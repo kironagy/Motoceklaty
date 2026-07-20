@@ -1,0 +1,8 @@
+2026/05/16-22:34:51.722 66b1 Creating DB /tmp/chatgpt-test/Default/Local Storage/leveldb since it was missing.
+2026/05/16-22:34:51.728 66b1 Reusing MANIFEST /tmp/chatgpt-test/Default/Local Storage/leveldb/MANIFEST-000001
+2026/05/16-22:35:51.731 66b3 Level-0 table #5: started
+2026/05/16-22:35:51.735 66b3 Level-0 table #5: 86591 bytes OK
+2026/05/16-22:35:51.736 66b3 Delete type=0 #3
+2026/05/16-22:38:32.337 66b1 Level-0 table #7: started
+2026/05/16-22:38:32.341 66b1 Level-0 table #7: 85818 bytes OK
+2026/05/16-22:38:32.343 66b1 Delete type=0 #4

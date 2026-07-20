@@ -1,0 +1,1103 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ضياء موتورز | سيارات مستعملة</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css" rel="stylesheet" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
+
+    <style>
+        :root {
+            --primary-color: #00a7b3;
+            --secondary-color: #ffda79;
+            --dark-color: #222;
+            --light-color: #f8f9fa;
+            --gray-color: #f1f1f1;
+            --transition: all 0.3s ease;
+        }
+
+        body {
+            background: #f5f6fa;
+            font-family: "Cairo", sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        h2.section-title {
+            text-align: center;
+            font-size: 28px;
+
+            font-weight: 700;
+            color: #1a1a1a;
+        }
+
+        .swiper {
+            width: 100%;
+            padding-top: 60px;
+            padding-bottom: 60px;
+        }
+
+        .swiper-slide {
+            width: 320px;
+            height: auto;
+            border-radius: 16px;
+            background: #fff;
+            overflow: hidden;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .swiper-slide:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        }
+
+        .bike-card img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .bike-details {
+            padding: 20px;
+        }
+
+        .bike-name {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #222;
+        }
+
+        .bike-price {
+            color: #00A7B3;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .bike-features {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .bike-features li {
+            font-size: 14px;
+            color: #555;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+        }
+
+        .bike-features li::before {
+            content: "✔";
+            color: #4CAF50;
+            margin-left: 8px;
+            font-size: 14px;
+        }
+
+        .swiper-pagination-bullet {
+            background: #00A7B3 !important;
+            opacity: 0.7;
+        }
+
+        .swiper-pagination-bullet-active {
+            opacity: 1;
+        }
+
+        body {
+            font-family: "Cairo", sans-serif;
+            background-color: var(--light-color);
+            color: var(--dark-color);
+            line-height: 1.6;
+        }
+
+        /* Navbar */
+        .navbar {
+            background-color: var(--primary-color);
+            padding: 15px 0;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            font-size: 1.5rem;
+            color: white !important;
+        }
+
+        .navbar-nav .nav-link {
+            color: white !important;
+            font-weight: 500;
+            padding: 8px 15px;
+            margin: 0 5px;
+            border-radius: 5px;
+            transition: var(--transition);
+        }
+
+        .navbar-nav .nav-link:hover,
+        .navbar-nav .nav-link.active {
+            background-color: rgba(255, 255, 255, 0.2);
+            color: var(--secondary-color) !important;
+        }
+
+        .navbar-toggler {
+            border: none;
+            padding: 5px 10px;
+        }
+
+        .navbar-toggler:focus {
+            box-shadow: none;
+        }
+
+        .navbar-toggler-icon {
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%28255, 255, 255, 1%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+        }
+
+        .btn-success {
+            background-color: var(--secondary-color);
+            border-color: var(--secondary-color);
+            color: var(--dark-color);
+            font-weight: 600;
+            padding: 8px 20px;
+            transition: var(--transition);
+        }
+
+        .btn-success:hover {
+            background-color: #ffd152;
+            border-color: #ffd152;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Hero Slider */
+        .slider {
+            position: relative;
+            width: 100%;
+            height: 85vh;
+            overflow: hidden;
+        }
+
+        .slide {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+        }
+
+        .slide.active {
+            opacity: 1;
+            z-index: 2;
+        }
+
+        .slide img,
+        .slide video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .overlay {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.7));
+            z-index: 3;
+        }
+
+        .slide-content {
+            position: absolute;
+            z-index: 4;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #fff;
+            padding: 20px;
+            width: 90%;
+            max-width: 800px;
+        }
+
+        .slide-content h1 {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            font-weight: 700;
+            text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.5);
+        }
+
+        .slide-content p {
+            font-size: 1.3rem;
+            margin-bottom: 30px;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
+        }
+
+        .slide-btn {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 1.1rem;
+            border-radius: 50px;
+            font-weight: 600;
+            transition: var(--transition);
+            box-shadow: 0 4px 15px rgba(0, 167, 179, 0.3);
+        }
+
+        .slide-btn:hover {
+            background-color: #008a94;
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0, 167, 179, 0.4);
+        }
+
+        /* أزرار التنقل */
+        .controls {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 5;
+        }
+
+        .dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background-color: rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .dot.active {
+            background-color: var(--primary-color);
+            transform: scale(1.2);
+        }
+
+        /* Section Titles */
+        .section-title {
+            color: var(--primary-color);
+            font-weight: 700;
+            text-align: center;
+
+            position: relative;
+            padding-bottom: 15px;
+        }
+
+        .section-title::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            right: 50%;
+            transform: translateX(50%);
+            width: 80px;
+            height: 3px;
+            background-color: var(--primary-color);
+        }
+
+        /* Services */
+        .service-card {
+            transition: var(--transition);
+            border: none;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            height: 100%;
+        }
+
+        .service-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.15);
+        }
+
+        .service-card img {
+            height: 220px;
+            object-fit: cover;
+            transition: var(--transition);
+        }
+
+        .service-card:hover img {
+            transform: scale(1.05);
+        }
+
+        .service-card .card-body {
+            padding: 25px;
+        }
+
+        .service-card .card-title {
+            color: var(--primary-color);
+            font-weight: 700;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+
+        .service-card .card-text {
+            color: #555;
+            line-height: 1.7;
+        }
+
+        /* Features */
+        .features {
+            background: #fff;
+            padding: 80px 0;
+            position: relative;
+        }
+
+        .features::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 100%;
+            height: 100%;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 320"><path fill="%2300a7b3" fill-opacity="0.03" d="M0,224L48,213.3C96,203,192,181,288,181.3C384,181,480,203,576,202.7C672,203,768,181,864,170.7C960,160,1056,160,1152,170.7C1248,181,1344,203,1392,213.3L1440,224L1440,320L1392,320C1344,320,1248,320,1152,320C1056,320,960,320,864,320C768,320,672,320,576,320C480,320,384,320,288,320C192,320,96,320,48,320L0,320Z"></path></svg>');
+            background-size: cover;
+            background-position: center;
+            z-index: 0;
+        }
+
+        .feature-box {
+            text-align: center;
+            padding: 30px 20px;
+            transition: var(--transition);
+            position: relative;
+            z-index: 1;
+            border-radius: 10px;
+            border: solid 1px rgba(0, 0, 0, 0.05);
+        }
+
+        .feature-box:hover {
+            transform: translateY(-8px);
+            background-color: white;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+        }
+
+        .feature-box i {
+            font-size: 35px;
+            color: var(--primary-color);
+            margin-bottom: 20px;
+            display: inline-block;
+            border-radius: 50%;
+
+        }
+
+        .feature-box h5 {
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: var(--dark-color);
+        }
+
+        .feature-box p {
+            color: #666;
+        }
+
+        /* Brands */
+        .brands {
+            background: var(--gray-color);
+            padding: 70px 0;
+        }
+
+        .brands img {
+            max-width: 120px;
+            opacity: 0.7;
+            transition: var(--transition);
+            filter: grayscale(100%);
+        }
+
+        .brands img:hover {
+            opacity: 1;
+            transform: scale(1.1);
+            filter: grayscale(0%);
+        }
+
+        /* Footer */
+        footer {
+            background-color: var(--primary-color);
+            color: #fff;
+            padding: 50px 0 20px;
+        }
+
+        footer h5 {
+            font-weight: 700;
+            margin-bottom: 20px;
+            position: relative;
+            display: inline-block;
+        }
+
+        footer h5::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            right: 0;
+            width: 50px;
+            height: 2px;
+            background-color: var(--secondary-color);
+        }
+
+        footer a {
+            color: #fff;
+            text-decoration: none;
+            transition: var(--transition);
+        }
+
+        footer a:hover {
+            color: var(--secondary-color);
+        }
+
+        .social-icons a {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            font-size: 1.2rem;
+            margin: 0 8px;
+            transition: var(--transition);
+        }
+
+        .social-icons a:hover {
+            background-color: var(--secondary-color);
+            color: var(--dark-color);
+            transform: translateY(-3px);
+        }
+
+        .copyright {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        /* Responsive */
+        @media (max-width: 992px) {
+            .slider {
+                height: 70vh;
+            }
+
+            .slide-content h1 {
+                font-size: 2.5rem;
+            }
+
+            .slide-content p {
+                font-size: 1.1rem;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .slider {
+                height: 60vh;
+            }
+
+            .slide-content h1 {
+                font-size: 2rem;
+            }
+
+            .slide-content p {
+                font-size: 1rem;
+            }
+
+            .section-title {
+                margin: 50px 0 30px;
+            }
+
+            .features {
+                padding: 60px 0;
+            }
+
+            .brands {
+                padding: 50px 0;
+            }
+        }
+
+        @media (max-width: 576px) {
+            .slider {
+                height: 50vh;
+            }
+
+            .slide-content h1 {
+                font-size: 1.6rem;
+            }
+
+            .slide-content p {
+                font-size: 0.9rem;
+                margin-bottom: 20px;
+            }
+
+            .slide-btn {
+                padding: 10px 25px;
+                font-size: 1rem;
+            }
+
+            .navbar-brand {
+                font-size: 1.3rem;
+            }
+        }
+
+        .installment-section {
+            background: url('https://firebasestorage.googleapis.com/v0/b/file-upload-d8004.appspot.com/o/1760228391033-WhatsApp%20Image%202025-10-11%20at%2005.00.20_3844b2db.jpg?alt=media&token=ea5025f8-4925-4aa5-a6ab-881357dfec5d') no-repeat center center/cover;
+            position: relative;
+            padding: 100px 0;
+            color: #fff;
+        }
+
+        .installment-section::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+        }
+
+        .installment-section .container {
+            position: relative;
+            z-index: 2;
+        }
+
+        .installment-box {
+            background: rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            padding: 30px 25px;
+        }
+
+        .installment-box label {
+            font-size: 14px;
+            color: #fff;
+            margin-bottom: 5px;
+        }
+
+        .installment-box .form-control {
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 8px;
+            padding: 8px 10px;
+        }
+
+        .calc-btn {
+            background: #00A7B3;
+            border: none;
+            color: #fff;
+            font-weight: bold;
+            border-radius: 10px;
+            padding: 10px 25px;
+            transition: all 0.3s ease;
+        }
+
+        .calc-btn:hover {
+            background: #ff4400;
+        }
+
+        .installment-text h2 {
+            font-size: 36px;
+            font-weight: 700;
+            margin-bottom: 20px;
+        }
+
+        .installment-text p {
+            font-size: 16px;
+            color: #f1f1f1;
+            line-height: 1.8;
+            margin-bottom: 30px;
+        }
+
+        .learn-more {
+            background: #00A7B3;
+            color: #fff;
+            padding: 10px 25px;
+            border-radius: 8px;
+            text-decoration: none;
+            transition: 0.3s;
+        }
+
+        .learn-more:hover {
+            background: #ff4400;
+        }
+
+        @media (max-width: 767px) {
+            .installment-text {
+                margin-top: 40px;
+            }
+        }
+    </style>
+
+</head>
+
+<body>
+
+    <!-- Hero Slider -->
+    <div class="slider" id="slider">
+        <!-- Slide 1: صورة -->
+        <div class="slide active">
+            <img src="https://images.unsplash.com/photo-1503736334956-4c8f8e92946d?auto=format&fit=crop&w=1400&q=80"
+                alt="سيارات مستعملة">
+            <div class="overlay"></div>
+            <div class="slide-content">
+                <h1>اشترِ عربية مستعملة بسهولة وأمان</h1>
+                <p>أفضل السيارات المستعملة بأسعار لا تُقارن وخدمة مضمونة.</p>
+                <button class="slide-btn">استعرض السيارات</button>
+            </div>
+        </div>
+
+        <!-- Slide 2: فيديو -->
+        <div class="slide">
+            <video autoplay muted loop playsinline>
+                <source src="https://cdn.pixabay.com/video/2021/06/07/75388-556312935_large.mp4" type="video/mp4">
+                متصفحك لا يدعم عرض الفيديو.
+            </video>
+            <div class="overlay"></div>
+            <div class="slide-content">
+                <h1>خدمة التقسيط المريحة</h1>
+                <p>اختر سيارتك وادفع كاش أو بالتقسيط بسهولة.</p>
+                <button class="slide-btn">تعرف على خطط التقسيط</button>
+            </div>
+        </div>
+
+        <!-- Slide 3: صورة -->
+        <div class="slide">
+            <img src="https://images.unsplash.com/photo-1502877338535-766e1452684a?auto=format&fit=crop&w=1400&q=80"
+                alt="خدمة ما بعد البيع">
+            <div class="overlay"></div>
+            <div class="slide-content">
+                <h1>أفضل خدمة ما بعد البيع</h1>
+                <p>صيانة معتمدة وضمان شامل على جميع السيارات.</p>
+                <button class="slide-btn">تعرف على خدماتنا</button>
+            </div>
+        </div>
+
+        <!-- Dots -->
+        <div class="controls">
+            <span class="dot active"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+        </div>
+    </div>
+
+    <!-- Features -->
+    <section class="features" id="features">
+        <div class="container">
+            <h2 class="section-title">مميزات موتسيكلاتي</h2>
+            <div class="row g-4 d-flex justify-content-around mt-3">
+                <!-- ميزة 3 -->
+                <div class="col-md-4 ">
+                    <div class="feature-box d-flex justify-content-center flex-column align-items-center">
+                        <div class="rounded-circle d-flex justify-content-center mb-3"
+                            style="background-color: rgba(0, 167, 179, 0.1); width: 60px; height: 60px;">
+                            <i class="bi bi-wrench-adjustable-circle"></i>
+                        </div>
+                        <h5>خدمة صيانة متميزة</h5>
+                        <p>فريق صيانة متخصص وخدمة ما بعد البيع لضمان راحتك واستمرار أداء المكنة بكفاءة.</p>
+                    </div>
+                </div>
+
+                <!-- ميزة 4 -->
+                <div class="col-md-4 ">
+                    <div class="feature-box d-flex justify-content-center flex-column align-items-center">
+                        <div class="rounded-circle d-flex justify-content-center mb-3"
+                            style="background-color: rgba(0, 167, 179, 0.1); width: 60px; height: 60px;">
+                            <i class="bi bi-currency-exchange"></i>
+                        </div>
+                        <h5>أنظمة تقسيط مرنة</h5>
+                        <p>اختار نظام الدفع اللي يناسبك سواء كاش أو تقسيط على فترات مريحة بدون تعقيد.</p>
+                    </div>
+                </div>
+
+                <!-- ميزة 5 -->
+                <div class="col-md-4 ">
+                    <div class="feature-box d-flex justify-content-center flex-column align-items-center">
+                        <div class="rounded-circle d-flex justify-content-center mb-3"
+                            style="background-color: rgba(0, 167, 179, 0.1); width: 60px; height: 60px;">
+                            <i class="bi bi-shield-check"></i>
+                        </div>
+                        <h5>ضمان وجودة</h5>
+                        <p>جميع المكن بضمان رسمي ضد عيوب الصناعة مع ضمان على قطع الغيار الأصلية.</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+
+
+
+
+    <div class="swiper mySwiper my-5">
+        <h2 class="section-title">الموتوسيكلات الجديدة</h2>
+
+        <div class="swiper-wrapper p-4">
+
+            <!-- كارت مكنة -->
+            <div class="swiper-slide">
+                <div class="bike-card">
+                    <img src="https://swiperjs.com/demos/images/nature-1.jpg" alt="Honda CBR 250R">
+                    <div class="bike-details">
+                        <h3 class="bike-name">Honda CBR 250R</h3>
+                        <div class="bike-price">65,000 جنيه</div>
+                        <ul class="bike-features">
+                            <li>محرك 250cc قوي</li>
+                            <li>تصميم رياضي أنيق</li>
+                            <li>استهلاك وقود اقتصادي</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- كارت مكنة -->
+            <div class="swiper-slide">
+                <div class="bike-card">
+                    <img src="https://swiperjs.com/demos/images/nature-2.jpg" alt="Yamaha R15">
+                    <div class="bike-details">
+                        <h3 class="bike-name">Yamaha R15</h3>
+                        <div class="bike-price">72,000 جنيه</div>
+                        <ul class="bike-features">
+                            <li>محرك 155cc VVA</li>
+                            <li>ثبات عالي على الطريق</li>
+                            <li>فرامل ABS أمامية وخلفية</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- كارت مكنة -->
+            <div class="swiper-slide">
+                <div class="bike-card">
+                    <img src="https://swiperjs.com/demos/images/nature-3.jpg" alt="Bajaj Pulsar NS200">
+                    <div class="bike-details">
+                        <h3 class="bike-name">Bajaj Pulsar NS200</h3>
+                        <div class="bike-price">58,500 جنيه</div>
+                        <ul class="bike-features">
+                            <li>تصميم شبابي قوي</li>
+                            <li>راحة في القيادة لمسافات طويلة</li>
+                            <li>تبريد سائل فعال</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="swiper-slide">
+                <div class="bike-card">
+                    <img src="https://swiperjs.com/demos/images/nature-1.jpg" alt="Honda CBR 250R">
+                    <div class="bike-details">
+                        <h3 class="bike-name">Honda CBR 250R</h3>
+                        <div class="bike-price">65,000 جنيه</div>
+                        <ul class="bike-features">
+                            <li>محرك 250cc قوي</li>
+                            <li>تصميم رياضي أنيق</li>
+                            <li>استهلاك وقود اقتصادي</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- كارت مكنة -->
+            <div class="swiper-slide">
+                <div class="bike-card">
+                    <img src="https://swiperjs.com/demos/images/nature-2.jpg" alt="Yamaha R15">
+                    <div class="bike-details">
+                        <h3 class="bike-name">Yamaha R15</h3>
+                        <div class="bike-price">72,000 جنيه</div>
+                        <ul class="bike-features">
+                            <li>محرك 155cc VVA</li>
+                            <li>ثبات عالي على الطريق</li>
+                            <li>فرامل ABS أمامية وخلفية</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- كارت مكنة -->
+            <div class="swiper-slide">
+                <div class="bike-card">
+                    <img src="https://swiperjs.com/demos/images/nature-3.jpg" alt="Bajaj Pulsar NS200">
+                    <div class="bike-details">
+                        <h3 class="bike-name">Bajaj Pulsar NS200</h3>
+                        <div class="bike-price">58,500 جنيه</div>
+                        <ul class="bike-features">
+                            <li>تصميم شبابي قوي</li>
+                            <li>راحة في القيادة لمسافات طويلة</li>
+                            <li>تبريد سائل فعال</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="swiper-slide">
+                <div class="bike-card">
+                    <img src="https://swiperjs.com/demos/images/nature-1.jpg" alt="Honda CBR 250R">
+                    <div class="bike-details">
+                        <h3 class="bike-name">Honda CBR 250R</h3>
+                        <div class="bike-price">65,000 جنيه</div>
+                        <ul class="bike-features">
+                            <li>محرك 250cc قوي</li>
+                            <li>تصميم رياضي أنيق</li>
+                            <li>استهلاك وقود اقتصادي</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- كارت مكنة -->
+            <div class="swiper-slide">
+                <div class="bike-card">
+                    <img src="https://swiperjs.com/demos/images/nature-2.jpg" alt="Yamaha R15">
+                    <div class="bike-details">
+                        <h3 class="bike-name">Yamaha R15</h3>
+                        <div class="bike-price">72,000 جنيه</div>
+                        <ul class="bike-features">
+                            <li>محرك 155cc VVA</li>
+                            <li>ثبات عالي على الطريق</li>
+                            <li>فرامل ABS أمامية وخلفية</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- كارت مكنة -->
+            <div class="swiper-slide">
+                <div class="bike-card">
+                    <img src="https://swiperjs.com/demos/images/nature-3.jpg" alt="Bajaj Pulsar NS200">
+                    <div class="bike-details">
+                        <h3 class="bike-name">Bajaj Pulsar NS200</h3>
+                        <div class="bike-price">58,500 جنيه</div>
+                        <ul class="bike-features">
+                            <li>تصميم شبابي قوي</li>
+                            <li>راحة في القيادة لمسافات طويلة</li>
+                            <li>تبريد سائل فعال</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="swiper-pagination"></div>
+    </div>
+
+    <!-- Services Section -->
+
+    <section class="installment-section" id="installment">
+        <div class="container">
+            <div class="row align-items-center">
+                <!-- الفورم -->
+                <div class="col-md-12">
+                    <div class="installment-box">
+                        <h4 class="text-center mb-4">احسب قسط مكنتك </h4>
+                        <form>
+                            <div class="row g-3">
+                                <div class="col-6">
+                                    <label>ماركة المكنة</label>
+                                    <select class="form-control">
+                                        <option>اختر...</option>
+                                        <option>هوندا</option>
+                                        <option>ياماها</option>
+                                        <option>بجاج</option>
+                                        <option>SYM</option>
+                                    </select>
+                                </div>
+
+                                <div class="col-6">
+                                    <label>موديل المكنة</label>
+                                    <select class="form-control">
+                                        <option>اختر...</option>
+                                        <option>CBR 250R</option>
+                                        <option>R15</option>
+                                        <option>NS200</option>
+                                        <option>Jet 14</option>
+                                    </select>
+                                </div>
+
+                                <div class="col-6">
+                                    <label>الدفعة الأولى</label>
+                                    <input type="number" class="form-control" placeholder="مثلاً 15000">
+                                </div>
+
+                                <div class="col-6">
+                                    <label>عدد الشهور</label>
+                                    <select class="form-control">
+                                        <option>اختر...</option>
+                                        <option>12 شهر</option>
+                                        <option>24 شهر</option>
+                                        <option>36 شهر</option>
+                                        <option>48 شهر</option>
+                                    </select>
+                                </div>
+
+                                <div class="col-12">
+                                    <label>الوظيفة</label>
+                                    <select class="form-control">
+                                        <option>اختر...</option>
+                                        <option>موظف قطاع خاص</option>
+                                        <option>موظف حكومي</option>
+                                        <option>صاحب عمل حر</option>
+                                    </select>
+                                </div>
+
+                                <div class="col-12 text-center mt-3">
+                                    <button type="button" class="calc-btn">احسب القسط</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+
+            </div>
+        </div>
+    </section>
+
+    <section class="brands" id="brands">
+        <div class="container text-center">
+            <h2 class="section-title">أشهر الماركات</h2>
+            <div class="swiper brandsSwiper">
+                <div class="swiper-wrapper">
+                    <div class="swiper-slide"><img
+                            src="https://upload.wikimedia.org/wikipedia/commons/3/3e/Suzuki_logo_2.svg"></div>
+                    <div class="swiper-slide"><img
+                            src="https://upload.wikimedia.org/wikipedia/commons/4/4d/Nissan_logo.svg"></div>
+                    <div class="swiper-slide"><img
+                            src="https://upload.wikimedia.org/wikipedia/commons/3/3f/Opel_Logo_2021.svg"></div>
+                    <div class="swiper-slide"><img
+                            src="https://upload.wikimedia.org/wikipedia/commons/3/3d/BMW_logo_%282020%29.svg"></div>
+                    <div class="swiper-slide"><img
+                            src="https://upload.wikimedia.org/wikipedia/commons/3/3b/Skoda_logo_2016.svg"></div>
+                    <div class="swiper-slide"><img
+                            src="https://upload.wikimedia.org/wikipedia/commons/3/3e/Suzuki_logo_2.svg"></div>
+                    <div class="swiper-slide"><img
+                            src="https://upload.wikimedia.org/wikipedia/commons/4/4d/Nissan_logo.svg"></div>
+                    <div class="swiper-slide"><img
+                            src="https://upload.wikimedia.org/wikipedia/commons/3/3f/Opel_Logo_2021.svg"></div>
+                    <div class="swiper-slide"><img
+                            src="https://upload.wikimedia.org/wikipedia/commons/3/3d/BMW_logo_%282020%29.svg"></div>
+                    <div class="swiper-slide"><img
+                            src="https://upload.wikimedia.org/wikipedia/commons/3/3b/Skoda_logo_2016.svg"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+
+
+    <!-- Footer -->
+    <footer id="contact">
+        <div class="container text-center">
+            <h5>تواصل معنا</h5>
+            <div class="social-icons mb-4">
+                <a href="#"><i class="bi bi-facebook"></i></a>
+                <a href="#"><i class="bi bi-instagram"></i></a>
+                <a href="#"><i class="bi bi-whatsapp"></i></a>
+                <a href="#"><i class="bi bi-twitter"></i></a>
+            </div>
+            <p class="copyright">© 2025 ضياء موتورز | جميع الحقوق محفوظة</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.js"></script>
+    <script>
+        var swiper = new Swiper(".mySwiper", {
+            effect: "coverflow",
+            grabCursor: true,
+            centeredSlides: true,
+            slidesPerView: "auto",
+            loop: true, // ✅ يكرر السلايدر بدون توقف
+            autoplay: {
+                delay: 2500, // ⏱️ المدة بين كل انتقال (2.5 ثانية)
+                disableOnInteraction: false, // ✅ يستمر حتى لو المستخدم لمس السلايدر
+            },
+            coverflowEffect: {
+                rotate: 0,
+                stretch: 0,
+                depth: 120,
+                modifier: 2,
+                slideShadows: false,
+            },
+            pagination: {
+                el: ".swiper-pagination",
+                clickable: true,
+            },
+        });
+
+        new Swiper(".brandsSwiper", {
+            slidesPerView: 5,
+            spaceBetween: 40,
+            loop: true,
+            autoplay: { delay: 1500, disableOnInteraction: false },
+            breakpoints: {
+                0: { slidesPerView: 2, spaceBetween: 20 },
+                576: { slidesPerView: 3 },
+                768: { slidesPerView: 4 },
+                992: { slidesPerView: 5 },
+            },
+        });
+    </script>
+    <script>
+        // Slider Functionality
+        const slides = document.querySelectorAll('.slide');
+        const dots = document.querySelectorAll('.dot');
+        let current = 0;
+
+        function showSlide(index) {
+            slides.forEach((slide, i) => {
+                slide.classList.toggle('active', i === index);
+                dots[i].classList.toggle('active', i === index);
+            });
+        }
+
+        function nextSlide() {
+            current = (current + 1) % slides.length;
+            showSlide(current);
+        }
+
+        dots.forEach((dot, i) => {
+            dot.addEventListener('click', () => {
+                current = i;
+                showSlide(current);
+            });
+        });
+
+        setInterval(nextSlide, 5000); // كل 5 ثواني
+
+        // Navbar scroll effect
+        window.addEventListener('scroll', function () {
+            const navbar = document.querySelector('.navbar');
+            if (window.scrollY > 50) {
+                navbar.style.padding = '10px 0';
+                navbar.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.1)';
+            } else {
+                navbar.style.padding = '15px 0';
+                navbar.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.1)';
+            }
+        });
+
+        // Smooth scrolling for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+
+                const targetId = this.getAttribute('href');
+                if (targetId === '#') return;
+
+                const targetElement = document.querySelector(targetId);
+                if (targetElement) {
+                    window.scrollTo({
+                        top: targetElement.offsetTop - 80,
+                        behavior: 'smooth'
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>

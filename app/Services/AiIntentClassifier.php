@@ -1,0 +1,388 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\Machine;
+use App\Models\WhatsappConversation;
+use Illuminate\Support\Facades\Log;
+
+class AiIntentClassifier
+{
+    public function classify(WhatsappConversation $conversation, string $message, array $context = []): array
+    {
+        $recent = $conversation->messages()
+            ->latest()
+            ->take(20)
+            ->get()
+            ->reverse()
+            ->map(fn ($m) => [
+                'direction' => $m->direction,
+                'message' => $m->message,
+                'payload' => $m->payload ?? null,
+            ])
+            ->values()
+            ->all();
+
+        $lastMachines = $this->lastMachines($conversation);
+        if (($context['mode'] ?? null) === 'application_data_extraction') {
+    return $this->extractApplicationData($conversation, $message, $recent, $lastMachines, $context);
+}
+        $prompt = $this->prompt($conversation, $message, $recent, $lastMachines, $context);
+
+        try {
+            $result = app(GeminiClient::class)->generateText($prompt, null, [
+                'temperature' => 0.05,
+                'max_output_tokens' => 900,
+            ]);
+
+            $text = trim((string) ($result['text'] ?? ''));
+            $json = $this->extractJson($text);
+
+            if (! is_array($json)) {
+                return $this->fallback();
+            }
+
+            return $this->normalizePlan(array_merge($this->fallback(), $json));
+        } catch (\Throwable $e) {
+            Log::error('AI conversation planner failed', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return $this->fallback();
+        }
+    }
+
+    private function prompt(
+        WhatsappConversation $conversation,
+        string $message,
+        array $recent,
+        array $lastMachines,
+        array $context
+    ): string {
+        $payload = [
+            'current_message' => $message,
+            'conversation_state' => [
+                'last_machine_id' => $conversation->last_machine_id ?? null,
+                'last_machine_ids' => $conversation->last_machine_ids ?? [],
+                'last_topic' => $conversation->last_topic ?? null,
+                'pending_question' => $conversation->pending_question ?? null,
+                'context_payload' => $conversation->context_payload ?? [],
+            ],
+            'last_machines_shown_to_customer' => $lastMachines,
+            'recent_messages' => $recent,
+            'known_context' => $context,
+        ];
+
+        return <<<PROMPT
+أنت عقل فهم محادثة لبوت واتساب معرض موتوسيكلات.
+
+مهمتك ليست الرد على العميل.
+مهمتك فهم الرسالة الحالية داخل سياق المحادثة وإرجاع خطة تنفيذ JSON فقط.
+
+ممنوع:
+- ممنوع تكتب شرح.
+- ممنوع تكتب رد عادي.
+- ممنوع Markdown.
+- ممنوع أي نص خارج JSON.
+
+Laravel هو الذي سينفذ:
+- البحث عن المكن
+- حساب القسط
+- إرسال الصور
+- بدء طلب التقديم
+- سؤال العميل لو محتاج توضيح
+
+النوايا المتاحة intent:
+- price
+- images
+- installment_calc
+- installment_system
+- brand_models
+- application
+- general
+- unknown
+
+target:
+- new_machine: العميل ذكر موديل/ماركة جديدة في الرسالة الحالية
+- previous_selection: العميل يقصد كل آخر الموديلات المعروضة في السياق
+- single_previous_machine: العميل يقصد مكنة واحدة سابقة
+- selected_index: العميل اختار رقم/ترتيب من آخر قائمة، مثل الأولى، التانية، آخر واحدة
+- unknown
+
+قواعد الفهم:
+- افهم العامية المصرية والكتابة الغلط.
+- الضمائر مثل: دي، ده، دول، هم، هما، الاتنين، كلها، عليهم، عليها ترجع للسياق السابق.
+- لو آخر رد عرض أكثر من مكنة والعميل قال احسبهم/صورهم/سعرهم/عايزهم، target = previous_selection.
+- لو آخر رد عرض مكنة واحدة والعميل سأل عليها، target = single_previous_machine.
+- لو العميل قال الأولى/التانية/التالتة/الأخيرة، target = selected_index واكتب selected_index رقم يبدأ من 1.
+- لو العميل قال عايز أقدم وفيه أكثر من مكنة في السياق ولم يحدد واحدة، اجعل needs_clarification=true.
+- لو العميل قال عايز أقدم وفيه مكنة واحدة فقط في السياق، intent=application و target=single_previous_machine.
+- لو العميل ذكر موديل جديد، استخرج machine_query.
+- لو العميل سأل عن القسط أو مدة تقسيط، intent=installment_calc.
+- لو العميل سأل عن أنظمة/شروط/ورق التقسيط، intent=installment_system.
+- لو العميل سأل عن الصور/الشكل/الألوان، intent=images.
+- لو العميل سأل عن السعر/الكاش/بكام، intent=price.
+- لو الرسالة ناقصة لكن يمكن فهمها من السياق، لا تطلب توضيح.
+- لا تطلب توضيح إلا لو التنفيذ خطر أو فيه أكثر من اختيار ولا يوجد تحديد.
+- machine_query لازم يكون اسم الموديل أو الماركة فقط من رسالة العميل، بدون كلمات طلب مثل عايز/احسب/سعر/صور.
+- لو العميل كتب "كي تي اكس" اجعل machine_query = "كي تي اكس".
+- لو العميل كتب "هوجن 4" لا تجعل machine_query = "هوجن" فقط، لازم "هوجن 4".
+- لو last_topic = application والعميل يسأل "إيه المطلوب؟" أو "أعمل إيه؟" فـ intent=application و target=single_previous_machine ولا تسأل عن الموديل لو last_machine_ids موجودة.
+- أي رسالة فيها معنى التقديم مثل: اقدم ازاي، عايز اقدم، اقدم، تقديم، ايه المطلوب للتقديم = intent application.
+- لو last_machine_ids موجودة والعميل قال اقدم ازاي أو عايز اقدم أو ايه المطلوب، target = single_previous_machine.
+- ممنوع تسأل عن اسم المكنة في application لو last_machine_ids موجودة.
+- لو last_topic = application والعميل قال ايه المطلوب أو أعمل ايه، intent=application و target=single_previous_machine.
+تحويل المدد:
+- سنة = 12
+- سنة ونص = 18
+- سنتين = 24
+- تلات سنين / 3 سنين = 36
+- 12 شهر = 12
+- 18 شهر = 18
+- 24 شهر = 24
+- 36 شهر = 36
+
+system:
+- نظام 20 أو بمصاريف إدارية = "20"
+- نظام 30 أو بدون مصاريف إدارية = "30"
+- غير مذكور = null
+
+رجع JSON بنفس الشكل فقط:
+
+{
+  "intent": "unknown",
+  "target": "unknown",
+  "machine_query": null,
+  "machine_ids": [],
+  "selected_index": null,
+  "uses_last_machines": false,
+  "references_previous": false,
+  "references_all_previous": false,
+  "months": null,
+  "deposit": null,
+  "deposit_mentioned": false,
+  "system": null,
+  "needs_machine": false,
+  "needs_months": false,
+  "needs_clarification": false,
+  "clarification_reason": null,
+  "clarification_question": null,
+  "confidence": 0.0
+}
+
+البيانات:
+PROMPT
+        . "\n" . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    }
+
+    private function lastMachines(WhatsappConversation $conversation): array
+    {
+        $ids = $conversation->last_machine_ids ?? [];
+
+        if (is_string($ids)) {
+            $ids = json_decode($ids, true) ?: [];
+        }
+
+        if (! is_array($ids) || empty($ids)) {
+            return [];
+        }
+
+        return Machine::query()
+            ->with('brand')
+            ->whereIn('id', $ids)
+            ->get()
+            ->sortBy(fn ($machine) => array_search($machine->id, $ids, true))
+            ->values()
+            ->map(fn (Machine $machine, int $i) => [
+                'position' => $i + 1,
+                'id' => $machine->id,
+                'name' => $machine->name,
+                'brand' => $machine->brand?->name,
+                'display_name' => trim(($machine->brand?->name ? $machine->brand->name . ' ' : '') . $machine->name),
+                'cash_price' => $machine->cash_price,
+                'installment_price' => $machine->installment_price,
+            ])
+            ->all();
+    }
+
+    private function fallback(): array
+    {
+        return [
+            'intent' => 'unknown',
+            'target' => 'unknown',
+            'machine_query' => null,
+            'machine_ids' => [],
+            'selected_index' => null,
+            'uses_last_machines' => false,
+            'references_previous' => false,
+            'references_all_previous' => false,
+            'months' => null,
+            'deposit' => null,
+            'deposit_mentioned' => false,
+            'system' => null,
+            'needs_machine' => false,
+            'needs_months' => false,
+            'needs_clarification' => false,
+            'clarification_reason' => null,
+            'clarification_question' => null,
+            'confidence' => 0.0,
+        ];
+    }
+
+    private function normalizePlan(array $plan): array
+    {
+        $validIntents = [
+            'price',
+            'images',
+            'installment_calc',
+            'installment_system',
+            'brand_models',
+            'application',
+            'general',
+            'unknown',
+        ];
+
+        $validTargets = [
+            'new_machine',
+            'previous_selection',
+            'single_previous_machine',
+            'selected_index',
+            'unknown',
+            'last_machines',
+        ];
+
+        if (! in_array($plan['intent'], $validIntents, true)) {
+            $plan['intent'] = 'unknown';
+        }
+
+        if (! in_array($plan['target'], $validTargets, true)) {
+            $plan['target'] = 'unknown';
+        }
+
+        if ($plan['target'] === 'last_machines') {
+            $plan['target'] = 'previous_selection';
+        }
+
+        if (in_array($plan['target'], ['previous_selection', 'single_previous_machine', 'selected_index'], true)) {
+            $plan['uses_last_machines'] = true;
+            $plan['references_previous'] = true;
+        }
+
+        if ($plan['target'] === 'previous_selection') {
+            $plan['references_all_previous'] = true;
+        }
+
+        $plan['machine_ids'] = is_array($plan['machine_ids']) ? $plan['machine_ids'] : [];
+        $plan['confidence'] = max(0, min(1, (float) $plan['confidence']));
+
+        if (! in_array((string) $plan['system'], ['20', '30'], true)) {
+            $plan['system'] = null;
+        }
+
+        foreach (['months', 'selected_index'] as $key) {
+            $plan[$key] = $plan[$key] !== null ? (int) $plan[$key] : null;
+        }
+
+        $plan['deposit'] = $plan['deposit'] !== null ? (float) $plan['deposit'] : null;
+
+        return $plan;
+    }
+private function extractApplicationData(
+    WhatsappConversation $conversation,
+    string $message,
+    array $recent,
+    array $lastMachines,
+    array $context
+): array {
+    $payload = [
+        'current_message' => $message,
+        'recent_messages' => $recent,
+        'last_machines' => $lastMachines,
+        'known_context' => $context,
+    ];
+
+    $prompt = <<<PROMPT
+أنت مستخرج بيانات طلب تقسيط لمعرض موتوسيكلات.
+
+ممنوع ترد على العميل.
+ممنوع تشرح.
+رجع JSON فقط.
+
+استخرج من رسالة العميل وسياق المحادثة البيانات المتاحة فقط.
+لو البيانات غير موجودة اتركها null.
+لا تخترع أي بيانات.
+
+الحقول:
+- full_name
+- national_id
+- phone
+- job_type
+- income_proof
+- work_address
+- home_address
+- installment_months
+
+قواعد مهمة:
+- لو العميل ذكر عنوان عام ناقص مثل: "ساكن في 12 ش محمد أبو النجا" اعتبره home_address لكنه ناقص.
+- العنوان الكامل غالبًا يحتاج: محافظة أو منطقة + شارع + علامة مميزة أو رقم منزل/عمارة.
+- لو عنوان السكن ناقص، ضع home_address_status = "incomplete".
+- لو عنوان الشغل ناقص، ضع work_address_status = "incomplete".
+- لو العنوان واضح وكامل، status = "complete".
+- لو العميل قال إنه شغال في مصنع، job_type = "موظف/عامل مصنع".
+- لو قال معاه مفردات مرتب أو مؤمن عليه، income_proof املأها.
+
+رجع JSON بهذا الشكل فقط:
+
+{
+  "application_data": {
+    "full_name": null,
+    "national_id": null,
+    "phone": null,
+    "job_type": null,
+    "income_proof": null,
+    "work_address": null,
+    "work_address_status": null,
+    "home_address": null,
+    "home_address_status": null,
+    "installment_months": null
+  }
+}
+
+البيانات:
+PROMPT
+        . "\n" . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+
+    try {
+        $result = app(GeminiClient::class)->generateText($prompt, null, [
+            'temperature' => 0.05,
+            'max_output_tokens' => 700,
+        ]);
+
+        $json = $this->extractJson(trim((string) ($result['text'] ?? '')));
+
+        return is_array($json) ? $json : ['application_data' => []];
+    } catch (\Throwable $e) {
+        Log::error('AI application extraction failed', [
+            'message' => $e->getMessage(),
+        ]);
+
+        return ['application_data' => []];
+    }
+}
+    private function extractJson(string $text): ?array
+    {
+        $text = trim($text);
+
+        $text = preg_replace('/^```json\s*/i', '', $text);
+        $text = preg_replace('/^```\s*/i', '', $text);
+        $text = preg_replace('/\s*```$/', '', $text);
+
+        if (preg_match('/\{.*\}/su', $text, $m)) {
+            $text = $m[0];
+        }
+
+        $data = json_decode($text, true);
+
+        return is_array($data) ? $data : null;
+    }
+}

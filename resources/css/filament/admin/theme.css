@@ -1,0 +1,1059 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&display=swap');
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+/* =========================
+   SIDEBAR ACTIVE زي الصورة
+========================= */
+
+.fi-sidebar-item-active > a {
+    background: linear-gradient(135deg, #2563eb, #7c3aed) !important;
+    box-shadow: 0 10px 25px rgba(37,99,235,0.35);
+    border-radius: 12px !important;
+}
+
+/* =========================
+   PAGE BACKGROUND
+========================= */
+
+.fi-body {
+    background: #f5f7fb !important;
+}
+
+.dark .fi-body {
+    background: #0f172a !important;
+}
+
+/* =========================
+   GENERAL CLEAN LOOK
+========================= */
+
+.fi-section,
+.fi-wi-widget {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* =========================
+   FINAL FIXES
+========================= */
+
+/* 1) Top navbar same site color */
+.fi-topbar nav {
+    background: #0B1324 !important;
+    border-bottom: 1px solid rgba(255,255,255,.08) !important;
+    box-shadow: none !important;
+}
+
+.dark .fi-topbar nav {
+    background: #0B1324 !important;
+}
+
+/* 2) Sidebar background same as stats widgets */
+.fi-sidebar,
+.fi-sidebar-header {
+    background: #1C293E !important;
+    border-right: 1px solid rgba(255,255,255,.08) !important;
+}
+
+.fi-sidebar-header {
+    border-bottom: 1px solid rgba(255,255,255,.08) !important;
+}
+
+/* 3) Sidebar active button cleaner */
+.fi-sidebar-item-active > a {
+    background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%) !important;
+    box-shadow: 0 0 18px rgba(37,99,235,.35) !important;
+    border: 1px solid rgba(255,255,255,.12) !important;
+}
+
+/* 4) Attendance / sections background solid like widgets */
+.fi-section {
+    background: #1C293E !important;
+    border: 1px solid rgba(255,255,255,.08) !important;
+    box-shadow: 0 15px 35px rgba(0,0,0,.35) !important;
+    border-radius: 18px !important;
+}
+
+/* Light mode section */
+html:not(.dark) .fi-section {
+    background: #ffffff !important;
+    border: 1px solid #e5e7eb !important;
+    box-shadow: 0 10px 25px rgba(15,23,42,.06) !important;
+}
+
+/* Keep stats cards same dark color */
+.dark .fi-wi-stats-overview-stat {
+    background: #1C293E !important;
+}
+
+/* Text inside sections */
+.dark .fi-section,
+.dark .fi-section * {
+    color: #e5e7eb;
+}
+
+/* =========================
+   TABLE PREMIUM DESIGN
+========================= */
+
+.fi-ta-ctn {
+    background: #1C293E !important;
+    border: 1px solid rgba(255,255,255,.08) !important;
+    border-radius: 20px !important;
+    overflow: hidden !important;
+    box-shadow: 0 18px 45px rgba(0,0,0,.35) !important;
+}
+
+.fi-ta-header,
+.fi-ta-content,
+.fi-ta-table {
+    background: transparent !important;
+}
+
+.fi-ta-table thead {
+    background: linear-gradient(135deg, rgba(37,99,235,.18), rgba(124,58,237,.18)) !important;
+}
+
+.fi-ta-header-cell,
+.fi-ta-header-cell span {
+    color: #f8fafc !important;
+    font-weight: 800 !important;
+}
+
+.fi-ta-row {
+    background: rgba(15,23,42,.35) !important;
+    border-bottom: 1px solid rgba(255,255,255,.07) !important;
+}
+
+.fi-ta-row:nth-child(even) {
+    background: rgba(255,255,255,.035) !important;
+}
+
+.fi-ta-row:hover {
+    background: rgba(37,99,235,.16) !important;
+}
+
+.fi-ta-cell {
+    color: #e5e7eb !important;
+}
+
+.fi-ta-cell a {
+    color: #fbbf24 !important;
+    font-weight: 700 !important;
+}
+
+.fi-ta-cell a:hover {
+    color: #f59e0b !important;
+}
+
+/* Search box inside table */
+.fi-ta-header .fi-input-wrp,
+.fi-ta-header input {
+    background: rgba(255,255,255,.07) !important;
+    border-color: rgba(255,255,255,.12) !important;
+    color: #e5e7eb !important;
+}
+
+.fi-ta-header input::placeholder {
+    color: rgba(229,231,235,.55) !important;
+}
+
+/* Checkboxes */
+.fi-checkbox-input {
+    background-color: rgba(255,255,255,.06) !important;
+    border-color: rgba(255,255,255,.18) !important;
+}
+
+.fi-checkbox-input:checked {
+    background-color: #f59e0b !important;
+    border-color: #f59e0b !important;
+}
+
+/* Light mode table */
+html:not(.dark) .fi-ta-ctn {
+    background: #ffffff !important;
+    border: 1px solid #e5e7eb !important;
+    box-shadow: 0 12px 30px rgba(15,23,42,.08) !important;
+}
+
+html:not(.dark) .fi-ta-table thead {
+    background: linear-gradient(135deg, rgba(37,99,235,.08), rgba(124,58,237,.08)) !important;
+}
+
+html:not(.dark) .fi-ta-row {
+    background: #ffffff !important;
+    border-bottom: 1px solid #eef2f7 !important;
+}
+
+html:not(.dark) .fi-ta-row:nth-child(even) {
+    background: #f8fafc !important;
+}
+
+html:not(.dark) .fi-ta-row:hover {
+    background: #eff6ff !important;
+}
+
+html:not(.dark) .fi-ta-cell,
+html:not(.dark) .fi-ta-header-cell,
+html:not(.dark) .fi-ta-header-cell span {
+    color: #111827 !important;
+}
+
+html:not(.dark) .fi-ta-cell a {
+    color: #d97706 !important;
+}
+
+/* =========================
+   CAIRO FONT
+========================= */
+
+
+html,
+body,
+.fi-body,
+.fi-main,
+.fi-sidebar,
+.fi-topbar,
+.fi-section,
+.fi-ta-table,
+.fi-btn,
+input,
+textarea,
+select {
+    font-family: 'Cairo', sans-serif !important;
+}
+
+/* تحسين الأرقام */
+* {
+    font-feature-settings: "tnum";
+}
+
+/* =========================
+   FORCE CAIRO FONT
+========================= */
+
+:root {
+    --font-family: 'Cairo', sans-serif !important;
+}
+
+html,
+body,
+button,
+input,
+textarea,
+select,
+.fi-body,
+.fi-main,
+.fi-layout,
+.fi-sidebar,
+.fi-topbar,
+.fi-header,
+.fi-section,
+.fi-ta,
+.fi-ta-table,
+.fi-ta-cell,
+.fi-ta-header-cell,
+.fi-btn,
+.fi-dropdown,
+.fi-modal,
+.fi-fo-field-wrp {
+    font-family: 'Cairo', sans-serif !important;
+}
+
+.fi-header-heading,
+.fi-sidebar-item-label,
+.fi-ta-header-cell,
+.fi-ta-cell,
+.fi-btn-label {
+    font-family: 'Cairo', sans-serif !important;
+}
+
+/* =========================
+   LIGHT MODE FIXES
+========================= */
+
+/* Sidebar في اللايت مود */
+html:not(.dark) .fi-sidebar,
+html:not(.dark) .fi-sidebar-header {
+    background: #1C293E !important;
+    border-right: 1px solid rgba(255,255,255,.08) !important;
+}
+
+/* لون النص في السايدبار */
+html:not(.dark) .fi-sidebar-item-label,
+html:not(.dark) .fi-sidebar-group-label,
+html:not(.dark) .fi-sidebar-item-icon {
+    color: #cbd5e1 !important;
+}
+
+/* hover */
+html:not(.dark) .fi-sidebar-item a:hover {
+    background: rgba(255,255,255,.08) !important;
+}
+
+/* active */
+html:not(.dark) .fi-sidebar-item-active > a {
+    background: linear-gradient(135deg, #2563eb, #7c3aed) !important;
+    color: white !important;
+}
+
+/* Navbar في اللايت مود */
+html:not(.dark) .fi-topbar nav {
+    background: #ffffff !important;
+    border-bottom: 1px solid #e5e7eb !important;
+    box-shadow: 0 8px 20px rgba(15,23,42,.05) !important;
+}
+
+/* النص في الناف */
+html:not(.dark) .fi-topbar {
+    color: #111827 !important;
+}
+
+
+/* =========================
+   SIDEBAR LOGO
+========================= */
+
+.fi-logo,
+.fi-sidebar-header span,
+.fi-sidebar-header {
+    color: #ffffff !important;
+    font-weight: 800 !important;
+}
+
+/* =========================
+   SIDEBAR ACTIVE BUTTON (SOLID)
+========================= */
+
+.fi-sidebar-item-active > a {
+    background: #334155 !important; /* لون هادي */
+    box-shadow: none !important;
+    border: 1px solid rgba(255,255,255,.08) !important;
+}
+
+.fi-sidebar-item-active span,
+.fi-sidebar-item-active svg {
+    color: #ffffff !important;
+}
+
+/* hover كمان يبقى ناعم */
+.fi-sidebar-item a:hover {
+    background: rgba(255,255,255,.06) !important;
+}
+
+/* شيل أي gradient قديم */
+.fi-sidebar-item-active > a::before {
+    display: none !important;
+}
+
+
+/* =========================
+   SIDEBAR ACTIVE EXACT STYLE
+========================= */
+
+.fi-sidebar-item-active > a {
+    background: #334155 !important; /* نفس اللون اللي في الصورة */
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    border-radius: 14px !important;
+    box-shadow: none !important;
+}
+
+/* النص والأيقونة */
+.fi-sidebar-item-active span,
+.fi-sidebar-item-active svg {
+    color: #e5e7eb !important;
+}
+
+/* hover */
+.fi-sidebar-item a:hover {
+    background: rgba(255,255,255,0.05) !important;
+}
+
+/* شيل أي gradient نهائي */
+.fi-sidebar-item-active > a::before {
+    display: none !important;
+}
+
+
+/* =========================
+   SIDEBAR ACTIVE - LIGHT & DARK
+========================= */
+
+html .fi-sidebar .fi-sidebar-item-active > a,
+html.dark .fi-sidebar .fi-sidebar-item-active > a,
+html:not(.dark) .fi-sidebar .fi-sidebar-item-active > a {
+    background: #334155 !important;
+    background-image: none !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    border-radius: 14px !important;
+    box-shadow: none !important;
+}
+
+html .fi-sidebar .fi-sidebar-item-active span,
+html .fi-sidebar .fi-sidebar-item-active svg,
+html.dark .fi-sidebar .fi-sidebar-item-active span,
+html.dark .fi-sidebar .fi-sidebar-item-active svg,
+html:not(.dark) .fi-sidebar .fi-sidebar-item-active span,
+html:not(.dark) .fi-sidebar .fi-sidebar-item-active svg {
+    color: #e5e7eb !important;
+}
+
+html .fi-sidebar .fi-sidebar-item-active > a::before,
+html.dark .fi-sidebar .fi-sidebar-item-active > a::before,
+html:not(.dark) .fi-sidebar .fi-sidebar-item-active > a::before {
+    display: none !important;
+    opacity: 0 !important;
+    background: none !important;
+}
+
+/* =========================
+   LOGIN PAGE DESIGN
+========================= */
+
+.fi-simple-layout {
+    background:
+        radial-gradient(circle at 20% 20%, rgba(20, 184, 166, .22), transparent 30%),
+        radial-gradient(circle at 80% 10%, rgba(37, 99, 235, .18), transparent 32%),
+        linear-gradient(135deg, #f8fafc 0%, #eef4ff 100%) !important;
+}
+
+.dark .fi-simple-layout {
+    background:
+        radial-gradient(circle at 25% 20%, rgba(20, 184, 166, .18), transparent 32%),
+        radial-gradient(circle at 75% 15%, rgba(37, 99, 235, .16), transparent 34%),
+        #0B1324 !important;
+}
+
+.fi-simple-main {
+    background: rgba(255, 255, 255, .82) !important;
+    backdrop-filter: blur(18px) !important;
+    border: 1px solid rgba(148, 163, 184, .22) !important;
+    border-radius: 26px !important;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, .14) !important;
+    padding: 42px !important;
+}
+
+.dark .fi-simple-main {
+    background: rgba(28, 41, 62, .78) !important;
+    border: 1px solid rgba(255, 255, 255, .08) !important;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .45) !important;
+}
+
+.fi-simple-header img {
+    max-height: 72px !important;
+    width: auto !important;
+    object-fit: contain !important;
+    margin-bottom: 14px !important;
+}
+
+.fi-simple-header-heading {
+    font-weight: 900 !important;
+    color: #0f172a !important;
+}
+
+.dark .fi-simple-header-heading {
+    color: #ffffff !important;
+}
+
+.fi-simple-main .fi-input-wrp {
+    border-radius: 14px !important;
+}
+
+.fi-simple-main .fi-btn-color-primary {
+    background: #0f766e !important;
+    color: #ffffff !important;
+    box-shadow: 0 12px 28px rgba(15, 118, 110, .28) !important;
+}
+
+.fi-simple-main .fi-btn-color-primary:hover {
+    background: #115e59 !important;
+}
+
+.dark .fi-simple-main .fi-btn-color-primary {
+    background: #14b8a6 !important;
+    color: #06201d !important;
+}
+
+.dark .fi-simple-main .fi-btn-color-primary:hover {
+    background: #2dd4bf !important;
+}
+
+.fi-wi-stats-overview-stat.rank-card {
+    border-radius: 26px !important;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid rgba(148, 163, 184, .25) !important;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, .10) !important;
+}
+
+.fi-wi-stats-overview-stat.rank-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: .14;
+    pointer-events: none;
+}
+
+.fi-wi-stats-overview-stat.rank-gold::before {
+    background: linear-gradient(135deg, #f59e0b, #fde68a, #f97316);
+}
+
+.fi-wi-stats-overview-stat.rank-silver::before {
+    background: linear-gradient(135deg, #94a3b8, #e5e7eb, #64748b);
+}
+
+.fi-wi-stats-overview-stat.rank-bronze::before {
+    background: linear-gradient(135deg, #b45309, #fdba74, #92400e);
+}
+
+.fi-wi-stats-overview-stat.rank-gold {
+    transform: scale(1.03);
+    border-color: rgba(245, 158, 11, .45) !important;
+}
+
+.fi-wi-stats-overview-stat.rank-silver {
+    transform: scale(.99);
+}
+
+.fi-wi-stats-overview-stat.rank-bronze {
+    transform: scale(.96);
+}
+
+.dark .fi-wi-stats-overview-stat.rank-card {
+    background: rgba(17, 24, 39, .95) !important;
+    border-color: rgba(255, 255, 255, .10) !important;
+}
+
+.dark .fi-wi-stats-overview-stat.rank-gold {
+    box-shadow: 0 18px 55px rgba(245, 158, 11, .18) !important;
+}
+
+.dark .fi-wi-stats-overview-stat.rank-silver {
+    box-shadow: 0 18px 45px rgba(148, 163, 184, .14) !important;
+}
+
+.dark .fi-wi-stats-overview-stat.rank-bronze {
+    box-shadow: 0 18px 45px rgba(180, 83, 9, .14) !important;
+}
+
+
+.fi-wi-stats-overview-stat.staff-rank-card {
+    border-radius: 26px !important;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid rgba(148, 163, 184, .22) !important;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, .08) !important;
+}
+
+.fi-wi-stats-overview-stat.staff-rank-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: .12;
+    pointer-events: none;
+}
+
+.fi-wi-stats-overview-stat.staff-rank-gold::before {
+    background: linear-gradient(135deg, #f59e0b, #fde68a, #f97316);
+}
+
+.fi-wi-stats-overview-stat.staff-rank-silver::before {
+    background: linear-gradient(135deg, #94a3b8, #f8fafc, #64748b);
+}
+
+.fi-wi-stats-overview-stat.staff-rank-bronze::before {
+    background: linear-gradient(135deg, #92400e, #fdba74, #b45309);
+}
+
+.fi-wi-stats-overview-stat.staff-rank-gold {
+    transform: scale(1.03);
+    border-color: rgba(245, 158, 11, .45) !important;
+}
+
+.fi-wi-stats-overview-stat.staff-rank-silver {
+    transform: scale(.99);
+}
+
+.fi-wi-stats-overview-stat.staff-rank-bronze {
+    transform: scale(.97);
+}
+
+.staff-rank-details {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+    direction: rtl;
+}
+
+.staff-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.staff-chip.approved {
+    color: #16a34a;
+    background: rgba(34, 197, 94, .10);
+}
+
+.staff-chip.paused {
+    color: #64748b;
+    background: rgba(100, 116, 139, .12);
+}
+
+.staff-chip.new {
+    color: #2563eb;
+    background: rgba(37, 99, 235, .10);
+}
+
+.staff-chip.pending {
+    color: #ea580c;
+    background: rgba(249, 115, 22, .12);
+}
+
+.dark .fi-wi-stats-overview-stat.staff-rank-card {
+    background: rgba(17, 24, 39, .95) !important;
+    border-color: rgba(255, 255, 255, .10) !important;
+}
+
+.dark .staff-chip.approved {
+    color: #4ade80;
+    background: rgba(34, 197, 94, .16);
+}
+
+.dark .staff-chip.paused {
+    color: #cbd5e1;
+    background: rgba(148, 163, 184, .16);
+}
+
+.dark .staff-chip.new {
+    color: #60a5fa;
+    background: rgba(37, 99, 235, .18);
+}
+
+.dark .staff-chip.pending {
+    color: #fb923c;
+    background: rgba(249, 115, 22, .18);
+}
+
+
+.staff-board {
+    direction: rtl;
+}
+
+.staff-board-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 22px;
+}
+
+.staff-board-head h2 {
+    font-size: 24px;
+    font-weight: 900;
+    color: #0f172a;
+    margin: 0;
+}
+
+.staff-board-head p {
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 14px;
+}
+
+.staff-rank-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 22px;
+}
+
+.staff-rank-card {
+    position: relative;
+    overflow: hidden;
+    border-radius: 28px;
+    padding: 24px;
+    background: white;
+    border: 1px solid rgba(148, 163, 184, .22);
+    box-shadow: 0 18px 45px rgba(15, 23, 42, .08);
+}
+
+.staff-rank-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: .12;
+    pointer-events: none;
+}
+
+.staff-rank-card.gold::before {
+    background: linear-gradient(135deg, #f59e0b, #fde68a, #f97316);
+}
+
+.staff-rank-card.silver::before {
+    background: linear-gradient(135deg, #94a3b8, #f8fafc, #64748b);
+}
+
+.staff-rank-card.bronze::before {
+    background: linear-gradient(135deg, #92400e, #fdba74, #b45309);
+}
+
+.staff-card-top {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+}
+
+.staff-rank-badge {
+    width: 44px;
+    height: 44px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, .06);
+    font-size: 20px;
+    font-weight: 900;
+    margin-bottom: 12px;
+}
+
+.staff-rank-card h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 900;
+    color: #334155;
+}
+
+.staff-rank-card p {
+    margin: 6px 0 0;
+    color: #64748b;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.staff-total {
+    text-align: center;
+    min-width: 86px;
+    padding: 12px;
+    border-radius: 22px;
+    background: rgba(15, 23, 42, .04);
+}
+
+.staff-total strong {
+    display: block;
+    font-size: 42px;
+    line-height: 1;
+    font-weight: 950;
+    color: #020617;
+}
+
+.staff-total span {
+    display: block;
+    margin-top: 6px;
+    color: #64748b;
+    font-weight: 800;
+}
+
+.staff-stats {
+    position: relative;
+    margin-top: 22px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.staff-stat {
+    border-radius: 18px;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.staff-stat span {
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.staff-stat strong {
+    font-size: 20px;
+    font-weight: 950;
+}
+
+.staff-stat.approved {
+    color: #16a34a;
+    background: rgba(34, 197, 94, .10);
+}
+
+.staff-stat.paused {
+    color: #64748b;
+    background: rgba(100, 116, 139, .12);
+}
+
+.staff-stat.new {
+    color: #2563eb;
+    background: rgba(37, 99, 235, .10);
+}
+
+.staff-stat.pending {
+    color: #ea580c;
+    background: rgba(249, 115, 22, .12);
+}
+
+.staff-rank-card.gold {
+    border-color: rgba(245, 158, 11, .42);
+}
+
+.staff-rank-card.silver {
+    border-color: rgba(148, 163, 184, .42);
+}
+
+.staff-rank-card.bronze {
+    border-color: rgba(180, 83, 9, .34);
+}
+
+.dark .staff-board-head h2 {
+    color: #f8fafc;
+}
+
+.dark .staff-board-head p {
+    color: #94a3b8;
+}
+
+.dark .staff-rank-card {
+    background: rgba(17, 24, 39, .96);
+    border-color: rgba(255, 255, 255, .10);
+}
+
+.dark .staff-rank-card h3 {
+    color: #f8fafc;
+}
+
+.dark .staff-rank-card p {
+    color: #cbd5e1;
+}
+
+.dark .staff-rank-badge,
+.dark .staff-total {
+    background: rgba(255, 255, 255, .07);
+}
+
+.dark .staff-total strong {
+    color: #ffffff;
+}
+
+.dark .staff-total span {
+    color: #cbd5e1;
+}
+
+@media (max-width: 1024px) {
+    .staff-rank-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .staff-rank-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+
+
+/* =========================
+   FINAL PREMIUM STATS CARDS
+========================= */
+
+.fi-wi-stats-overview {
+    gap: 26px !important;
+}
+
+.fi-wi-stats-overview-stat {
+    position: relative !important;
+    overflow: hidden !important;
+    min-height: 176px !important;
+    padding: 30px 34px !important;
+    border-radius: 28px !important;
+    background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%) !important;
+    border: 1px solid rgba(226, 232, 240, .95) !important;
+    box-shadow: 0 18px 42px rgba(15, 23, 42, .09) !important;
+    transition: all .25s ease !important;
+}
+
+.fi-wi-stats-overview-stat > div,
+.fi-wi-stats-overview-stat .fi-section,
+.fi-wi-stats-overview-stat .fi-section-content {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    min-height: auto !important;
+}
+
+.fi-wi-stats-overview-stat:hover {
+    transform: translateY(-5px) !important;
+    box-shadow: 0 26px 65px rgba(15, 23, 42, .14) !important;
+}
+
+.fi-wi-stats-overview-stat::before {
+    content: "" !important;
+    position: absolute !important;
+    top: 0 !important;
+    right: 0 !important;
+    left: 0 !important;
+    height: 8px !important;
+    background: var(--status-gradient, linear-gradient(90deg, #4311A5, #A576FF, #30D9EF)) !important;
+    z-index: 1 !important;
+}
+
+.fi-wi-stats-overview-stat::after {
+    content: "" !important;
+    position: absolute !important;
+    width: 170px !important;
+    height: 170px !important;
+    top: -70px !important;
+    left: -55px !important;
+    border-radius: 999px !important;
+    background: var(--status-gradient, linear-gradient(135deg, #4311A5, #A576FF, #30D9EF)) !important;
+    opacity: .10 !important;
+    filter: blur(10px) !important;
+    pointer-events: none !important;
+    z-index: 0 !important;
+}
+
+.fi-wi-stats-overview-stat > * {
+    position: relative !important;
+    z-index: 2 !important;
+}
+
+.fi-wi-stats-overview-stat-label {
+    color: #64748b !important;
+    font-size: 17px !important;
+    line-height: 1.4 !important;
+    font-weight: 900 !important;
+    margin-bottom: 14px !important;
+}
+
+.fi-wi-stats-overview-stat-value {
+    color: #020617 !important;
+    font-size: 42px !important;
+    line-height: 1.05 !important;
+    font-weight: 950 !important;
+    letter-spacing: -1px !important;
+    margin-bottom: 16px !important;
+}
+
+.fi-wi-stats-overview-stat-description {
+    color: var(--status-color, #4311A5) !important;
+    font-size: 15px !important;
+    line-height: 1.5 !important;
+    font-weight: 900 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    white-space: normal !important;
+}
+
+.fi-wi-stats-overview-stat-description svg,
+.fi-wi-stats-overview-stat svg {
+    color: var(--status-color, #4311A5) !important;
+    width: 22px !important;
+    height: 22px !important;
+    flex-shrink: 0 !important;
+}
+
+.fi-wi-stats-overview-stat-chart {
+    opacity: .28 !important;
+    height: 34px !important;
+    margin-top: 6px !important;
+}
+
+/* Card Colors */
+.requests-status-card-total {
+    --status-color: #475569;
+    --status-gradient: linear-gradient(90deg, #0f172a, #64748b);
+}
+
+.requests-status-card-new {
+    --status-color: #2563eb;
+    --status-gradient: linear-gradient(90deg, #2563eb, #06b6d4);
+}
+
+.requests-status-card-pending {
+    --status-color: #f97316;
+    --status-gradient: linear-gradient(90deg, #f97316, #facc15);
+}
+
+.requests-status-card-approved {
+    --status-color: #16a34a;
+    --status-gradient: linear-gradient(90deg, #16a34a, #22c55e);
+}
+
+.requests-status-card-delivered {
+    --status-color: #059669;
+    --status-gradient: linear-gradient(90deg, #047857, #84cc16);
+}
+
+.requests-status-card-paused {
+    --status-color: #64748b;
+    --status-gradient: linear-gradient(90deg, #475569, #94a3b8);
+}
+
+.requests-status-card-rejected {
+    --status-color: #ef4444;
+    --status-gradient: linear-gradient(90deg, #dc2626, #fb7185);
+}
+
+.requests-status-card-transferred {
+    --status-color: #4f46e5;
+    --status-gradient: linear-gradient(90deg, #4f46e5, #8b5cf6);
+}
+
+.requests-status-card-canceled {
+    --status-color: #e11d48;
+    --status-gradient: linear-gradient(90deg, #be123c, #ef4444);
+}
+
+/* Dark Mode */
+.dark .fi-wi-stats-overview-stat {
+    background: linear-gradient(145deg, #101827 0%, #1C293E 100%) !important;
+    border-color: rgba(255, 255, 255, .08) !important;
+    box-shadow: 0 18px 45px rgba(0, 0, 0, .35) !important;
+}
+
+.dark .fi-wi-stats-overview-stat-label {
+    color: #cbd5e1 !important;
+}
+
+.dark .fi-wi-stats-overview-stat-value {
+    color: #ffffff !important;
+}
+
+.dark .fi-wi-stats-overview-stat-description {
+    color: var(--status-color, #A576FF) !important;
+}
+
+@media (max-width: 768px) {
+    .fi-wi-stats-overview-stat {
+        min-height: 158px !important;
+        padding: 24px !important;
+    }
+
+    .fi-wi-stats-overview-stat-value {
+        font-size: 36px !important;
+    }
+}
+
