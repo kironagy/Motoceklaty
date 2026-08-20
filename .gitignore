@@ -19,6 +19,7 @@
 /storage/app/**/*.log
 /storage/app/**/*.tmp
 /storage/app/**/*.cache
+/storage/
 /storage/framework/
 /storage/logs/
 /storage/*.key
