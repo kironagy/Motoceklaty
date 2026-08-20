@@ -8,7 +8,7 @@ class AiComplexReplyService
 {
     public function reply(string $message, array $conversationContext = []): array
     {
-        $memory = app(AiMemoryContextBuilder::class)->buildForMessage($message);
+        $memory = app(AiMemoryContextBuilder::class)->buildForMessage($message, $conversationContext);
 
         $prompt = app(AiPromptBuilder::class)->buildChatReplyPrompt(
             message: $message,

@@ -21,7 +21,10 @@ class GeminiClient
         );
 
         $modelCode = $preferredModelCode ?: 'gemini-3.1-flash-lite';
-        $estimatedTokens = mb_strlen($prompt);
+        // 1 char = 1 token was ~3.7x too pessimistic in practice for this
+        // Arabic-heavy content (measured via real usageMetadata.promptTokenCount
+        // responses), causing tighter TPS-window rejections than necessary.
+        $estimatedTokens = (int) ceil(mb_strlen($prompt) / 4);
 
         while (true) {
             $modelRow = $manager->reserveAvailableModel(

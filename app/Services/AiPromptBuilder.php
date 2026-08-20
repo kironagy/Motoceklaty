@@ -4,6 +4,10 @@ namespace App\Services;
 
 class AiPromptBuilder
 {
+    /** Defensive caps only — normal messages/memory never come close to these. */
+    private const MAX_MESSAGE_CHARS = 4000;
+    private const MAX_MEMORY_CHARS = 20000;
+
     public function buildChatReplyPrompt(
         string $message,
         string $memoryContext,
@@ -11,6 +15,9 @@ class AiPromptBuilder
         string $confidence = 'system',
         array $conversationContext = []
     ): string {
+        $message = mb_substr($message, 0, self::MAX_MESSAGE_CHARS);
+        $memoryContext = mb_substr($memoryContext, 0, self::MAX_MEMORY_CHARS);
+
         $conversationText = $this->formatConversation($conversationContext);
         $lastMachinesText = $this->formatLastMachines($conversationContext['last_machines'] ?? []);
 
@@ -75,6 +82,7 @@ PROMPT;
         foreach (array_slice($messages, -20) as $row) {
             $sender = $row['sender'] ?? $row['role'] ?? $row['direction'] ?? null;
             $body = trim((string) ($row['body'] ?? $row['message'] ?? $row['text'] ?? ''));
+            $body = mb_substr($body, 0, 1000);
 
             if ($body === '') {
                 continue;

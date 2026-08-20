@@ -8,20 +8,14 @@ use Illuminate\Support\Facades\Log;
 
 class AiIntentClassifier
 {
+    /** Defensive cap only — a normal WhatsApp message never comes close to this. */
+    private const MAX_MESSAGE_CHARS = 4000;
+
     public function classify(WhatsappConversation $conversation, string $message, array $context = []): array
     {
-        $recent = $conversation->messages()
-            ->latest()
-            ->take(20)
-            ->get()
-            ->reverse()
-            ->map(fn ($m) => [
-                'direction' => $m->direction,
-                'message' => $m->message,
-                'payload' => $m->payload ?? null,
-            ])
-            ->values()
-            ->all();
+        $message = mb_substr($message, 0, self::MAX_MESSAGE_CHARS);
+
+        $recent = $this->recentMessagesForPrompt($conversation);
 
         $lastMachines = $this->lastMachines($conversation);
 
@@ -179,6 +173,77 @@ system:
 البيانات:
 PROMPT
         . "\n" . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    }
+
+    /**
+     * Last 20 messages, with the full raw payload (which can carry a large
+     * OCR text blob for a document upload) kept only for the single most
+     * recent message that actually has one. Older OCR/media payloads in the
+     * window are collapsed to a short summary — their extracted data is
+     * already reflected in conversation_state/context_payload, so resending
+     * the full document text on every later message is pure duplication,
+     * not extra understanding.
+     */
+    private function recentMessagesForPrompt(WhatsappConversation $conversation): array
+    {
+        $rows = $conversation->messages()
+            ->latest()
+            ->take(20)
+            ->get()
+            ->reverse()
+            ->values();
+
+        $lastRichPayloadIndex = null;
+
+        foreach ($rows as $i => $m) {
+            if ($this->payloadHasDocumentData($m->payload ?? null)) {
+                $lastRichPayloadIndex = $i;
+            }
+        }
+
+        return $rows
+            ->map(fn ($m, $i) => [
+                'direction' => $m->direction,
+                'message' => $m->message,
+                'payload' => $this->promptPayload($m->payload ?? null, $i === $lastRichPayloadIndex),
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function payloadHasDocumentData($payload): bool
+    {
+        return is_array($payload)
+            && (! empty($payload['ocr_results']) || ! empty($payload['saved_media_items']));
+    }
+
+    private function promptPayload($payload, bool $keepFull)
+    {
+        if (! is_array($payload) || $keepFull || ! $this->payloadHasDocumentData($payload)) {
+            return $payload;
+        }
+
+        $summary = [];
+
+        if (is_array($payload['saved_media_items'] ?? null)) {
+            $summary['media_count'] = count($payload['saved_media_items']);
+            $summary['media_types'] = collect($payload['saved_media_items'])
+                ->pluck('type')
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+        }
+
+        if (isset($payload['ocr_status'])) {
+            $summary['ocr_status'] = $payload['ocr_status'];
+        }
+
+        if (is_array($payload['ocr_results'] ?? null)) {
+            $summary['ocr_documents_processed'] = count($payload['ocr_results']);
+        }
+
+        return $summary ?: null;
     }
 
     private function lastMachines(WhatsappConversation $conversation): array
