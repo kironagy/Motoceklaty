@@ -15,12 +15,18 @@ return [
             'base_url' => 'https://generativelanguage.googleapis.com/v1beta',
             'default_task' => 'sales_reply',
 
+            // Kept in sync with the model codes actually provisioned in
+            // gemini_api_key_models (provider=gemini) so that creating a new
+            // Gemini API key via Filament (CreateGeminiApiKey) seeds the same
+            // models already relied on at runtime (e.g. GeminiClient's default
+            // 'gemini-3.1-flash-lite'). Update this list whenever a model is
+            // added/retired in production.
             'default_models' => [
 
                 [
-                    'display_name' => 'Gemini 1.5 Flash',
-                    'model_code' => 'gemini-1.5-flash',
-                    'category' => 'Gemini',
+                    'display_name' => 'Gemma 4 31B',
+                    'model_code' => 'gemma-4-31b-it',
+                    'category' => 'Other models',
                     'rpm_limit' => 15,
                     'rpd_limit' => 1500,
                     'tps_limit' => 1000000,
@@ -29,9 +35,9 @@ return [
                 ],
 
                 [
-                    'display_name' => 'Gemini 1.5 Flash 8B',
-                    'model_code' => 'gemini-1.5-flash-8b',
-                    'category' => 'Gemini',
+                    'display_name' => 'Gemma 4 26B',
+                    'model_code' => 'gemma-4-26b-a4b-it',
+                    'category' => 'Other models',
                     'rpm_limit' => 15,
                     'rpd_limit' => 1500,
                     'tps_limit' => 1000000,
@@ -40,14 +46,36 @@ return [
                 ],
 
                 [
-                    'display_name' => 'Gemini Embedding',
-                    'model_code' => 'text-embedding-004',
-                    'category' => 'Embedding',
+                    'display_name' => 'Gemini Embedding 1',
+                    'model_code' => 'gemini-embedding-001',
+                    'category' => 'Other models',
                     'rpm_limit' => 15,
                     'rpd_limit' => 1000,
                     'tps_limit' => 1000000,
-                    'priority' => 10,
+                    'priority' => 3,
                     'is_embedding' => true,
+                ],
+
+                [
+                    'display_name' => 'Gemini Embedding 2',
+                    'model_code' => 'gemini-embedding-2',
+                    'category' => 'Other models',
+                    'rpm_limit' => 15,
+                    'rpd_limit' => 1000,
+                    'tps_limit' => 1000000,
+                    'priority' => 4,
+                    'is_embedding' => true,
+                ],
+
+                [
+                    'display_name' => 'Gemini 3.1 Flash Lite',
+                    'model_code' => 'gemini-3.1-flash-lite',
+                    'category' => 'Gemini',
+                    'rpm_limit' => 15,
+                    'rpd_limit' => 500,
+                    'tps_limit' => 1000000,
+                    'priority' => 5,
+                    'is_embedding' => false,
                 ],
             ],
         ],
