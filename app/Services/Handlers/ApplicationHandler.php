@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services\Whatsapp\Handlers;
+namespace App\Services\Handlers;
 
 use App\Models\Machine;
 use App\Models\WhatsappConversation;

@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use App\Services\Whatsapp\Handlers\ApplicationHandler;
+use App\Services\Handlers\ApplicationHandler;
 use App\Services\Handlers\MediaOcrHandler;
 class WhatsappIntentRouter
 {
