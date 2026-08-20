@@ -95,7 +95,7 @@ private function familyMatches(string $queryNorm, string $queryCode, array $quer
         fn ($token) => ! $this->isNumericToken($token)
     ));
 
-    $queryBrandToken = $this->detectBrandOnlyToken($queryNorm, $queryCode, $nonNumericTokens);
+    $queryBrandToken = $this->detectBrandOnlyToken($queryNorm, $queryCode, $nonNumericTokens, $queryTokens);
 
     if ($queryBrandToken) {
         return Machine::query()
@@ -151,7 +151,12 @@ private function familyMatches(string $queryNorm, string $queryCode, array $quer
                 }
             }
 
-            if (! empty($queryBrandTokens) && empty($modelTokens)) {
+            $hasNumericQueryToken = ! empty(array_filter(
+                $queryTokens,
+                fn ($token) => $this->isNumericToken($token)
+            ));
+
+            if (! empty($queryBrandTokens) && empty($modelTokens) && ! $hasNumericQueryToken) {
                 return true;
             }
 
@@ -281,12 +286,20 @@ public function isBrandOnlyRequest(string $message): bool
         fn ($token) => ! $this->isNumericToken($token)
     ));
 
-    return (bool) $this->detectBrandOnlyToken($queryNorm, $queryCode, $nonNumericTokens);
+    return (bool) $this->detectBrandOnlyToken($queryNorm, $queryCode, $nonNumericTokens, $queryTokens);
 }
 
-private function detectBrandOnlyToken(string $queryNorm, string $queryCode, array $nonNumericTokens): ?string
+private function detectBrandOnlyToken(string $queryNorm, string $queryCode, array $nonNumericTokens, array $queryTokens = []): ?string
 {
     if (count($nonNumericTokens) !== 1) {
+        return null;
+    }
+
+    /*
+     * وجود رقم مع اسم البراند معناه العميل بيقصد موديل معين
+     * ("هوجن ٤")، مش كل موديلات البراند.
+     */
+    if (count($queryTokens) !== count($nonNumericTokens)) {
         return null;
     }
 

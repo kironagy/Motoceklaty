@@ -56,6 +56,27 @@ public function handle(
             $plan['needs_clarification'] = false;
             $plan['clarification_question'] = null;
         } elseif (
+            $lastMachines->count() > 1
+            && $this->isVariantNarrowingReply($message)
+        ) {
+            /*
+             * لو آخر رد كان فيه أكتر من موديل مطروح (زي "هوجن ٤ استيراد"
+             * و"هوجن ٤ استيراد فرز تاني") والعميل رد بكلمة تحديد زي
+             * "استيراد" أو "فرز تاني"، منسيبش الـ AI classifier يخمن -
+             * بيميل يرجع أول موديل في القايمة القديمة بدل ما يفلتر فعليًا.
+             * بنرجع كل الموديلات السابقة وبعدين بنفلترها بالكلمة نفسها.
+             */
+            $intent = in_array($intent, ['general', 'unknown'], true)
+                ? $this->detectIntent($message)
+                : $intent;
+            $plan['intent'] = $intent;
+            $plan['target'] = 'previous_selection';
+            $plan['uses_last_machines'] = true;
+            $plan['references_previous'] = true;
+            $plan['references_all_previous'] = true;
+            $plan['needs_clarification'] = false;
+            $plan['clarification_question'] = null;
+        } elseif (
             in_array($intent, ['general', 'unknown'], true)
             && $lastMachines->isNotEmpty()
             && $this->isPureFollowUp($message)
@@ -135,7 +156,7 @@ public function handle(
 
         $machines = $brandFiltered['machines'];
 
-        if (($plan['target'] ?? null) === 'new_machine') {
+        if ($machines->count() > 1) {
             $machines = $this->narrowMachinesByVariant($machines, $message);
         }
 
@@ -697,6 +718,14 @@ $folder = $this->safeFolderName($machine->name);
             $text
         );
 
+        $text = preg_replace('/\bال(?=[\p{Arabic}]{2,})/u', '', $text);
+
+        $text = str_replace(
+            ['استراد', 'وارد', 'فرز ثاني', 'فرز 2', 'فرز تانى', 'تانى', 'اصلى'],
+            ['استيراد', 'استيراد', 'فرز تاني', 'فرز تاني', 'فرز تاني', 'تاني', 'اصلي'],
+            $text
+        );
+
         $text = preg_replace('/[^\p{Arabic}a-zA-Z0-9\s]/u', ' ', $text);
         $text = preg_replace('/\s+/u', ' ', $text);
 
@@ -930,6 +959,22 @@ if (! empty($plan['machine_query'])) {
     return app(MachineSearchService::class)->search($message, 20);
 }
 
+
+private function isVariantNarrowingReply(string $message): bool
+{
+    $m = $this->normalizeText($message);
+
+    return $this->containsAny($m, [
+        'استيراد',
+        'فرز تاني',
+        'فرز ثاني',
+        'اصلي',
+        'اصليه',
+        'محلي',
+        'محليه',
+        'cc200',
+    ]);
+}
 
 private function isPureFollowUp(string $message): bool
 {
