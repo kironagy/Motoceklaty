@@ -166,6 +166,100 @@ public static function getEloquentQuery(): Builder
     return str_replace($arabicIndic, $western, str_replace($easternArabicIndic, $western, $value));
 }
 
+protected static function normalizeEgyptianPhone(?string $value): ?string
+{
+    $value = self::toEnglishDigits($value);
+
+    if ($value === null || trim($value) === '') {
+        return null;
+    }
+
+    // بعض البيانات القديمة فيها رقمين مفصولين بـ / أو , — ناخد الأول.
+    $parts = preg_split('#[/,،|]+#u', $value);
+    $value = $parts[0] ?? $value;
+
+    $digits = preg_replace('/\D+/', '', $value ?? '');
+
+    if ($digits === '') {
+        return null;
+    }
+
+    // شيل كود الدولة (00201... / 201...) ورجّع الرقم لصيغة 01xxxxxxxxx
+    if (str_starts_with($digits, '00')) {
+        $digits = substr($digits, 2);
+    }
+
+    if (strlen($digits) > 11 && str_starts_with($digits, '20')) {
+        $digits = '0' . substr($digits, 2);
+    }
+
+    return substr($digits, 0, 11);
+}
+
+protected static function normalizeNationalId(?string $value): ?string
+{
+    $value = self::toEnglishDigits($value);
+
+    if ($value === null || trim($value) === '') {
+        return null;
+    }
+
+    $digits = preg_replace('/\D+/', '', $value);
+
+    return $digits === '' ? null : substr($digits, 0, 14);
+}
+
+public static function normalizePhoneForForm(?string $value): ?string
+{
+    return self::normalizeEgyptianPhone($value);
+}
+
+public static function normalizeNationalIdForForm(?string $value): ?string
+{
+    return self::normalizeNationalId($value);
+}
+
+public static function extractSecondaryPhone(?string $value): ?string
+{
+    if ($value === null || trim($value) === '') {
+        return null;
+    }
+
+    $parts = preg_split('#[/,،|]+#u', self::toEnglishDigits($value));
+
+    return isset($parts[1])
+        ? self::normalizeEgyptianPhone($parts[1])
+        : null;
+}
+
+/**
+ * قاعدة تفرد لا تشتغل إلا لو القيمة اتغيّرت فعلاً عن المحفوظة،
+ * عشان تعديل حالة الطلب ما يتعطّلش بسبب داتا قديمة مكررة.
+ */
+protected static function uniqueIfChangedRule(string $column, string $message): \Closure
+{
+    return function (?\Illuminate\Database\Eloquent\Model $record) use ($column, $message) {
+        return function (string $attribute, $value, \Closure $fail) use ($record, $column, $message) {
+            if ($value === null || $value === '') {
+                return;
+            }
+
+            if ($record && (string) $record->{$column} === (string) $value) {
+                return;
+            }
+
+            $exists = InstallmentRequest::query()
+                ->where($column, $value)
+                ->when($record, fn ($query) => $query->whereKeyNot($record->getKey()))
+                ->exists();
+
+            if ($exists) {
+                $fail($message);
+            }
+        };
+    };
+}
+
 protected static function normalizeApplicantName(?string $value): ?string
 {
     if ($value === null) return null;
@@ -422,54 +516,37 @@ Forms\Components\TextInput::make('applicant_phone')
     ->label('رقم الهاتف')
     ->required()
     ->reactive()
+    ->afterStateHydrated(function ($state, callable $set) {
+        $set('applicant_phone', self::normalizeEgyptianPhone($state));
+    })
     ->afterStateUpdated(function ($state, callable $set) {
-        $normalized = self::toEnglishDigits($state);
-        // شيل أي شيء غير رقم
-        $normalized = preg_replace('/\D+/', '', $normalized ?? '');
-        // اقصى 11 رقم
-        $normalized = substr($normalized, 0, 11);
-
-        $set('applicant_phone', $normalized);
+        $set('applicant_phone', self::normalizeEgyptianPhone($state));
     })
-    ->dehydrateStateUsing(function ($state) {
-        $normalized = self::toEnglishDigits($state);
-        $normalized = preg_replace('/\D+/', '', $normalized ?? '');
-        return substr($normalized, 0, 11);
-    })
+    ->dehydrateStateUsing(fn ($state) => self::normalizeEgyptianPhone($state))
     ->maxLength(11)
     ->minLength(11)
     ->rule('regex:/^\d{11}$/')
-    ->unique(ignoreRecord: true)
+    ->rule(self::uniqueIfChangedRule('applicant_phone', 'رقم الهاتف دا متسجل قبل كدا.'))
     ->validationMessages([
         'regex' => 'رقم الهاتف يجب أن يكون 11 رقمًا بالضبط.',
-        'unique' => 'رقم الهاتف دا متسجل قبل كدا.',
     ]),
 
 Forms\Components\TextInput::make('applicant_phone_2')
     ->label('رقم الهاتف الثاني')
     ->nullable()
     ->reactive()
+    ->afterStateHydrated(function ($state, callable $set) {
+        $set('applicant_phone_2', self::normalizeEgyptianPhone($state));
+    })
     ->afterStateUpdated(function ($state, callable $set) {
-        $normalized = self::toEnglishDigits($state);
-        $normalized = preg_replace('/\D+/', '', $normalized ?? '');
-        $normalized = substr($normalized, 0, 11);
-        $set('applicant_phone_2', $normalized);
+        $set('applicant_phone_2', self::normalizeEgyptianPhone($state));
     })
-    ->dehydrateStateUsing(function ($state) {
-        if ($state === null || $state === '') return null;
-
-        $normalized = self::toEnglishDigits($state);
-        $normalized = preg_replace('/\D+/', '', $normalized ?? '');
-        $normalized = substr($normalized, 0, 11);
-
-        return $normalized !== '' ? $normalized : null;
-    })
+    ->dehydrateStateUsing(fn ($state) => self::normalizeEgyptianPhone($state))
     ->maxLength(11)
     ->rule('regex:/^\d{11}$/')
-    ->unique(ignoreRecord: true)
+    ->rule(self::uniqueIfChangedRule('applicant_phone_2', 'رقم الهاتف الثاني دا متسجل قبل كدا.'))
     ->validationMessages([
         'regex'  => 'رقم الهاتف الثاني يجب أن يكون 11 رقمًا بالضبط.',
-        'unique' => 'رقم الهاتف الثاني دا متسجل قبل كدا.',
     ]),
 
 Forms\Components\Textarea::make('applicant_address')
@@ -486,20 +563,16 @@ Forms\Components\TextInput::make('applicant_national_id')
     ->required()
     ->reactive()
     ->afterStateUpdated(function ($state, callable $set) {
-        $normalized = self::toEnglishDigits($state);
-        $normalized = preg_replace('/\D+/', '', $normalized ?? '');
-        $normalized = substr($normalized, 0, 14);
-        $set('applicant_national_id', $normalized);
+        $set('applicant_national_id', self::normalizeNationalId($state));
     })
-    ->dehydrateStateUsing(function ($state) {
-        $normalized = self::toEnglishDigits($state);
-        $normalized = preg_replace('/\D+/', '', $normalized ?? '');
-        return substr($normalized, 0, 14);
-    })
+    ->dehydrateStateUsing(fn ($state) => self::normalizeNationalId($state))
     ->minLength(14)
     ->maxLength(14)
     ->rule('regex:/^\d{14}$/')
-    ->unique(ignoreRecord: true),
+    ->rule(self::uniqueIfChangedRule('applicant_national_id', 'الرقم القومي دا متسجل قبل كدا.'))
+    ->validationMessages([
+        'regex' => 'الرقم القومي يجب أن يكون 14 رقمًا بالضبط.',
+    ]),
 
         Forms\Components\Toggle::make('applicant_age_ok')
             ->label('مستوفي شرط السن'),

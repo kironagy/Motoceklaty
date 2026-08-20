@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'driver' => env('OCR_DRIVER', 'paddle'), // 'paddle' | 'google_vision'
+
     'enabled' => (bool) env('OCR_ENABLED', true),
     'url' => rtrim((string) env('PADDLE_OCR_URL', 'http://127.0.0.1:8100'), '/'),
     'token' => (string) env('PADDLE_OCR_TOKEN', ''),
@@ -14,5 +16,11 @@ return [
         'image/bmp',
         'image/tiff',
         'application/pdf',
+    ],
+
+    'google_vision' => [
+        'api_key' => (string) env('GOOGLE_VISION_API_KEY', ''),
+        'timeout' => (int) env('GOOGLE_VISION_TIMEOUT', 60),
+        'language_hints' => ['ar'],
     ],
 ];

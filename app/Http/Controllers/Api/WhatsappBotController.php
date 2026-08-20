@@ -199,19 +199,16 @@ public function processQueuedWhatsappJob(object $job): array
      * عشان لو فيه pending_order_data محفوظ قبل كده ميتكسرش.
      * بعد ما نعمل Gemini Order Extractor هنظبط الجزء ده.
      */
-    if (!count($mediaItems) && $this->isOrderConfirmationMessage($message)) {
-        $forcedData = $this->latestPendingOrderData($conversation);
+    $forcedData = (!count($mediaItems) && $this->isOrderConfirmationMessage($message))
+        ? $this->latestPendingOrderData($conversation)
+        : null;
 
-        if (!$forcedData) {
-            return [
-                'reply' => 'تمام يا فندم، ابعتلي بيانات الطلب الأول عشان أراجعها معاك.',
-                'image' => null,
-                'images' => [],
-                'image_items' => [],
-                'image_groups' => [],
-            ];
-        }
-
+    /*
+     * لو مفيش pending_order_data قديمة أصلاً (زي أي عميل بيستخدم
+     * التدفق الجديد عبر ApplicationHandler)، منردش برسالة تايهة -
+     * نسيب الراوتر الحديث يتصرف بدل ما نوقف المحادثة هنا.
+     */
+    if ($forcedData) {
         if (!$this->orderDataIsComplete($forcedData)) {
             return [
                 'reply' => $this->missingOrderDataReply($forcedData),

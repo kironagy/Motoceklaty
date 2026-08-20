@@ -36,6 +36,7 @@ class InstallmentRequest extends Model
  
     protected $fillable = [
         'machine_id',
+        'whatsapp_conversation_id',
         'installment_type',
         'months',
 'machine_installment_price',
@@ -122,6 +123,11 @@ class InstallmentRequest extends Model
     public function machine()
     {
         return $this->belongsTo(Machine::class);
+    }
+
+    public function whatsappConversation()
+    {
+        return $this->belongsTo(WhatsappConversation::class);
     }
 
     public function staff()

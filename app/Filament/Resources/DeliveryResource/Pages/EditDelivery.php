@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\DeliveryResource\Pages;
 
 use App\Filament\Resources\DeliveryResource;
+use App\Models\InstallmentRequest;
 use App\Models\Notification;
 use App\Models\Staff;
 use App\Services\PushNotificationService;
@@ -70,6 +71,63 @@ class EditDelivery extends EditRecord
         return [
             Actions\DeleteAction::make(),
         ];
+    }
+
+    /**
+     * بعض الطلبات القديمة (وطلبات الواتساب) متسجل فيها أرقام بصيغة غير نظيفة
+     * زي "+20 10 6622..." أو رقمين مفصولين بـ "/". لو سبناها زي ما هي،
+     * أي حفظ — حتى لو تغيير الحالة بس — بيفشل في الـ validation.
+     * فبننضّفها وإحنا بنملأ الفورم.
+     */
+    protected function mutateFormDataBeforeFill(array $data): array
+    {
+        $rawPhone = $data['applicant_phone'] ?? null;
+        $normalizedPhone = DeliveryResource::normalizePhoneForForm($rawPhone);
+        $fixed = [];
+
+        if ($normalizedPhone !== null && (string) $rawPhone !== $normalizedPhone) {
+            // لو كان فيه رقم تاني مدفون في نفس الخانة، نحاول ننقله لخانة الرقم الثاني.
+            $secondary = DeliveryResource::extractSecondaryPhone($rawPhone);
+
+            if (
+                $secondary !== null &&
+                blank($data['applicant_phone_2'] ?? null) &&
+                ! InstallmentRequest::where('applicant_phone_2', $secondary)
+                    ->whereKeyNot($this->record->getKey())
+                    ->exists()
+            ) {
+                $data['applicant_phone_2'] = $secondary;
+            }
+
+            $data['applicant_phone'] = $normalizedPhone;
+            $fixed[] = 'رقم الهاتف';
+        }
+
+        $rawPhone2 = $data['applicant_phone_2'] ?? null;
+        $normalizedPhone2 = DeliveryResource::normalizePhoneForForm($rawPhone2);
+
+        if (filled($rawPhone2) && (string) $rawPhone2 !== (string) $normalizedPhone2) {
+            $data['applicant_phone_2'] = $normalizedPhone2;
+            $fixed[] = 'رقم الهاتف الثاني';
+        }
+
+        $rawNid = $data['applicant_national_id'] ?? null;
+        $normalizedNid = DeliveryResource::normalizeNationalIdForForm($rawNid);
+
+        if (filled($rawNid) && (string) $rawNid !== (string) $normalizedNid) {
+            $data['applicant_national_id'] = $normalizedNid;
+            $fixed[] = 'الرقم القومي';
+        }
+
+        if ($fixed !== []) {
+            \Filament\Notifications\Notification::make()
+                ->title('تم تصحيح صيغة: ' . implode(' + ', $fixed))
+                ->body('راجع القيم قبل الحفظ.')
+                ->warning()
+                ->send();
+        }
+
+        return $data;
     }
 
     protected function mutateFormDataBeforeSave(array $data): array

@@ -36,4 +36,9 @@ class WhatsappConversation extends Model
     {
         return $this->belongsTo(Machine::class, 'last_machine_id');
     }
+
+    public function whatsappBot()
+    {
+        return $this->belongsTo(WhatsappBot::class);
+    }
 }

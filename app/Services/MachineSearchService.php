@@ -239,6 +239,14 @@ if (
 
                 if (in_array($token, $nameTokens, true)) {
                     $score += 700;
+                } else {
+                    foreach ($nameTokens as $nameToken) {
+                        if ($this->tokensAreSimilar($token, $nameToken)) {
+                            $score += 400;
+
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -372,9 +380,71 @@ private function allBrandTokens(): array
             if (in_array($token, $nameTokens, true)) {
                 return true;
             }
+
+            foreach ($nameTokens as $nameToken) {
+                if ($this->tokensAreSimilar($token, $nameToken)) {
+                    return true;
+                }
+            }
         }
 
         return false;
+    }
+
+    /**
+     * سماحية غلطة إملائية بسيطة (حرف واحد فرق) في الكلمات الطويلة نسبيًا،
+     * عشان "هوجن" تتطابق مع "هوجان" أو "هوغن" لو العميل غلط في الكتابة.
+     */
+    private function tokensAreSimilar(string $a, string $b): bool
+    {
+        $lenA = mb_strlen($a);
+        $lenB = mb_strlen($b);
+
+        if ($lenA < 4 || $lenB < 4) {
+            return false;
+        }
+
+        if (abs($lenA - $lenB) > 1) {
+            return false;
+        }
+
+        $maxDistance = max($lenA, $lenB) >= 7 ? 2 : 1;
+
+        return $this->mbLevenshtein($a, $b) <= $maxDistance;
+    }
+
+    /**
+     * levenshtein() الأصلية بتشتغل على البايتات مش الحروف، وده غلط مع
+     * العربي (كل حرف 2 بايت أو أكتر في UTF-8). النسخة دي بتشتغل على
+     * مصفوفة حروف حقيقية.
+     */
+    private function mbLevenshtein(string $a, string $b): int
+    {
+        $chars1 = preg_split('//u', $a, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $chars2 = preg_split('//u', $b, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        $len1 = count($chars1);
+        $len2 = count($chars2);
+
+        $prev = range(0, $len2);
+
+        for ($i = 1; $i <= $len1; $i++) {
+            $curr = [$i];
+
+            for ($j = 1; $j <= $len2; $j++) {
+                $cost = $chars1[$i - 1] === $chars2[$j - 1] ? 0 : 1;
+
+                $curr[$j] = min(
+                    $prev[$j] + 1,
+                    $curr[$j - 1] + 1,
+                    $prev[$j - 1] + $cost
+                );
+            }
+
+            $prev = $curr;
+        }
+
+        return $prev[$len2];
     }
 
     private function hasStrongCodeMatch(string $queryCode, string $nameCode): bool
@@ -558,6 +628,7 @@ private function loadMemoryAliasesMap(): array
             'haojang' => 'هوجن',
             'هوجان' => 'هوجن',
             'هوجين' => 'هوجن',
+            'هوجون' => 'هوجن',
             'الهوجان' => 'هوجن',
             'الهوجن' => 'هوجن',
 
@@ -587,6 +658,32 @@ private function loadMemoryAliasesMap(): array
             'اصلى' => 'اصلي',
             'original' => 'اصلي',
             'اوريجينال' => 'اصلي',
+
+            'واحده' => '1',
+            'واحد' => '1',
+            'اتنين' => '2',
+            'اثنين' => '2',
+            'إتنين' => '2',
+            'تلاته' => '3',
+            'تلاتة' => '3',
+            'ثلاثة' => '3',
+            'ثلاثه' => '3',
+            'اربعه' => '4',
+            'اربعة' => '4',
+            'أربعة' => '4',
+            'خمسه' => '5',
+            'خمسة' => '5',
+            'سته' => '6',
+            'ستة' => '6',
+            'سبعه' => '7',
+            'سبعة' => '7',
+            'تمانيه' => '8',
+            'تمانية' => '8',
+            'ثمانية' => '8',
+            'تسعه' => '9',
+            'تسعة' => '9',
+            'عشره' => '10',
+            'عشرة' => '10',
         ];
 
         uksort($replace, fn ($a, $b) => mb_strlen($b) <=> mb_strlen($a));

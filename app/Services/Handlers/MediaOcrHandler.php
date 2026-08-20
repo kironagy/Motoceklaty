@@ -3,7 +3,7 @@
 namespace App\Services\Handlers;
 
 use App\Models\WhatsappConversation;
-use App\Services\Ocr\PaddleOcrClient;
+use App\Services\Ocr\OcrProviderInterface;
 use Illuminate\Support\Facades\Storage;
 
 class MediaOcrHandler
@@ -43,7 +43,7 @@ class MediaOcrHandler
                 continue;
             }
 
-            $ocr = app(PaddleOcrClient::class)->recognize($disk->path($path), $mime);
+            $ocr = app(OcrProviderInterface::class)->recognize($disk->path($path), $mime);
             $results[] = $this->mediaResult($item, $ocr);
         }
 
