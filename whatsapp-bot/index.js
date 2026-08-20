@@ -257,6 +257,7 @@ async function flushMediaCollector(sock, botId, originalFrom, replyJid, collecto
             message: collector.message || '',
             direction: 'incoming',
             media_items: collector.mediaItems,
+            wa_message_id: collector.waMessageId || null,
         };
 
         console.log(`📤 Sending ${collector.mediaItems.length} media items to Laravel`);
@@ -310,11 +311,13 @@ async function handleIncomingMessage(sock, botId, msg) {
             mediaCollectors[collectorKey] = {
                 mediaItems: [],
                 message: cleanText || '',
+                waMessageId: null,
                 timer: null,
             };
         }
 
         mediaCollectors[collectorKey].mediaItems.push(media);
+        mediaCollectors[collectorKey].waMessageId = messageId;
 
         if (cleanText) {
             mediaCollectors[collectorKey].message = cleanText;
@@ -347,6 +350,7 @@ async function handleIncomingMessage(sock, botId, msg) {
             reply_jid: replyJid,
             message: cleanText,
             direction: 'incoming',
+            wa_message_id: messageId,
         };
 console.log('📤 Sending to Laravel:', cleanText);
         const response = await postToLaravel(payload);

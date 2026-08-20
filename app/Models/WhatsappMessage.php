@@ -8,6 +8,7 @@ class WhatsappMessage extends Model
 {
     protected $fillable = [
         'whatsapp_conversation_id',
+        'wa_message_id',
         'direction',
         'message',
         'payload',
