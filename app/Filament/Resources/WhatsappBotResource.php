@@ -25,7 +25,10 @@ class WhatsappBotResource extends Resource
     protected static ?string $modelLabel = 'بوت واتساب';
     protected static ?string $pluralModelLabel = 'بوتات واتساب';
 
-    protected static string $nodeUrl = 'http://127.0.0.1:3080';
+    protected static function getNodeUrl(): string
+    {
+        return rtrim((string) env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3010'), '/');
+    }
 
     public static function form(Form $form): Form
     {
@@ -197,7 +200,7 @@ class WhatsappBotResource extends Resource
                             ->withHeaders([
                                 'X-BOT-TOKEN' => $token,
                             ])
-                            ->post(static::$nodeUrl . '/sessions/start', [
+                            ->post(static::getNodeUrl() . '/sessions/start', [
                                 'bot_id' => $botId,
                             ]);
 
@@ -210,7 +213,7 @@ class WhatsappBotResource extends Resource
                                 ->withHeaders([
                                     'X-BOT-TOKEN' => $token,
                                 ])
-                                ->get(static::$nodeUrl . "/sessions/{$botId}/qr");
+                                ->get(static::getNodeUrl() . "/sessions/{$botId}/qr");
 
                             if (!$response->successful()) {
                                 continue;
@@ -277,7 +280,7 @@ class WhatsappBotResource extends Resource
                             ->withHeaders([
                                 'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
                             ])
-                            ->get(static::$nodeUrl . "/sessions/{$record->id}/qr");
+                            ->get(static::getNodeUrl() . "/sessions/{$record->id}/qr");
 
                         if (!$response->successful()) {
                             return new HtmlString('<div style="text-align:center;padding:20px;">فشل جلب QR من السيرفر.</div>');
@@ -311,7 +314,7 @@ class WhatsappBotResource extends Resource
                             ->withHeaders([
                                 'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
                             ])
-                            ->get(static::$nodeUrl . "/sessions/{$record->id}/status");
+                            ->get(static::getNodeUrl() . "/sessions/{$record->id}/status");
 
                         if (!$response->successful()) {
                             Notification::make()
@@ -346,7 +349,7 @@ class WhatsappBotResource extends Resource
                             ->withHeaders([
                                 'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
                             ])
-                            ->post(static::$nodeUrl . "/sessions/{$record->id}/logout");
+                            ->post(static::getNodeUrl() . "/sessions/{$record->id}/logout");
 
                         $record->update([
                             'qr_code' => null,
