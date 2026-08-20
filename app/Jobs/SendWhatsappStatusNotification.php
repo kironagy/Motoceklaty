@@ -35,7 +35,17 @@ class SendWhatsappStatusNotification implements ShouldQueue
         }
 
         $conversation = $request->whatsappConversation;
-        $jid = $conversation->phone . '@s.whatsapp.net';
+        $jid = $this->recipientJid($request, $conversation);
+
+        if (! $jid) {
+            Log::warning('SendWhatsappStatusNotification: no valid recipient JID', [
+                'installment_request_id' => $request->id,
+                'conversation_phone' => $conversation->phone,
+                'applicant_phone' => $request->applicant_phone,
+            ]);
+
+            return;
+        }
 
         $message = $this->messageFor($request, $this->status, $this->reason);
 
@@ -61,6 +71,7 @@ class SendWhatsappStatusNotification implements ShouldQueue
             'installment_request_id' => $request->id,
             'status' => $this->status,
             'jid' => $jid,
+            'conversation_phone' => $conversation->phone,
             'response_status' => $response->status(),
             'response_ok' => $response->json('ok'),
         ]);
@@ -72,12 +83,40 @@ class SendWhatsappStatusNotification implements ShouldQueue
         }
     }
 
+    private function recipientJid(InstallmentRequest $request, object $conversation): ?string
+    {
+        $conversationPhone = trim((string) $conversation->phone);
+
+        if ($conversationPhone === '') {
+            return null;
+        }
+
+        // Keep an explicitly stored JID intact, including WhatsApp LID values.
+        if (str_contains($conversationPhone, '@')) {
+            return $conversationPhone;
+        }
+
+        // Older conversations stored a numeric LID without its @lid suffix.
+        // In that case, use the customer's registered Egyptian phone number.
+        if (preg_match('/^\d{15}$/', $conversationPhone)) {
+            $phone = preg_replace('/\D+/', '', (string) $request->applicant_phone);
+
+            if (preg_match('/^01[0125]\d{8}$/', $phone)) {
+                return '20' . substr($phone, 1) . '@s.whatsapp.net';
+            }
+
+            return null;
+        }
+
+        return $conversationPhone . '@s.whatsapp.net';
+    }
+
     private function messageFor(InstallmentRequest $request, string $status, ?string $reason): ?string
     {
         $reason = trim((string) $reason);
 
         return match ($status) {
-            'approved' => "تمام يا فندم، طلبك رقم #{$request->id} تمت الموافقة عليه.\nتعالى الفرع علشان تكمل باقي الإجراءات.",
+            'approved' => "ألف مبروك يا فندم، طلب التقسيط رقم #{$request->id} تمت الموافقة عليه.\nبرجاء التوجه إلى الفرع لاستكمال باقي الإجراءات واستلام المكنة.",
             'paused' => "طلبك رقم #{$request->id} متوقف مؤقتًا."
                 . ($reason !== '' ? "\nالسبب: {$reason}" : '')
                 . "\nبرجاء التواصل مع المعرض لاستكمال المطلوب.",

@@ -21,7 +21,7 @@ class InstallmentRequestObserver
             return;
         }
 
-        SendWhatsappStatusNotification::dispatch(
+        SendWhatsappStatusNotification::dispatchSync(
             $model->id,
             $status,
             $this->reasonText($model->checks_report)
