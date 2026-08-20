@@ -94,6 +94,15 @@ class GeminiClient
                     $json = $response->json();
 
                     $reply = data_get($json, 'candidates.0.content.parts.0.text');
+                    $finishReason = data_get($json, 'candidates.0.finishReason');
+
+                    if ($finishReason === 'MAX_TOKENS') {
+                        Log::warning('Gemini reply truncated by maxOutputTokens', [
+                            'model' => $modelRow->model_code,
+                            'max_output_tokens' => $options['maxOutputTokens'] ?? null,
+                            'reply_chars' => mb_strlen((string) $reply),
+                        ]);
+                    }
 
                     $usedTokens = (int) data_get(
                         $json,
@@ -106,6 +115,7 @@ class GeminiClient
                     return [
                         'ok' => true,
                         'reply' => $reply,
+                        'truncated' => $finishReason === 'MAX_TOKENS',
                         'key_id' => $modelRow->gemini_api_key_id,
                         'model_id' => $modelRow->id,
                         'model' => $modelRow->model_code,

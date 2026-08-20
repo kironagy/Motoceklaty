@@ -26,7 +26,11 @@ class AiComplexReplyService
                 'temperature' => 0.2,
                 'topP' => 0.4,
                 'topK' => 5,
-                'maxOutputTokens' => 260,
+                // Was 260 - measured live truncating real replies (e.g. the
+                // full branch list + map links) at exactly 597 chars every
+                // time, mid-URL. 1024 gives real headroom for a legitimately
+                // long structured answer while still bounding cost/rambling.
+                'maxOutputTokens' => 1024,
             ]
         );
 
