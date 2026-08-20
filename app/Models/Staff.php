@@ -23,7 +23,8 @@ class Staff extends Authenticatable
         'is_super_admin',   // ✅ جديد
         'referral_code',
             'is_bot',
-
+'is_company_employee',
+'installment_system_id',
         'attendance_rules',
         'lat',
 'lng',
@@ -35,10 +36,7 @@ class Staff extends Authenticatable
         'is_admin' => 'boolean',
         'is_super_admin' => 'boolean', // ✅ جديد
         'requests_count' => 'integer',
-                'attendance_rules' => 'array',
-                'lat' => 'float',
-'lng' => 'float',
-'distance_m' => 'integer',
+        'is_company_employee' => 'boolean',
 
 
     ];
@@ -63,7 +61,13 @@ class Staff extends Authenticatable
 
         $this->attributes['password'] = Hash::make($value);
     }
-
+public function installmentSystems()
+{
+    return $this->belongsToMany(
+        InstallmentSystem::class,
+        'installment_system_staff'
+    );
+}
     // ✅ صلاحيات
     public function isSuperAdmin(): bool
     {

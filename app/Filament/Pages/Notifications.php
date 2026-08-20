@@ -2,38 +2,49 @@
 
 namespace App\Filament\Pages;
 
+use App\Models\InstallmentRequest;
 use App\Models\Notification;
 use Filament\Pages\Page;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Auth;
+use Livewire\WithPagination;
 
 class Notifications extends Page
 {
+    use WithPagination;
+
     protected static ?string $navigationIcon = 'heroicon-o-bell';
     protected static string $view = 'filament.pages.notifications';
 
-    public array $notifications = [];
+    /** عدد الإشعارات المعروضة في كل صفحة. */
+    private const PER_PAGE = 20;
 
-    public function mount(): void
+    /**
+     * لا نستخدم get() هنا؛ paginate() تجلب 20 سجلًا فقط من قاعدة البيانات.
+     */
+    public function getNotificationsProperty(): LengthAwarePaginator
     {
-        $this->loadNotifications();
+        return Notification::query()
+            ->where('user_id', Auth::id())
+            ->latest('created_at')
+            ->paginate(self::PER_PAGE);
     }
-public function markAllAsRead()
-{
-    \App\Models\Notification::where('user_id', Auth::id())
-        ->update(['is_read' => true]);
 
-    $this->loadNotifications();
-
-    $this->dispatch('refresh-bell');
-}
-
-
-    public function loadNotifications(): void
+    protected function getViewData(): array
     {
-        $this->notifications = Notification::where('user_id', Auth::id())
-            ->orderBy('created_at', 'desc')
-            ->get()
-            ->toArray();
+        return [
+            'notifications' => $this->notifications,
+        ];
+    }
+
+    public function markAllAsRead(): void
+    {
+        Notification::where('user_id', Auth::id())
+            ->where('is_read', false)
+            ->update(['is_read' => true]);
+
+        $this->resetPage();
+        $this->dispatch('refresh-bell');
     }
 
     public function markAsRead(int $id): void
@@ -42,95 +53,93 @@ public function markAllAsRead()
             ->where('user_id', Auth::id())
             ->update(['is_read' => true]);
 
-        // 🔄 إعادة تحميل الإشعارات بعد التحديث
-        $this->loadNotifications();
-
-        // 🔔 تحديث عدد الإشعارات بجانب أيقونة الجرس
         $this->dispatch('refresh-bell');
     }
 
+    public function approveTransfer(int $id): void
+    {
+        try {
+            $notification = Notification::where('id', $id)
+                ->where('user_id', Auth::id())
+                ->first();
 
-public function approveTransfer($id)
-{
-    try {
+            if (! $notification) {
+                return;
+            }
 
-        $notification = \App\Models\Notification::find($id);
+            $data = json_decode($notification->data, true);
+            $requestId = $data['request_id'] ?? null;
 
-        if (!$notification) {
+            if (! $requestId) {
+                return;
+            }
+
+            $request = InstallmentRequest::find($requestId);
+
+            if (! $request) {
+                return;
+            }
+
+            if ($request->pending_staff_id) {
+                $request->update([
+                    'staff_id' => $request->pending_staff_id,
+                    'pending_staff_id' => null,
+                    'transfer_requested_by' => null,
+                    'transfer_requested_at' => null,
+                ]);
+            }
+
+            $notification->update(['is_read' => true]);
+
+            $this->dispatch('refresh-bell');
+
+            \Filament\Notifications\Notification::make()
+                ->title('تمت الموافقة على التحويل')
+                ->success()
+                ->send();
+        } catch (\Throwable $e) {
+            \Filament\Notifications\Notification::make()
+                ->title('حصل خطأ')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    public function rejectTransfer(int $id): void
+    {
+        $notification = Notification::where('id', $id)
+            ->where('user_id', Auth::id())
+            ->first();
+
+        if (! $notification) {
             return;
         }
 
         $data = json_decode($notification->data, true);
+        $requestId = $data['request_id'] ?? null;
 
-        if (!isset($data['request_id'])) {
+        if (! $requestId) {
             return;
         }
 
-        $request = \App\Models\InstallmentRequest::find($data['request_id']);
+        $request = InstallmentRequest::find($requestId);
 
-        if (!$request) {
-            return;
-        }
-
-        if ($request->pending_staff_id) {
+        if ($request) {
             $request->update([
-                'staff_id' => $request->pending_staff_id,
                 'pending_staff_id' => null,
                 'transfer_requested_by' => null,
                 'transfer_requested_at' => null,
             ]);
         }
 
-        $notification->update([
-            'is_read' => true,
-        ]);
+        $notification->update(['is_read' => true]);
 
-        $this->loadNotifications();
+        $this->dispatch('refresh-bell');
 
         \Filament\Notifications\Notification::make()
-            ->title('تمت الموافقة على التحويل')
-            ->success()
-            ->send();
-
-    } catch (\Throwable $e) {
-
-        \Filament\Notifications\Notification::make()
-            ->title('حصل خطأ')
-            ->body($e->getMessage())
+            ->title('تم رفض طلب التحويل')
             ->danger()
             ->send();
     }
-}
-
-public function rejectTransfer($id)
-{
-    $notification = \App\Models\Notification::find($id);
-
-    if (!$notification) return;
-
-    $data = json_decode($notification->data, true);
-
-    if (!isset($data['request_id'])) return;
-
-    $request = \App\Models\InstallmentRequest::find($data['request_id']);
-
-    if ($request) {
-        $request->update([
-            'pending_staff_id' => null,
-            'transfer_requested_by' => null,
-            'transfer_requested_at' => null,
-        ]);
-    }
-
-    $notification->update([
-        'is_read' => true,
-    ]);
-
-    $this->loadNotifications();
-
-    \Filament\Notifications\Notification::make()
-        ->title('تم رفض طلب التحويل')
-        ->danger()
-        ->send();
-}
 }

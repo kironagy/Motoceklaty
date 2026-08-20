@@ -62,7 +62,9 @@ PROMPT;
 
     private function formatConversation(array $conversationContext): string
     {
-        $messages = $conversationContext['messages'] ?? [];
+        $messages = $conversationContext['messages']
+            ?? $conversationContext['recent_messages']
+            ?? [];
 
         if (! is_array($messages) || empty($messages)) {
             return 'لا يوجد سياق محادثة سابق.';
@@ -71,7 +73,7 @@ PROMPT;
         $lines = [];
 
         foreach (array_slice($messages, -20) as $row) {
-            $sender = $row['sender'] ?? $row['role'] ?? null;
+            $sender = $row['sender'] ?? $row['role'] ?? $row['direction'] ?? null;
             $body = trim((string) ($row['body'] ?? $row['message'] ?? $row['text'] ?? ''));
 
             if ($body === '') {

@@ -16,4 +16,21 @@ class EditStaff extends EditRecord
             Actions\DeleteAction::make(),
         ];
     }
+    
+    protected function mutateFormDataBeforeSave(array $data): array
+{
+    $user = auth()->user();
+
+    if (! $user?->is_super_admin || $this->record->id === $user?->id) {
+        unset(
+            $data['is_admin'],
+            $data['is_super_admin'],
+            $data['is_bot'],
+            $data['is_company_employee'],
+            $data['installmentSystems'],
+        );
+    }
+
+    return $data;
+}
 }

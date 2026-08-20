@@ -6,7 +6,7 @@ use App\Filament\Resources\DeliveryResource\Pages;
 use App\Models\InstallmentRequest;
 use App\Models\InstallmentSystem;
 use Carbon\Carbon;
-
+use App\Services\PushNotificationService;
 use App\Models\Machine;
 use App\Models\Brand;
 use App\Models\Staff;
@@ -91,12 +91,41 @@ public static function getEloquentQuery(): Builder
     $query = parent::getEloquentQuery();
     $user = Auth::user();
 
-    // ✅ الأدمن أو السوبر أدمن يشوفوا كل الطلبات
-    if ($user->is_admin || $user->is_super_admin) {
+    if (! $user) {
+        return $query->whereRaw('1 = 0');
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | موظف شركة - أعلى أولوية حتى لو Admin / Super Admin
+    |--------------------------------------------------------------------------
+    */
+    if ($user->is_company_employee ?? false) {
+
+        $companyNames = $user->installmentSystems()
+            ->pluck('installment_systems.name')
+            ->toArray();
+
+        // موظف شركة بدون شركات محددة = ممنوع يشوف طلبات
+        if (empty($companyNames)) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->whereIn(
+            'installment_type',
+            $companyNames
+        );
+    }
+
+    // الأدمن والسوبر أدمن العادي
+    if (
+        ($user->is_admin ?? false) ||
+        ($user->is_super_admin ?? false)
+    ) {
         return $query;
     }
 
-    // 👤 الموظف يشوف طلباته بس
+    // الموظف العادي
     return $query->where('staff_id', $user->id);
 }
     // ✅ تحميل بيانات النظام تلقائيًا عند التعديل
@@ -163,13 +192,55 @@ protected static function normalizeApplicantName(?string $value): ?string
 
                         // 🟢 نوع النظام
                         Forms\Components\Select::make('installment_type')
-                            ->label('نوع النظام')
-                            ->options(InstallmentSystem::pluck('name', 'name'))
-                            ->searchable()
-                            ->reactive()
-                            ->afterStateUpdated(fn($state, callable $set) => self::loadSystemData($state, $set))
-                            ->afterStateHydrated(fn($state, callable $set) => self::loadSystemData($state, $set))
-                            ->required(),
+    ->label('نوع النظام')
+    ->options(function () {
+        $user = Auth::user();
+
+        if (
+            $user &&
+            ($user->is_company_employee ?? false) &&
+            $user->installment_system_id
+        ) {
+            return InstallmentSystem::query()
+                ->whereKey($user->installment_system_id)
+                ->pluck('name', 'name')
+                ->toArray();
+        }
+
+        return InstallmentSystem::query()
+            ->pluck('name', 'name')
+            ->toArray();
+    })
+    ->default(function () {
+        $user = Auth::user();
+
+        if (
+            $user &&
+            ($user->is_company_employee ?? false) &&
+            $user->installment_system_id
+        ) {
+            return InstallmentSystem::whereKey(
+                $user->installment_system_id
+            )->value('name');
+        }
+
+        return null;
+    })
+    ->disabled(fn () =>
+        (bool) (Auth::user()?->is_company_employee ?? false)
+    )
+    ->dehydrated(true)
+    ->searchable()
+    ->reactive()
+    ->afterStateUpdated(
+        fn ($state, callable $set) =>
+            self::loadSystemData($state, $set)
+    )
+    ->afterStateHydrated(
+        fn ($state, callable $set) =>
+            self::loadSystemData($state, $set)
+    )
+    ->required(),
 
                         // 🟢 المصاريف الإدارية
                         Forms\Components\TextInput::make('administrative_fees')
@@ -321,6 +392,8 @@ Forms\Components\Section::make('عرض السعر')
         'امان (بدون مصاريف ادارية)',
         'امان زيرو مصاريف',
         'امان بدون مصاريف',
+        'امان - الجيزة',
+        'امان - القاهرة'
     ]))
     ->columns(1),
 
@@ -960,18 +1033,48 @@ Tables\Columns\TextColumn::make('status')
 
             // ✅ الفلاتر
           ->filters([
-    Tables\Filters\SelectFilter::make('installment_type')
-        ->label('شركة التقسيط')
-        ->options(
-            InstallmentSystem::pluck('name', 'name')->toArray()
-        ),
+Tables\Filters\SelectFilter::make('installment_type')
+    ->label('شركة التقسيط')
+    ->options(function () {
+
+        $user = Auth::user();
+
+        if (
+            $user &&
+            ($user->is_company_employee ?? false)
+        ) {
+            return $user->installmentSystems()
+                ->pluck(
+                    'installment_systems.name',
+                    'installment_systems.name'
+                )
+                ->toArray();
+        }
+
+        return InstallmentSystem::query()
+            ->pluck('name', 'name')
+            ->toArray();
+    }),
 
     Tables\Filters\SelectFilter::make('staff_id')
         ->label('اسم الموظف')
-        ->options(
-            \App\Models\Staff::pluck('name', 'id')->toArray()
-        )
-        ->searchable(),
+        ->options(fn () => [
+            '__without_staff__' => 'بدون اسم',
+        ] + Staff::query()->pluck('name', 'id')->toArray())
+        ->searchable()
+        ->query(function (Builder $query, array $data): Builder {
+            $staffId = $data['value'] ?? null;
+
+            if (blank($staffId)) {
+                return $query;
+            }
+
+            if ($staffId === '__without_staff__') {
+                return $query->whereNull('staff_id');
+            }
+
+            return $query->where('staff_id', $staffId);
+        }),
 
     Tables\Filters\SelectFilter::make('status')
         ->label('حالة الطلب')

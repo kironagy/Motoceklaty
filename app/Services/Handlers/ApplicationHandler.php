@@ -48,7 +48,10 @@ class ApplicationHandler
             ],
         ]);
 
-        $application = array_merge($application, $analysis['application_data'] ?? []);
+        $application = $this->mergeApplicationData(
+            $application,
+            $analysis['application_data'] ?? []
+        );
 
         $missing = $this->missingFields($application);
 
@@ -66,6 +69,16 @@ class ApplicationHandler
 
     private function currentMachine(WhatsappConversation $conversation): ?Machine
     {
+        if (! empty($conversation->last_machine_id)) {
+            $machine = Machine::query()
+                ->with('brand')
+                ->find((int) $conversation->last_machine_id);
+
+            if ($machine) {
+                return $machine;
+            }
+        }
+
         $ids = $conversation->last_machine_ids ?? [];
 
         if (is_string($ids)) {
@@ -81,6 +94,27 @@ class ApplicationHandler
         }
 
         return Machine::query()->with('brand')->find($ids[0]);
+    }
+
+    private function mergeApplicationData(array $current, array $extracted): array
+    {
+        foreach ($extracted as $key => $value) {
+            if ($value === null) {
+                continue;
+            }
+
+            if (is_string($value)) {
+                $value = trim($value);
+
+                if ($value === '') {
+                    continue;
+                }
+            }
+
+            $current[$key] = $value;
+        }
+
+        return $current;
     }
 
     private function missingFields(array $data): array
@@ -166,3 +200,4 @@ class ApplicationHandler
             : $name;
     }
 }
+

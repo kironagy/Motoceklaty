@@ -8,4 +8,7 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::command('gemini:reset-usage')->dailyAt('00:00');
+Schedule::command('gemini:reset-usage')
+    ->dailyAt('00:05')
+    ->timezone(config('gemini.rate_limits.daily_reset_timezone', 'America/Los_Angeles'));
+

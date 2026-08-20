@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use App\Services\Whatsapp\Handlers\ApplicationHandler;
+use App\Services\Handlers\MediaOcrHandler;
 class WhatsappIntentRouter
 {
 public function handle(
@@ -22,7 +23,11 @@ public function handle(
         $message = trim($message);
 
         if (count($mediaItems)) {
-            return $this->textReply($conversation, 'تمام يا فندم، استلمت الملفات.');
+            return app(MediaOcrHandler::class)->handle(
+                conversation: $conversation,
+                mediaItems: $mediaItems,
+                message: $message
+            );
         }
 
         if ($message === '' || $message === '[media]') {
@@ -31,16 +36,48 @@ public function handle(
 
         $plan = app(AiIntentClassifier::class)->classify($conversation, $message);
         $intent = $plan['intent'] ?? 'unknown';
-if (
-    in_array($intent, ['general', 'unknown'], true)
-    && $this->lastMachinesFromConversation($conversation)->isNotEmpty()
-    && str_contains($this->normalizeText($message), 'اقدم')
-) {
-    $intent = 'application';
-    $plan['intent'] = 'application';
-    $plan['target'] = 'single_previous_machine';
-    $plan['uses_last_machines'] = true;
-}
+
+        $lastMachines = $this->lastMachinesFromConversation($conversation);
+        $normalizedMessage = $this->normalizeText($message);
+        $applicationIsPending = ($conversation->pending_question ?? null) === 'application_missing_data';
+
+        if (
+            $applicationIsPending
+            || (
+                in_array($intent, ['general', 'unknown'], true)
+                && $this->isApplicationIntent($normalizedMessage, $conversation)
+            )
+        ) {
+            $intent = 'application';
+            $plan['intent'] = 'application';
+            $plan['target'] = 'single_previous_machine';
+            $plan['uses_last_machines'] = true;
+            $plan['references_previous'] = true;
+            $plan['needs_clarification'] = false;
+            $plan['clarification_question'] = null;
+        } elseif (
+            in_array($intent, ['general', 'unknown'], true)
+            && $lastMachines->isNotEmpty()
+            && $this->isPureFollowUp($message)
+        ) {
+            $intent = $this->detectIntent($message);
+            $plan['intent'] = $intent;
+            $plan['target'] = $lastMachines->count() === 1
+                ? 'single_previous_machine'
+                : 'previous_selection';
+            $plan['uses_last_machines'] = true;
+            $plan['references_previous'] = true;
+            $plan['references_all_previous'] = $lastMachines->count() > 1;
+            $plan['needs_clarification'] = false;
+            $plan['clarification_question'] = null;
+        } elseif (
+            in_array($intent, ['general', 'unknown'], true)
+            && $this->isInstallmentSystemIntent($normalizedMessage)
+        ) {
+            $intent = 'installment_system';
+            $plan['intent'] = $intent;
+        }
+
         if (($plan['needs_clarification'] ?? false) === true) {
             $reply = $plan['clarification_question']
                 ?: 'تمام يا فندم، تقصد أنهي موديل بالظبط؟';
@@ -49,6 +86,11 @@ if (
         }
 
         $machines = $this->resolveMachinesFromPlan($conversation, $message, $plan);
+
+        if (in_array($intent, ['general', 'unknown'], true) && $machines->isNotEmpty()) {
+            $intent = $this->detectIntent($message);
+            $plan['intent'] = $intent;
+        }
 
         $searchMessage = $plan['machine_query'] ?: $message;
 
@@ -213,6 +255,7 @@ private function handleAiFallback(WhatsappConversation $conversation, string $me
         'conversation_id' => $conversation->id,
         'from' => $conversation->from ?? null,
         'is_first_message' => count($recentMessages) <= 1,
+        'messages' => $recentMessages,
         'recent_messages' => $recentMessages,
         'last_machines' => $lastMachines,
         'last_machine_ids' => $conversation->last_machine_ids ?? [],
@@ -730,9 +773,26 @@ private function rememberMachines(WhatsappConversation $conversation, Collection
         return;
     }
 
+    $ids = $machines
+        ->pluck('id')
+        ->map(fn ($id) => (int) $id)
+        ->filter(fn (int $id) => $id > 0)
+        ->unique()
+        ->values()
+        ->all();
+
+    if (empty($ids)) {
+        return;
+    }
+
+    $currentActiveId = (int) ($conversation->last_machine_id ?? 0);
+    $activeId = count($ids) === 1
+        ? $ids[0]
+        : (in_array($currentActiveId, $ids, true) ? $currentActiveId : null);
+
     $data = [
-        'last_machine_id' => $machines->first()?->id,
-        'last_machine_ids' => $machines->pluck('id')->values()->all(),
+        'last_machine_id' => $activeId,
+        'last_machine_ids' => $ids,
     ];
 
     $allowed = [];
@@ -750,17 +810,32 @@ private function rememberMachines(WhatsappConversation $conversation, Collection
 
 private function lastMachinesFromConversation(WhatsappConversation $conversation): Collection
 {
-    if (! Schema::hasColumn('whatsapp_conversations', 'last_machine_ids')) {
-        return collect();
-    }
-
-    $ids = $conversation->last_machine_ids ?? [];
+    $ids = Schema::hasColumn('whatsapp_conversations', 'last_machine_ids')
+        ? ($conversation->last_machine_ids ?? [])
+        : [];
 
     if (is_string($ids)) {
         $ids = json_decode($ids, true) ?: [];
     }
 
-    if (! is_array($ids) || ! count($ids)) {
+    if (! is_array($ids)) {
+        $ids = [];
+    }
+
+    if (
+        empty($ids)
+        && Schema::hasColumn('whatsapp_conversations', 'last_machine_id')
+        && ! empty($conversation->last_machine_id)
+    ) {
+        $ids = [(int) $conversation->last_machine_id];
+    }
+
+    $ids = array_values(array_unique(array_filter(
+        array_map('intval', $ids),
+        fn (int $id) => $id > 0
+    )));
+
+    if (empty($ids)) {
         return collect();
     }
 
@@ -770,6 +845,24 @@ private function lastMachinesFromConversation(WhatsappConversation $conversation
         ->get()
         ->sortBy(fn ($machine) => array_search($machine->id, $ids, true))
         ->values();
+}
+
+private function activeMachineFromConversation(WhatsappConversation $conversation): ?Machine
+{
+    if (
+        Schema::hasColumn('whatsapp_conversations', 'last_machine_id')
+        && ! empty($conversation->last_machine_id)
+    ) {
+        $machine = Machine::query()
+            ->with('brand')
+            ->find((int) $conversation->last_machine_id);
+
+        if ($machine) {
+            return $machine;
+        }
+    }
+
+    return $this->lastMachinesFromConversation($conversation)->first();
 }
 
 private function resolveMachinesFromPlan(
@@ -784,7 +877,9 @@ private function resolveMachinesFromPlan(
     }
 
     if ($target === 'single_previous_machine') {
-        return $this->lastMachinesFromConversation($conversation)->take(1)->values();
+        $machine = $this->activeMachineFromConversation($conversation);
+
+        return $machine ? collect([$machine]) : collect();
     }
 
     if ($target === 'selected_index') {
@@ -1321,11 +1416,43 @@ private function updateConversationState(
     ?string $pendingQuestion = null,
     array $payload = []
 ): void {
+    $currentPayload = $conversation->context_payload ?? [];
+
+    if (is_string($currentPayload)) {
+        $currentPayload = json_decode($currentPayload, true) ?: [];
+    }
+
+    if (! is_array($currentPayload)) {
+        $currentPayload = [];
+    }
+
+    $mergedPayload = $this->mergeContextPayload($currentPayload, $payload);
+
     $conversation->forceFill([
         'last_topic' => $topic,
         'pending_question' => $pendingQuestion,
-        'context_payload' => $payload ?: null,
+        'context_payload' => $mergedPayload ?: null,
     ])->save();
+}
+
+private function mergeContextPayload(array $current, array $updates): array
+{
+    foreach ($updates as $key => $value) {
+        if (
+            array_key_exists($key, $current)
+            && is_array($current[$key])
+            && is_array($value)
+            && ! array_is_list($current[$key])
+            && ! array_is_list($value)
+        ) {
+            $current[$key] = $this->mergeContextPayload($current[$key], $value);
+            continue;
+        }
+
+        $current[$key] = $value;
+    }
+
+    return $current;
 }
 
 
@@ -1335,7 +1462,7 @@ private function updateConversationState(
 
 private function isApplicationIntent(string $normalizedMessage, WhatsappConversation $conversation): bool
 {
-    if (($conversation->last_topic ?? null) === 'application') {
+    if (($conversation->pending_question ?? null) === 'application_missing_data') {
         return true;
     }
 
@@ -1349,3 +1476,4 @@ private function isApplicationIntent(string $normalizedMessage, WhatsappConversa
         || str_contains($normalizedMessage, 'عاوز اقدم');
 }
 }
+

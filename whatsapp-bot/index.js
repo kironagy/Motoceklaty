@@ -26,6 +26,8 @@ const chatQueues = {};
 
 const PORT = process.env.PORT || 3010;
 const LARAVEL_TIMEOUT = Number(process.env.LARAVEL_TIMEOUT || 180000);
+const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
+const AUTO_START_BOT_ID = process.env.AUTO_START_BOT_ID || '';
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -375,7 +377,7 @@ async function startSession(botId) {
     const sock = makeWASocket({
         version,
         auth: state,
-        logger: pino({ level: 'silent' }),
+        logger: pino({ level: LOG_LEVEL }),
         printQRInTerminal: false,
         browser: [`Motocyklaty ${botId}`, 'Chrome', '1.0.0'],
         syncFullHistory: false,
@@ -407,6 +409,13 @@ async function startSession(botId) {
 
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+            console.error('WhatsApp connection closed', {
+                botId,
+                statusCode,
+                shouldReconnect,
+                error: lastDisconnect?.error?.message || lastDisconnect?.error || null,
+            });
 
             delete sessions[botId];
 
@@ -604,4 +613,10 @@ app.post('/send-media-items', checkToken, async (req, res) => {
 });
 app.listen(PORT, () => {
     console.log(`🚀 WhatsApp Worker Running ${PORT}`);
+
+    if (AUTO_START_BOT_ID) {
+        startSession(AUTO_START_BOT_ID).catch(error => {
+            console.error('AUTO START WHATSAPP SESSION ERROR:', error?.stack || error);
+        });
+    }
 });

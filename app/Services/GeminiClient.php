@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\GeminiApiKeyModel;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -14,21 +13,28 @@ class GeminiClient
 
         $failed429 = [];
         $triedIds = [];
+        $transientFailures = 0;
+        $maxTransientFailovers = max(
+            0,
+            (int) ($options['maxTransientFailovers']
+                ?? config('gemini.rate_limits.max_transient_failovers', 2))
+        );
 
         $modelCode = $preferredModelCode ?: 'gemini-3.1-flash-lite';
         $estimatedTokens = mb_strlen($prompt);
 
         while (true) {
-            $modelRow = $this->getNextAvailableModel(
+            $modelRow = $manager->reserveAvailableModel(
                 preferredModelCode: $modelCode,
                 estimatedTokens: $estimatedTokens,
-                triedIds: $triedIds,
-                embedding: false
+                embedding: false,
+                excludedIds: $triedIds,
+                provider: 'gemini'
             );
 
             if (! $modelRow) {
                 if (! empty($failed429)) {
-                    app(GeminiAlertService::class)->sendAllKeysExhaustedAlert($failed429);
+                    app(GeminiAlertService::class)->startAllKeysExhaustedAlert($failed429);
                 }
 
                 return [
@@ -106,7 +112,7 @@ class GeminiClient
                 $body = $response->body();
                 $status = $response->status();
 
-                if ($status === 400 && str_contains($body, 'API_KEY_INVALID')) {
+                if ($this->isInvalidApiKeyError($status, $body)) {
                     $modelRow->apiKey?->update([
                         'is_active' => false,
                         'last_error' => mb_substr($body, 0, 2000),
@@ -126,14 +132,40 @@ class GeminiClient
                     continue;
                 }
 
+                if ($status === 403) {
+                    $modelRow->update([
+                        'is_active' => false,
+                        'last_error' => mb_substr($body, 0, 2000),
+                    ]);
+
+                    Log::warning('Gemini model disabled for this key because permission was denied', [
+                        'key_id' => $modelRow->gemini_api_key_id,
+                        'model_id' => $modelRow->id,
+                        'model' => $modelRow->model_code,
+                    ]);
+
+                    continue;
+                }
+
                 if ($status === 429 || $this->isQuotaError($body)) {
-                    $manager->markRateLimited($modelRow, $body);
+                    $rateLimit = app(GeminiRateLimitParser::class)->analyze(
+                        $body,
+                        $response->header('Retry-After')
+                    );
+
+                    $manager->markRateLimited(
+                        model: $modelRow,
+                        error: $body,
+                        dailyLimit: $rateLimit['daily_limit'],
+                        cooldownSeconds: $rateLimit['cooldown_seconds']
+                    );
 
                     $failed429[] = [
                         'key_id' => $modelRow->gemini_api_key_id,
                         'model_id' => $modelRow->id,
                         'model' => $modelRow->model_code,
-                        'error' => $body,
+                        'daily_limit' => $rateLimit['daily_limit'],
+                        'cooldown_seconds' => $rateLimit['cooldown_seconds'],
                     ];
 
                     continue;
@@ -159,6 +191,7 @@ class GeminiClient
 
                 if (in_array($status, [500, 502, 503, 504], true)) {
                     $manager->markError($modelRow, $body, 120);
+                    $transientFailures++;
 
                     Log::warning('Gemini temporary server error, trying next key for same model', [
                         'key_id' => $modelRow->gemini_api_key_id,
@@ -167,7 +200,17 @@ class GeminiClient
                         'body' => $body,
                     ]);
 
-                    continue;
+                    if ($transientFailures <= $maxTransientFailovers) {
+                        continue;
+                    }
+
+                    return [
+                        'ok' => false,
+                        'error' => 'Gemini is temporarily unavailable.',
+                        'status' => $status,
+                        'key_id' => $modelRow->gemini_api_key_id,
+                        'model' => $modelRow->model_code,
+                    ];
                 }
 
                 $manager->markError($modelRow, $body, 120);
@@ -188,6 +231,7 @@ class GeminiClient
                 ];
             } catch (\Throwable $e) {
                 $manager->markError($modelRow, $e->getMessage(), 120);
+                $transientFailures++;
 
                 Log::error('Gemini request exception', [
                     'key_id' => $modelRow->gemini_api_key_id,
@@ -195,46 +239,18 @@ class GeminiClient
                     'error' => $e->getMessage(),
                 ]);
 
+                if ($transientFailures <= $maxTransientFailovers) {
+                    continue;
+                }
+
                 return [
                     'ok' => false,
-                    'error' => $e->getMessage(),
+                    'error' => 'Gemini connection failed after retrying available keys.',
                     'key_id' => $modelRow->gemini_api_key_id,
                     'model' => $modelRow->model_code,
                 ];
             }
         }
-    }
-
-    private function getNextAvailableModel(
-        string $preferredModelCode,
-        int $estimatedTokens,
-        array $triedIds,
-        ?bool $embedding = null
-    ): ?GeminiApiKeyModel {
-        app(GeminiKeyManager::class)->refreshWindows();
-
-        return GeminiApiKeyModel::query()
-            ->with('apiKey')
-            ->whereNotIn('id', $triedIds)
-            ->where('is_active', true)
-            ->where('model_code', $preferredModelCode)
-            ->whereColumn('requests_today', '<', 'rpd_limit')
-            ->whereColumn('requests_this_minute', '<', 'rpm_limit')
-            ->whereRaw('(tokens_this_second + ?) < tps_limit', [$estimatedTokens])
-            ->where(function ($q) {
-                $q->whereNull('cooldown_until')
-                    ->orWhere('cooldown_until', '<=', now());
-            })
-            ->whereHas('apiKey', function ($q) {
-                $q->where('is_active', true);
-            })
-            ->when(! is_null($embedding), function ($q) use ($embedding) {
-                $q->where('is_embedding', $embedding);
-            })
-            ->orderBy('priority')
-            ->orderBy('requests_today')
-            ->orderBy('requests_this_minute')
-            ->first();
     }
 
     private function isQuotaError(string $body): bool
@@ -246,4 +262,14 @@ class GeminiClient
             || str_contains($body, 'rate limit')
             || str_contains($body, 'too many requests');
     }
+
+    private function isInvalidApiKeyError(int $status, string $body): bool
+    {
+        $body = mb_strtolower($body);
+
+        return $status === 401
+            || str_contains($body, 'api_key_invalid')
+            || str_contains($body, 'api key not valid');
+    }
 }
+

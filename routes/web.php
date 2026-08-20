@@ -9,8 +9,14 @@ use App\Http\Controllers\InstallmentRequestController;
 use App\Http\Controllers\MachineController;
 use Google\Cloud\Vision\V1\Client\ImageAnnotatorClient as ClientImageAnnotatorClient;
 use Illuminate\Support\Facades\Route;
+//notifecation
+use App\Http\Controllers\PushSubscriptionController;
 
+Route::post('/push-subscriptions', [PushSubscriptionController::class, 'store'])
+    ->name('push-subscriptions.store');
 
+Route::delete('/push-subscriptions', [PushSubscriptionController::class, 'destroy'])
+    ->name('push-subscriptions.destroy');
 // web.php
 Route::get('/', [HomeController::class, 'index'])->name('home');
 

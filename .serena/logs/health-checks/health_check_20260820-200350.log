@@ -1,0 +1,135 @@
+INFO  2026-08-20 20:03:50,708 serena.cli:health_check:949 - Starting health check for project: /Users/kiro/Herd/copiacode/project
+INFO  2026-08-20 20:03:50,708 serena.cli:health_check:953 - Creating SerenaAgent with disabled dashboard...
+INFO  2026-08-20 20:03:50,709 serena.util.file_system:_load_gitignore_files:165 - Processing .gitignore file: /Users/kiro/Herd/copiacode/project/database/.gitignore
+INFO  2026-08-20 20:03:50,711 serena.util.file_system:_load_gitignore_files:165 - Processing .gitignore file: /Users/kiro/Herd/copiacode/project/.serena/.gitignore
+INFO  2026-08-20 20:03:50,712 serena.util.file_system:_load_gitignore_files:165 - Processing .gitignore file: /Users/kiro/Herd/copiacode/project/.venv/.gitignore
+INFO  2026-08-20 20:03:50,713 serena.util.file_system:_load_gitignore_files:165 - Processing .gitignore file: /Users/kiro/Herd/copiacode/project/bootstrap/cache/.gitignore
+INFO  2026-08-20 20:03:50,780 serena.agent:__init__:631 - Will record tool usage statistics with token count estimator: CHAR_COUNT.
+INFO  2026-08-20 20:03:50,797 serena.agent:__init__:635 - Starting Serena server (version=1.7.0-4ba2c2b9-dirty, process id=37543, parent process id=82980; language backend=LSP); Python version=3.13.5, platform=macOS-26.5.1-arm64-arm-64bit-Mach-O
+INFO  2026-08-20 20:03:50,798 serena.agent:__init__:639 - Configuration file: /Users/kiro/.serena/serena_config.yml
+INFO  2026-08-20 20:03:50,798 serena.agent:__init__:640 - Available projects: B-connect, Herd, Medical_Plus_v3 3, kiro, project
+INFO  2026-08-20 20:03:50,798 serena.agent:__init__:641 - Loaded tools (52): create_text_file, replace_content, replace_in_files, delete_lines, replace_lines, insert_at_line, replace_symbol_body, insert_after_symbol, insert_before_symbol, read_file, list_dir, find_file, search_for_pattern, restart_language_server, get_symbols_overview, find_symbol, find_referencing_symbols, find_implementations, find_declaration, get_diagnostics_for_file, get_diagnostics_for_symbol, rename_symbol, safe_delete_symbol, write_memory, read_memory, list_memories, delete_memory, rename_memory, edit_memory, execute_shell_command, open_dashboard, activate_project, remove_project, get_current_config, onboarding, initial_instructions, serena_info, jet_brains_find_symbol, jet_brains_move, jet_brains_safe_delete, jet_brains_inline_symbol, jet_brains_find_referencing_symbols, jet_brains_get_symbols_overview, jet_brains_type_hierarchy, jet_brains_find_declaration, jet_brains_find_implementations, jet_brains_rename, jet_brains_debug, jet_brains_run_inspections, jet_brains_list_inspections, list_queryable_projects, query_project
+INFO  2026-08-20 20:03:50,798 serena.config.serena_config:determine_language_backend:1452 - Using language backend from global configuration: LSP
+INFO  2026-08-20 20:03:50,807 serena.config.serena_config:start:329 - Loading project instance for RegisteredProject[project_root=/Users/kiro/Herd/copiacode/project, project_config=ProjectConfig[project_name=project]] starting ...
+INFO  2026-08-20 20:03:50,807 serena.project:__init__:46 - Serena project data folder: /Users/kiro/Herd/copiacode/project/.serena
+INFO  2026-08-20 20:03:50,807 serena.project:start:329 - Gathering ignore spec for project project starting ...
+INFO  2026-08-20 20:03:50,808 serena.config.serena_config:stop:336 - Loading project instance for RegisteredProject[project_root=/Users/kiro/Herd/copiacode/project, project_config=ProjectConfig[project_name=project]] completed in 0.000 seconds
+INFO  2026-08-20 20:03:50,808 serena.util.file_system:start:329 - Loading of .gitignore files starting ...
+INFO  2026-08-20 20:03:50,808 serena.agent:activate_project_from_path_or_name:1351 - Found registered project 'project' at path /Users/kiro/Herd/copiacode/project
+INFO  2026-08-20 20:03:50,808 serena.agent:_activate_project:1219 - Activating project at /Users/kiro/Herd/copiacode/project
+INFO  2026-08-20 20:03:50,808 serena.task_executor:issue_task:217 - Scheduling Task-1:init_project_services
+INFO  2026-08-20 20:03:50,808 serena.util.file_system:_load_gitignore_files:165 - Processing .gitignore file: /Users/kiro/Herd/copiacode/project/.gitignore
+INFO  2026-08-20 20:03:50,808 serena.agent:_update_active_modes:1127 - Active modes (2): editing, interactive
+INFO  2026-08-20 20:03:50,808 serena.util.file_system:_load_gitignore_files:165 - Processing .gitignore file: /Users/kiro/Herd/copiacode/project/database/.gitignore
+INFO  2026-08-20 20:03:50,833 serena.agent:_create_base_toolset:813 - Number of exposed tools: 29
+INFO  2026-08-20 20:03:50,834 serena.agent:__init__:681 - Number of exposed tools: 29. Exposed tools: ['activate_project', 'create_text_file', 'delete_memory', 'edit_memory', 'execute_shell_command', 'find_declaration', 'find_file', 'find_implementations', 'find_referencing_symbols', 'find_symbol', 'get_current_config', 'get_diagnostics_for_file', 'get_symbols_overview', 'initial_instructions', 'insert_after_symbol', 'insert_before_symbol', 'list_dir', 'list_memories', 'onboarding', 'read_file', 'read_memory', 'rename_memory', 'rename_symbol', 'replace_content', 'replace_in_files', 'replace_symbol_body', 'safe_delete_symbol', 'search_for_pattern', 'write_memory']
+INFO  2026-08-20 20:03:50,834 serena.util.file_system:_load_gitignore_files:165 - Processing .gitignore file: /Users/kiro/Herd/copiacode/project/.serena/.gitignore
+INFO  2026-08-20 20:03:50,835 serena.agent:_update_active_tools:1145 - Active tools (29): activate_project, create_text_file, delete_memory, edit_memory, execute_shell_command, find_declaration, find_file, find_implementations, find_referencing_symbols, find_symbol, get_current_config, get_diagnostics_for_file, get_symbols_overview, initial_instructions, insert_after_symbol, insert_before_symbol, list_dir, list_memories, onboarding, read_file, read_memory, rename_memory, rename_symbol, replace_content, replace_in_files, replace_symbol_body, safe_delete_symbol, search_for_pattern, write_memory
+INFO  2026-08-20 20:03:50,836 serena.util.file_system:_load_gitignore_files:165 - Processing .gitignore file: /Users/kiro/Herd/copiacode/project/.venv/.gitignore
+INFO  2026-08-20 20:03:50,837 serena.util.file_system:_load_gitignore_files:165 - Processing .gitignore file: /Users/kiro/Herd/copiacode/project/bootstrap/cache/.gitignore
+INFO  2026-08-20 20:03:50,902 serena.task_executor:_process_task_queue:139 - Starting execution of Task-1:init_project_services
+INFO  2026-08-20 20:03:50,903 serena.task_executor:start:329 - Task-1:init_project_services starting ...
+INFO  2026-08-20 20:03:50,903 serena.agent:start:329 - Language server initialization starting ...
+INFO  2026-08-20 20:03:50,903 serena.project:create_language_server_manager:517 - Creating language server manager for /Users/kiro/Herd/copiacode/project
+INFO  2026-08-20 20:03:50,903 serena.project:_ignored_patterns:203 - Waiting for ignored patterns to become available ...
+INFO  2026-08-20 20:03:51,079 serena.cli:health_check:956 - SerenaAgent created successfully
+INFO  2026-08-20 20:03:51,079 serena.cli:health_check:959 - Searching for analyzable files...
+INFO  2026-08-20 20:03:51,079 serena.project:_ignore_spec:187 - Waiting for ignore spec to become available ...
+INFO  2026-08-20 20:03:51,118 serena.util.file_system:stop:336 - Loading of .gitignore files completed in 0.411 seconds
+INFO  2026-08-20 20:03:51,118 serena.project:stop:336 - Gathering ignore spec for project project completed in 0.411 seconds
+INFO  2026-08-20 20:03:51,118 serena.project:_ignore_spec:190 - Ignore spec is now available for project; proceeding
+INFO  2026-08-20 20:03:51,693 serena.util.file_system:stop:336 - Loading of .gitignore files completed in 0.885 seconds
+INFO  2026-08-20 20:03:51,693 serena.project:stop:336 - Gathering ignore spec for project project completed in 0.886 seconds
+INFO  2026-08-20 20:03:51,693 serena.project:_ignored_patterns:206 - Ignored patterns are now available for project; proceeding
+INFO  2026-08-20 20:03:51,694 sensai.util.logging:start:329 - Language server startup (language=php) starting ...
+INFO  2026-08-20 20:03:51,694 serena.ls_manager:create_language_server:58 - Creating language server instance for /Users/kiro/Herd/copiacode/project, language=php.
+INFO  2026-08-20 20:03:51,694 sensai.util.logging:start:329 - Language server startup (language=python) starting ...
+INFO  2026-08-20 20:03:51,694 serena.ls_manager:create_language_server:58 - Creating language server instance for /Users/kiro/Herd/copiacode/project, language=python.
+INFO  2026-08-20 20:03:51,694 sensai.util.logging:start:329 - Language server startup (language=typescript) starting ...
+INFO  2026-08-20 20:03:51,694 serena.ls_manager:create_language_server:58 - Creating language server instance for /Users/kiro/Herd/copiacode/project, language=typescript.
+INFO  2026-08-20 20:03:51,715 solidlsp.ls:_load_raw_document_symbols_cache:3049 - Loading document symbols cache from /Users/kiro/Herd/copiacode/project/.serena/cache/python/raw_document_symbols.pkl
+INFO  2026-08-20 20:03:51,720 solidlsp.ls:_load_raw_document_symbols_cache:3049 - Loading document symbols cache from /Users/kiro/Herd/copiacode/project/.serena/cache/typescript/raw_document_symbols.pkl
+INFO  2026-08-20 20:03:51,736 solidlsp.ls:_load_raw_document_symbols_cache:3049 - Loading document symbols cache from /Users/kiro/Herd/copiacode/project/.serena/cache/php/raw_document_symbols.pkl
+INFO  2026-08-20 20:03:51,778 solidlsp.ls:_load_raw_document_symbols_cache:3054 - Loaded 641 entries from raw document symbols cache.
+INFO  2026-08-20 20:03:51,782 solidlsp.ls:_load_document_symbols_cache:3084 - Loading document symbols cache from /Users/kiro/Herd/copiacode/project/.serena/cache/php/document_symbols.pkl
+INFO  2026-08-20 20:03:51,880 solidlsp.ls:_load_raw_document_symbols_cache:3054 - Loaded 25 entries from raw document symbols cache.
+INFO  2026-08-20 20:03:51,881 solidlsp.ls:_load_document_symbols_cache:3084 - Loading document symbols cache from /Users/kiro/Herd/copiacode/project/.serena/cache/typescript/document_symbols.pkl
+INFO  2026-08-20 20:03:51,985 solidlsp.ls:_load_document_symbols_cache:3089 - Loaded 1125 entries from document symbols cache.
+INFO  2026-08-20 20:03:52,149 solidlsp.language_servers.intelephense:__init__:112 - Ignoring the following directories for PHP projects: cache, node_modules, vendor
+INFO  2026-08-20 20:03:52,150 solidlsp.ls:start:3180 - Starting language server php for /Users/kiro/Herd/copiacode/project
+INFO  2026-08-20 20:03:52,150 solidlsp.language_servers.intelephense:_start_server:181 - Starting Intelephense server process
+INFO  2026-08-20 20:03:52,150 solidlsp.ls_process:_start:519 - Starting language server process via command: ['/Users/kiro/.serena/language_servers/static/Intelephense/php-lsp/node_modules/.bin/intelephense', '--stdio']
+INFO  2026-08-20 20:03:52,156 solidlsp.initialize_params:_apply_updates:61 - Workspace folders: ['/Users/kiro/Herd/copiacode/project']
+INFO  2026-08-20 20:03:52,158 solidlsp.language_servers.intelephense:_start_server:185 - Sending initialize request from LSP client to LSP server and awaiting response
+INFO  2026-08-20 20:03:52,444 solidlsp.ls:_load_document_symbols_cache:3089 - Loaded 27 entries from document symbols cache.
+INFO  2026-08-20 20:03:52,470 solidlsp.ls:start:3180 - Starting language server typescript for /Users/kiro/Herd/copiacode/project
+INFO  2026-08-20 20:03:52,470 solidlsp.language_servers.typescript_language_server:_start_server:447 - Starting TypeScript server process
+INFO  2026-08-20 20:03:52,473 solidlsp.ls_process:_start:519 - Starting language server process via command: ['/Users/kiro/.serena/language_servers/static/TypeScriptLanguageServer/ts-lsp/node_modules/.bin/typescript-language-server', '--stdio']
+INFO  2026-08-20 20:03:52,480 solidlsp.initialize_params:_apply_updates:61 - Workspace folders: ['/Users/kiro/Herd/copiacode/project']
+INFO  2026-08-20 20:03:52,481 solidlsp.language_servers.typescript_language_server:_start_server:451 - Sending initialize request from LSP client to LSP server and awaiting response
+INFO  2026-08-20 20:03:52,510 solidlsp.language_servers.intelephense:window_log_message:171 - LSP: window/logMessage: {'type': 3, 'message': 'Initialising intelephense 1.14.4'}
+INFO  2026-08-20 20:03:52,511 solidlsp.language_servers.intelephense:window_log_message:171 - LSP: window/logMessage: {'type': 3, 'message': 'Reading state from /var/folders/tp/xh4l30rj0bj869fwbymyqvr80000gn/T/intelephense/1617d734.'}
+INFO  2026-08-20 20:03:52,887 solidlsp.language_servers.typescript_language_server:window_log_message:384 - LSP: window/logMessage: {'type': 3, 'message': 'Using Typescript version (bundled) 5.9.3 from path "/Users/kiro/.serena/language_servers/static/TypeScriptLanguageServer/ts-lsp/node_modules/typescript/lib/tsserver.js"'}
+INFO  2026-08-20 20:03:52,889 solidlsp.language_servers.typescript_language_server:handle_typescript_version:392 - TypeScript server version notification received: {'version': '5.9.3', 'source': 'bundled'}
+INFO  2026-08-20 20:03:52,890 solidlsp.language_servers.typescript_language_server:_start_server:467 - TypeScript server is ready
+INFO  2026-08-20 20:03:52,890 solidlsp.language_servers.typescript_language_server:_start_server:476 - Waiting for TypeScript project indexing to complete (if async)...
+INFO  2026-08-20 20:03:52,890 solidlsp.language_servers.typescript_language_server:_start_server:478 - TypeScript project indexing complete
+INFO  2026-08-20 20:03:52,891 sensai.util.logging:stop:336 - Language server startup (language=typescript) completed in 1.197 seconds
+INFO  2026-08-20 20:03:52,895 solidlsp.language_servers.intelephense:window_log_message:171 - LSP: window/logMessage: {'type': 3, 'message': 'Initialised in 385 ms'}
+INFO  2026-08-20 20:03:52,895 solidlsp.language_servers.intelephense:_start_server:187 - After sent initialize params
+INFO  2026-08-20 20:03:52,895 solidlsp.language_servers.intelephense:_start_server:206 - Sending workspace/didChangeConfiguration with file associations: ['*.php', '*.phtml']
+INFO  2026-08-20 20:03:52,896 sensai.util.logging:stop:336 - Language server startup (language=php) completed in 1.202 seconds
+INFO  2026-08-20 20:03:52,905 solidlsp.language_servers.intelephense:window_log_message:171 - LSP: window/logMessage: {'type': 3, 'message': 'Searching file:///Users/kiro/.serena/language_servers/static/Intelephense/php-lsp/node_modules/intelephense/lib/stub for files to index.'}
+INFO  2026-08-20 20:03:52,910 solidlsp.language_servers.intelephense:window_log_message:171 - LSP: window/logMessage: {'type': 3, 'message': 'Searching file:///Users/kiro/Herd/copiacode/project for files to index.'}
+INFO  2026-08-20 20:03:53,423 solidlsp.language_servers.intelephense:window_log_message:171 - LSP: window/logMessage: {'type': 2, 'message': 'file:///Users/kiro/Herd/copiacode/project/vendor/composer/autoload_classmap.php is over the maximum file size of 1000000 bytes.'}
+INFO  2026-08-20 20:03:53,424 solidlsp.language_servers.intelephense:window_log_message:171 - LSP: window/logMessage: {'type': 2, 'message': 'file:///Users/kiro/Herd/copiacode/project/vendor/composer/autoload_static.php is over the maximum file size of 1000000 bytes.'}
+INFO  2026-08-20 20:03:53,424 solidlsp.language_servers.intelephense:window_log_message:171 - LSP: window/logMessage: {'type': 2, 'message': 'file:///Users/kiro/Herd/copiacode/project/vendor/fakerphp/faker/src/Faker/Provider/nl_BE/Text.php is over the maximum file size of 1000000 bytes.'}
+INFO  2026-08-20 20:03:54,531 solidlsp.ls:_load_raw_document_symbols_cache:3054 - Loaded 9527 entries from raw document symbols cache.
+INFO  2026-08-20 20:03:54,531 solidlsp.ls:_load_document_symbols_cache:3084 - Loading document symbols cache from /Users/kiro/Herd/copiacode/project/.serena/cache/python/document_symbols.pkl
+INFO  2026-08-20 20:04:02,649 solidlsp.ls:_load_document_symbols_cache:3089 - Loaded 10810 entries from document symbols cache.
+INFO  2026-08-20 20:04:02,651 solidlsp.ls:start:3180 - Starting language server python for /Users/kiro/Herd/copiacode/project
+INFO  2026-08-20 20:04:02,651 solidlsp.language_servers.pyright_server:_start_server:216 - Starting pyright-langserver server process
+INFO  2026-08-20 20:04:02,651 solidlsp.ls_process:_start:519 - Starting language server process via command: ['/Users/kiro/.local/bin/uvx', '-p', '3.13', '--from', 'pyright==1.1.403', 'pyright-langserver', '--stdio']
+INFO  2026-08-20 20:04:02,666 solidlsp.initialize_params:_apply_updates:61 - Workspace folders: ['/Users/kiro/Herd/copiacode/project']
+INFO  2026-08-20 20:04:02,666 solidlsp.language_servers.pyright_server:_start_server:222 - Sending initialize request from LSP client to pyright server and awaiting response
+INFO  2026-08-20 20:04:02,944 serena.cli:health_check:968 - Found analyzable file: structure-images.php
+INFO  2026-08-20 20:04:02,944 serena.cli:health_check:982 - Testing GetSymbolsOverviewTool on file: structure-images.php
+INFO  2026-08-20 20:04:02,944 serena.task_executor:issue_task:217 - Scheduling Task-2:<lambda>
+INFO  2026-08-20 20:04:02,975 solidlsp.language_servers.pyright_server:window_log_message:138 - LSP: window/logMessage: Pyright language server 1.1.403 starting
+INFO  2026-08-20 20:04:02,975 solidlsp.language_servers.pyright_server:window_log_message:138 - LSP: window/logMessage: Server root directory: file:///Users/kiro/.cache/uv/archive-v0/08_gVmp-Tj-HT5c5/lib/python3.13/site-packages/pyright/dist/dist
+INFO  2026-08-20 20:04:02,977 solidlsp.language_servers.pyright_server:window_log_message:138 - LSP: window/logMessage: Starting service instance "project"
+INFO  2026-08-20 20:04:02,977 solidlsp.language_servers.pyright_server:_start_server:224 - Received initialize response from pyright server: {'capabilities': {'textDocumentSync': 2, 'definitionProvider': {'workDoneProgress': True}, 'declarationProvider': {'workDoneProgress': True}, 'typeDefinitionProvider': {'workDoneProgress': True}, 'referencesProvider': {'workDoneProgress': True}, 'documentSymbolProvider': {'workDoneProgress': True}, 'workspaceSymbolProvider': {'workDoneProgress': True}, 'hoverProvider': {'workDoneProgress': True}, 'documentHighlightProvider': {'workDoneProgress': True}, 'renameProvider': {'prepareProvider': True, 'workDoneProgress': True}, 'completionProvider': {'triggerCharacters': ['.', '[', '"', "'"], 'resolveProvider': True, 'workDoneProgress': True, 'completionItem': {'labelDetailsSupport': True}}, 'signatureHelpProvider': {'triggerCharacters': ['(', ',', ')'], 'workDoneProgress': True}, 'codeActionProvider': {'codeActionKinds': ['quickfix', 'source.organizeImports'], 'workDoneProgress': True}, 'executeCommandProvider': {'commands': [], 'workDoneProgress': True}, 'callHierarchyProvider': True, 'workspace': {'workspaceFolders': {'supported': True, 'changeNotifications': True}}}}
+INFO  2026-08-20 20:04:02,977 solidlsp.language_servers.pyright_server:_start_server:236 - Waiting up to 60.0s for Pyright to complete initial workspace analysis...
+INFO  2026-08-20 20:04:03,391 solidlsp.language_servers.pyright_server:window_log_message:138 - LSP: window/logMessage: No include entries specified; assuming /Users/kiro/Herd/copiacode/project
+INFO  2026-08-20 20:04:03,391 solidlsp.language_servers.pyright_server:window_log_message:138 - LSP: window/logMessage: Auto-excluding **/node_modules
+INFO  2026-08-20 20:04:03,391 solidlsp.language_servers.pyright_server:window_log_message:138 - LSP: window/logMessage: Auto-excluding **/__pycache__
+INFO  2026-08-20 20:04:03,391 solidlsp.language_servers.pyright_server:window_log_message:138 - LSP: window/logMessage: Auto-excluding **/.*
+INFO  2026-08-20 20:04:03,391 solidlsp.language_servers.pyright_server:window_log_message:138 - LSP: window/logMessage: Assuming Python version 3.13.5.final.0
+INFO  2026-08-20 20:04:03,391 solidlsp.language_servers.pyright_server:window_log_message:138 - LSP: window/logMessage: Found 18 source files
+INFO  2026-08-20 20:04:03,391 solidlsp.language_servers.pyright_server:window_log_message:143 - Pyright workspace scanning complete
+INFO  2026-08-20 20:04:03,392 solidlsp.language_servers.pyright_server:_start_server:238 - Pyright initial analysis complete, server ready
+INFO  2026-08-20 20:04:03,392 sensai.util.logging:stop:336 - Language server startup (language=python) completed in 11.698 seconds
+INFO  2026-08-20 20:04:03,392 sensai.util.logging:start:329 - Initialising file change notifier (polling for baseline) starting ...
+INFO  2026-08-20 20:04:04,556 sensai.util.logging:stop:336 - Initialising file change notifier (polling for baseline) completed in 1.165 seconds
+INFO  2026-08-20 20:04:04,557 serena.agent:stop:336 - Language server initialization completed in 13.654 seconds
+INFO  2026-08-20 20:04:04,557 serena.task_executor:stop:336 - Task-1:init_project_services completed in 13.654 seconds
+INFO  2026-08-20 20:04:04,557 serena.task_executor:_process_task_queue:139 - Starting execution of Task-2:<lambda>
+INFO  2026-08-20 20:04:04,557 serena.task_executor:start:329 - Task-2:<lambda> starting ...
+INFO  2026-08-20 20:04:04,558 serena.task_executor:stop:336 - Task-2:<lambda> completed in 0.001 seconds
+INFO  2026-08-20 20:04:04,558 serena.cli:health_check:984 - GetSymbolsOverviewTool returned: [{'name': '$app', 'kind': 'Variable'}, {'name': 'safeFolderName', 'kind': 'Function'}, {'name': 'collectImagesDeep', 'kind': 'Function'}, {'name': '$machine', 'kind': 'Variable'}, {'name': '$folderName', 'kind': 'Variable'}, {'name': '$targetDir', 'kind': 'Variable'}, {'name': '$allImages', 'kind': 'Variable'}, {'name': '$allImages', 'kind': 'Variable'}, {'name': '$counter', 'kind': 'Variable'}, {'name': '$oldPath', 'kind': 'Variable'}, {'name': '$relative', 'kind': 'Variable'}, {'name': '$relative', 'kind': 'Variable'}, {'name': '$oldFullPath', 'kind': 'Variable'}, {'name': '$ext', 'kind': 'Variable'}, {'name': '$newName', 'kind': 'Variable'}, {'name': '$newFullPath', 'kind': 'Variable'}]
+INFO  2026-08-20 20:04:04,558 serena.cli:health_check:1004 - Using symbol for testing: safeFolderName (kind: Function)
+INFO  2026-08-20 20:04:04,558 serena.cli:health_check:1007 - Testing FindSymbolTool for symbol: safeFolderName
+INFO  2026-08-20 20:04:04,558 serena.task_executor:issue_task:217 - Scheduling Task-3:<lambda>
+INFO  2026-08-20 20:04:04,663 serena.task_executor:_process_task_queue:139 - Starting execution of Task-3:<lambda>
+INFO  2026-08-20 20:04:04,663 serena.task_executor:start:329 - Task-3:<lambda> starting ...
+INFO  2026-08-20 20:04:04,663 serena.task_executor:stop:336 - Task-3:<lambda> completed in 0.000 seconds
+INFO  2026-08-20 20:04:04,663 serena.cli:health_check:1013 - FindSymbolTool found 1 matches for symbol safeFolderName
+INFO  2026-08-20 20:04:04,663 serena.cli:health_check:1016 - Testing FindReferencingSymbolsTool for symbol: safeFolderName
+INFO  2026-08-20 20:04:04,663 serena.task_executor:issue_task:217 - Scheduling Task-4:<lambda>
+INFO  2026-08-20 20:04:04,768 serena.task_executor:_process_task_queue:139 - Starting execution of Task-4:<lambda>
+INFO  2026-08-20 20:04:04,768 serena.task_executor:start:329 - Task-4:<lambda> starting ...
+INFO  2026-08-20 20:04:04,769 serena.ls_manager:sync_file_system_changes:274 - Polling file system for changes to source files ...
+INFO  2026-08-20 20:04:05,958 serena.ls_manager:sync_file_system_changes:276 - File system polling complete; 0 change events sent to language servers.
+INFO  2026-08-20 20:04:09,025 serena.task_executor:stop:336 - Task-4:<lambda> completed in 4.257 seconds
+INFO  2026-08-20 20:04:09,025 serena.cli:health_check:1021 - FindReferencingSymbolsTool found 1 references for symbol safeFolderName
+INFO  2026-08-20 20:04:09,026 serena.cli:health_check:1029 - Health check completed successfully

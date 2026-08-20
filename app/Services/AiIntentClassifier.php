@@ -24,18 +24,24 @@ class AiIntentClassifier
             ->all();
 
         $lastMachines = $this->lastMachines($conversation);
+
         if (($context['mode'] ?? null) === 'application_data_extraction') {
-    return $this->extractApplicationData($conversation, $message, $recent, $lastMachines, $context);
-}
+            return $this->extractApplicationData($conversation, $message, $recent, $lastMachines, $context);
+        }
+
         $prompt = $this->prompt($conversation, $message, $recent, $lastMachines, $context);
 
         try {
             $result = app(GeminiClient::class)->generateText($prompt, null, [
                 'temperature' => 0.05,
-                'max_output_tokens' => 900,
+                'maxOutputTokens' => 900,
             ]);
 
-            $text = trim((string) ($result['text'] ?? ''));
+            if (! ($result['ok'] ?? false)) {
+                return $this->fallback();
+            }
+
+            $text = trim((string) ($result['reply'] ?? $result['text'] ?? ''));
             $json = $this->extractJson($text);
 
             if (! is_array($json)) {
@@ -183,7 +189,20 @@ PROMPT
             $ids = json_decode($ids, true) ?: [];
         }
 
-        if (! is_array($ids) || empty($ids)) {
+        if (! is_array($ids)) {
+            $ids = [];
+        }
+
+        if (empty($ids) && ! empty($conversation->last_machine_id)) {
+            $ids = [(int) $conversation->last_machine_id];
+        }
+
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $ids),
+            fn (int $id) => $id > 0
+        )));
+
+        if (empty($ids)) {
             return [];
         }
 
@@ -355,10 +374,14 @@ PROMPT
     try {
         $result = app(GeminiClient::class)->generateText($prompt, null, [
             'temperature' => 0.05,
-            'max_output_tokens' => 700,
+            'maxOutputTokens' => 700,
         ]);
 
-        $json = $this->extractJson(trim((string) ($result['text'] ?? '')));
+        if (! ($result['ok'] ?? false)) {
+            return ['application_data' => []];
+        }
+
+        $json = $this->extractJson(trim((string) ($result['reply'] ?? $result['text'] ?? '')));
 
         return is_array($json) ? $json : ['application_data' => []];
     } catch (\Throwable $e) {

@@ -25,7 +25,7 @@ class WhatsappBotResource extends Resource
     protected static ?string $modelLabel = 'بوت واتساب';
     protected static ?string $pluralModelLabel = 'بوتات واتساب';
 
-    protected static string $nodeUrl = 'http://127.0.0.1:3010';
+    protected static string $nodeUrl = 'http://127.0.0.1:3080';
 
     public static function form(Form $form): Form
     {
@@ -73,24 +73,24 @@ class WhatsappBotResource extends Resource
                     Forms\Components\Toggle::make('is_active')
                         ->label('نشط')
                         ->default(true),
-                        Forms\Components\ToggleButtons::make('mode')
-    ->label('نوع البوت')
-    ->options([
-        'training' => 'تعليمي',
-        'live' => 'لايف',
-    ])
-    ->icons([
-        'training' => 'heroicon-o-academic-cap',
-        'live' => 'heroicon-o-bolt',
-    ])
-    ->colors([
-        'training' => 'warning',
-        'live' => 'success',
-    ])
-    ->default('live')
-    ->inline()
-    ->required()
-    ->helperText('التعليمي يتعلم ويخزن الردود فقط، اللايف يرد على العملاء باستخدام الذاكرة.'),
+                    Forms\Components\ToggleButtons::make('mode')
+                        ->label('نوع البوت')
+                        ->options([
+                            'training' => 'تعليمي',
+                            'live' => 'لايف',
+                        ])
+                        ->icons([
+                            'training' => 'heroicon-o-academic-cap',
+                            'live' => 'heroicon-o-bolt',
+                        ])
+                        ->colors([
+                            'training' => 'warning',
+                            'live' => 'success',
+                        ])
+                        ->default('live')
+                        ->inline()
+                        ->required()
+                        ->helperText('التعليمي يتعلم ويخزن الردود فقط، اللايف يرد على العملاء باستخدام الذاكرة.'),
 
                     Forms\Components\Textarea::make('notes')
                         ->label('ملاحظات')
@@ -120,23 +120,23 @@ class WhatsappBotResource extends Resource
                     ->label('رقم الواتساب')
                     ->searchable()
                     ->toggleable(),
-                    Tables\Columns\TextColumn::make('mode')
-    ->label('نوع البوت')
-    ->badge()
-    ->formatStateUsing(fn ($state) => match ($state) {
-        'training' => 'تعليمي',
-        'live' => 'لايف',
-        default => 'غير محدد',
-    })
-    ->color(fn ($state) => match ($state) {
-        'training' => 'warning',
-        'live' => 'success',
-        default => 'gray',
-    }),
+                Tables\Columns\TextColumn::make('mode')
+                    ->label('نوع البوت')
+                    ->badge()
+                    ->formatStateUsing(fn($state) => match ($state) {
+                        'training' => 'تعليمي',
+                        'live' => 'لايف',
+                        default => 'غير محدد',
+                    })
+                    ->color(fn($state) => match ($state) {
+                        'training' => 'warning',
+                        'live' => 'success',
+                        default => 'gray',
+                    }),
                 Tables\Columns\TextColumn::make('session_status')
                     ->label('حالة الربط')
                     ->badge()
-                    ->formatStateUsing(fn ($state) => match ($state) {
+                    ->formatStateUsing(fn($state) => match ($state) {
                         'connected' => 'متصل',
                         'qr' => 'في انتظار QR',
                         'starting' => 'جاري التشغيل',
@@ -144,7 +144,7 @@ class WhatsappBotResource extends Resource
                         'logged_out' => 'تم تسجيل الخروج',
                         default => 'غير مربوط',
                     })
-                    ->color(fn ($state) => match ($state) {
+                    ->color(fn($state) => match ($state) {
                         'connected' => 'success',
                         'qr', 'starting' => 'warning',
                         'disconnected', 'logged_out' => 'danger',
@@ -186,122 +186,122 @@ class WhatsappBotResource extends Resource
             ])
             ->actions([
                 Tables\Actions\Action::make('generate_qr')
-    ->label('توليد QR')
-    ->icon('heroicon-o-qr-code')
-    ->color('warning')
-    ->action(function (WhatsappBot $record) {
-        $token = env('BOT_TOKEN');
-        $botId = (string) $record->id;
+                    ->label('توليد QR')
+                    ->icon('heroicon-o-qr-code')
+                    ->color('warning')
+                    ->action(function (WhatsappBot $record) {
+                        $token = config('services.whatsapp.bot_token');
+                        $botId = (string) $record->id;
 
-        Http::timeout(15)
-            ->withHeaders([
-                'X-BOT-TOKEN' => $token,
-            ])
-            ->post(static::$nodeUrl . '/sessions/start', [
-                'bot_id' => $botId,
-            ]);
+                        Http::timeout(15)
+                            ->withHeaders([
+                                'X-BOT-TOKEN' => $token,
+                            ])
+                            ->post(static::$nodeUrl . '/sessions/start', [
+                                'bot_id' => $botId,
+                            ]);
 
-        $data = null;
+                        $data = null;
 
-        for ($i = 0; $i < 10; $i++) {
-            sleep(1);
+                        for ($i = 0; $i < 10; $i++) {
+                            sleep(1);
 
-            $response = Http::timeout(15)
-                ->withHeaders([
-                    'X-BOT-TOKEN' => $token,
-                ])
-                ->get(static::$nodeUrl . "/sessions/{$botId}/qr");
+                            $response = Http::timeout(15)
+                                ->withHeaders([
+                                    'X-BOT-TOKEN' => $token,
+                                ])
+                                ->get(static::$nodeUrl . "/sessions/{$botId}/qr");
 
-            if (!$response->successful()) {
-                continue;
-            }
+                            if (!$response->successful()) {
+                                continue;
+                            }
 
-            $data = $response->json();
+                            $data = $response->json();
 
-            if (!empty($data['qr']) || (($data['status'] ?? null) === 'connected')) {
-                break;
-            }
-        }
+                            if (!empty($data['qr']) || (($data['status'] ?? null) === 'connected')) {
+                                break;
+                            }
+                        }
 
-        if (!$data) {
-            Notification::make()
-                ->title('فشل توليد QR')
-                ->body('لم يتم الوصول لخدمة الواتساب')
-                ->danger()
-                ->send();
+                        if (!$data) {
+                            Notification::make()
+                                ->title('فشل توليد QR')
+                                ->body('لم يتم الوصول لخدمة الواتساب')
+                                ->danger()
+                                ->send();
 
-            return;
-        }
+                            return;
+                        }
 
-        $record->update([
-            'qr_code' => $data['qr'] ?? null,
-            'session_status' => $data['status'] ?? 'starting',
-            'connected_at' => ($data['status'] ?? null) === 'connected' ? now() : $record->connected_at,
-        ]);
+                        $record->update([
+                            'qr_code' => $data['qr'] ?? null,
+                            'session_status' => $data['status'] ?? 'starting',
+                            'connected_at' => ($data['status'] ?? null) === 'connected' ? now() : $record->connected_at,
+                        ]);
 
-        if (!empty($data['qr'])) {
-            Notification::make()
-                ->title('تم توليد QR')
-                ->body('اضغط عرض QR أو امسحه من الجدول')
-                ->success()
-                ->send();
+                        if (!empty($data['qr'])) {
+                            Notification::make()
+                                ->title('تم توليد QR')
+                                ->body('اضغط عرض QR أو امسحه من الجدول')
+                                ->success()
+                                ->send();
 
-            return;
-        }
+                            return;
+                        }
 
-        if (($data['status'] ?? null) === 'connected') {
-            Notification::make()
-                ->title('البوت متصل بالفعل')
-                ->body('لا يوجد QR لأن الجلسة متصلة')
-                ->success()
-                ->send();
+                        if (($data['status'] ?? null) === 'connected') {
+                            Notification::make()
+                                ->title('البوت متصل بالفعل')
+                                ->body('لا يوجد QR لأن الجلسة متصلة')
+                                ->success()
+                                ->send();
 
-            return;
-        }
+                            return;
+                        }
 
-        Notification::make()
-            ->title('QR لم يظهر بعد')
-            ->body('اضغط عرض QR بعد ثواني أو جرّب فحص الحالة')
-            ->warning()
-            ->send();
-    }),
-              Tables\Actions\Action::make('show_qr')
-    ->label('عرض QR')
-    ->icon('heroicon-o-eye')
-    ->color('info')
-    ->modalHeading('QR Code')
-    ->modalSubmitAction(false)
-    ->modalCancelActionLabel('إغلاق')
-    ->modalContent(function (WhatsappBot $record) {
-        $response = Http::timeout(15)
-            ->withHeaders([
-                'X-BOT-TOKEN' => env('BOT_TOKEN'),
-            ])
-            ->get(static::$nodeUrl . "/sessions/{$record->id}/qr");
+                        Notification::make()
+                            ->title('QR لم يظهر بعد')
+                            ->body('اضغط عرض QR بعد ثواني أو جرّب فحص الحالة')
+                            ->warning()
+                            ->send();
+                    }),
+                Tables\Actions\Action::make('show_qr')
+                    ->label('عرض QR')
+                    ->icon('heroicon-o-eye')
+                    ->color('info')
+                    ->modalHeading('QR Code')
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('إغلاق')
+                    ->modalContent(function (WhatsappBot $record) {
+                        $response = Http::timeout(15)
+                            ->withHeaders([
+                                'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
+                            ])
+                            ->get(static::$nodeUrl . "/sessions/{$record->id}/qr");
 
-        if (!$response->successful()) {
-            return new HtmlString('<div style="text-align:center;padding:20px;">فشل جلب QR من السيرفر.</div>');
-        }
+                        if (!$response->successful()) {
+                            return new HtmlString('<div style="text-align:center;padding:20px;">فشل جلب QR من السيرفر.</div>');
+                        }
 
-        $data = $response->json();
-        $qr = $data['qr'] ?? null;
+                        $data = $response->json();
+                        $qr = $data['qr'] ?? null;
 
-        $record->update([
-            'qr_code' => $qr,
-            'session_status' => $data['status'] ?? $record->session_status,
-        ]);
+                        $record->update([
+                            'qr_code' => $qr,
+                            'session_status' => $data['status'] ?? $record->session_status,
+                        ]);
 
-        if (!$qr) {
-            return new HtmlString('<div style="text-align:center;padding:20px;">لا يوجد QR حاليًا. اضغط توليد QR وانتظر ثانيتين.</div>');
-        }
+                        if (!$qr) {
+                            return new HtmlString('<div style="text-align:center;padding:20px;">لا يوجد QR حاليًا. اضغط توليد QR وانتظر ثانيتين.</div>');
+                        }
 
-        return new HtmlString(
-            '<div style="text-align:center;padding:20px;">
+                        return new HtmlString(
+                            '<div style="text-align:center;padding:20px;">
                 <img src="' . e($qr) . '" style="width:320px;height:320px;border-radius:16px;border:1px solid #ddd;padding:8px;background:white;" />
                 <p style="margin-top:12px;font-weight:bold;">افتح واتساب &gt; Linked Devices &gt; Link a device</p>
             </div>'
-        );
-    }),
+                        );
+                    }),
                 Tables\Actions\Action::make('check_status')
                     ->label('فحص الحالة')
                     ->icon('heroicon-o-arrow-path')
@@ -309,7 +309,7 @@ class WhatsappBotResource extends Resource
                     ->action(function (WhatsappBot $record) {
                         $response = Http::timeout(15)
                             ->withHeaders([
-                                'X-BOT-TOKEN' => env('BOT_TOKEN'),
+                                'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
                             ])
                             ->get(static::$nodeUrl . "/sessions/{$record->id}/status");
 
@@ -344,7 +344,7 @@ class WhatsappBotResource extends Resource
                     ->action(function (WhatsappBot $record) {
                         Http::timeout(15)
                             ->withHeaders([
-                                'X-BOT-TOKEN' => env('BOT_TOKEN'),
+                                'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
                             ])
                             ->post(static::$nodeUrl . "/sessions/{$record->id}/logout");
 

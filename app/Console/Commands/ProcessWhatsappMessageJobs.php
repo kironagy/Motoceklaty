@@ -13,8 +13,18 @@ class ProcessWhatsappMessageJobs extends Command
     protected $signature = 'whatsapp:process-jobs {--sleep=2}';
     protected $description = 'Process queued WhatsApp AI message jobs';
 
+    /** @var resource|null kept open for the process lifetime so flock() stays held */
+    private $lockHandle = null;
+
     public function handle(): int
     {
+        if (! $this->acquireSingleInstanceLock()) {
+            $this->error('Another whatsapp:process-jobs instance is already running. Exiting.');
+            Log::warning('whatsapp:process-jobs refused to start: lock already held');
+
+            return self::FAILURE;
+        }
+
         $this->info('WhatsApp queue worker started');
 
         while (true) {
@@ -26,6 +36,14 @@ class ProcessWhatsappMessageJobs extends Command
             }
 
             try {
+                $this->line(sprintf(
+                    '[%s] Processing job #%d from %s: %s',
+                    now()->toDateTimeString(),
+                    $job->id,
+                    $job->reply_jid ?: $job->from,
+                    $job->message ?: '[media]'
+                ));
+
                 $controller = app(WhatsappBotController::class);
 
                 $result = $controller->processQueuedWhatsappJob($job);
@@ -33,6 +51,14 @@ class ProcessWhatsappMessageJobs extends Command
                 if (!is_array($result)) {
                     $result = [];
                 }
+
+                $this->line(sprintf(
+                    '[%s] AI result for job #%d: reply=%s images=%d',
+                    now()->toDateTimeString(),
+                    $job->id,
+                    !empty(trim((string) ($result['reply'] ?? ''))) ? 'yes' : 'no',
+                    count($result['image_items'] ?? $result['images'] ?? [])
+                ));
 
                 $this->sendWhatsappResult($job, $result);
 
@@ -55,6 +81,14 @@ class ProcessWhatsappMessageJobs extends Command
                     'line' => $e->getLine(),
                 ]);
 
+                $this->error(sprintf(
+                    "[%s] Job #%d failed: %s\n%s",
+                    now()->toDateTimeString(),
+                    $job->id,
+                    $e->getMessage(),
+                    $e->getTraceAsString()
+                ));
+
                 DB::table('whatsapp_message_jobs')
                     ->where('id', $job->id)
                     ->update([
@@ -67,6 +101,27 @@ class ProcessWhatsappMessageJobs extends Command
                 sleep(1);
             }
         }
+    }
+
+    private function acquireSingleInstanceLock(): bool
+    {
+        $path = storage_path('app/whatsapp-process-jobs.lock');
+
+        $handle = fopen($path, 'c');
+
+        if ($handle === false) {
+            return true;
+        }
+
+        if (! flock($handle, LOCK_EX | LOCK_NB)) {
+            fclose($handle);
+
+            return false;
+        }
+
+        $this->lockHandle = $handle;
+
+        return true;
     }
 
     private function claimNextJob(): ?object
@@ -157,7 +212,7 @@ class ProcessWhatsappMessageJobs extends Command
         $response = Http::connectTimeout(10)
             ->timeout(60)
             ->withHeaders([
-                'X-BOT-TOKEN' => env('BOT_TOKEN'),
+                'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
                 'Accept' => 'application/json',
             ])
             ->post($url, [
@@ -190,7 +245,7 @@ class ProcessWhatsappMessageJobs extends Command
         $response = Http::connectTimeout(10)
             ->timeout(120)
             ->withHeaders([
-                'X-BOT-TOKEN' => env('BOT_TOKEN'),
+                'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
                 'Accept' => 'application/json',
             ])
             ->post($url, [

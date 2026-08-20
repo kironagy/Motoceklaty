@@ -28,7 +28,7 @@ class WhatsappBotController extends Controller
 {
    public function incomingMessage(Request $request)
 {
-    if ($request->header('X-BOT-TOKEN') !== env('BOT_TOKEN')) {
+    if ($request->header('X-BOT-TOKEN') !== config('services.whatsapp.bot_token')) {
         return response()->json(['error' => 'Unauthorized'], 401);
     }
 
