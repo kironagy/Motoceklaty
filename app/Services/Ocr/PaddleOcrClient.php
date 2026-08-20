@@ -4,7 +4,7 @@ namespace App\Services\Ocr;
 
 use Illuminate\Support\Facades\Http;
 
-class PaddleOcrClient
+class PaddleOcrClient implements OcrProviderInterface
 {
     public function recognize(string $absolutePath, ?string $mime = null): array
     {
