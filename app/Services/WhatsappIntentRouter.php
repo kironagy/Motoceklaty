@@ -23,6 +23,10 @@ public function handle(
         $message = trim($message);
 
         if (count($mediaItems)) {
+            if (($conversation->pending_question ?? null) === 'application_documents') {
+                return app(ApplicationHandler::class)->handleDocument($conversation, $mediaItems);
+            }
+
             return app(MediaOcrHandler::class)->handle(
                 conversation: $conversation,
                 mediaItems: $mediaItems,
@@ -39,10 +43,18 @@ public function handle(
 
         $lastMachines = $this->lastMachinesFromConversation($conversation);
         $normalizedMessage = $this->normalizeText($message);
-        $applicationIsPending = ($conversation->pending_question ?? null) === 'application_missing_data';
+        $applicationIsPending = in_array(
+            $conversation->pending_question ?? null,
+            ['application_missing_data', 'application_documents'],
+            true
+        );
+
+        $isBareConfirmationAfterCalc = $conversation->last_topic === 'installment_calc'
+            && $this->isBareConfirmation($normalizedMessage);
 
         if (
             $applicationIsPending
+            || $isBareConfirmationAfterCalc
             || (
                 in_array($intent, ['general', 'unknown'], true)
                 && $this->isApplicationIntent($normalizedMessage, $conversation)
@@ -220,7 +232,7 @@ public function handle(
             return $this->handleCashPrice($conversation, $machines, $message);
         }
 
-        return $this->handleAiFallback($conversation, $message);
+        return $this->handleAiFallback($conversation, $message, $machines);
     } catch (\Throwable $e) {
         Log::error('WhatsappIntentRouter simple error', [
             'message' => $e->getMessage(),
@@ -246,8 +258,24 @@ public function handle(
     }
 }
 
-private function handleAiFallback(WhatsappConversation $conversation, string $message): array
-{
+private function handleAiFallback(
+    WhatsappConversation $conversation,
+    string $message,
+    ?Collection $machines = null
+): array {
+    /*
+     * مهم:
+     * ده المسار الوحيد اللي كان بينسى المكنة اللي النظام لقاها بالفعل.
+     * لو العميل قال "كي تي اكس" والرد راح للـ AI، لازم نفضل فاكرين
+     * إن الكلام على KTX 250، وإلا أول ما يقول بعدها "عاوزها قسط"
+     * المحادثة بتبقى فاضية والنظام بيسأله على اسم المكنة تاني.
+     * بنحفظها قبل نداء الـ AI عشان الرد نفسه كمان يوصله بيانات
+     * المكنة الحقيقية من الداتابيز بدل ما يخمنها من الميموري.
+     */
+    if ($machines instanceof Collection && $machines->isNotEmpty()) {
+        $this->rememberMachines($conversation, $machines);
+    }
+
     $conversation->refresh();
 
     $recentMessages = $conversation->messages()
@@ -900,15 +928,32 @@ private function resolveMachinesFromPlan(
     array $plan
 ): Collection {
     $target = $plan['target'] ?? 'unknown';
+    $hasMachineQuery = ! empty($plan['machine_query']);
 
+    /*
+     * لو الـ AI قال "target = يرجع لموديل سابق" بس فعليًا مفيش موديل
+     * سابق في المحادثة (أول رسالة، أو محادثة جديدة)، ومعانا اسم موديل
+     * صريح في machine_query، منسيبش الرد يقف فاضي - نكمل على البحث
+     * بالاسم بدل ما نرجع collection فاضية.
+     */
     if ($target === 'previous_selection') {
-        return $this->lastMachinesFromConversation($conversation);
+        $last = $this->lastMachinesFromConversation($conversation);
+
+        if ($last->isNotEmpty() || ! $hasMachineQuery) {
+            return $last;
+        }
     }
 
     if ($target === 'single_previous_machine') {
         $machine = $this->activeMachineFromConversation($conversation);
 
-        return $machine ? collect([$machine]) : collect();
+        if ($machine) {
+            return collect([$machine]);
+        }
+
+        if (! $hasMachineQuery) {
+            return collect();
+        }
     }
 
     if ($target === 'selected_index') {
@@ -918,7 +963,27 @@ private function resolveMachinesFromPlan(
             $last = $this->lastMachinesFromConversation($conversation);
             $machine = $last->get($index - 1);
 
-            return $machine ? collect([$machine]) : collect();
+            if ($machine) {
+                return collect([$machine]);
+            }
+
+            if (! $hasMachineQuery) {
+                return collect();
+            }
+        }
+    }
+
+    if ($hasMachineQuery) {
+        $query = trim((string) $plan['machine_query']);
+
+        $found = app(MachineSearchService::class)->search($query, 20);
+
+        if ($found->isEmpty()) {
+            $found = app(MachineSearchService::class)->search($message, 20);
+        }
+
+        if ($found->isNotEmpty()) {
+            return $found;
         }
     }
 
@@ -930,17 +995,6 @@ private function resolveMachinesFromPlan(
             ->sortBy(fn ($machine) => array_search($machine->id, $plan['machine_ids'], true))
             ->values();
     }
-if (! empty($plan['machine_query'])) {
-    $query = trim((string) $plan['machine_query']);
-
-    $found = app(MachineSearchService::class)->search($query, 20);
-
-    if ($found->isEmpty()) {
-        $found = app(MachineSearchService::class)->search($message, 20);
-    }
-
-    return $found;
-}
 
     if (($plan['uses_last_machines'] ?? false) === true) {
         return $this->lastMachinesFromConversation($conversation);
@@ -1505,6 +1559,27 @@ private function mergeContextPayload(array $current, array $updates): array
 
 
 
+/*
+ * لو العميل رد بكلمة تأكيد قصيرة ("تمام"، "اوك"، "تمام كده") فورًا بعد
+ * ما حسبنا له القسط، ده يعني موافقة على الشراء مش سؤال سعر جديد.
+ */
+private function isBareConfirmation(string $normalizedMessage): bool
+{
+    $normalized = trim($normalizedMessage);
+
+    return in_array($normalized, [
+        'تمام',
+        'تمام كده',
+        'تمام يافندم',
+        'اوك',
+        'ok',
+        'اه تمام',
+        'ايوه تمام',
+        'موافق',
+        'ماشي',
+    ], true);
+}
+
 private function isApplicationIntent(string $normalizedMessage, WhatsappConversation $conversation): bool
 {
     if (($conversation->pending_question ?? null) === 'application_missing_data') {
@@ -1518,7 +1593,11 @@ private function isApplicationIntent(string $normalizedMessage, WhatsappConversa
         || str_contains($normalizedMessage, 'امشي في الاجراءات')
         || str_contains($normalizedMessage, 'اكمل اجراءات')
         || str_contains($normalizedMessage, 'عايز اقدم')
-        || str_contains($normalizedMessage, 'عاوز اقدم');
+        || str_contains($normalizedMessage, 'عاوز اقدم')
+        || str_contains($normalizedMessage, 'اشتري')
+        || str_contains($normalizedMessage, 'شراء')
+        || str_contains($normalizedMessage, 'المطلوب')
+        || str_contains($normalizedMessage, 'اعمل ايه');
 }
 }
 
