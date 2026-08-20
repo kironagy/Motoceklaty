@@ -53,3 +53,6 @@ yarn-error.log
 
 # Local QR images and generated test artifacts
 /whatsapp-qr*.png
+
+# Single-instance runtime lockfiles (B2/B7)
+/whatsapp-bot/whatsapp-bot.lock

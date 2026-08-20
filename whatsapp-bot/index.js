@@ -10,6 +10,8 @@ const pino = require('pino');
 const axios = require('axios');
 const express = require('express');
 const QRCode = require('qrcode');
+const fs = require('fs');
+const path = require('path');
 
 require('dotenv').config();
 
@@ -25,13 +27,51 @@ const mediaCollectors = {};
 const chatQueues = {};
 
 const PORT = process.env.PORT || 3010;
-const LARAVEL_TIMEOUT = Number(process.env.LARAVEL_TIMEOUT || 180000);
+const LARAVEL_TIMEOUT = Number(process.env.LARAVEL_TIMEOUT || 30000);
 const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
 const AUTO_START_BOT_ID = process.env.AUTO_START_BOT_ID || '';
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+const LOCK_FILE = path.join(__dirname, 'whatsapp-bot.lock');
+
+function isPidAlive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function acquireSingleInstanceLock() {
+    if (fs.existsSync(LOCK_FILE)) {
+        const existingPid = parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim(), 10);
+
+        if (existingPid && isPidAlive(existingPid)) {
+            console.error(`Another whatsapp-bot instance is already running (pid ${existingPid}). Exiting.`);
+            process.exit(1);
+        }
+    }
+
+    fs.writeFileSync(LOCK_FILE, String(process.pid));
+
+    const releaseLock = () => {
+        try {
+            if (fs.existsSync(LOCK_FILE) && fs.readFileSync(LOCK_FILE, 'utf8').trim() === String(process.pid)) {
+                fs.unlinkSync(LOCK_FILE);
+            }
+        } catch {}
+    };
+
+    process.on('exit', releaseLock);
+    process.on('SIGINT', () => { releaseLock(); process.exit(0); });
+    process.on('SIGTERM', () => { releaseLock(); process.exit(0); });
+}
+
+acquireSingleInstanceLock();
 
 function checkToken(req, res, next) {
     const token = req.headers['x-bot-token'];
