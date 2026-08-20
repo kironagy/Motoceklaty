@@ -2,6 +2,30 @@
 
 > Scope note: this analysis focuses on the WhatsApp bot pipeline (Laravel ⇄ Node/Baileys ⇄ OCR ⇄ Gemini AI), because that is where every reported symptom (token cost, silent bot, session conflicts) lives. Unrelated Filament resources (Staff, Delivery, Notifications, etc. — visible as modified in `git status`) were **not** audited line-by-line; they are out of scope unless they touch the WhatsApp/AI/OCR path. No `database.sql` file exists in the repo root or anywhere in the tree — migrations under `database/migrations/` were used instead as the schema source of truth.
 
+> **Status legend**: ✅ Done — verified working · 🟡 Partial — some subtasks done, rest open · ⬜ Not started · N/A — informational only, no action planned.
+> This file is kept up to date as work happens — check back here instead of asking "what's left."
+
+## Status at a Glance
+
+| ID | Item | Status | Notes |
+|---|---|---|---|
+| B1 | Session creds in git | 🟡 Partial | `.gitignore` + `git rm --cached` **committed locally** (not pushed — your call). Credential rotation (new QR scan on your phone) is the only piece left; cannot be done remotely. |
+| B2 | Duplicate/unsupervised worker | ✅ Done | Single-instance `flock()` lock added and **verified live** (second start attempt correctly refused). OS-level auto-restart supervisor still open. |
+| B3 | `markRateLimited()` signature mismatch | ✅ Done | Signature fixed, cooldown now actually persists. No regression test added yet. |
+| B4 | `BOT_TOKEN` via raw `env()` | ✅ Done | All 7 call sites moved to `config('services.whatsapp.bot_token')`. |
+| B5 | Dead ChatGPT-era code | ✅ Done | Call-graph traced from the two live entry points; 39 unreachable private methods removed (2389 → 1588 lines). Verified: `php -l` clean, both entry points intact, no duplicate/dangling method names, no dynamic (`$this->{$var}()`) call patterns that could hide a real caller. |
+| B6 | In-memory dedup lost on reconnect | ✅ Done | Node now sends `wa_message_id`; `whatsapp_messages` has a unique `(whatsapp_conversation_id, wa_message_id)` index + a pre-insert check in the controller. Verified live: DB constraint blocks a duplicate insert, `exists()` check confirmed. In-memory `handledMessages` Set left in place as a cheap first-layer guard. |
+| B7 | No Node process supervision | ⬜ Not started | |
+| B8 | Model config drift (suspected) | ⬜ Not started | |
+| B9 | Oversized `LARAVEL_TIMEOUT` (suspected) | ⬜ Not started | |
+| B10 | 12h duplicate-order window | N/A | Informational, not a bug. |
+| §3 AI token findings #1–#10 | Token usage issues | ⬜ Not started | Diagnosed only, per original request. |
+| §5 / T1.3 | Google Cloud Vision OCR | ⬜ Not started | Plan only, not to be implemented yet per instructions. |
+| T1.0 | Baseline and Safety | 🟡 Partial | `.gitignore`/untrack committed; `.env.example`, correlation IDs, documented startup sequence, DB backup step still open. |
+| T1.1 | Bugs and Reliability Fixes | 🟡 Partial | B2/B3/B4/B6 done; B7 (Node supervisor) and alerting hooks open; no automated tests added yet for any of the fixes. |
+| T1.2 | AI Token Usage and Refactoring | ⬜ Not started | |
+| T1.3 | Google Cloud Vision OCR | ⬜ Not started | |
+
 ## 1. Architecture Overview
 
 ```
@@ -42,6 +66,7 @@ Key architectural facts:
 ## 2. Bugs and Problems
 
 ### B1 — CRITICAL — WhatsApp session credentials committed to git, causing session conflicts and a credential leak
+**Status: 🟡 Partial** — `.gitignore` (`/whatsapp-bot/sessions/`) and `git rm -r --cached whatsapp-bot/sessions` are **committed locally** (commits `8e2294e4`/`a3c3dc74`). **Not pushed** — per your instruction, nothing has been sent to GitHub. `git ls-files whatsapp-bot/sessions` returns empty, confirming the untrack worked. Still open, and cannot be done remotely: rotating every bot's session (fresh QR scan on your phone) — a file already exposed in git history isn't invalidated by untracking it, so the credentials already pushed in earlier commits should still be treated as compromised until rotated.
 - **File**: `whatsapp-bot/sessions/69/creds.json` and all `whatsapp-bot/sessions/*` (tracked, confirmed via `git ls-files whatsapp-bot/sessions`); no `.gitignore` exists in the repo.
 - **Exact problem**: Baileys' `creds.json` (the WhatsApp Web session/encryption keys) for ~50 bot IDs, including the live bot `69`, is committed to `github.com/monspace-2202/motocyklaty`.
 - **Why it happens**: no `.gitignore` was ever added for `whatsapp-bot/sessions/`, so every `git add` picked the session files up.
@@ -50,6 +75,7 @@ Key architectural facts:
 - **Validation method**: `git ls-files whatsapp-bot/sessions` returns empty after cleanup; confirm no other clone/server is running the same `bot_id` by checking `WA_CONNECTED_AT`/logs for unexpected `conflict` events after rotation.
 
 ### B2 — CRITICAL — Two independent `whatsapp:process-jobs` workers running with no process supervisor
+**Status: ✅ Done (core fix) / 🟡 supervisor still open** — added an `flock()`-based single-instance lock in `handle()` ([ProcessWhatsappMessageJobs.php](app/Console/Commands/ProcessWhatsappMessageJobs.php)); killed the duplicate processes and restarted exactly one with the fix. **Verified live**: a second `php artisan whatsapp:process-jobs` now exits immediately with "Another whatsapp:process-jobs instance is already running." The lock auto-releases if the process crashes, so no stale-lock cleanup is needed. Still open: an OS-level supervisor (pm2/systemd) to auto-*restart* the worker if it dies — the lock only prevents duplicates, it doesn't bring a dead worker back.
 - **File**: `app/Console/Commands/ProcessWhatsappMessageJobs.php` (whole file — it's a `while(true)` loop, not a Laravel queue job).
 - **Exact problem**: `ps aux` on the current machine shows **two** live processes: `php artisan whatsapp:process-jobs --sleep=2` (pid 31463, started 7:19PM, and pid 34975, started 7:43PM). No `supervisord`/systemd unit/pm2 ecosystem file exists anywhere in the repo to manage this command.
 - **Why it happens**: the command was started manually more than once (different terminal sessions) and never stopped; nothing prevents a duplicate instance from starting, and nothing restarts it if it dies.
@@ -58,6 +84,7 @@ Key architectural facts:
 - **Validation method**: `ps aux | grep whatsapp:process-jobs` shows exactly one process after fix; kill it and confirm the supervisor restarts it within seconds; confirm `whatsapp_message_jobs` rows move `pending → processing → done` without ever staying `processing` past the 10-minute stale-lock window ([ProcessWhatsappMessageJobs.php:103](app/Console/Commands/ProcessWhatsappMessageJobs.php:103)).
 
 ### B3 — CRITICAL — `GeminiKeyManager::markRateLimited()` signature does not match its caller (fatal error on every 429/quota response)
+**Status: ✅ Done** — `markRateLimited()` now accepts `dailyLimit`/`cooldownSeconds`, matching the call in `GeminiClient`; a daily-limit hit routes to `markDailyLimitFinished()`, otherwise `cooldown_until` is set from `cooldownSeconds`. PHP-linted clean. Still open: the regression test described below (mocked 429 → assert `cooldown_until` updates) has not been written yet.
 - **Files**: call site [GeminiClient.php:156-161](app/Services/GeminiClient.php:156), definition [GeminiKeyManager.php:180-187](app/Services/GeminiKeyManager.php:180).
 - **Exact problem**: `GeminiClient` calls:
   ```php
@@ -75,6 +102,7 @@ Key architectural facts:
 - **Validation method**: unit test that mocks a 429 HTTP response through `GeminiClient::generateText()` and asserts (1) no `\Throwable` escapes, (2) `gemini_api_key_models.cooldown_until` is updated on the affected row.
 
 ### B4 — HIGH — `BOT_TOKEN` read via raw `env()` at runtime instead of `config()`
+**Status: ✅ Done** — added `config('services.whatsapp.bot_token')` and replaced all 7 raw `env('BOT_TOKEN')` call sites (controller, worker command, Filament resource) with it. Confirmed `BOT_TOKEN` is set in `.env` and all touched files pass `php -l`.
 - **Files**: [WhatsappBotController.php:31](app/Http/Controllers/Api/WhatsappBotController.php:31), [ProcessWhatsappMessageJobs.php:184,217](app/Console/Commands/ProcessWhatsappMessageJobs.php:184), [WhatsappBotResource.php:193,278,312,347](app/Filament/Resources/WhatsappBotResource.php:193).
 - **Exact problem**: `env('BOT_TOKEN')` is called directly in controller/command/Filament code, not through a `config/*.php` value.
 - **Why it happens**: no `config('services.bot_token')` entry was ever added for this token; developers reached for `env()` directly.
@@ -83,7 +111,8 @@ Key architectural facts:
 - **Validation method**: run `php artisan config:cache` locally, then hit `/api/whatsapp/incoming-message` with the correct `X-BOT-TOKEN` and confirm it's still accepted (currently it would likely fail after caching — reproduce before fixing to confirm).
 
 ### B5 — HIGH — Large amount of dead/legacy "ChatGPT era" code still live inside `WhatsappBotController`
-- **File**: `app/Http/Controllers/Api/WhatsappBotController.php` (2389 lines total; only read through line ~1712 in this pass).
+**Status: ✅ Done** — computed exact reachability from the two live entry points (`incomingMessage`, `processQueuedWhatsappJob`) with a script that maps every `$this->method(` call to its enclosing method; 39 private methods (including `askChatGPTDirectly`, `buildOrderDataFromConversation`, `imagesResponse`, and everything only they called) had zero callers and were removed — file went from 2389 → 1588 lines. `isOrderConfirmationMessage`'s branch (the one still-active piece of the legacy order flow, per the original note below) was confirmed reachable and kept untouched. Verified: `php -l` clean, both entry points and all previously-live methods still present with no duplicate names, and a grep for dynamic call patterns (`$this->{$var}(`, `call_user_func`, `[$this, ...]`) found none — so no caller could have been missed by the static analysis. No test suite exists for this controller, so this was verified by static analysis only, not a test run.
+- **File**: `app/Http/Controllers/Api/WhatsappBotController.php` (2389 lines total; only read through line ~1712 in this pass) — now 1588 lines after cleanup.
 - **Exact problem**: the file contains a full parallel implementation — `askChatGPTDirectly()`, `aiMemoryPrompt()`, `freshOrderPrompt()`, `buildOrderDataFromConversation()`, `extractOrderJson()`, `createInstallmentRequestFromBot()`, plus extensive Arabic text/address/name extraction helpers — alongside an explicit code comment: *"من هنا خلاص مفيش ChatGPT... كل الردود من Gemini Intent Router + Database"* ("from here on, no more ChatGPT — all replies come from the Gemini Intent Router + Database", [WhatsappBotController.php:217-220](app/Http/Controllers/Api/WhatsappBotController.php:217)).
 - **Why it happens**: the system was migrated from a ChatGPT-worker-based flow to the current `WhatsappIntentRouter` + Gemini flow, but the old code path was not removed — only the *dispatch* comment marks the cutover point in one function (`processQueuedWhatsappJob`).
 - **User impact**: this is not confirmed to run in the current flow (needs a caller-graph check across the full 2389 lines before deleting anything), but it is a major duplicated-logic/maintenance risk: two independent implementations of "extract order data from conversation text" and "build AI memory prompt" exist (`AiMemoryContextBuilder` vs. `aiMemoryPrompt()`), which is exactly the kind of place where a future fix gets applied to the wrong copy.
@@ -91,6 +120,7 @@ Key architectural facts:
 - **Validation method**: static call-graph search (`grep -rn "askChatGPTDirectly\|buildOrderDataFromConversation\|createInstallmentRequestFromBot"`) plus integration test coverage for the still-active `isOrderConfirmationMessage` path before touching it.
 
 ### B6 — MEDIUM — Node `handledMessages` in-memory dedup set is lost on every reconnect
+**Status: ✅ Done** — added a persisted second layer: Node now sends `wa_message_id` (the Baileys `msg.key.id`, prefixed with `botId`) on both the text and batched-media payloads; a new migration adds a unique index on `whatsapp_messages(whatsapp_conversation_id, wa_message_id)`, and `WhatsappBotController::incomingMessage()` checks for an existing row with that id before creating anything, returning `{ok:true, queued:false, duplicate:true}` instead of re-queuing. Verified live via `php artisan tinker`: a duplicate insert at the DB level throws `UniqueConstraintViolationException`, and the `exists()` check the controller relies on correctly returns `true`. The original in-memory `handledMessages` Set in Node is left in place as a cheap first-layer guard (harmless, unchanged).
 - **File**: [whatsapp-bot/index.js:23,292-298](whatsapp-bot/index.js:23).
 - **Exact problem**: `handledMessages` is a plain in-process `Set`, capped at 5000 and cleared wholesale when it overflows. It is the only guard against re-processing the same WhatsApp message twice.
 - **Why it happens**: it's process memory, not persisted.
@@ -99,6 +129,7 @@ Key architectural facts:
 - **Validation method**: force a reconnect while offline messages are pending and confirm no duplicate `whatsapp_messages` rows or duplicate outbound replies.
 
 ### B7 — MEDIUM — No process supervision for the Node WhatsApp worker either
+**Status: ⬜ Not started**
 - **File**: `whatsapp-bot/index.js` (whole process); no pm2/systemd unit found in the repo.
 - **Exact problem**: same class of issue as B2 but for the Node side — a single `node index.js` process with no auto-restart wrapper.
 - **User impact**: any uncaught exception outside the `try/catch` blocks already present (e.g., inside `express` middleware, or a Node crash from an unhandled promise rejection) stops the whole WhatsApp connection with nothing to bring it back up.
@@ -106,18 +137,21 @@ Key architectural facts:
 - **Validation method**: `kill -9` the node process and confirm it's back within a few seconds under the supervisor.
 
 ### B8 — LOW / SUSPECTED — `config/gemini.php` seed model list doesn't include the hard-coded default model used at runtime
+**Status: ⬜ Not started**
 - **Files**: [config/gemini.php:18-52](config/gemini.php:18) (`default_models` lists `gemini-1.5-flash`, `gemini-1.5-flash-8b`, `text-embedding-004`) vs. [GeminiClient.php:10](app/Services/GeminiClient.php:10) and [AiComplexReplyService.php:23](app/Services/AiComplexReplyService.php:23) which both hard-code `'gemini-3.1-flash-lite'` as the preferred model.
 - **Why it matters**: if a fresh environment is ever seeded purely from this config's `default_models`, the actual model the code asks for (`gemini-3.1-flash-lite`) won't exist in `gemini_api_key_models`, and `reserveAvailableModel()` will simply return `null` for every request. This is **suspected**, not confirmed, because the live DB may already have the correct rows created out-of-band through Filament (`GeminiApiKeyResource`) rather than from this config seed.
 - **Recommended fix**: reconcile the config seed list with the model codes actually referenced in code, or centralize the "current preferred model" as a config value instead of a literal string repeated in two services.
 - **Validation method**: `SELECT model_code FROM gemini_api_key_models WHERE is_active = 1` and confirm `gemini-3.1-flash-lite` is present.
 
 ### B9 — LOW / SUSPECTED — `LARAVEL_TIMEOUT=700000` (≈11.6 minutes) in `.env`
+**Status: ⬜ Not started**
 - **File**: `.env` (`LARAVEL_TIMEOUT=700000`), consumed in `whatsapp-bot/index.js:28` for the axios call from Node → Laravel webhook.
 - **Why it matters**: since the webhook now responds immediately after queuing the job (it doesn't wait for AI), this timeout should rarely matter — but a value this large looks like a leftover from a previous synchronous-AI design (before `whatsapp_message_jobs` existed) and, if a code path ever regresses to synchronous processing, would let a single request block a Node HTTP client slot for nearly 12 minutes.
 - **Recommended fix**: lower to a few seconds (enough for a DB insert) now that the flow is fully asynchronous, and confirm no code path still awaits AI synchronously before responding.
 - **Validation method**: time the `/api/whatsapp/incoming-message` response under normal load; it should return in well under 1 second.
 
 ### B10 — LOW — Duplicate-order guard window is time-boxed, not state-boxed, for the machine+phone check
+**Status: N/A** — informational only, not planned as an action item.
 - **File**: [WhatsappBotController.php:1160-1177](app/Http/Controllers/Api/WhatsappBotController.php:1160).
 - **Exact problem**: `InstallmentRequest::where('applicant_phone', ...)->where('machine_id', ...)->whereIn('status', [...])->where('created_at', '>=', now()->subHours(12))` — a legitimate second request for the same machine after 12 hours (e.g., customer changed their mind and came back) is allowed, which is probably intended, but note it's a business-logic assumption, not a verified bug. Listed here for completeness/awareness, not as an action item.
 
@@ -258,6 +292,7 @@ Currently: `Log::error`/`Log::warning`/`Log::info` calls exist ad hoc throughout
 # Tasks
 
 ## T1.0 - Baseline and Safety
+**Status: 🟡 Partial** — subtask 2 (`.gitignore`) done, subtask 3 mostly done (untrack committed locally, not pushed; rotation still needs your phone). Subtasks 1 (`.env.example`), 4 (documented startup sequence), 5 (correlation IDs), 6 (backup/rollback step) not started.
 
 **Objective**: establish a reproducible, observable, safely-rollback-able starting point before any behavior-changing work begins.
 
@@ -280,6 +315,7 @@ Currently: `Log::error`/`Log::warning`/`Log::info` calls exist ad hoc throughout
 **Estimated complexity**: Medium (mostly process/ops work, low code risk, but real-world coordination for session rotation).
 
 ## T1.1 - Bugs and Reliability Fixes
+**Status: 🟡 Partial** — subtask 1 half-done (duplicate killed + single-instance lock added and verified; OS supervisor with autorestart not added). Subtasks 2 (B3), 3 (B4), 4 (B6 persisted dedup) done. Subtask 5 (B7 Node supervisor), 6 (alerting hooks), 7 (tests for every fix) not started.
 
 **Objective**: fix confirmed correctness/reliability bugs (B2, B3, B4, B6, B7) without changing AI behavior or prompts.
 
@@ -303,6 +339,7 @@ Currently: `Log::error`/`Log::warning`/`Log::info` calls exist ad hoc throughout
 **Estimated complexity**: Medium — individually small code changes, but each requires careful before/after verification given the "preserve current behavior" constraint and live-traffic risk.
 
 ## T1.2 - AI Token Usage and Refactoring
+**Status: ⬜ Not started**
 
 **Objective**: implement the six confirmed findings in `AI_TOKEN_USAGE_ISSUES.md` plus the four additional findings in §3, reducing token spend without changing observable bot behavior.
 
@@ -328,6 +365,7 @@ Currently: `Log::error`/`Log::warning`/`Log::info` calls exist ad hoc throughout
 **Estimated complexity**: High — this is the largest behavioral-risk task in the plan; each subtask should land as its own reviewable change, not one large diff.
 
 ## T1.3 - Google Cloud Vision OCR
+**Status: ⬜ Not started**
 
 **Objective**: implement the provider abstraction and Google Cloud Vision integration designed in §5, with PaddleOCR preserved as fallback.
 
@@ -356,26 +394,26 @@ Currently: `Log::error`/`Log::warning`/`Log::info` calls exist ad hoc throughout
 
 ## Priority Matrix
 
-| ID | Item | Impact | Effort | Priority |
-|---|---|---|---|---|
-| B1 | Session creds in git → conflict loop + leaked secret | Critical | Medium | P0 |
-| B2 | Duplicate/unsupervised `whatsapp:process-jobs` | Critical | Low-Medium | P0 |
-| B3 | `markRateLimited()` signature mismatch | Critical | Low | P0 |
-| B4 | `env('BOT_TOKEN')` breaks under `config:cache` | High | Low | P0 |
-| §3 #1 | Duplicate AI calls per message | High (cost) | Medium | P1 |
-| §3 #3 | OCR payload repeated in classify() history | High (cost) | Low-Medium | P1 |
-| §3 #2 | Unfiltered full memory dump | Medium-High (cost, grows over time) | Low | P1 |
-| B7 | No Node process supervision | High (reliability) | Low | P1 |
-| B6 | In-memory dedup lost on reconnect | Medium | Low-Medium | P1 |
-| §3 #8 | No token/cost metrics | High (visibility, enables everything else) | Medium | P1 |
-| §3 #4 | No fast-path before AI classify | Medium (cost) | Medium-High (behavior risk) | P2 |
-| B5 | Dead ChatGPT-era code in controller | Medium (maintainability) | Medium (needs call-graph audit) | P2 |
-| §3 #5 | Inaccurate token estimation | Low-Medium (indirect) | Low | P2 |
-| §3 #6 | No truncation caps on prompt fields | Low (defensive) | Low | P2 |
-| T1.3 | Google Cloud Vision OCR migration | Medium (quality/cost tradeoff, optional) | Medium-High | P2 |
-| B8 | Config/runtime model list drift | Low (suspected only) | Low | P3 |
-| B9 | Oversized `LARAVEL_TIMEOUT` | Low (suspected only) | Low | P3 |
-| B10 | 12h duplicate-order window | Low (business rule, not a bug) | N/A | P3 |
+| ID | Item | Impact | Effort | Priority | Status |
+|---|---|---|---|---|---|
+| B1 | Session creds in git → conflict loop + leaked secret | Critical | Medium | P0 | 🟡 Partial |
+| B2 | Duplicate/unsupervised `whatsapp:process-jobs` | Critical | Low-Medium | P0 | ✅ Done (lock) / 🟡 supervisor open |
+| B3 | `markRateLimited()` signature mismatch | Critical | Low | P0 | ✅ Done |
+| B4 | `env('BOT_TOKEN')` breaks under `config:cache` | High | Low | P0 | ✅ Done |
+| §3 #1 | Duplicate AI calls per message | High (cost) | Medium | P1 | ⬜ Not started |
+| §3 #3 | OCR payload repeated in classify() history | High (cost) | Low-Medium | P1 | ⬜ Not started |
+| §3 #2 | Unfiltered full memory dump | Medium-High (cost, grows over time) | Low | P1 | ⬜ Not started |
+| B7 | No Node process supervision | High (reliability) | Low | P1 | ⬜ Not started |
+| B6 | In-memory dedup lost on reconnect | Medium | Low-Medium | P1 | ✅ Done |
+| §3 #8 | No token/cost metrics | High (visibility, enables everything else) | Medium | P1 | ⬜ Not started |
+| §3 #4 | No fast-path before AI classify | Medium (cost) | Medium-High (behavior risk) | P2 | ⬜ Not started |
+| B5 | Dead ChatGPT-era code in controller | Medium (maintainability) | Medium (needs call-graph audit) | P2 | ✅ Done |
+| §3 #5 | Inaccurate token estimation | Low-Medium (indirect) | Low | P2 | ⬜ Not started |
+| §3 #6 | No truncation caps on prompt fields | Low (defensive) | Low | P2 | ⬜ Not started |
+| T1.3 | Google Cloud Vision OCR migration | Medium (quality/cost tradeoff, optional) | Medium-High | P2 | ⬜ Not started |
+| B8 | Config/runtime model list drift | Low (suspected only) | Low | P3 | ⬜ Not started |
+| B9 | Oversized `LARAVEL_TIMEOUT` | Low (suspected only) | Low | P3 | ⬜ Not started |
+| B10 | 12h duplicate-order window | Low (business rule, not a bug) | N/A | P3 | N/A |
 
 ## Recommended Execution Order
 
