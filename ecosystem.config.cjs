@@ -17,6 +17,7 @@ module.exports = {
       cwd: __dirname + '/whatsapp-bot',
       script: 'index.js',
       interpreter: 'node',
+      env: { PORT: 3080 },
       autorestart: true,
       max_restarts: 20,
       restart_delay: 3000,

@@ -26,7 +26,7 @@ const handledMessages = new Set();
 const mediaCollectors = {};
 const chatQueues = {};
 
-const PORT = process.env.PORT || 3010;
+const PORT = process.env.PORT || 3080;
 const LARAVEL_TIMEOUT = Number(process.env.LARAVEL_TIMEOUT || 30000);
 const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
 const AUTO_START_BOT_ID = process.env.AUTO_START_BOT_ID || '';

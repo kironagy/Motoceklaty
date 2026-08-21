@@ -53,7 +53,7 @@ class SendWhatsappStatusNotification implements ShouldQueue
             return;
         }
 
-        $url = rtrim(env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3010'), '/') . '/send-message';
+        $url = rtrim(env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3080'), '/') . '/send-message';
 
         $response = Http::connectTimeout(10)
             ->timeout(60)

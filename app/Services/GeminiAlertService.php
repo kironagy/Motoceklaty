@@ -2,12 +2,44 @@
 
 namespace App\Services;
 
+use App\Models\GeminiApiKeyModel;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class GeminiAlertService
 {
+    /**
+     * بيبعت تنبيه فوري وواتساب لما موديل واحد بس يخلص الحد اليومي بتاعه -
+     * مش لازم ننتظر كل الموديلات تخلص عشان الرسالة توصل. الرسالة نفسها
+     * نص عادي مبني من بيانات الموديل في الداتابيز، مفيش AI بيولّده.
+     */
+    public function modelExhaustedAlert(GeminiApiKeyModel $model): void
+    {
+        if (! config('gemini.alerts.enabled', true)) {
+            return;
+        }
+
+        $dedupeKey = 'gemini_model_exhausted_alert_' . $model->id . '_' . now()->toDateString();
+
+        if (Cache::has($dedupeKey)) {
+            return;
+        }
+
+        Cache::put($dedupeKey, true, now()->endOfDay());
+
+        $name = $model->display_name ?: $model->model_code;
+
+        $message = "⚠️ تنبيه Gemini\n\n"
+            . "الموديل \"{$name}\" ({$model->model_code}) خلص الحد اليومي بتاعه.\n"
+            . 'الوقت: ' . now()->format('Y-m-d H:i:s');
+
+        $this->sendWhatsappMessage($message);
+
+        Log::warning('Gemini single model exhausted alert sent', ['model_id' => $model->id]);
+    }
+
     public function startAllKeysExhaustedAlert(array $failedModels = []): void
     {
         if (! config('gemini.alerts.enabled', true)) {
@@ -119,21 +151,40 @@ class GeminiAlertService
     private function sendWhatsappMessage(string $message): void
     {
         $number = config('gemini.alerts.whatsapp_number');
+        $botId = config('gemini.alerts.whatsapp_bot_id');
         $url = config('gemini.alerts.whatsapp_url');
 
-        if (! $number || ! $url) {
-            Log::warning('Gemini alert skipped: missing whatsapp_number or whatsapp_url');
+        if (! $number || ! $botId || ! $url) {
+            Log::warning('Gemini alert skipped: missing whatsapp_number, whatsapp_bot_id, or whatsapp_url', [
+                'has_number' => (bool) $number,
+                'has_bot_id' => (bool) $botId,
+                'has_url' => (bool) $url,
+            ]);
             return;
         }
 
+        $jid = str_contains($number, '@') ? $number : $number . '@s.whatsapp.net';
+
         try {
-            Http::timeout(15)->post($url, [
-                'phone' => $number,
-                'message' => $message,
-            ]);
+            $response = Http::timeout(15)
+                ->withHeaders([
+                    'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
+                    'Accept' => 'application/json',
+                ])
+                ->post($url, [
+                    'bot_id' => (string) $botId,
+                    'jid' => $jid,
+                    'message' => $message,
+                ]);
 
-            Log::warning('Gemini alert whatsapp message sent');
-
+            if ($response->successful() && ($response->json('ok') ?? false)) {
+                Log::warning('Gemini alert whatsapp message sent');
+            } else {
+                Log::error('Gemini alert whatsapp send failed', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+            }
         } catch (\Throwable $e) {
             Log::error('Failed to send Gemini alert whatsapp message', [
                 'error' => $e->getMessage(),

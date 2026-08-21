@@ -655,7 +655,7 @@ class ApplicationHandler
                 return;
             }
 
-            $url = rtrim((string) env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3010'), '/') . '/send-message';
+            $url = rtrim((string) env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3080'), '/') . '/send-message';
 
             \Illuminate\Support\Facades\Http::connectTimeout(5)
                 ->timeout(15)

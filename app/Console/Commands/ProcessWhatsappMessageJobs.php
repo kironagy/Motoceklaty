@@ -205,7 +205,7 @@ class ProcessWhatsappMessageJobs extends Command
 
     private function sendWhatsappText(object $job, string $reply): void
     {
-        $url = rtrim(env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3010'), '/') . '/send-message';
+        $url = rtrim(env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3080'), '/') . '/send-message';
 
         $payload = $this->decodeJobPayload($job);
 
@@ -240,7 +240,7 @@ class ProcessWhatsappMessageJobs extends Command
 
     private function sendWhatsappMediaItems(object $job, array $mediaItems): void
     {
-        $url = rtrim(env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3010'), '/') . '/send-media-items';
+        $url = rtrim(env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3080'), '/') . '/send-media-items';
 
         $response = Http::connectTimeout(10)
             ->timeout(120)

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\InstallmentSystem;
 use App\Models\Machine;
 use App\Models\WhatsappConversation;
 use Illuminate\Support\Collection;
@@ -21,6 +22,25 @@ public function handle(
 ): array {
     try {
         $message = trim($message);
+
+        /*
+         * المحادثة دي محوّلة لموظف دعم فعلاً - الـ AI بيسكت تمامًا ومايردش
+         * لحد ما الموظف يقفل التحويل من الداشبورد (status يرجع 'open').
+         * بنسجل الرسالة الجديدة بس عشان الموظف يشوفها.
+         */
+        if (($conversation->status ?? 'open') === 'awaiting_agent') {
+            $conversation->messages()->create([
+                'direction' => 'incoming',
+                'message' => $message,
+                'payload' => ['media_items' => $mediaItems],
+            ]);
+
+            return $this->textResult(null);
+        }
+
+        if (! count($mediaItems) && $this->isHumanSupportRequest($message)) {
+            return $this->handoffToAgent($conversation, $message);
+        }
 
         if (count($mediaItems)) {
             if (($conversation->pending_question ?? null) === 'application_documents') {
@@ -69,7 +89,17 @@ public function handle(
             $plan['clarification_question'] = null;
         } elseif (
             $lastMachines->count() > 1
-            && $this->isVariantNarrowingReply($message)
+            && (
+                $this->isVariantNarrowingReply($message)
+                /*
+                 * تضييق عام مش مرتبط بكلمة معينة (استيراد/فرز تاني):
+                 * العميل بيكتب اسم/براند قصير بيطابق بعض (مش كل) المكن
+                 * اللي عرضناها بالفعل - زي "خليك في VLR" لما نكون رشحنا
+                 * أكتر من موديل وواحد منهم بس VLR. الأولوية للتضييق من
+                 * نفس المرشحين قبل أي بحث جديد في الكتالوج كله.
+                 */
+                || $this->isGenericNarrowingReply($lastMachines, $message)
+            )
         ) {
             /*
              * لو آخر رد كان فيه أكتر من موديل مطروح (زي "هوجن ٤ استيراد"
@@ -91,7 +121,16 @@ public function handle(
         } elseif (
             in_array($intent, ['general', 'unknown'], true)
             && $lastMachines->isNotEmpty()
-            && $this->isPureFollowUp($message)
+            && (
+                $this->isPureFollowUp($message)
+                /*
+                 * تأكيد بسيط ("تمام"، "ماشي") بعد ما عرضنا مكنة/مكن، من غير
+                 * ما يكون فيه سياق تقسيط شغال (ده متغطي فوق في
+                 * isBareConfirmationAfterCalc) - يعني "استمر معايا في
+                 * اللي عرضته" مش "ابدأ من الصفر واسألني عاوز مكنه ايه".
+                 */
+                || $this->isBareConfirmation($normalizedMessage)
+            )
         ) {
             $intent = $this->detectIntent($message);
             $plan['intent'] = $intent;
@@ -132,6 +171,20 @@ public function handle(
         }
 
         $isBrandOnly = app(MachineSearchService::class)->isBrandOnlyRequest($message);
+
+        /*
+         * لو الرسالة طلب براند بس (زي "عاوز مكنه دايو")، مبنعتمدش على
+         * المكن اللي جت من resolveMachinesFromPlan() (ممكن تبقى فاضلة
+         * من محادثة سابقة عن براند تاني تمامًا) - بنعمل بحث جديد مباشر
+         * بالبراند المطلوب عشان مايحصلش خلط بين براندات مختلفة.
+         */
+        if ($isBrandOnly) {
+            $freshBrandMachines = app(MachineSearchService::class)->search($message, 20);
+
+            if ($freshBrandMachines->isNotEmpty()) {
+                $machines = $freshBrandMachines;
+            }
+        }
 
         $brandFiltered = $this->filterMachinesByRequestedBrand($machines, $message);
 
@@ -312,10 +365,7 @@ private function handleAiFallback(
     ]);
 
     if (! ($result['ok'] ?? false)) {
-        return $this->textReply(
-            $conversation,
-            'ثواني يا فندم، هراجعلك التفاصيل وأرد عليك.'
-        );
+        return $this->handoffToAgent($conversation, $message);
     }
 
     $reply = trim((string) $result['reply']);
@@ -781,6 +831,53 @@ $folder = $this->safeFolderName($machine->name);
         ];
     }
 
+    private function isHumanSupportRequest(string $message): bool
+    {
+        $m = $this->normalizeText($message);
+
+        return $this->containsAny($m, [
+            'دعم فني',
+            'الدعم الفني',
+            'خدمه العملاء',
+            'خدمة العملاء',
+            'عايز اكلم حد',
+            'عاوز اكلم حد',
+            'اكلم موظف',
+            'اكلم حد من عندكم',
+            'كلمني موظف',
+            'حد يرد عليا',
+            'حد يتكلم معايا',
+            'عايز حد يرد',
+            'عاوز حد يرد',
+            'شخص حقيقي',
+            'انسان حقيقي',
+            'مش عايز اتكلم مع بوت',
+            'مش عاوز اتكلم مع بوت',
+            'مش فاهم حاجه',
+            'مش فاهمه حاجه',
+        ]);
+    }
+
+    /**
+     * بيحول المحادثة لموظف دعم: status = awaiting_agent يوقف رد الـ AI
+     * تمامًا (شيك أول handle())، وتظهر في tab "الرسائل المنتظر الرد
+     * عليها" بالداشبورد لحد ما الموظف يرد ويقفل التحويل.
+     */
+    private function handoffToAgent(WhatsappConversation $conversation, string $message): array
+    {
+        $conversation->forceFill(['status' => 'awaiting_agent'])->save();
+
+        $reply = $this->renderMemory('رد تحويل لدعم فني')
+            ?: 'تمام يا فندم، هحولك دلوقتي لموظف خدمة عملاء هيتواصل معاك في أقرب وقت.';
+
+        $this->saveOutgoing($conversation, $reply, [
+            'source' => 'human_handoff',
+            'message' => $message,
+        ]);
+
+        return $this->textResult($reply);
+    }
+
     private function textReply(WhatsappConversation $conversation, string $reply): array
     {
         $this->saveOutgoing($conversation, $reply, [
@@ -790,7 +887,7 @@ $folder = $this->safeFolderName($machine->name);
         return $this->textResult($reply);
     }
 
-    private function textResult(string $reply, array $extra = []): array
+    private function textResult(?string $reply, array $extra = []): array
     {
         return array_merge([
             'handled' => true,
@@ -1013,6 +1110,36 @@ private function resolveMachinesFromPlan(
     return app(MachineSearchService::class)->search($message, 20);
 }
 
+
+/**
+ * لو الرسالة قصيرة (1-3 كلمات، مفيهاش أرقام كتير) وبتطابق جزء (مش كل)
+ * المكن اللي اتعرضت قبل كده، اعتبرها تضييق مش طلب جديد. بنستخدم نفس
+ * normalizeSearchText بتاعة MachineSearchService عشان نتجنب تكرار أي
+ * أخطاء تطبيع (زي مشكلة دايو/دايون اللي اتصلحت هناك).
+ */
+private function isGenericNarrowingReply(Collection $lastMachines, string $message): bool
+{
+    $search = app(MachineSearchService::class);
+    $normalized = trim($search->normalizeSearchText($message));
+
+    if ($normalized === '' || str_word_count($normalized) > 3) {
+        return false;
+    }
+
+    $matches = 0;
+
+    foreach ($lastMachines as $machine) {
+        $name = $search->normalizeSearchText(
+            trim($this->machineBrandName($machine) . ' ' . $machine->name)
+        );
+
+        if ($name !== '' && str_contains($name, $normalized)) {
+            $matches++;
+        }
+    }
+
+    return $matches > 0 && $matches < $lastMachines->count();
+}
 
 private function isVariantNarrowingReply(string $message): bool
 {
@@ -1292,6 +1419,22 @@ private function handleInstallmentCalc(
         return $this->textReply($conversation, $reply);
     }
 
+    $validMonths = $this->validMonthsForMachines($machines);
+
+    if (! empty($validMonths) && ! in_array((int) $months, $validMonths, true)) {
+        $this->rememberMachines($conversation, $machines);
+        $this->updateConversationState($conversation, 'installment_calc', 'choose_months', [
+            'machine_ids' => $machines->pluck('id')->values()->all(),
+        ]);
+
+        $list = implode(' / ', $validMonths);
+
+        return $this->textReply(
+            $conversation,
+            "المدة دي مش متاحة يا فندم، مدد التقسيط المتاحة للمكنة دي: {$list} شهر. تحب تقسط على قد ايه؟"
+        );
+    }
+
     $deposit = (float) ($parsed['deposit'] ?? 0);
     $system = (string) ($parsed['system'] ?? '20');
 
@@ -1338,6 +1481,40 @@ private function handleInstallmentCalc(
     ]);
 
     return array_merge($this->textResult($reply), $this->machineMeta($machines));
+}
+
+/**
+ * كل مكنة مرتبطة بـ IDs في installment_systems (array)، وكل نظام تقسيط
+ * له خطط (plans) فيها months محددة. برجع union لكل المدد المتاحة فعليًا
+ * عبر كل المكن الممررة، عشان العميل ميكتبش رقم شهور من دماغه.
+ */
+private function validMonthsForMachines(Collection $machines): array
+{
+    $systemIds = $machines
+        ->flatMap(function (Machine $machine) {
+            $ids = $machine->installment_systems ?? [];
+
+            return is_array($ids) ? $ids : [];
+        })
+        ->filter()
+        ->unique()
+        ->values()
+        ->all();
+
+    if (empty($systemIds)) {
+        return [];
+    }
+
+    return InstallmentSystem::query()
+        ->whereIn('id', $systemIds)
+        ->get()
+        ->flatMap(fn (InstallmentSystem $system) => collect($system->plans ?? [])->pluck('months'))
+        ->map(fn ($m) => (int) $m)
+        ->filter(fn ($m) => $m > 0)
+        ->unique()
+        ->sort()
+        ->values()
+        ->all();
 }
 
 private function extractRequestedBrand(string $message): ?array
@@ -1467,6 +1644,23 @@ private function narrowMachinesByVariant(Collection $machines, string $message):
         return $filtered->isNotEmpty() ? $filtered : $machines;
     }
 
+    $search = app(MachineSearchService::class);
+    $normalized = trim($search->normalizeSearchText($message));
+
+    if ($normalized !== '' && str_word_count($normalized) <= 3) {
+        $filtered = $machines->filter(function (Machine $machine) use ($search, $normalized) {
+            $name = $search->normalizeSearchText(
+                trim($this->machineBrandName($machine) . ' ' . $machine->name)
+            );
+
+            return $name !== '' && str_contains($name, $normalized);
+        })->values();
+
+        if ($filtered->isNotEmpty() && $filtered->count() < $machines->count()) {
+            return $filtered;
+        }
+    }
+
     return $machines;
 }
 
@@ -1577,6 +1771,12 @@ private function isBareConfirmation(string $normalizedMessage): bool
         'ايوه تمام',
         'موافق',
         'ماشي',
+        'ماشي تمام',
+        'حلو',
+        'تمام كدا',
+        'اه',
+        'ايوه',
+        'ايوا',
     ], true);
 }
 

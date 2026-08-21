@@ -140,6 +140,8 @@ class GeminiKeyManager
             'cooldown_until' => now()->endOfDay(),
             'last_error' => 'Daily request limit reached.',
         ]);
+
+        app(GeminiAlertService::class)->modelExhaustedAlert($model);
     }
 
     public function refreshWindows(): void

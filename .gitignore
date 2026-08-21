@@ -15,6 +15,7 @@
 /whatsapp-bot/.env
 /whatsapp-bot/auth/
 /whatsapp-bot/sessions/
+/whatsapp-bot/sessions_backup/
 /whatsapp-bot/*.log
 /storage/app/**/*.log
 /storage/app/**/*.tmp
