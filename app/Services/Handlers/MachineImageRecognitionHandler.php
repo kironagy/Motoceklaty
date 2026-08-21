@@ -73,6 +73,43 @@ class MachineImageRecognitionHandler
             ]);
         }
 
+        $machineType = trim((string) ($classification['machine_type'] ?? ''));
+        $brandGuess = trim((string) ($classification['brand_guess'] ?? ''));
+
+        /*
+         * مفيش موديل مطابق بثقة من الكتالوج، بس Gemini عرف نوع/براند
+         * المكنة - بنقوله للعميل صراحةً إنها مش متوفرة عندنا بدل ما
+         * نسكت، ونجيب بدائل من نفس البراند لو لقينا.
+         */
+        if ($machineType !== '' || $brandGuess !== '') {
+            $alternatives = $this->findAlternatives($brandGuess);
+
+            $typeLabel = $machineType !== '' ? $machineType : 'المكنة';
+            $brandLabel = $brandGuess !== '' ? " من براند {$brandGuess}" : '';
+            $intro = "من الصورة، دي شكلها {$typeLabel}{$brandLabel}، بس الموديل ده مش متوفر عندنا حاليًا.";
+
+            if ($alternatives->isNotEmpty()) {
+                $this->rememberMachines($conversation, $alternatives);
+
+                $lines = $alternatives->map(function (Machine $machine) {
+                    $price = $machine->cash_price
+                        ? number_format((float) $machine->cash_price) . ' جنيه'
+                        : 'السعر محتاج تأكيد';
+
+                    return '- ' . $this->machineDisplayName($machine) . ': ' . $price;
+                })->implode("\n");
+
+                $reply = "{$intro}\nدي أقرب بدائل عندنا:\n{$lines}";
+            } else {
+                $reply = "{$intro} تقدر تكتبلي اسم الموديل أو البراند وأشوفلك أقرب حاجة عندنا؟";
+            }
+
+            return $this->reply($conversation, $reply, [
+                'vision_classification' => $classification,
+                'alternative_machine_ids' => $alternatives->pluck('id')->values()->all(),
+            ]);
+        }
+
         $visibleText = trim((string) ($classification['visible_text'] ?? ''));
         $hint = $visibleText !== '' ? " شفت إن فيها كتابة \"{$visibleText}\"،" : '';
 
@@ -81,6 +118,24 @@ class MachineImageRecognitionHandler
             "مش متأكد بالظبط من الموديل من الصورة دي،{$hint} ممكن تأكدلي اسم الموديل أو البراند عشان أقولك تفاصيله بالظبط؟",
             ['vision_classification' => $classification]
         );
+    }
+
+    /**
+     * بدور على بدائل في الكتالوج من نفس البراند اللي Gemini خمّنه. لاحظ
+     * إن أسماء "براند" هنا بتشمل كمان فئات زي "Scooters"/"تروسيكلات"،
+     * فالمطابقة دي بتغطي النوع كمان مش البراند التجاري بس.
+     */
+    private function findAlternatives(string $brandGuess): Collection
+    {
+        if ($brandGuess === '') {
+            return collect();
+        }
+
+        return Machine::query()
+            ->with('brand')
+            ->whereHas('brand', fn ($q) => $q->where('name', 'like', '%' . $brandGuess . '%'))
+            ->limit(5)
+            ->get();
     }
 
     /**
@@ -102,20 +157,24 @@ class MachineImageRecognitionHandler
             ->implode("\n");
 
         $prompt = <<<PROMPT
-انت خبير بيتعرف على مكن/موتوسيكلات وسكوترات من صورة، وبتقارنها بقائمة الموديلات الحقيقية المتاحة عندنا بس تحت. اختار رقم (id) الموديل الأقرب للي في الصورة *بس لو متأكد بصريًا* (الشكل والتصميم والشعار متطابقين فعلاً)، ولو مش متأكد أو الصورة مش واضحة كفاية أو الموديل مش موجود في القائمة، رجع match_id: null - ممنوع تخمّن أو تختار أقرب حاجة شكلها شبه لو مش متأكد فعلاً، خصوصًا إن سكوتر وموتوسيكل حاجتين مختلفتين تمامًا حتى لو نفس البراند.
+انت خبير بيتعرف على مكن/موتوسيكلات وسكوترات من صورة. مهمتك جزئين:
+
+١) وصف نوع المكنة (موتوسيكل / سكوتر / تروسيكل / غير معروف) والبراند بتاعها لو ظاهر أو معروف، حتى لو الموديل ده مش موجود في القائمة تحت.
+
+٢) قارن الصورة بقائمة الموديلات الحقيقية المتاحة عندنا تحت، واختار رقم (id) الموديل الأقرب للي في الصورة *بس لو متأكد بصريًا* (الشكل والتصميم والشعار متطابقين فعلاً)، ولو مش متأكد أو الصورة مش واضحة كفاية أو الموديل مش موجود في القائمة، رجع match_id: null - ممنوع تخمّن أو تختار أقرب حاجة شكلها شبه لو مش متأكد فعلاً، خصوصًا إن سكوتر وموتوسيكل حاجتين مختلفتين تمامًا حتى لو نفس البراند.
 
 قائمة الموديلات (id) اسم:
 {$list}
 
 رد بصيغة JSON فقط بدون أي كلام زيادة، بالشكل ده بالظبط:
-{"match_id": رقم من القايمة فوق أو null, "confidence": "high أو medium أو low", "visible_text": "أي نص أو شعار ظاهر فعليًا في الصورة"}
+{"match_id": رقم من القايمة فوق أو null, "confidence": "high أو medium أو low", "visible_text": "أي نص أو شعار ظاهر فعليًا في الصورة", "machine_type": "موتوسيكل أو سكوتر أو تروسيكل أو فاضي لو مش معروف", "brand_guess": "اسم البراند لو ظاهر أو معروف أو فاضي"}
 PROMPT;
 
         $result = app(GeminiClient::class)->generateText($prompt, 'gemini-3.1-flash-lite', [
             'image_base64' => base64_encode($binary),
             'image_mime' => $mime,
             'temperature' => 0.1,
-            'maxOutputTokens' => 200,
+            'maxOutputTokens' => 300,
             'responseMimeType' => 'application/json',
         ]);
 
@@ -144,6 +203,8 @@ PROMPT;
                 ? $decoded['confidence']
                 : 'low',
             'visible_text' => trim((string) ($decoded['visible_text'] ?? '')),
+            'machine_type' => trim((string) ($decoded['machine_type'] ?? '')),
+            'brand_guess' => trim((string) ($decoded['brand_guess'] ?? '')),
         ];
     }
 
