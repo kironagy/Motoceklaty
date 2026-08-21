@@ -92,11 +92,44 @@ class AwaitingAgentConversationResource extends Resource
                     ->modalDescription('هيرجع الـ AI يرد على العميل تاني بشكل عادي.')
                     ->action(function (WhatsappConversation $record): void {
                         $record->forceFill(['status' => 'open'])->save();
+                        static::setArchived($record, false);
 
                         Notification::make()->title('اتقفل التحويل، الـ AI رجع يرد')->success()->send();
                     }),
             ])
             ->emptyStateHeading('مفيش محادثات منتظرة الرد دلوقتي');
+    }
+
+    private static function setArchived(WhatsappConversation $record, bool $archive): void
+    {
+        $lastIncoming = $record->messages()
+            ->where('direction', 'incoming')
+            ->latest('id')
+            ->first();
+
+        $botId = data_get($lastIncoming?->payload, 'bot_id') ?: $record->whatsapp_bot_id;
+        $jid = data_get($lastIncoming?->payload, 'reply_jid')
+            ?: data_get($lastIncoming?->payload, 'from')
+            ?: ($record->phone ? $record->phone . '@s.whatsapp.net' : null);
+
+        if (! $botId || ! $jid) {
+            return;
+        }
+
+        try {
+            Http::timeout(10)
+                ->withHeaders([
+                    'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
+                    'Accept' => 'application/json',
+                ])
+                ->post(config('services.whatsapp.worker_url') . '/chats/archive', [
+                    'bot_id' => (string) $botId,
+                    'jid' => (string) $jid,
+                    'archive' => $archive,
+                ]);
+        } catch (\Throwable) {
+            // best effort - closing the handoff itself already succeeded
+        }
     }
 
     private static function sendReply(WhatsappConversation $record, string $message): bool
@@ -122,7 +155,7 @@ class AwaitingAgentConversationResource extends Resource
         }
 
         try {
-            $url = rtrim((string) env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3080'), '/') . '/send-message';
+            $url = (string) config('gemini.alerts.whatsapp_url');
 
             $response = Http::connectTimeout(5)
                 ->timeout(15)

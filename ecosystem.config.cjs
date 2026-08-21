@@ -42,5 +42,18 @@ module.exports = {
       max_restarts: 20,
       restart_delay: 3000,
     },
+    {
+      // schedule:work loops internally and fires every scheduled task
+      // (gemini:reset-usage, gemini-alerts-repeat, ...) every minute on its
+      // own - no system cron needed. autorestart brings it back if it dies.
+      name: 'laravel-scheduler',
+      cwd: __dirname,
+      script: 'artisan',
+      interpreter: 'php',
+      args: 'schedule:work',
+      autorestart: true,
+      max_restarts: 20,
+      restart_delay: 3000,
+    },
   ],
 };

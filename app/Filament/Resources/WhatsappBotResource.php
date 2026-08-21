@@ -27,7 +27,7 @@ class WhatsappBotResource extends Resource
 
     protected static function getNodeUrl(): string
     {
-        return rtrim((string) env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3080'), '/');
+        return (string) config('services.whatsapp.worker_url');
     }
 
     public static function form(Form $form): Form

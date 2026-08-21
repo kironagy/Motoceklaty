@@ -548,6 +548,32 @@ app.get('/sessions/:botId/status', checkToken, (req, res) => {
 
 
 
+app.post('/chats/archive', checkToken, async (req, res) => {
+    try {
+        const botId = normalizeBotId(req.body.bot_id);
+        const jid = req.body.jid;
+        const archive = req.body.archive !== false;
+
+        if (!botId || !jid) {
+            return res.status(422).json({ ok: false, error: 'bot_id, jid required' });
+        }
+
+        const sock = sessions[botId];
+
+        if (!sock) {
+            return res.status(404).json({ ok: false, error: 'session not found', bot_id: botId });
+        }
+
+        await sock.chatModify({ archive, lastMessages: [] }, jid);
+
+        return res.json({ ok: true, bot_id: botId, jid, archived: archive });
+    } catch (error) {
+        console.error('ARCHIVE CHAT ENDPOINT ERROR:', error?.message || error);
+
+        return res.status(500).json({ ok: false, error: error?.message || 'archive failed' });
+    }
+});
+
 app.post('/send-message', checkToken, async (req, res) => {
     try {
         const botId = normalizeBotId(req.body.bot_id);

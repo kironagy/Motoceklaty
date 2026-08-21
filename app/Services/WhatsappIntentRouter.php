@@ -799,8 +799,8 @@ $folder = $this->safeFolderName($machine->name);
         $text = preg_replace('/\bال(?=[\p{Arabic}]{2,})/u', '', $text);
 
         $text = str_replace(
-            ['استراد', 'وارد', 'فرز ثاني', 'فرز 2', 'فرز تانى', 'تانى', 'اصلى'],
-            ['استيراد', 'استيراد', 'فرز تاني', 'فرز تاني', 'فرز تاني', 'تاني', 'اصلي'],
+            ['استراد', 'وارد', 'فرز ثاني', 'فرز 2', 'فرز تانى', 'تانى', 'اصلى', 'بكام'],
+            ['استيراد', 'استيراد', 'فرز تاني', 'فرز تاني', 'فرز تاني', 'تاني', 'اصلي', ' كام'],
             $text
         );
 
@@ -875,7 +875,48 @@ $folder = $this->safeFolderName($machine->name);
             'message' => $message,
         ]);
 
+        $this->archiveChatOnWhatsapp($conversation);
+
         return $this->textResult($reply);
+    }
+
+    /**
+     * بيحط المحادثة في أرشيف الواتساب نفسه (مش داشبورد بس) عشان أي حد
+     * فاتح الواتساب مباشرة يلاقيها في الأرشيف. لو فشل، مبيوقفش التحويل -
+     * الأهم إن الـ AI يسكت وconversation تتعلم في الداشبورد على أي حال.
+     */
+    private function archiveChatOnWhatsapp(WhatsappConversation $conversation): void
+    {
+        $lastIncoming = $conversation->messages()
+            ->where('direction', 'incoming')
+            ->latest('id')
+            ->first();
+
+        $botId = data_get($lastIncoming?->payload, 'bot_id') ?: $conversation->whatsapp_bot_id;
+        $jid = data_get($lastIncoming?->payload, 'reply_jid')
+            ?: data_get($lastIncoming?->payload, 'from')
+            ?: ($conversation->phone ? $conversation->phone . '@s.whatsapp.net' : null);
+
+        if (! $botId || ! $jid) {
+            return;
+        }
+
+        try {
+            \Illuminate\Support\Facades\Http::timeout(10)
+                ->withHeaders([
+                    'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
+                    'Accept' => 'application/json',
+                ])
+                ->post(config('services.whatsapp.worker_url') . '/chats/archive', [
+                    'bot_id' => (string) $botId,
+                    'jid' => (string) $jid,
+                ]);
+        } catch (\Throwable $e) {
+            Log::warning('Failed to archive WhatsApp chat on handoff', [
+                'conversation_id' => $conversation->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function textReply(WhatsappConversation $conversation, string $reply): array
