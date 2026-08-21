@@ -365,7 +365,35 @@ private function handleAiFallback(
     ]);
 
     if (! ($result['ok'] ?? false)) {
-        return $this->handoffToAgent($conversation, $message);
+        /*
+         * فشل تقني عابر في نداء AI (شبكة/rate-limit/JSON) مش معناه إن الـ
+         * AI "معرفش يساعد العميل" - ده الفرق اللي كان ناقص وسبب تحويل
+         * أي رسالة عادية زي "مساء الخير" لدعم فني من أول مرة. بنحوّل
+         * للدعم بس لو فشل مرتين ورا بعض في نفس المحادثة، مش من أول فشل.
+         */
+        $failures = (int) data_get($conversation->context_payload, 'ai_fallback_failures', 0) + 1;
+
+        $conversation->forceFill([
+            'context_payload' => array_merge(
+                $conversation->context_payload ?? [],
+                ['ai_fallback_failures' => $failures]
+            ),
+        ])->save();
+
+        if ($failures >= 2) {
+            return $this->handoffToAgent($conversation, $message);
+        }
+
+        return $this->textReply(
+            $conversation,
+            'ثواني يا فندم، هراجعلك التفاصيل وأرد عليك.'
+        );
+    }
+
+    if ($conversation->context_payload && array_key_exists('ai_fallback_failures', $conversation->context_payload)) {
+        $cleared = $conversation->context_payload;
+        unset($cleared['ai_fallback_failures']);
+        $conversation->forceFill(['context_payload' => $cleared])->save();
     }
 
     $reply = trim((string) $result['reply']);
