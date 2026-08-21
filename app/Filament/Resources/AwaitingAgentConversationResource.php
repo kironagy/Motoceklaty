@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\AwaitingAgentConversationResource\Pages;
 use App\Models\WhatsappConversation;
+use App\Services\WhatsappIntentRouter;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
@@ -94,10 +95,88 @@ class AwaitingAgentConversationResource extends Resource
                         $record->forceFill(['status' => 'open'])->save();
                         static::setArchived($record, false);
 
-                        Notification::make()->title('اتقفل التحويل، الـ AI رجع يرد')->success()->send();
+                        $answered = static::answerPendingIncomingMessage($record);
+
+                        Notification::make()
+                            ->title($answered
+                                ? 'اتقفل التحويل، الـ AI رد على آخر رسالة وسابها'
+                                : 'اتقفل التحويل، الـ AI هيرد على أي رسالة جديدة من العميل')
+                            ->success()
+                            ->send();
                     }),
             ])
             ->emptyStateHeading('مفيش محادثات منتظرة الرد دلوقتي');
+    }
+
+    /**
+     * قفل التحويل لوحده بيغيّر الـ status بس - العميل يمكن يكون بعت
+     * رسايل وقت ما كانت المحادثة awaiting_agent واتسجلت من غير رد
+     * (الـ AI كان ساكت عمدًا). لو مفيش رد بعدها من الموظف نفسه، بنشغّل
+     * الراوتر دلوقتي على آخر رسالة عشان العميل ياخد رد بدل ما يفضل مستني
+     * لحد ما يبعت حاجة جديدة بنفسه.
+     */
+    private static function answerPendingIncomingMessage(WhatsappConversation $record): bool
+    {
+        $last = $record->messages()->latest('id')->first();
+
+        if (! $last || $last->direction !== 'incoming') {
+            return false;
+        }
+
+        $mediaItems = data_get($last->payload, 'saved_media_items', []);
+
+        try {
+            $result = app(WhatsappIntentRouter::class)->handle(
+                $record->refresh(),
+                (string) $last->message,
+                is_array($mediaItems) ? $mediaItems : []
+            );
+        } catch (\Throwable) {
+            return false;
+        }
+
+        $reply = trim((string) ($result['reply'] ?? ''));
+
+        if ($reply === '') {
+            return false;
+        }
+
+        return static::deliverText($record, $reply);
+    }
+
+    private static function deliverText(WhatsappConversation $record, string $message): bool
+    {
+        $lastIncoming = $record->messages()
+            ->where('direction', 'incoming')
+            ->latest('id')
+            ->first();
+
+        $botId = data_get($lastIncoming?->payload, 'bot_id') ?: $record->whatsapp_bot_id;
+        $jid = data_get($lastIncoming?->payload, 'reply_jid')
+            ?: data_get($lastIncoming?->payload, 'from')
+            ?: ($record->phone ? $record->phone . '@s.whatsapp.net' : null);
+
+        if (! $botId || ! $jid) {
+            return false;
+        }
+
+        try {
+            $response = Http::connectTimeout(5)
+                ->timeout(15)
+                ->withHeaders([
+                    'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
+                    'Accept' => 'application/json',
+                ])
+                ->post(config('gemini.alerts.whatsapp_url'), [
+                    'bot_id' => (string) $botId,
+                    'jid' => (string) $jid,
+                    'message' => $message,
+                ]);
+
+            return $response->successful() && ($response->json('ok') ?? false);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     private static function setArchived(WhatsappConversation $record, bool $archive): void
