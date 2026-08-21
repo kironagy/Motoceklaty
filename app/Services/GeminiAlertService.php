@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\GeminiApiKey;
 use App\Models\GeminiApiKeyModel;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -10,6 +11,48 @@ use Illuminate\Support\Facades\Log;
 
 class GeminiAlertService
 {
+    /**
+     * بيبعت تنبيه فوري لما رد الـ AI على عميل يفشل (حتى لو فشل عابر مش
+     * كل المفاتيح خلصت) - العميل ساعتها بياخد رد "ثواني يا فندم..."
+     * بدل الرد الحقيقي، فلازم الأدمن ياخد تنبيه فوري بنفس اللحظة يعرف
+     * فيه إيه المفتاح/الموديل اللي فشل ولية، مش يستنى لحد ما كل المفاتيح
+     * تخلص عشان يعرف إن فيه مشكلة.
+     */
+    public function transientAiFailureAlert(?string $modelCode, ?int $keyId, ?string $error): void
+    {
+        if (! config('gemini.alerts.enabled', true)) {
+            return;
+        }
+
+        $dedupeKey = 'gemini_transient_failure_alert_' . md5(($modelCode ?? 'unknown') . '|' . ($keyId ?? 'unknown'));
+
+        if (Cache::has($dedupeKey)) {
+            return;
+        }
+
+        Cache::put($dedupeKey, true, now()->addMinutes(2));
+
+        $keyName = $keyId ? GeminiApiKey::find($keyId)?->name : null;
+
+        $label = match (true) {
+            (bool) $keyName => "المفتاح \"{$keyName}\"",
+            (bool) $modelCode => "الموديل \"{$modelCode}\"",
+            default => 'أحد مفاتيح Gemini',
+        };
+
+        $message = $error
+            ? "⚠️ تنبيه Gemini\n\nحصل خطأ وقت محاولة الرد على عميل عن طريق {$label}:\n{$error}\n\nالوقت: " . now()->format('Y-m-d H:i:s')
+            : "⚠️ تنبيه Gemini\n\n{$label} مش قادر يبعت رسائل دلوقتي (فشل الرد على عميل من غير تفاصيل خطأ واضحة).\n\nالوقت: " . now()->format('Y-m-d H:i:s');
+
+        $this->sendWhatsappMessage($message);
+
+        Log::warning('Gemini transient AI failure alert sent', [
+            'model' => $modelCode,
+            'key_id' => $keyId,
+            'error' => $error,
+        ]);
+    }
+
     /**
      * بيبعت تنبيه فوري وواتساب لما موديل واحد بس يخلص الحد اليومي بتاعه -
      * مش لازم ننتظر كل الموديلات تخلص عشان الرسالة توصل. الرسالة نفسها
@@ -151,11 +194,19 @@ class GeminiAlertService
     private function sendWhatsappMessage(string $message): void
     {
         $number = config('gemini.alerts.whatsapp_number');
-        $botId = config('gemini.alerts.whatsapp_bot_id');
         $url = config('gemini.alerts.whatsapp_url');
 
+        /*
+         * عمدًا مش بنعتمد على GEMINI_ALERT_BOT_ID ثابت في .env - ده نفسه
+         * ممكن يبقى البوت اللي واقع وقت المشكلة. بنستخدم آخر بوت شغّال
+         * (is_active) من نفس منطق auto-start في whatsapp-bot/index.js،
+         * فالتنبيه بيوصل طول ما فيه أي بوت شغّال، مش بوت واحد بعينه.
+         */
+        $botId = \App\Models\WhatsappBot::where('is_active', true)->latest('id')->value('id')
+            ?? \App\Models\WhatsappBot::latest('id')->value('id');
+
         if (! $number || ! $botId || ! $url) {
-            Log::warning('Gemini alert skipped: missing whatsapp_number, whatsapp_bot_id, or whatsapp_url', [
+            Log::warning('Gemini alert skipped: missing whatsapp_number, active bot, or whatsapp_url', [
                 'has_number' => (bool) $number,
                 'has_bot_id' => (bool) $botId,
                 'has_url' => (bool) $url,

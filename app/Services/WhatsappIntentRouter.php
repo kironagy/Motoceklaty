@@ -38,6 +38,16 @@ public function handle(
             return $this->textResult(null);
         }
 
+        if (count($mediaItems) && $this->allMediaAreVoice($mediaItems)) {
+            return $this->handleVoiceMessage($conversation, $message);
+        }
+
+        if ($conversation->context_payload && array_key_exists('voice_message_count', $conversation->context_payload)) {
+            $cleared = $conversation->context_payload;
+            unset($cleared['voice_message_count']);
+            $conversation->forceFill(['context_payload' => $cleared])->save();
+        }
+
         if (! count($mediaItems) && $this->isHumanSupportRequest($message)) {
             return $this->handoffToAgent($conversation, $message);
         }
@@ -45,6 +55,11 @@ public function handle(
         if (count($mediaItems)) {
             if (($conversation->pending_question ?? null) === 'application_documents') {
                 return app(ApplicationHandler::class)->handleDocument($conversation, $mediaItems);
+            }
+
+            if ($this->allMediaAreImages($mediaItems)) {
+                return app(\App\Services\Handlers\MachineImageRecognitionHandler::class)
+                    ->handle($conversation, $mediaItems, $message);
             }
 
             return app(MediaOcrHandler::class)->handle(
@@ -379,6 +394,12 @@ private function handleAiFallback(
                 ['ai_fallback_failures' => $failures]
             ),
         ])->save();
+
+        app(GeminiAlertService::class)->transientAiFailureAlert(
+            $result['model'] ?? null,
+            $result['key_id'] ?? null,
+            $result['error'] ?? null
+        );
 
         if ($failures >= 2) {
             return $this->handoffToAgent($conversation, $message);
@@ -884,6 +905,81 @@ $folder = $this->safeFolderName($machine->name);
             'مش فاهم حاجه',
             'مش فاهمه حاجه',
         ]);
+    }
+
+    /**
+     * كل عناصر الوسائط المرفقة صوتية (رسالة صوتية/voice note)، مفيش أي
+     * صورة أو مستند مع الصوت.
+     */
+    private function allMediaAreVoice(array $mediaItems): bool
+    {
+        if (! count($mediaItems)) {
+            return false;
+        }
+
+        foreach ($mediaItems as $item) {
+            $type = strtolower((string) ($item['type'] ?? $item['media_type'] ?? ''));
+            $mime = strtolower((string) ($item['mime'] ?? $item['media_mime'] ?? ''));
+
+            if ($type !== 'audio' && ! str_starts_with($mime, 'audio/')) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * كل عناصر الوسائط المرفقة صور (مش مستندات/PDF)، عشان نجرب نتعرف
+     * على المكنة في الصورة قبل ما نحول للـ OCR بتاع المستندات.
+     */
+    private function allMediaAreImages(array $mediaItems): bool
+    {
+        if (! count($mediaItems)) {
+            return false;
+        }
+
+        foreach ($mediaItems as $item) {
+            $type = strtolower((string) ($item['type'] ?? $item['media_type'] ?? ''));
+            $mime = strtolower((string) ($item['mime'] ?? $item['media_mime'] ?? ''));
+
+            $isImage = $type === 'image' || str_starts_with($mime, 'image/');
+
+            if (! $isImage || str_contains($mime, 'pdf')) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * حاليًا الـ AI مقدرش يحلل رسائل صوتية. أول مرتين بنطلب من العميل
+     * يكتب طلبه، وأي محاولة تالتة بنحوّله لدعم فني بدل ما نكرر نفس الرد
+     * لما نهاية ملهاش.
+     */
+    private function handleVoiceMessage(WhatsappConversation $conversation, string $message): array
+    {
+        $count = (int) data_get($conversation->context_payload, 'voice_message_count', 0) + 1;
+
+        $conversation->forceFill([
+            'context_payload' => array_merge(
+                $conversation->context_payload ?? [],
+                ['voice_message_count' => $count]
+            ),
+        ])->save();
+
+        if ($count >= 3) {
+            return $this->handoffToAgent($conversation, $message ?: '[رسالة صوتية]');
+        }
+
+        $reply = $this->renderMemoryOrDefault(
+            'رد رسائل صوتية غير مدعومة',
+            [],
+            'معلش يا فندم، مقدرش أسمع الرسائل الصوتية دلوقتي، ممكن تكتبلي طلبك بالكتابة؟'
+        );
+
+        return $this->textReply($conversation, $reply);
     }
 
     /**

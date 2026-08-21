@@ -9,6 +9,7 @@ class WhatsappConversation extends Model
     protected $fillable = [
         'whatsapp_bot_id',
         'phone',
+        'real_phone',
         'status',
 
         'last_machine_id',

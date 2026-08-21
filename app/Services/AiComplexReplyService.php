@@ -46,6 +46,8 @@ class AiComplexReplyService
                 'error' => $result['error'] ?? 'ai_failed',
                 'intent' => 'fallback_complex',
                 'confidence' => 'system',
+                'model' => $result['model'] ?? null,
+                'key_id' => $result['key_id'] ?? null,
             ];
         }
 

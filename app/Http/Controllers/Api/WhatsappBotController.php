@@ -65,6 +65,23 @@ class WhatsappBotController extends Controller
         ['status' => 'open']
     );
 
+    /*
+     * بعض العملاء بيبان الشات معاهم بمعرّف @lid (خصوصية واتساب) بدل رقم
+     * الموبايل الحقيقي في remoteJid، فـ $phone بيبقى رقم مش حقيقي. الـ
+     * worker بيحاول يحل الرقم الحقيقي (remoteJidAlt أو lid-mapping) ولو
+     * لقاه بيبعته هنا كـ customer_jid - بنسجله في عمود منفصل real_phone
+     * للعرض بس، من غير ما نغيّر $phone اللي بيتستخدم كمفتاح للمحادثة.
+     */
+    $customerJid = $request->input('customer_jid');
+
+    if ($customerJid) {
+        $realPhone = $this->cleanPhoneFromJid((string) $customerJid);
+
+        if ($realPhone !== '' && $realPhone !== $conversation->real_phone) {
+            $conversation->forceFill(['real_phone' => $realPhone])->save();
+        }
+    }
+
     if ($waMessageId && $direction !== 'outgoing' && !$isFromMe) {
         $alreadyProcessed = $conversation->messages()
             ->where('wa_message_id', $waMessageId)
@@ -131,6 +148,26 @@ class WhatsappBotController extends Controller
         'images' => [],
     ]);
 }
+
+    /**
+     * بيرجع id آخر بوت شغّال (is_active) عشان الـ worker يعرف يشغّل
+     * البوت الصح لوحده وقت ما يبدأ، من غير ما نحتاج نعدّل AUTO_START_BOT_ID
+     * في الـ .env يدويًا كل ما نمسح بوت وننشئ واحد جديد.
+     */
+    public function latestActiveBotId(Request $request)
+    {
+        if ($request->header('X-BOT-TOKEN') !== config('services.whatsapp.bot_token')) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $bot = WhatsappBot::where('is_active', true)->latest('id')->first()
+            ?? WhatsappBot::latest('id')->first();
+
+        return response()->json([
+            'ok' => (bool) $bot,
+            'bot_id' => $bot?->id,
+        ]);
+    }
 
 private function queueWhatsappMessageJob(
     WhatsappBot $bot,
@@ -483,7 +520,11 @@ private function containsAnyStrongTokenMatch(array $queryTokens, array $nameToke
             str_contains($mime, 'mp4') => 'mp4',
             str_contains($mime, 'quicktime') => 'mov',
             str_contains($mime, 'pdf') => 'pdf',
-            default => $type === 'image' ? 'jpg' : ($type === 'video' ? 'mp4' : 'bin'),
+            str_contains($mime, 'ogg') => 'ogg',
+            str_contains($mime, 'opus') => 'ogg',
+            str_contains($mime, 'mpeg') && $type === 'audio' => 'mp3',
+            str_contains($mime, 'mp3') => 'mp3',
+            default => $type === 'image' ? 'jpg' : ($type === 'video' ? 'mp4' : ($type === 'audio' ? 'ogg' : 'bin')),
         };
     }
 

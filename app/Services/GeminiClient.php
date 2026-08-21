@@ -51,13 +51,22 @@ class GeminiClient
             $triedIds[] = $modelRow->id;
 
             try {
+                $parts = [['text' => $prompt]];
+
+                if (! empty($options['image_base64'])) {
+                    $parts[] = [
+                        'inlineData' => [
+                            'mimeType' => $options['image_mime'] ?? 'image/jpeg',
+                            'data' => $options['image_base64'],
+                        ],
+                    ];
+                }
+
                 $payload = [
                     'contents' => [
                         [
                             'role' => 'user',
-                            'parts' => [
-                                ['text' => $prompt],
-                            ],
+                            'parts' => $parts,
                         ],
                     ],
                     'generationConfig' => [
@@ -142,6 +151,12 @@ class GeminiClient
                         'model' => $modelRow->model_code,
                     ]);
 
+                    app(GeminiAlertService::class)->transientAiFailureAlert(
+                        $modelRow->model_code,
+                        $modelRow->gemini_api_key_id,
+                        'المفتاح ده غير صالح (invalid API key) وتم إيقافه تلقائيًا: ' . mb_substr($body, 0, 500)
+                    );
+
                     continue;
                 }
 
@@ -156,6 +171,12 @@ class GeminiClient
                         'model_id' => $modelRow->id,
                         'model' => $modelRow->model_code,
                     ]);
+
+                    app(GeminiAlertService::class)->transientAiFailureAlert(
+                        $modelRow->model_code,
+                        $modelRow->gemini_api_key_id,
+                        'الصلاحية اتمنعت على المفتاح ده (permission denied) وتم إيقافه: ' . mb_substr($body, 0, 500)
+                    );
 
                     continue;
                 }
@@ -198,6 +219,12 @@ class GeminiClient
                         'status' => $status,
                         'body' => $body,
                     ]);
+
+                    app(GeminiAlertService::class)->transientAiFailureAlert(
+                        $modelRow->model_code,
+                        $modelRow->gemini_api_key_id,
+                        'الموديل ده رجع 404 (مش موجود) وتم إيقافه: ' . mb_substr($body, 0, 500)
+                    );
 
                     continue;
                 }

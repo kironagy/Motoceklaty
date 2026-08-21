@@ -214,8 +214,6 @@ return [
 
         'whatsapp_number' => env('GEMINI_ALERT_WHATSAPP_NUMBER'),
 
-        'whatsapp_bot_id' => env('GEMINI_ALERT_BOT_ID'),
-
         'whatsapp_url' => env('WHATSAPP_SEND_MESSAGE_URL', env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3080') . '/send-message'),
 
         'repeat_every_minutes' => 5,

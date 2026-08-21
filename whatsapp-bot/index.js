@@ -29,7 +29,25 @@ const chatQueues = {};
 const PORT = process.env.PORT || 3080;
 const LARAVEL_TIMEOUT = Number(process.env.LARAVEL_TIMEOUT || 30000);
 const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
-const AUTO_START_BOT_ID = process.env.AUTO_START_BOT_ID || '';
+
+async function fetchLatestActiveBotId() {
+    try {
+        const webhookUrl = process.env.LARAVEL_WEBHOOK_URL || '';
+        const baseUrl = webhookUrl.replace(/\/whatsapp\/incoming-message\/?$/, '');
+
+        if (!baseUrl) return null;
+
+        const response = await axios.get(`${baseUrl}/whatsapp/latest-active-bot`, {
+            headers: { 'X-BOT-TOKEN': process.env.BOT_TOKEN },
+            timeout: LARAVEL_TIMEOUT,
+        });
+
+        return response.data?.bot_id ? String(response.data.bot_id) : null;
+    } catch (error) {
+        console.error('fetch latest active bot id error:', error?.message || error);
+        return null;
+    }
+}
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -91,6 +109,33 @@ function normalizeJid(jid) {
     return jid || null;
 }
 
+/**
+ * الشات بتاع بعض العملاء بيستخدم @lid (معرّف داخلي من واتساب للخصوصية)
+ * بدل رقم الموبايل الحقيقي في remoteJid. بنحاول نلاقي الرقم الحقيقي
+ * (@s.whatsapp.net) من msg.key.remoteJidAlt أو من جدول lid-mapping بتاع
+ * Baileys نفسه، عشان يظهر صح في الداشبورد - من غير ما نغيّر الـ JID اللي
+ * بنرد بيه على العميل (ده لازم يفضل زي ما هو).
+ */
+async function resolveCustomerJid(sock, originalFrom, msg) {
+    try {
+        const alt = msg?.key?.remoteJidAlt;
+
+        if (alt && (alt.endsWith('@s.whatsapp.net') || alt.endsWith('@c.us'))) {
+            return alt;
+        }
+
+        if (originalFrom && originalFrom.endsWith('@lid') && sock?.signalRepository?.lidMapping) {
+            const pn = await sock.signalRepository.lidMapping.getPNForLID(originalFrom);
+
+            if (pn) return pn;
+        }
+    } catch (error) {
+        console.error('resolveCustomerJid error:', error?.message || error);
+    }
+
+    return null;
+}
+
 function getMessageText(msg) {
     return (
         msg.message?.conversation ||
@@ -124,6 +169,15 @@ function getMediaInfo(msg) {
             type: 'document',
             mime: msg.message.documentMessage.mimetype || 'application/octet-stream',
             fileName: msg.message.documentMessage.fileName || null,
+        };
+    }
+
+    if (msg.message?.audioMessage) {
+        return {
+            type: 'audio',
+            mime: msg.message.audioMessage.mimetype || 'audio/ogg; codecs=opus',
+            fileName: null,
+            ptt: Boolean(msg.message.audioMessage.ptt),
         };
     }
 
@@ -288,12 +342,13 @@ console.log('📨 handleLaravelResponse', data);
     }
 }
 
-async function flushMediaCollector(sock, botId, originalFrom, replyJid, collector, quotedMsg) {
+async function flushMediaCollector(sock, botId, originalFrom, replyJid, collector, quotedMsg, customerJid = null) {
     try {
         const payload = {
             bot_id: botId,
             from: originalFrom,
             reply_jid: replyJid,
+            customer_jid: customerJid,
             message: collector.message || '',
             direction: 'incoming',
             media_items: collector.mediaItems,
@@ -370,13 +425,16 @@ async function handleIncomingMessage(sock, botId, msg) {
 
             delete mediaCollectors[collectorKey];
 
+            const customerJid = await resolveCustomerJid(sock, originalFrom, msg);
+
             await flushMediaCollector(
                 sock,
                 botId,
                 originalFrom,
                 replyJid,
                 collector,
-                msg
+                msg,
+                customerJid
             );
         }, 3000);
 
@@ -384,10 +442,13 @@ async function handleIncomingMessage(sock, botId, msg) {
     }
 
     try {
+        const customerJid = await resolveCustomerJid(sock, originalFrom, msg);
+
         const payload = {
             bot_id: botId,
             from: originalFrom,
             reply_jid: replyJid,
+            customer_jid: customerJid,
             message: cleanText,
             direction: 'incoming',
             wa_message_id: messageId,
@@ -645,7 +706,9 @@ app.post('/send-media-items', checkToken, async (req, res) => {
 
             let payload;
 
-            if (type === 'video' || mime.startsWith('video/')) {
+            if (type === 'audio' || mime.startsWith('audio/')) {
+                payload = { audio: { url }, mimetype: mime || 'audio/ogg; codecs=opus', ptt: true };
+            } else if (type === 'video' || mime.startsWith('video/')) {
                 payload = { video: { url }, caption };
             } else if (type === 'document' || type === 'file' || mime.includes('pdf') || mime.startsWith('application/')) {
                 payload = {
@@ -684,9 +747,16 @@ app.post('/send-media-items', checkToken, async (req, res) => {
 app.listen(PORT, () => {
     console.log(`🚀 WhatsApp Worker Running ${PORT}`);
 
-    if (AUTO_START_BOT_ID) {
-        startSession(AUTO_START_BOT_ID).catch(error => {
+    fetchLatestActiveBotId().then(botId => {
+        if (!botId) {
+            console.log('⚠️ No active WhatsApp bot found to auto-start.');
+            return;
+        }
+
+        console.log(`🔄 Auto-starting latest active bot: ${botId}`);
+
+        startSession(botId).catch(error => {
             console.error('AUTO START WHATSAPP SESSION ERROR:', error?.stack || error);
         });
-    }
+    });
 });
