@@ -300,6 +300,19 @@ public function handle(
             return $this->handleCashPrice($conversation, $machines, $message);
         }
 
+        /*
+         * العميل بيسأل عن سعر بس مقدرناش نطابق موديل بثقة (زي "دايونج"
+         * بدل "دايو") - ممنوع نسيب الـ AI العام (handleAiFallback) يرد
+         * برقم من عنده، لأنه بيخترع سعر مش موجود فعليًا في الداتابيز.
+         * نسأل نتأكد من الاسم الأول بدل ما نديله سعر غلط.
+         */
+        if ($intent === 'price' && $machines->isEmpty()) {
+            return $this->textReply(
+                $conversation,
+                'تقصد سعر أنهي موديل بالظبط يا فندم؟ أقولك السعر الدقيق أول ما تأكدلي الاسم.'
+            );
+        }
+
         return $this->handleAiFallback($conversation, $message, $machines);
     } catch (\Throwable $e) {
         Log::error('WhatsappIntentRouter simple error', [

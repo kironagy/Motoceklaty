@@ -231,6 +231,18 @@ public function processQueuedWhatsappJob(object $job): array
     }
 
     /*
+     * لو العميل عمل reply/quote على رسالة سابقة (مننا أو منه) - زي "انت
+     * قولتلي ٥٨٥٠٠ عايز اعرف ده سعر ايه" - من غير السياق ده الراوتر ماكانش
+     * بيفهم "ده" بتشاور على إيه. بنلزق نص الرسالة المقتبسة كسياق قبل
+     * الرسالة نفسها عشان الـ intent classifier والـ AI يقدروا يحلوا المرجع.
+     */
+    $quotedText = trim((string) data_get($payload, 'quoted_text', ''));
+
+    if ($quotedText !== '' && $message !== '') {
+        $message = "(العميل بيرد على رسالة سابقة نصها: \"{$quotedText}\") {$message}";
+    }
+
+    /*
      * مهم:
      * هنسيب تأكيد الطلب القديم زي ما هو مؤقتًا
      * عشان لو فيه pending_order_data محفوظ قبل كده ميتكسرش.

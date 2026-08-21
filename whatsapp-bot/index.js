@@ -147,6 +147,28 @@ function getMessageText(msg) {
     ).trim();
 }
 
+/**
+ * لو العميل عمل reply/quote على رسالة سابقة (زي "انت قولتلي ٥٨٥٠٠ عايز
+ * اعرف ده سعر ايه")، بيانات الرسالة المقتبسة بتيجي من واتساب في
+ * contextInfo.quotedMessage - من غير ما نجيبها، النظام مش بيعرف "ده"
+ * بتشاور على إيه ومبيفهمش السؤال. بنستخرج النص بس عشان نديه كـ سياق.
+ */
+function getQuotedText(msg) {
+    const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+        || msg.message?.imageMessage?.contextInfo?.quotedMessage
+        || msg.message?.videoMessage?.contextInfo?.quotedMessage;
+
+    if (!quoted) return '';
+
+    return (
+        quoted.conversation
+        || quoted.extendedTextMessage?.text
+        || quoted.imageMessage?.caption
+        || quoted.videoMessage?.caption
+        || ''
+    ).trim();
+}
+
 function getMediaInfo(msg) {
     if (msg.message?.imageMessage) {
         return {
@@ -350,6 +372,7 @@ async function flushMediaCollector(sock, botId, originalFrom, replyJid, collecto
             reply_jid: replyJid,
             customer_jid: customerJid,
             message: collector.message || '',
+            quoted_text: collector.quotedText || '',
             direction: 'incoming',
             media_items: collector.mediaItems,
             wa_message_id: collector.waMessageId || null,
@@ -426,6 +449,7 @@ async function handleIncomingMessage(sock, botId, msg) {
             delete mediaCollectors[collectorKey];
 
             const customerJid = await resolveCustomerJid(sock, originalFrom, msg);
+            collector.quotedText = getQuotedText(msg);
 
             await flushMediaCollector(
                 sock,
@@ -443,6 +467,7 @@ async function handleIncomingMessage(sock, botId, msg) {
 
     try {
         const customerJid = await resolveCustomerJid(sock, originalFrom, msg);
+        const quotedText = getQuotedText(msg);
 
         const payload = {
             bot_id: botId,
@@ -450,6 +475,7 @@ async function handleIncomingMessage(sock, botId, msg) {
             reply_jid: replyJid,
             customer_jid: customerJid,
             message: cleanText,
+            quoted_text: quotedText,
             direction: 'incoming',
             wa_message_id: messageId,
         };
