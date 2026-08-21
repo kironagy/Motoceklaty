@@ -548,13 +548,33 @@ private function allBrandTokens(): array
         $map = $this->loadMemoryAliasesMap();
     }
 
+    /*
+     * الميموري بتكتب اسم مختصر زي "هوجن 4"، بس أسماء الكتالوج دايمًا فيها
+     * كلمات زيادة ("هوجن ٤ استيراد"، "هوجن ٤ استيراد فرز تاني"، "(cc200)
+     * هوجن ٤") - فمطابقة تامة (=) كانت بترجع فاضية لكل موديلات هوجن، وكانت
+     * شغالة بالصدفة بس للي أسماءهم في الكتالوج مطابقة حرفيًا زي "دايو ٤".
+     * بنستخدم مطابقة على مستوى التوكينز (كل توكينز اسم الميموري لازم
+     * تكون موجودة في اسم الموديل الحقيقي) بدل التطابق التام.
+     */
+    $machineTokens = $this->importantTokens((string) $machine->name);
+
+    if (empty($machineTokens)) {
+        return [];
+    }
+
     $aliases = [];
 
-    foreach ([$machine->name] as $name) {
-        $key = $this->normalizeSearchText((string) $name);
+    foreach ($map as $memoryKey => $memoryAliases) {
+        $memoryTokens = $this->importantTokens($memoryKey);
 
-        if (isset($map[$key])) {
-            $aliases = array_merge($aliases, $map[$key]);
+        if (empty($memoryTokens)) {
+            continue;
+        }
+
+        $allTokensPresent = empty(array_diff($memoryTokens, $machineTokens));
+
+        if ($allTokensPresent) {
+            $aliases = array_merge($aliases, $memoryAliases);
         }
     }
 
