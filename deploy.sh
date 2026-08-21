@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")"
 
 echo "== Pulling latest code =="
-git pull origin main
+git pull github-new main
 
 echo "== Checking for pending migrations (run manually if any) =="
 php artisan migrate:status | grep -i pending || echo "No pending migrations."
