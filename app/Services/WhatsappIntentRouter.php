@@ -88,11 +88,14 @@ public function handle(
             && $this->isBareConfirmation($normalizedMessage);
 
         if (
-            $applicationIsPending
-            || $isBareConfirmationAfterCalc
-            || (
-                in_array($intent, ['general', 'unknown'], true)
-                && $this->isApplicationIntent($normalizedMessage, $conversation)
+            $intent !== 'application_status'
+            && (
+                $applicationIsPending
+                || $isBareConfirmationAfterCalc
+                || (
+                    in_array($intent, ['general', 'unknown'], true)
+                    && $this->isApplicationIntent($normalizedMessage, $conversation)
+                )
             )
         ) {
             $intent = 'application';
@@ -103,6 +106,7 @@ public function handle(
             $plan['needs_clarification'] = false;
             $plan['clarification_question'] = null;
         } elseif (
+
             $lastMachines->count() > 1
             && (
                 $this->isVariantNarrowingReply($message)
@@ -248,6 +252,10 @@ public function handle(
             }
         }
 
+        if ($intent === 'application_status') {
+            return $this->handleApplicationStatus($conversation);
+        }
+
         if ($intent === 'application') {
             if ($machines->isEmpty()) {
                 return $this->textReply(
@@ -279,6 +287,7 @@ public function handle(
 
             return app(ApplicationHandler::class)->handle($conversation, $message);
         }
+
 
         if ($intent === 'installment_system') {
             return $this->handleInstallmentSystem($conversation, $message);
@@ -626,11 +635,7 @@ private function handleImages(
 ): array {
     $aiIntent = $plan;
 
-    if (
-        $machines->isEmpty()
-        || (($aiIntent['target'] ?? null) === 'last_machines')
-        || (($aiIntent['uses_last_machines'] ?? false) === true)
-    ) {
+    if ($machines->isEmpty()) {
         $last = $this->lastMachinesFromConversation($conversation);
 
         if ($last->isNotEmpty()) {
@@ -1443,11 +1448,38 @@ private function renderMemoryOrDefault(string $title, array $variables, string $
 }
 
 
+/*الاستعلام عن الطلب*/
+private function handleApplicationStatus(WhatsappConversation $conversation): array
+{
+    $existing = \App\Models\InstallmentRequest::query()
+        ->where('whatsapp_conversation_id', $conversation->id)
+        ->latest('id')
+        ->first();
+
+    if (! $existing) {
+        $reply = 'مش لاقيين طلب تقسيط باسمك يا فندم. لو حابب تقدم، ابعتلي اسم الموديل اللي عايزه.';
+    } else {
+        $reply = match ($existing->status) {
+            'pending'        => "طلبك رقم #{$existing->id} لسه تحت المراجعة، وهنتواصل معاك أول ما نخلص. مش محتاج تعمل طلب جديد دلوقتي.",
+            'needs_more_info'=> "طلبك رقم #{$existing->id} محتاج بيانات أو مستندات إضافية. برجاء التواصل مع المعرض لاستكمال المطلوب.",
+            'approved'       => "ألف مبروك يا فندم! 🎉 طلبك رقم #{$existing->id} تمت الموافقة عليه. برجاء التوجه إلى الفرع لاستكمال باقي الإجراءات.",
+            'paused'         => "طلبك رقم #{$existing->id} متوقف مؤقتًا. برجاء التواصل مع المعرض لاستكمال المطلوب.",
+            'rejected'       => "للأسف طلبك رقم #{$existing->id} اترفض. لو عايز تاخد تفاصيل أكتر تواصل مع المعرض.",
+            'canceled'       => "طلبك رقم #{$existing->id} اتلغى. لو عايز تعمل طلب جديد، ابعتلي اسم الموديل.",
+            default          => "طلبك رقم #{$existing->id} حالته: {$existing->status}. هنتواصل معاك قريبًا.",
+        };
+    }
+
+    // لا نغير pending_question ولا نغير last_topic — فقط نرد على السؤال
+    return $this->textReply($conversation, $reply);
+}
+
 /*القسط*/
 private function handleInstallmentSystem(
     WhatsappConversation $conversation,
     string $message
 ): array {
+
     $reply = $this->renderMemory('رد نظام التقسيط')
         ?: "التقسيط عندنا متاح للموظفين وأصحاب الأنشطة وأصحاب المعاشات والمهن الحرة.\n\n"
         . "عندنا نظامين:\n"
@@ -1562,11 +1594,7 @@ private function handleInstallmentCalc(
     $parsed = app(InstallmentTextParser::class)->parse($message);
     $parsed = $this->applyAiParsedInstallment($parsed, $aiIntent);
 
-    if (
-        $machines->isEmpty()
-        || (($aiIntent['target'] ?? null) === 'last_machines')
-        || (($aiIntent['uses_last_machines'] ?? false) === true)
-    ) {
+    if ($machines->isEmpty()) {
         $last = $this->lastMachinesFromConversation($conversation);
 
         if ($last->isNotEmpty()) {

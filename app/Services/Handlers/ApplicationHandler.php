@@ -92,8 +92,10 @@ class ApplicationHandler
             $analysis['application_data'] ?? []
         );
 
-        if (empty($application['income_proof']) && $this->messageDeniesIncomeProof($message)) {
-            $application['income_proof'] = 'لا يوجد';
+        if (empty($application['income_proof'])) {
+            if ($this->messageDeniesIncomeProof($message) || $this->categorizeIncome((string) ($application['job_type'] ?? ''), '') === 'freelance') {
+                $application['income_proof'] = 'لا يوجد';
+            }
         }
 
         $missing = $this->missingFields($application);
@@ -370,6 +372,13 @@ class ApplicationHandler
             str_contains($text, 'حر') || str_contains($text, 'نجار')
             || str_contains($text, 'سباك') || str_contains($text, 'حداد')
             || str_contains($text, 'كهربائي') || str_contains($text, 'نقاش')
+            || str_contains($text, 'سواق') || str_contains($text, 'سائق')
+            || str_contains($text, 'دليفري') || str_contains($text, 'صنايعي')
+            || str_contains($text, 'حرفي') || str_contains($text, 'مبلط')
+            || str_contains($text, 'عمالة') || str_contains($text, 'أرزقي')
+            || str_contains($text, 'ارزقي') || str_contains($text, 'ميكانيكي')
+            || str_contains($text, 'سباكه') || str_contains($text, 'نجاره')
+            || str_contains($text, 'حداده') || str_contains($text, 'نقاشه')
         ) {
             return 'freelance';
         }
@@ -579,7 +588,27 @@ class ApplicationHandler
             'installment_months',
         ];
 
-        return array_values(array_filter($required, fn ($key) => empty($data[$key])));
+        $isFreelance = $this->categorizeIncome((string) ($data['job_type'] ?? ''), (string) ($data['income_proof'] ?? '')) === 'freelance';
+
+        return array_values(array_filter($required, function ($key) use ($data, $isFreelance) {
+            if ($key === 'income_proof' && $isFreelance) {
+                return false;
+            }
+
+            if (empty($data[$key])) {
+                return true;
+            }
+
+            if ($key === 'home_address' && isset($data['home_address_status']) && $data['home_address_status'] === 'incomplete') {
+                return true;
+            }
+
+            if ($key === 'work_address' && isset($data['work_address_status']) && $data['work_address_status'] === 'incomplete') {
+                return true;
+            }
+
+            return false;
+        }));
     }
 
     private function questionForMissing(array $missing, array $application): string
