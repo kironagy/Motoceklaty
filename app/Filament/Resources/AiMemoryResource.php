@@ -72,6 +72,63 @@ public static function form(Form $form): Form
                 ])
                 ->columns(2),
 
+            Forms\Components\Section::make('تصنيف الاسترجاع (Retrieval Metadata)')
+                ->description('تحدد إمتى الميموري دي تتبعت للـ AI. متأثرش على معنى المحتوى.')
+                ->schema([
+
+                    Forms\Components\Select::make('category')
+                        ->label('التصنيف')
+                        ->options([
+                            'pricing' => 'أسعار',
+                            'eligibility' => 'شروط أهلية',
+                            'application' => 'بيانات التقديم',
+                            'catalog' => 'المخزون والموديلات',
+                            'support' => 'دعم/فروع',
+                            'ocr' => 'قراءة مستندات',
+                            'style' => 'أسلوب الرد',
+                        ])
+                        ->searchable(),
+
+                    Forms\Components\Select::make('scope')
+                        ->label('النطاق')
+                        ->options([
+                            'always_include' => 'دايمًا تتبعت (قاعدة صارمة)',
+                            'fallback_context_only' => 'للرد الحر بس، مش مصدر أسعار',
+                        ])
+                        ->helperText('سيب فاضي للسلوك العادي (بتترشح حسب التشابه مع رسالة العميل).'),
+
+                    Forms\Components\CheckboxList::make('applicable_intents')
+                        ->label('النوايا المرتبطة')
+                        ->options([
+                            'price' => 'سعر',
+                            'images' => 'صور',
+                            'installment_calc' => 'حساب قسط',
+                            'installment_system' => 'نظام تقسيط',
+                            'brand_models' => 'موديلات براند',
+                            'application' => 'تقديم',
+                            'application_status' => 'حالة الطلب',
+                            'delivery_question' => 'توصيل',
+                            'payment_question' => 'دفع',
+                            'warranty_question' => 'ضمان',
+                            'complaint' => 'شكوى',
+                            'faq' => 'أسئلة شائعة',
+                            'small_talk' => 'كلام عام',
+                        ])
+                        ->columns(3)
+                        ->helperText('سيبها فاضية لو الميموري تنفع مع أي نية.'),
+
+                    Forms\Components\TagsInput::make('keywords')
+                        ->label('كلمات مفتاحية إضافية')
+                        ->helperText('كلمات بتساعد الاسترجاع تلاقي الميموري دي غير الموجودة في العنوان/المحتوى.'),
+
+                    Forms\Components\TextInput::make('priority')
+                        ->label('الأولوية')
+                        ->numeric()
+                        ->default(0),
+
+                ])
+                ->columns(2),
+
         ]);
 }    
 public static function table(Table $table): Table

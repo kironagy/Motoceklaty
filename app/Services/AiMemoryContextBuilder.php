@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AiMemory;
+use App\Models\AiMemoryRetrievalLog;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
@@ -10,20 +11,12 @@ use Illuminate\Support\Facades\Schema;
 class AiMemoryContextBuilder
 {
     /**
-     * How many memories relevantMemories() may return before we trust the
-     * filtered set enough to skip the full dump. Generous on purpose: this
-     * is the complex/fallback path, so under-including is the real risk,
-     * not over-including.
+     * How many memories relevantMemories() may return. The metadata
+     * pre-filter (AiMemoryResolver::candidateMemories) already bounds the
+     * candidate set before scoring, so this no longer needs a "trust the
+     * filter or dump everything" escape hatch - see buildRelevantMemoryContext().
      */
     private const RELEVANCE_LIMIT = 18;
-
-    /**
-     * If relevance scoring finds fewer than this many matches, the
-     * message likely doesn't share enough vocabulary with any single
-     * topic to trust filtering — fall back to the full memory context
-     * instead of risking the model missing a rule it needs.
-     */
-    private const MIN_RELEVANT_TO_TRUST_FILTER = 5;
 
     public function buildForMessage(string $message, array $conversationContext = []): array
     {
@@ -36,14 +29,6 @@ class AiMemoryContextBuilder
         ];
     }
 
-    /**
-     * Only the memories relevant to the current message (+ a little recent
-     * conversation for topic continuity) are sent, instead of dumping every
-     * active memory on every fallback reply. Falls back to the full,
-     * unfiltered context whenever relevance scoring isn't confident, so
-     * this can only ever include *more* context than needed, never less
-     * than what full dumping already guaranteed.
-     */
     private function buildRelevantMemoryContext(string $message, array $conversationContext): string
     {
         if (! class_exists(AiMemory::class) || ! Schema::hasTable('ai_memories')) {
@@ -51,18 +36,63 @@ class AiMemoryContextBuilder
         }
 
         $scoringText = $this->scoringText($message, $conversationContext);
+        $resolver = app(AiMemoryResolver::class);
+        $intent = $conversationContext['intent'] ?? null;
 
-        $relevant = app(AiMemoryResolver::class)->relevantMemories(
-            $scoringText,
-            null,
-            self::RELEVANCE_LIMIT
-        );
+        $candidates = $resolver->candidateMemories($intent);
 
-        if ($relevant->count() < self::MIN_RELEVANT_TO_TRUST_FILTER) {
-            return $this->buildFullMemoryContext();
+        if ($candidates->isEmpty()) {
+            // No candidates even survive the metadata pre-filter (e.g. an
+            // intent was passed that nothing is tagged for yet) - fall
+            // back to a small, bounded set of hard business rules rather
+            // than an unbounded dump of every active memory.
+            $fallback = $resolver->activeMemories()->filter(
+                fn (AiMemory $memory) => ($memory->scope ?? null) === 'always_include'
+            );
+
+            $this->logRetrieval($conversationContext, $message, $intent, collect(), $fallback, 'always_include_only', false);
+
+            return $this->toToon($fallback);
         }
 
+        $relevant = $resolver->relevantMemories($scoringText, $intent, self::RELEVANCE_LIMIT);
+
+        if ($relevant->isEmpty()) {
+            $relevant = $candidates->take(self::RELEVANCE_LIMIT);
+
+            $this->logRetrieval($conversationContext, $message, $intent, $candidates, $relevant, 'candidate_set_unscored', false);
+
+            return $this->toToon($relevant);
+        }
+
+        $this->logRetrieval($conversationContext, $message, $intent, $candidates, $relevant, 'metadata_filtered', false);
+
         return $this->toToon($relevant);
+    }
+
+    private function logRetrieval(
+        array $conversationContext,
+        string $message,
+        ?string $intent,
+        Collection $candidates,
+        Collection $selected,
+        string $method,
+        bool $fellBackToFullDump
+    ): void {
+        try {
+            AiMemoryRetrievalLog::create([
+                'whatsapp_conversation_id' => $conversationContext['conversation_id'] ?? null,
+                'message_excerpt' => mb_substr($message, 0, 500),
+                'intent' => $intent,
+                'candidate_memory_ids' => $candidates->pluck('id')->values()->all(),
+                'selected_memory_ids' => $selected->pluck('id')->values()->all(),
+                'scores' => [],
+                'retrieval_method' => $method,
+                'fell_back_to_full_dump' => $fellBackToFullDump,
+            ]);
+        } catch (\Throwable $e) {
+            // Observability must never break the reply path.
+        }
     }
 
     private function scoringText(string $message, array $conversationContext): string

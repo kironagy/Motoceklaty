@@ -25,6 +25,41 @@ class AiMemoryResolver
         });
     }
 
+
+    /**
+     * Metadata pre-filter, run before any keyword scoring. Keeps the
+     * scorer's candidate set small even at hundreds of memories: a memory
+     * is a candidate when it's tagged 'always_include' (hard business
+     * rules that must never be filtered out by a relevance score, e.g.
+     * excluded professions), when it has no applicable_intents tags at
+     * all (untagged memories stay eligible for every intent so this
+     * degrades to today's behaviour instead of silently excluding
+     * anything), or when its applicable_intents contains the given
+     * intent.
+     */
+    public function candidateMemories(?string $intent = null): Collection
+    {
+        return $this->activeMemories()->filter(function (AiMemory $memory) use ($intent) {
+            if (($memory->scope ?? null) === 'always_include') {
+                return true;
+            }
+
+            $tags = $memory->applicable_intents ?? [];
+
+            /*
+             * No tags, or the caller doesn't have a confident classified
+             * intent to filter by (e.g. the complex/unknown fallback
+             * path) - stay eligible. Only exclude a memory when we KNOW
+             * the current intent and it explicitly wasn't tagged for it.
+             */
+            if (empty($tags) || $intent === null) {
+                return true;
+            }
+
+            return in_array($intent, $tags, true);
+        })->values();
+    }
+
 public function memoryByExactTitle(string $title): ?\App\Models\AiMemory
 {
     $parser = app(AiMemoryParser::class);
@@ -43,7 +78,7 @@ public function memoryByExactTitle(string $title): ?\App\Models\AiMemory
         $messageNormalized = $parser->normalize($message);
         $tokens = $parser->tokens($message);
 
-        return $this->activeMemories()
+        return $this->candidateMemories($intent)
             ->map(function (AiMemory $memory) use ($parser, $messageNormalized, $tokens, $intent) {
                 $title = $parser->normalize((string) $memory->title);
                 $content = $parser->normalize((string) $memory->content);
@@ -60,6 +95,14 @@ public function memoryByExactTitle(string $title): ?\App\Models\AiMemory
                     }
                 }
 
+                foreach (($memory->keywords ?? []) as $keyword) {
+                    $keyword = $parser->normalize((string) $keyword);
+
+                    if ($keyword !== '' && str_contains($messageNormalized, $keyword)) {
+                        $score += 25;
+                    }
+                }
+
                 if ($intent) {
                     foreach ($this->intentKeywords($intent) as $keyword) {
                         $keyword = $parser->normalize($keyword);
@@ -72,7 +115,17 @@ public function memoryByExactTitle(string $title): ?\App\Models\AiMemory
                             $score += 15;
                         }
                     }
+
+                    if (in_array($intent, $memory->applicable_intents ?? [], true)) {
+                        $score += 30;
+                    }
                 }
+
+                if (($memory->scope ?? null) === 'always_include') {
+                    $score += 1000;
+                }
+
+                $score += (int) ($memory->priority ?? 0);
 
                 if ($memory->template_replies && is_array($memory->template_replies)) {
                     $score += 5;

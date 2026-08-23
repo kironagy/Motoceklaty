@@ -15,11 +15,71 @@ use App\Services\Handlers\ApplicationHandler;
 use App\Services\Handlers\MediaOcrHandler;
 class WhatsappIntentRouter
 {
-public function handle(
+    /*
+     * Scratch space for the current handle() call, populated inside
+     * handleInternal() and read back by the handle() wrapper to write a
+     * single structured "ai_turn" log entry without threading extra
+     * parameters through every branch/return. Reset at the top of every
+     * handleInternal() call, so no state leaks between turns.
+     */
+    private ?string $lastTurnIntent = null;
+    private ?float $lastTurnConfidence = null;
+    private ?float $lastTurnRepetitionScore = null;
+
+    /**
+     * Thin wrapper around handleInternal() whose only job is observability:
+     * one structured log line per turn answering "what did the AI decide
+     * and why" without needing to re-read code (see
+     * AI_MEMORY_CONVERSATION_IMPROVEMENT_PLAN.md Section 22). Kept
+     * separate from handleInternal() so none of that method's many
+     * early-return branches needed touching to get logging on every path.
+     */
+    public function handle(
+        WhatsappConversation $conversation,
+        string $message,
+        array $mediaItems = []
+    ): array {
+        $startedAt = microtime(true);
+        $statusBefore = $conversation->status ?? 'open';
+        $missingFieldsBefore = $conversation->context_payload['missing_fields'] ?? null;
+        $clarificationAttemptsBefore = (int) ($conversation->clarification_attempts ?? 0);
+
+        $result = $this->handleInternal($conversation, $message, $mediaItems);
+
+        $conversation->refresh();
+
+        Log::info('ai_turn', [
+            'conversation_id' => $conversation->id,
+            'message_excerpt' => mb_substr($message, 0, 300),
+            'intent' => $this->lastTurnIntent,
+            'confidence' => $this->lastTurnConfidence,
+            'response_type' => $result['type'] ?? null,
+            'response_reason' => $result['reason'] ?? null,
+            'response_source' => $result['handled'] ?? false ? ($this->lastTurnIntent ? 'deterministic_handler' : 'llm_fallback') : 'unhandled',
+            'handled' => $result['handled'] ?? null,
+            'missing_fields_before' => $missingFieldsBefore,
+            'missing_fields_after' => $conversation->context_payload['missing_fields'] ?? null,
+            'clarification_attempts' => $conversation->clarification_attempts ?? 0,
+            'clarification_attempts_delta' => (int) ($conversation->clarification_attempts ?? 0) - $clarificationAttemptsBefore,
+            'repetition_score' => $this->lastTurnRepetitionScore,
+            'escalated' => $statusBefore !== 'awaiting_agent' && $conversation->status === 'awaiting_agent',
+            'pending_question' => $conversation->pending_question ?? null,
+            'last_topic' => $conversation->last_topic ?? null,
+            'latency_ms' => (int) ((microtime(true) - $startedAt) * 1000),
+        ]);
+
+        return $result;
+    }
+
+private function handleInternal(
     WhatsappConversation $conversation,
     string $message,
     array $mediaItems = []
 ): array {
+    $this->lastTurnIntent = null;
+    $this->lastTurnConfidence = null;
+    $this->lastTurnRepetitionScore = null;
+
     try {
         $message = trim($message);
 
@@ -76,19 +136,73 @@ public function handle(
         $plan = app(AiIntentClassifier::class)->classify($conversation, $message);
         $intent = $plan['intent'] ?? 'unknown';
 
+        $this->lastTurnIntent = $intent;
+        $this->lastTurnConfidence = isset($plan['confidence']) ? (float) $plan['confidence'] : null;
+
         $lastMachines = $this->lastMachinesFromConversation($conversation);
         $normalizedMessage = $this->normalizeText($message);
+
+        /*
+         * رسالة غضب/شكوى ("نصابين"، "حراميه") غالبًا بتحتوي كلمة زي
+         * "سعرها" أو "حسبتها" اللي أصلها مصممة تكشف إن العميل بيسأل عن
+         * السعر/بيكمل نفس الموضوع - فكانت بتتحول لإعادة نفس عرض السعر أو
+         * نفس حساب القسط بدل ما ترد على الشكوى فعليًا. لو الرسالة شكوى،
+         * منسيبش أي heuristic تاني (تضييق/متابعة/تأكيد) تعيد تفسيرها.
+         */
+        $isComplaint = $this->isComplaintMessage($normalizedMessage);
+
         $applicationIsPending = in_array(
             $conversation->pending_question ?? null,
             ['application_missing_data', 'application_documents'],
             true
         );
 
+        /*
+         * تحية صرفة ("مساء الخير") وسط طلب تقديم كانت بتروح على طول
+         * لـ ApplicationHandler، وهو مش عنده حاجة يستخرجها منها فيرجع
+         * نفس رسالة "ناقصني البيانات دي" تاني - يبان وكأنه متجاهل كلام
+         * العميل تمامًا. رد بسيط يعكس التحية ويكمل بعده بملخص الناقص
+         * أطبع وألصق بكتير.
+         */
+        if ($applicationIsPending && $this->isPureGreeting($normalizedMessage)) {
+            return $this->withApplicationResume(
+                $conversation,
+                $this->textReply($conversation, $this->greetingReply($normalizedMessage)),
+                true
+            );
+        }
+
+        /*
+         * "عاوز اعمل طلب جديد" / "مكنة تانية غير اللي طلبناه" وسط طلب
+         * شغال - العميل بيطلب صراحة يبدأ من موديل تاني، مش يكمل نفس
+         * العنوان القديم. كان بيتحط زي أي رسالة تانية جوه applicationIsPending
+         * فيرجعله نفس أسئلة العنوان القديمة تاني - loop حقيقي.
+         */
+        if ($applicationIsPending && $this->isNewApplicationRequest($normalizedMessage)) {
+            return $this->restartApplicationForNewMachine($conversation);
+        }
+
         $isBareConfirmationAfterCalc = $conversation->last_topic === 'installment_calc'
             && $this->isBareConfirmation($normalizedMessage);
 
+        /*
+         * لو العميل وسط طلب تقديم وسأل سؤال حقيقي بنية واضحة (سعر/صور/نظام
+         * تقسيط/توصيل)، منجبروش يكمل التقديم قبل ما نرد عليه - كان ده أهم
+         * سبب إن أي سؤال عادي وسط التقديم بيتجاهل تمامًا. لازم يكون
+         * التصنيف بثقة معقولة عشان مانقاطعش التقديم على تخمين ضعيف؛
+         * التأكيدات البسيطة أو الرسائل الغامضة (general/unknown) لسه
+         * بترجع تلقائي لمسار التقديم زي ما كانت.
+         */
+        $answerableDuringApplication = ['price', 'images', 'installment_system', 'installment_calc', 'delivery_question'];
+        $isConfidentInterruptingQuestion = $applicationIsPending
+            && in_array($intent, $answerableDuringApplication, true)
+            && (float) ($plan['confidence'] ?? 1.0) >= 0.5;
+
+        $resumeApplicationAfterAnswer = $isConfidentInterruptingQuestion;
+
         if (
             $intent !== 'application_status'
+            && ! $isConfidentInterruptingQuestion
             && (
                 $applicationIsPending
                 || $isBareConfirmationAfterCalc
@@ -108,6 +222,15 @@ public function handle(
         } elseif (
 
             $lastMachines->count() > 1
+            /*
+             * لو الـ AI classifier نفسه واثق إن الرسالة بتقصد موديل جديد
+             * تمامًا (target=new_machine ومعاه machine_query صريح)، متسيبش
+             * كلمة زي "اصلي" جوه اسم الموديل الجديد ("دايو ٦ اصلي") تتفهم
+             * غلط كأنها تضييق على آخر موديلات اتعرضت - كان ده بالظبط سبب
+             * إن "دايو ٦ اصلي عاوزه على سنة" بيحسب قسط على دايو 2 القديمة
+             * بدل دايو ٦ الجديدة تمامًا.
+             */
+            && ($plan['target'] ?? null) !== 'new_machine'
             && (
                 $this->isVariantNarrowingReply($message)
                 /*
@@ -139,6 +262,7 @@ public function handle(
             $plan['clarification_question'] = null;
         } elseif (
             in_array($intent, ['general', 'unknown'], true)
+            && ! $isComplaint
             && $lastMachines->isNotEmpty()
             && (
                 $this->isPureFollowUp($message)
@@ -170,15 +294,28 @@ public function handle(
         }
 
         if (($plan['needs_clarification'] ?? false) === true) {
-            $reply = $plan['clarification_question']
+            $question = $plan['clarification_question']
                 ?: 'تمام يا فندم، تقصد أنهي موديل بالظبط؟';
 
-            return $this->textReply($conversation, $reply);
+            $exhausted = app(\App\Services\ClarificationService::class)->recordAttempt($conversation, $question);
+
+            if ($exhausted) {
+                return $this->handoffToAgent($conversation, $message, 'clarification_exhausted');
+            }
+
+            return $this->textReply($conversation, $question);
         }
+
+        /*
+         * الرسالة اتفهمت بثقة (مش needs_clarification) - أي لخبطة سابقة
+         * على موضوع تاني منتهية، نصفر العداد عشان مايتراكمش على مواضيع
+         * مش مرتبطة ببعض.
+         */
+        app(\App\Services\ClarificationService::class)->reset($conversation);
 
         $machines = $this->resolveMachinesFromPlan($conversation, $message, $plan);
 
-        if (in_array($intent, ['general', 'unknown'], true) && $machines->isNotEmpty()) {
+        if (in_array($intent, ['general', 'unknown'], true) && ! $isComplaint && $machines->isNotEmpty()) {
             $intent = $this->detectIntent($message);
             $plan['intent'] = $intent;
         }
@@ -257,6 +394,20 @@ public function handle(
         }
 
         if ($intent === 'application') {
+            /*
+             * لو فيه طلب تقديم شغال بالفعل ومقفول على مكنة معينة، مينفعش
+             * نسيب أي رسالة "application" (حتى لو مش مقصود بيها تغيير
+             * المكنة، زي سؤال حالة أو رسالة مش مفهومة) تعيد تحديد المكنة
+             * من last_machine_ids - ده كان بيخلي أي سؤال جانبي عن مكنة
+             * تانية "يخطف" الطلب الشغال بالفعل ويحوله عليها. سيب
+             * ApplicationHandler يتصرف على المكنة المقفولة زي ما هي.
+             */
+            $alreadyLockedMachineId = $this->applicationLockedMachineId($conversation);
+
+            if ($alreadyLockedMachineId) {
+                return app(ApplicationHandler::class)->handle($conversation, $message);
+            }
+
             if ($machines->isEmpty()) {
                 return $this->textReply(
                     $conversation,
@@ -290,11 +441,19 @@ public function handle(
 
 
         if ($intent === 'installment_system') {
-            return $this->handleInstallmentSystem($conversation, $message);
+            return $this->withApplicationResume(
+                $conversation,
+                $this->handleInstallmentSystem($conversation, $message),
+                $resumeApplicationAfterAnswer
+            );
         }
 
         if ($intent === 'installment_calc') {
-            return $this->handleInstallmentCalc($conversation, $machines, $message, $plan);
+            return $this->withApplicationResume(
+                $conversation,
+                $this->handleInstallmentCalc($conversation, $machines, $message, $plan),
+                $resumeApplicationAfterAnswer
+            );
         }
 
         if ($machines->isNotEmpty() && $isBrandOnly) {
@@ -302,11 +461,19 @@ public function handle(
         }
 
         if ($intent === 'images') {
-            return $this->handleImages($conversation, $machines, $message, $plan);
+            return $this->withApplicationResume(
+                $conversation,
+                $this->handleImages($conversation, $machines, $message, $plan),
+                $resumeApplicationAfterAnswer
+            );
         }
 
         if ($intent === 'price' && $machines->isNotEmpty()) {
-            return $this->handleCashPrice($conversation, $machines, $message);
+            return $this->withApplicationResume(
+                $conversation,
+                $this->handleCashPrice($conversation, $machines, $message),
+                $resumeApplicationAfterAnswer
+            );
         }
 
         /*
@@ -322,7 +489,11 @@ public function handle(
             );
         }
 
-        return $this->handleAiFallback($conversation, $message, $machines);
+        return $this->withApplicationResume(
+            $conversation,
+            $this->handleAiFallback($conversation, $message, $machines),
+            $resumeApplicationAfterAnswer
+        );
     } catch (\Throwable $e) {
         Log::error('WhatsappIntentRouter simple error', [
             'message' => $e->getMessage(),
@@ -424,7 +595,7 @@ private function handleAiFallback(
         );
 
         if ($failures >= 2) {
-            return $this->handoffToAgent($conversation, $message);
+            return $this->handoffToAgent($conversation, $message, 'technical_failure');
         }
 
         return $this->textReply(
@@ -441,12 +612,39 @@ private function handleAiFallback(
 
     $reply = trim((string) $result['reply']);
 
+    /*
+     * الرد الحر ده أضعف نقطة لتكرار نفس الكلام لو الـ AI مش قادر يتقدم
+     * في فهم العميل. لو الرد جديد شبه اللي فات جدًا، ده مش "صياغة تانية"
+     * لازم نغيرها - ده دليل إن الفهم واقف مكانه، فبنعده كمحاولة توضيح
+     * فاشلة (نفس عداد needs_clarification) بدل ما نبعت تكرار تاني.
+     */
+    $recentOutgoing = collect($recentMessages)
+        ->where('direction', 'outgoing')
+        ->pluck('message')
+        ->filter()
+        ->reverse()
+        ->take(2)
+        ->values()
+        ->all();
+
+    $repetitionScore = app(\App\Support\RepetitionGuard::class)->score($reply, $recentOutgoing);
+    $this->lastTurnRepetitionScore = $repetitionScore;
+
+    if ($repetitionScore >= 0.75) {
+        $exhausted = app(\App\Services\ClarificationService::class)->recordAttempt($conversation, $reply);
+
+        if ($exhausted) {
+            return $this->handoffToAgent($conversation, $message, 'repetition_exhausted');
+        }
+    }
+
     $this->saveOutgoing($conversation, $reply, [
         'source' => 'ai_fallback',
         'intent' => $result['intent'] ?? null,
         'confidence' => $result['confidence'] ?? null,
         'model' => $result['model'] ?? null,
         'key_id' => $result['key_id'] ?? null,
+        'repetition_score' => $repetitionScore,
     ]);
 
     return $this->textResult($reply);
@@ -568,10 +766,13 @@ if ($this->isInstallmentCalcIntent($m)) {
 
     /*
      * default:
-     * لو العميل كتب اسم مكنة بس من غير طلب واضح،
-     * نرجع سعر كاش كاختيار آمن مؤقتًا.
+     * الرسالة مفيهاش أي كلمة سعر/صور/تقسيط واضحة - ده كان بيترجع 'price'
+     * كـ"اختيار آمن"، لكنه في الواقع كان بيخلي أي رسالة مش مفهومة (شكوى،
+     * كلام غضب، سؤال عام) تتحول لإعادة عرض السعر أو القسط تلقائيًا، حتى
+     * لو معندهاش أي علاقة بالسعر. "general" يخلي الرسالة تروح لمسار الـ
+     * AI الحر اللي فعلاً بيقرا سياق المحادثة، بدل تخمين غير آمن.
      */
-    return 'price';
+    return 'general';
 }
 
 private function handleCashPrice(WhatsappConversation $conversation, Collection $machines, string $message): array
@@ -925,6 +1126,173 @@ $folder = $this->safeFolderName($machine->name);
         ]);
     }
 
+
+    /**
+     * كلمات غضب/اتهام صريحة - مش "شكوى" بمعنى عام (اللي أي حد يقدر يقصدها
+     * بطرق ملهاش نهاية)، لكن مؤشر واضح وموثوق إن العميل مستني اعتذار أو
+     * توضيح حقيقي، مش نفس الرد التلقائي اللي زعّله أصلاً.
+     */
+    private function isComplaintMessage(string $normalizedMessage): bool
+    {
+        return $this->containsAny($normalizedMessage, [
+            'نصاب',
+            'نصابين',
+            'نصب',
+            'حرامي',
+            'حراميه',
+            'حرامية',
+            'سرقه',
+            'سرقة',
+            'بتسرقوا',
+            'استغلال',
+            'مستغلين',
+            'غشاشين',
+            'غش',
+            'مش معقول',
+            'مسخره',
+            'مسخرة',
+            'بتتلاعبوا',
+            'تلعبوا فينا',
+            'حرام عليكم',
+        ]);
+    }
+
+
+    /**
+     * A short message that's basically just a greeting, not carrying any
+     * real content - "مساء الخير" wouldn't produce anything extractable
+     * for ApplicationHandler, so treating it as an application-flow
+     * message just re-sent the same missing-fields template with no
+     * acknowledgment of what the customer actually said. Capped at 4
+     * words so a greeting genuinely mixed with real data ("مساء الخير
+     * اسمي أحمد") still goes through normal extraction instead of being
+     * swallowed here.
+     */
+    private function isPureGreeting(string $normalizedMessage): bool
+    {
+        $normalized = trim($normalizedMessage);
+
+        if ($normalized === '' || str_word_count($normalized) > 4) {
+            return false;
+        }
+
+        return $this->containsAny($normalized, [
+            'صباح الخير',
+            'مساء الخير',
+            'السلام عليكم',
+            'سلام عليكم',
+            'اهلا',
+            'أهلا',
+            'ازيك',
+            'ازيكم',
+            'إزيك',
+            'إزيكم',
+            'هاي',
+            'هلا',
+            'صباح النور',
+            'مساء النور',
+        ]);
+    }
+
+    private function greetingReply(string $normalizedMessage): string
+    {
+        if (str_contains($normalizedMessage, 'صباح')) {
+            return 'صباح النور يا فندم!';
+        }
+
+        if (str_contains($normalizedMessage, 'مساء')) {
+            return 'مساء النور يا فندم!';
+        }
+
+        if (str_contains($normalizedMessage, 'سلام عليكم')) {
+            return 'وعليكم السلام يا فندم!';
+        }
+
+        return 'أهلاً بيك يا فندم!';
+    }
+
+
+    /**
+     * Explicit "I want a different machine / a new application" while
+     * still mid-application - the customer is asking to abandon the
+     * machine currently in progress, not to be re-asked the same address
+     * questions forever. Kept deliberately narrow (explicit switch
+     * language only) so an ordinary missing-field answer never matches.
+     */
+    private function isNewApplicationRequest(string $normalizedMessage): bool
+    {
+        return $this->containsAny($normalizedMessage, [
+            'طلب جديد',
+            'طلب تاني',
+            'طلب تانى',
+            'مكنه تانيه',
+            'مكنة تانية',
+            'موديل تاني',
+            'موديل تانى',
+            'غير اللي طلبناه',
+            'غير الي طلبناه',
+            'الغاء الطلب',
+            'إلغاء الطلب',
+            'ابدا من الأول',
+            'ابدأ من الأول',
+            'ابدا من الاول',
+        ]);
+    }
+
+    /**
+     * Resets the machine-specific part of the in-progress application
+     * (machine choice, payment method, document collection state) and
+     * asks which model the customer wants instead - but keeps everything
+     * already known about the customer themselves (name, ID, phone, job,
+     * income proof, addresses), since none of that changes just because
+     * they picked a different machine.
+     */
+    private function restartApplicationForNewMachine(WhatsappConversation $conversation): array
+    {
+        $payload = $conversation->context_payload ?? [];
+        $application = $payload['application'] ?? [];
+
+        foreach (['machine_id', 'machine_name', 'payment_method'] as $key) {
+            unset($application[$key]);
+        }
+
+        $payload['application'] = $application;
+        $payload['missing_fields'] = [];
+        unset($payload['pending_conflicts'], $payload['no_progress_streak'], $payload['documents_required'], $payload['documents_index'], $payload['documents_collected']);
+
+        $conversation->forceFill([
+            'last_machine_id' => null,
+            'last_machine_ids' => null,
+            'last_topic' => null,
+            'pending_question' => null,
+            'context_payload' => $payload,
+        ])->save();
+
+        $reply = 'تمام يا فندم، تحب تقدم على أنهي موديل؟';
+
+        $this->saveOutgoing($conversation, $reply, ['source' => 'application_restart_new_machine']);
+
+        return $this->textResult($reply);
+    }
+
+
+    /**
+     * The machine id already locked into an in-progress application, if
+     * any - null when there's no application running, or none has a
+     * machine chosen yet.
+     */
+    private function applicationLockedMachineId(WhatsappConversation $conversation): ?int
+    {
+        if (! in_array($conversation->pending_question ?? null, ['application_missing_data', 'application_documents'], true)) {
+            return null;
+        }
+
+        $payload = $conversation->context_payload ?? [];
+        $machineId = $payload['application']['machine_id'] ?? null;
+
+        return $machineId ? (int) $machineId : null;
+    }
+
     /**
      * كل عناصر الوسائط المرفقة صوتية (رسالة صوتية/voice note)، مفيش أي
      * صورة أو مستند مع الصوت.
@@ -988,7 +1356,7 @@ $folder = $this->safeFolderName($machine->name);
         ])->save();
 
         if ($count >= 3) {
-            return $this->handoffToAgent($conversation, $message ?: '[رسالة صوتية]');
+            return $this->handoffToAgent($conversation, $message ?: '[رسالة صوتية]', 'repeated_voice_messages');
         }
 
         $reply = $this->renderMemoryOrDefault(
@@ -1005,7 +1373,7 @@ $folder = $this->safeFolderName($machine->name);
      * تمامًا (شيك أول handle())، وتظهر في tab "الرسائل المنتظر الرد
      * عليها" بالداشبورد لحد ما الموظف يرد ويقفل التحويل.
      */
-    private function handoffToAgent(WhatsappConversation $conversation, string $message): array
+    private function handoffToAgent(WhatsappConversation $conversation, string $message, string $reason = 'explicit_request'): array
     {
         $conversation->forceFill(['status' => 'awaiting_agent'])->save();
 
@@ -1015,6 +1383,14 @@ $folder = $this->safeFolderName($machine->name);
         $this->saveOutgoing($conversation, $reply, [
             'source' => 'human_handoff',
             'message' => $message,
+        ]);
+
+        Log::info('ai_escalation', [
+            'conversation_id' => $conversation->id,
+            'reason' => $reason,
+            'message' => $message,
+            'clarification_attempts' => $conversation->clarification_attempts ?? 0,
+            'last_clarification_question' => $conversation->last_clarification_question ?? null,
         ]);
 
         $this->archiveChatOnWhatsapp($conversation);
@@ -1068,6 +1444,65 @@ $folder = $this->safeFolderName($machine->name);
         ]);
 
         return $this->textResult($reply);
+    }
+
+
+    /**
+     * Appends a short "still need X" resume line to an answer given while
+     * an application was interrupted for a genuine question (see the
+     * interrupt/resume decision in handle()). pending_question is left
+     * untouched by the caller, so the next message still resumes the
+     * application normally - this only makes the current reply mention
+     * what's still missing instead of silently dropping the topic.
+     */
+    private function withApplicationResume(WhatsappConversation $conversation, array $result, bool $shouldResume): array
+    {
+        if (! $shouldResume || empty($result['reply'])) {
+            return $result;
+        }
+
+        $payload = $conversation->context_payload ?? [];
+        $application = $payload['application'] ?? [];
+
+        if (empty($application)) {
+            return $result;
+        }
+
+        try {
+            $stateService = app(\App\Services\ApplicationStateService::class);
+            $application = $stateService->refreshAddressComponents($application);
+
+            $isFreelance = app(ApplicationHandler::class)->categorizeIncome(
+                (string) ($application['job_type'] ?? ''),
+                (string) ($application['income_proof'] ?? '')
+            ) === 'freelance';
+
+            $missing = $stateService->missingFields($application, $isFreelance);
+
+            if (empty($missing)) {
+                return $result;
+            }
+
+            $labels = [
+                'full_name' => 'الاسم بالكامل',
+                'national_id' => 'الرقم القومي',
+                'phone' => 'رقم الموبايل',
+                'job_type' => 'طبيعة شغلك',
+                'income_proof' => 'إثبات الدخل',
+                'work_address' => 'عنوان الشغل',
+                'home_address' => 'عنوان السكن',
+                'installment_months' => 'مدة التقسيط',
+            ];
+
+            $missingLabels = implode(' و', array_map(fn ($key) => $labels[$key] ?? $key, $missing));
+
+            $result['reply'] = trim($result['reply']) . "\n\nولسه ناقصني {$missingLabels} عشان أكمل طلب التقديم.";
+        } catch (\Throwable $e) {
+            // Never let the resume-prompt convenience break a reply that
+            // already succeeded.
+        }
+
+        return $result;
     }
 
     private function textResult(?string $reply, array $extra = []): array
@@ -1298,11 +1733,14 @@ private function resolveMachinesFromPlan(
  * لو الرسالة قصيرة (1-3 كلمات، مفيهاش أرقام كتير) وبتطابق جزء (مش كل)
  * المكن اللي اتعرضت قبل كده، اعتبرها تضييق مش طلب جديد. بنستخدم نفس
  * normalizeSearchText بتاعة MachineSearchService عشان نتجنب تكرار أي
- * أخطاء تطبيع (زي مشكلة دايو/دايون اللي اتصلحت هناك).
+ * أخطاء تطبيع (زي مشكلة دايو/دايون اللي اتصلحت هناك)، وتطابق متسامح مع
+ * غلطات إملائية (حرف ناقص/زايد) عشان رد زي "فز تاني" يتطابق مع "فرز
+ * تاني" من غير ما نحتاج نضيف كل غلطة ممكنة يدويًا.
  */
 private function isGenericNarrowingReply(Collection $lastMachines, string $message): bool
 {
     $search = app(MachineSearchService::class);
+    $fuzzy = app(\App\Support\FuzzyArabicMatcher::class);
     $normalized = trim($search->normalizeSearchText($message));
 
     if ($normalized === '' || str_word_count($normalized) > 3) {
@@ -1316,7 +1754,7 @@ private function isGenericNarrowingReply(Collection $lastMachines, string $messa
             trim($this->machineBrandName($machine) . ' ' . $machine->name)
         );
 
-        if ($name !== '' && str_contains($name, $normalized)) {
+        if ($name !== '' && $fuzzy->containsFuzzyPhrase($name, $normalized)) {
             $matches++;
         }
     }
@@ -1328,7 +1766,7 @@ private function isVariantNarrowingReply(string $message): bool
 {
     $m = $this->normalizeText($message);
 
-    return $this->containsAny($m, [
+    return app(\App\Support\FuzzyArabicMatcher::class)->containsAnyFuzzyPhrase($m, [
         'استيراد',
         'فرز تاني',
         'فرز ثاني',
@@ -1644,6 +2082,31 @@ private function handleInstallmentCalc(
     $deposit = (float) ($parsed['deposit'] ?? 0);
     $system = (string) ($parsed['system'] ?? '20');
 
+    /*
+     * لو نفس الطلب بالظبط اتكرر (نفس المدة/النظام/المقدم)، الأرقام
+     * المفروض تفضل زي ما هي - ده مش تكرار غلط، العميل فعلاً بيسأل نفس
+     * السؤال. لكن رد نفس الجملة حرفيًا مرتين ورا بعض حسّاس آلي. بنغيّر
+     * جملة الافتتاح بس (مش الأرقام) عشان يحس إن حد بيرد عليه فعلاً.
+     */
+    $payload = $conversation->context_payload ?? [];
+    $currentMachineIds = $machines->pluck('id')->sort()->values()->all();
+    $previousMachineIds = collect($payload['last_calc_machine_ids'] ?? [])->sort()->values()->all();
+
+    /*
+     * "بالظبط زي الأول" لازم يبقى معناه فعلاً "نفس السؤال اللي فات" -
+     * نفس المدة/النظام/المقدم مش كفاية لوحدها، لازم كمان تبقى نفس
+     * المكنة. من غيرها، سؤال قسط على مكنة تانية بنفس عدد الشهور (زي 12
+     * شهر) كان بيترد عليه وكأنه تكرار لسؤال قديم عن مكنة مختلفة تمامًا.
+     */
+    $isRepeatOfLastCalc = $payload !== []
+        && array_key_exists('last_months', $payload)
+        && (int) $payload['last_months'] === (int) $months
+        && (string) ($payload['last_system'] ?? '20') === $system
+        && (float) ($payload['last_deposit'] ?? 0) === $deposit
+        && $previousMachineIds === $currentMachineIds;
+
+    $repeatStreak = $isRepeatOfLastCalc ? ((int) ($payload['installment_repeat_streak'] ?? 0) + 1) : 0;
+
     $calculations = app(InstallmentCalculator::class)
         ->calculateMany($machines, (int) $months, $deposit, $system);
 
@@ -1658,8 +2121,18 @@ private function handleInstallmentCalc(
 
     $variables = $built['variables'];
 
+    $openers = [
+        "تمام يا فندم، القسط على {$variables['months']} شهر {$variables['deposit_text']}:",
+        "أه تمام، زي ما قلتلك يا فندم، القسط على {$variables['months']} شهر {$variables['deposit_text']} برضو:",
+        "بالظبط زي الأول يا فندم، القسط على {$variables['months']} شهر {$variables['deposit_text']}:",
+    ];
+
+    $opener = $isRepeatOfLastCalc
+        ? $openers[1 + ($repeatStreak % 2)]
+        : $openers[0];
+
     $defaultReply =
-        "تمام يا فندم، القسط على {$variables['months']} شهر {$variables['deposit_text']}:\n\n" .
+        "{$opener}\n\n" .
         "{$variables['installment_list']}\n\n" .
         "{$variables['admin_fee_text']}";
 
@@ -1684,6 +2157,8 @@ private function handleInstallmentCalc(
         'last_months' => $months,
         'last_system' => $system,
         'last_deposit' => $deposit,
+        'last_calc_machine_ids' => $currentMachineIds,
+        'installment_repeat_streak' => $repeatStreak,
     ]);
 
     return array_merge($this->textResult($reply), $this->machineMeta($machines));
@@ -1829,7 +2304,9 @@ private function narrowMachinesByVariant(Collection $machines, string $message):
         return $machines;
     }
 
-    if (str_contains($m, 'فرز تاني') || str_contains($m, 'فرز ثاني')) {
+    $fuzzy = app(\App\Support\FuzzyArabicMatcher::class);
+
+    if ($fuzzy->containsAnyFuzzyPhrase($m, ['فرز تاني', 'فرز ثاني'])) {
         $filtered = $machines->filter(fn ($machine) =>
             str_contains($this->normalizeText($machine->name), 'فرز تاني')
             || str_contains($this->normalizeText($machine->name), 'فرز ثاني')
@@ -1838,7 +2315,7 @@ private function narrowMachinesByVariant(Collection $machines, string $message):
         return $filtered->isNotEmpty() ? $filtered : $machines;
     }
 
-    if (str_contains($m, 'استيراد')) {
+    if ($fuzzy->containsFuzzyPhrase($m, 'استيراد')) {
         $filtered = $machines->filter(function ($machine) {
             $name = $this->normalizeText($machine->name);
 
@@ -1854,12 +2331,12 @@ private function narrowMachinesByVariant(Collection $machines, string $message):
     $normalized = trim($search->normalizeSearchText($message));
 
     if ($normalized !== '' && str_word_count($normalized) <= 3) {
-        $filtered = $machines->filter(function (Machine $machine) use ($search, $normalized) {
+        $filtered = $machines->filter(function (Machine $machine) use ($search, $normalized, $fuzzy) {
             $name = $search->normalizeSearchText(
                 trim($this->machineBrandName($machine) . ' ' . $machine->name)
             );
 
-            return $name !== '' && str_contains($name, $normalized);
+            return $name !== '' && $fuzzy->containsFuzzyPhrase($name, $normalized);
         })->values();
 
         if ($filtered->isNotEmpty() && $filtered->count() < $machines->count()) {
@@ -1926,6 +2403,33 @@ private function updateConversationState(
     }
 
     $mergedPayload = $this->mergeContextPayload($currentPayload, $payload);
+
+    /*
+     * لو طلب تقديم شغال بالفعل (pending_question حاليًا application_missing_data
+     * أو application_documents) وحد من الـ handlers الجانبية (سعر/صور/حساب
+     * قسط) نادى الدالة دي عشان يسجل بيانات إضافية بس (زي آخر مكنة اتحسبلها
+     * قسط)، من غير ما يقصد يقفل أو يغير الطلب نفسه - مينفعش نمسح last_topic
+     * وpending_question بتوع الطلب. ده كان بالظبط السبب إن سؤال جانبي عن
+     * مكنة تانية وسط طلب تقديم كان بيلغي "احنا لسه بنجمع مستندات" تمامًا،
+     * فالرسالة اللي بعدها بترجع تبدأ الطلب من الأول على المكنة الغلط.
+     */
+    $applicationInProgress = in_array(
+        $conversation->pending_question ?? null,
+        ['application_missing_data', 'application_documents'],
+        true
+    );
+
+    $callerTargetsApplication = in_array(
+        $pendingQuestion,
+        ['application_missing_data', 'application_documents'],
+        true
+    );
+
+    if ($applicationInProgress && ! $callerTargetsApplication) {
+        $conversation->forceFill(['context_payload' => $mergedPayload ?: null])->save();
+
+        return;
+    }
 
     $conversation->forceFill([
         'last_topic' => $topic,

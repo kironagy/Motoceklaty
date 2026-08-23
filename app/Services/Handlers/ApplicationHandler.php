@@ -17,6 +17,17 @@ class ApplicationHandler
         $conversation->refresh();
 
         $payload = $this->payload($conversation);
+        $machine = $this->currentMachine($conversation);
+
+        /*
+         * "احنا بنقدم على أنهي مكنة؟" / "رفعنا ايه لحد دلوقتي؟" - العميل
+         * بيسأل عن حالة الطلب نفسه، مش بيبعت بيانات جديدة. من غيرها كان
+         * بيترد عليه بنفس رسالة "ابعتلي صورة البطاقة" الثابتة تاني، من
+         * غير ما يجاوب على سؤاله خالص.
+         */
+        if ($machine && $this->isApplicationStatusQuestion($message)) {
+            return $this->reply($conversation, $this->applicationStatusSummary($conversation, $machine, $payload));
+        }
 
         if (($conversation->pending_question ?? null) === 'application_documents') {
             return $this->reply($conversation, $this->documentPrompt($payload));
@@ -27,8 +38,6 @@ class ApplicationHandler
         if ($blocked) {
             return $this->reply($conversation, $blocked);
         }
-
-        $machine = $this->currentMachine($conversation);
 
         $application = $payload['application'] ?? [];
 
@@ -46,7 +55,7 @@ class ApplicationHandler
         /*
          * لو العميل أصلاً كان بيحسب قسط قبل كده في نفس المحادثة (last_months
          * محفوظة من installment_calc)، معنى كده إنه قال قسط بالفعل.
-         * منسألوش تاني "كاش ولا تقسيط؟" ومنستخدمش عدد الشهور اللي حسبه.
+         * منسألوش تاني \"كاش ولا تقسيط؟\" ومنستخدمش عدد الشهور اللي حسبه.
          */
         if (empty($application['payment_method']) && !empty($payload['last_months'])) {
             $application['payment_method'] = 'installment';
@@ -68,6 +77,37 @@ class ApplicationHandler
             return $this->reply($conversation, 'تمام يا فندم، تعالى المعرض وهناخد إجراءات الشراء كاش على طول.');
         }
 
+        $stateService = app(\App\Services\ApplicationStateService::class);
+
+        if (!empty($payload['pending_conflicts'])) {
+            $resolved = $stateService->resolveConflicts($payload['pending_conflicts'], $message);
+            $application = array_merge($application, $resolved);
+
+            $stillPending = array_diff_key($payload['pending_conflicts'], $resolved);
+
+            if (!empty($stillPending)) {
+                $payload['pending_conflicts'] = $stillPending;
+                $payload['application'] = $application;
+
+                $conversation->forceFill(['context_payload' => $payload])->save();
+
+                return $this->reply($conversation, $stateService->conflictQuestion($stillPending));
+            }
+
+            $payload['pending_conflicts'] = null;
+
+            /*
+             * الرسالة دي كانت إجابة على سؤال التعارض بس ("التاني")، مش
+             * بيانات طلب جديدة. لو سبناها تروح لاستخراج الـ AI العادي
+             * تحت، كان بيحاول يستخرج منها/من سياق المحادثة تاني ويرجّع
+             * نفس الرقم القديم كـ"مستخرج جديد" فيفتح نفس تعارض الهاتف
+             * تاني من غير نهاية - ده كان بالظبط السبب إنه بيرجع يسأل نفس
+             * السؤال تاني وتاني. بنقفل الدورة هنا على طول بدل ما نمر على
+             * الاستخراج تاني.
+             */
+            return $this->finalizeApplicationTurn($conversation, $payload, $application, $message, $stateService);
+        }
+
         $analysis = app(\App\Services\AiIntentClassifier::class)->classify($conversation, $message, [
             'mode' => 'application_data_extraction',
             'required_fields' => [
@@ -87,23 +127,99 @@ class ApplicationHandler
             ],
         ]);
 
-        $application = $this->mergeApplicationData(
-            $application,
-            $analysis['application_data'] ?? []
-        );
+        $extracted = $analysis['application_data'] ?? [];
+        $extracted = $stateService->reconcileAddressAssignment($application, $extracted);
+        $conflicts = $stateService->detectConflicts($application, $extracted);
 
+        if (!empty($conflicts)) {
+            // Don't silently pick a value - merge only the non-conflicting
+            // fields extracted this turn, hold the conflicting ones, and
+            // ask which one is correct before touching them.
+            $extracted = array_diff_key($extracted, $conflicts);
+            $payload['pending_conflicts'] = $conflicts;
+        }
+
+        $application = $this->mergeApplicationData($application, $extracted);
+
+        if (!empty($conflicts)) {
+            $payload['application'] = $application;
+
+            $conversation->forceFill([
+                'last_topic' => 'application',
+                'context_payload' => $payload,
+            ])->save();
+
+            return $this->reply($conversation, $stateService->conflictQuestion($conflicts));
+        }
+
+        return $this->finalizeApplicationTurn($conversation, $payload, $application, $message, $stateService);
+    }
+
+    /**
+     * Shared tail for both the normal extraction path and the
+     * conflict-resolution shortcut: apply the income-proof denial check,
+     * refresh address components, compute what's still missing, and
+     * either ask for it (progress-aware) or move on to document
+     * collection once everything required is known.
+     */
+    private function finalizeApplicationTurn(
+        WhatsappConversation $conversation,
+        array $payload,
+        array $application,
+        string $message,
+        \App\Services\ApplicationStateService $stateService
+    ): array {
         if (empty($application['income_proof'])) {
             if ($this->messageDeniesIncomeProof($message) || $this->categorizeIncome((string) ($application['job_type'] ?? ''), '') === 'freelance') {
                 $application['income_proof'] = 'لا يوجد';
             }
         }
 
-        $missing = $this->missingFields($application);
+        $application = $stateService->refreshAddressComponents($application);
+
+        $isFreelance = $this->categorizeIncome(
+            (string) ($application['job_type'] ?? ''),
+            (string) ($application['income_proof'] ?? '')
+        ) === 'freelance';
+
+        $previousMissing = $payload['missing_fields'] ?? [];
+        $missing = $stateService->missingFields($application, $isFreelance);
 
         if (!empty($missing)) {
-            $this->saveState($conversation, $application, $missing, null);
+            /*
+             * اللي كان ناقص قبل وبقى موجود دلوقتي - من غيرها كل رد كان
+             * بيرجع نفس القالب الثابت "ناقصني البيانات دي" تاني من غير
+             * ما يقول إنه فعلاً استلم اللي العميل بعته، وده كان بيحس إن
+             * البوت مش قاري كلامه أصلاً.
+             */
+            $newlyFilled = array_values(array_diff($previousMissing, $missing));
 
-            return $this->reply($conversation, $this->questionForMissing($missing, $application));
+            /*
+             * لو محصلش تقدم تاني ورا بعض (مفيش newlyFilled) وده مش أول
+             * مرة بنسأل فيها أصلاً، بنعد المرات عشان الجملة الافتتاحية
+             * تتغير بدل ما تفضل ثابتة حرفيًا - مش بنغير قايمة البيانات
+             * الناقصة نفسها أبدًا. أول سؤال في الطلب لسه بيستخدم الصيغة
+             * العادية لأنه مفيش "تكرار" حقيقي لسه.
+             */
+            $hasAskedBefore = array_key_exists('missing_fields', $payload);
+
+            $noProgressStreak = ($hasAskedBefore && empty($newlyFilled))
+                ? (int) ($payload['no_progress_streak'] ?? 0) + 1
+                : 0;
+
+            $this->saveState(
+                $conversation,
+                $application,
+                $missing,
+                null,
+                ['no_progress_streak' => $noProgressStreak],
+                $payload
+            );
+
+            return $this->reply(
+                $conversation,
+                $stateService->questionForMissing($missing, $application, $newlyFilled, $noProgressStreak)
+            );
         }
 
         $requiredDocuments = $this->requiredDocuments($application);
@@ -349,7 +465,7 @@ class ApplicationHandler
         };
     }
 
-    private function categorizeIncome(string $jobType, string $incomeProof): string
+    public function categorizeIncome(string $jobType, string $incomeProof): string
     {
         $text = mb_strtolower($jobType . ' ' . $incomeProof);
 
@@ -432,6 +548,90 @@ class ApplicationHandler
         }
 
         return 'ابعتلي ' . $this->documentLabel($required[$index]) . ' من فضلك.';
+    }
+
+
+    /**
+     * "احنا بنقدم على أنهي مكنة؟" / "رفعنا ايه لحد دلوقتي؟" - a status
+     * question about the in-progress application itself, not new data.
+     */
+    private function isApplicationStatusQuestion(string $message): bool
+    {
+        $keywords = [
+            'بنقدم علي', 'بنقدم على', 'هنقدم علي', 'هنقدم على',
+            'بنشتري ايه', 'هنشتري ايه', 'شاريين ايه', 'بنقدم فين',
+            'رفعنا ايه', 'بعتلك ايه', 'بعتنا ايه', 'وصلنا لفين',
+            'احنا مقدمين', 'اي مكنه', 'انهي مكنه', 'أي مكنة', 'أنهي مكنة',
+            'الطلب بتاعنا', 'طلبنا وصل لفين', 'ناقصنا ايه', 'فاضلنا ايه',
+        ];
+
+        foreach ($keywords as $keyword) {
+            if (mb_stripos($message, $keyword) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Answers "what are we applying for / what have we sent so far"
+     * directly: confirms the machine + price, what's already known, and
+     * either the current document prompt or the still-missing data
+     * fields, depending on which stage the application is at.
+     */
+    private function applicationStatusSummary(WhatsappConversation $conversation, Machine $machine, array $payload): string
+    {
+        $application = $payload['application'] ?? [];
+
+        $priceText = $machine->cash_price
+            ? number_format((float) $machine->cash_price) . ' جنيه'
+            : null;
+
+        $lines = [
+            "حضرتك مقدم على {$this->machineDisplayName($machine)}"
+                . ($priceText ? " (سعرها كاش {$priceText})" : '') . '.',
+        ];
+
+        $labels = [
+            'full_name' => 'الاسم',
+            'national_id' => 'الرقم القومي',
+            'phone' => 'رقم الموبايل',
+            'job_type' => 'طبيعة الشغل',
+            'income_proof' => 'إثبات الدخل',
+            'work_address' => 'عنوان الشغل',
+            'home_address' => 'عنوان السكن',
+            'installment_months' => 'مدة التقسيط',
+        ];
+
+        $known = collect($labels)
+            ->filter(fn ($label, $key) => filled($application[$key] ?? null))
+            ->implode(' و');
+
+        if ($known !== '') {
+            $lines[] = "استلمنا منك: {$known}.";
+        }
+
+        if (($conversation->pending_question ?? null) === 'application_documents') {
+            $lines[] = $this->documentPrompt($payload);
+
+            return implode(' ', $lines);
+        }
+
+        $stateService = app(\App\Services\ApplicationStateService::class);
+
+        $isFreelance = $this->categorizeIncome(
+            (string) ($application['job_type'] ?? ''),
+            (string) ($application['income_proof'] ?? '')
+        ) === 'freelance';
+
+        $missing = $stateService->missingFields($application, $isFreelance);
+
+        $lines[] = empty($missing)
+            ? 'البيانات الأساسية مكتملة، جاري استكمال المستندات.'
+            : $stateService->questionForMissing($missing, $application);
+
+        return implode("\n", $lines);
     }
 
     private function detectPaymentMethod(string $message): ?string
@@ -527,6 +727,23 @@ class ApplicationHandler
 
     private function currentMachine(WhatsappConversation $conversation): ?Machine
     {
+        /*
+         * لو فيه طلب تقديم شغال بالفعل ومقفول على مكنة معينة، لازم يفضل
+         * على نفس المكنة دي دايمًا - مش يتأثر بآخر مكنة اتعرضت بسبب سؤال
+         * جانبي (زي "طيب وهي كام دايو 2؟" وسط طلب على هوجن ٤). last_machine_id
+         * بيتحدث لأي مكنة بتتعرض حتى لو العميل مش بيقدم عليها فعلاً - كان
+         * ده بيخلي الطلب "يقفز" لمكنة تانية بمجرد ما العميل يسأل عليها.
+         */
+        $lockedMachineId = $this->applicationLockedMachineId($conversation);
+
+        if ($lockedMachineId) {
+            $machine = Machine::query()->with('brand')->find($lockedMachineId);
+
+            if ($machine) {
+                return $machine;
+            }
+        }
+
         if (! empty($conversation->last_machine_id)) {
             $machine = Machine::query()
                 ->with('brand')
@@ -554,6 +771,17 @@ class ApplicationHandler
         return Machine::query()->with('brand')->find($ids[0]);
     }
 
+    private function applicationLockedMachineId(WhatsappConversation $conversation): ?int
+    {
+        if (! in_array($conversation->pending_question ?? null, ['application_missing_data', 'application_documents'], true)) {
+            return null;
+        }
+
+        $machineId = $this->payload($conversation)['application']['machine_id'] ?? null;
+
+        return $machineId ? (int) $machineId : null;
+    }
+
     private function mergeApplicationData(array $current, array $extracted): array
     {
         foreach ($extracted as $key => $value) {
@@ -575,66 +803,6 @@ class ApplicationHandler
         return $current;
     }
 
-    private function missingFields(array $data): array
-    {
-        $required = [
-            'full_name',
-            'national_id',
-            'phone',
-            'job_type',
-            'income_proof',
-            'work_address',
-            'home_address',
-            'installment_months',
-        ];
-
-        $isFreelance = $this->categorizeIncome((string) ($data['job_type'] ?? ''), (string) ($data['income_proof'] ?? '')) === 'freelance';
-
-        return array_values(array_filter($required, function ($key) use ($data, $isFreelance) {
-            if ($key === 'income_proof' && $isFreelance) {
-                return false;
-            }
-
-            if (empty($data[$key])) {
-                return true;
-            }
-
-            if ($key === 'home_address' && isset($data['home_address_status']) && $data['home_address_status'] === 'incomplete') {
-                return true;
-            }
-
-            if ($key === 'work_address' && isset($data['work_address_status']) && $data['work_address_status'] === 'incomplete') {
-                return true;
-            }
-
-            return false;
-        }));
-    }
-
-    private function questionForMissing(array $missing, array $application): string
-    {
-        $labels = [
-            'full_name' => 'الاسم بالكامل',
-            'national_id' => 'الرقم القومي',
-            'phone' => 'رقم الموبايل',
-            'job_type' => 'طبيعة شغلك',
-            'income_proof' => 'إثبات دخل (مفردات مرتب أو غيرها لو متاح)',
-            'work_address' => 'عنوان الشغل بالتفصيل',
-            'home_address' => 'عنوان السكن بالتفصيل',
-            'installment_months' => 'مدة التقسيط اللي تحبها',
-        ];
-
-        $items = array_map(fn ($key) => $labels[$key] ?? $key, $missing);
-
-        if (count($items) === 1) {
-            return 'تمام يا فندم، ناقصني ' . $items[0] . ' عشان أكمل طلب التقديم.';
-        }
-
-        $list = implode("\n", array_map(fn ($item) => '- ' . $item, $items));
-
-        return "تمام يا فندم، ناقصني البيانات دي عشان أكمل طلب التقديم:\n{$list}";
-    }
-
     private function payload(WhatsappConversation $conversation): array
     {
         $payload = $conversation->context_payload ?? [];
@@ -650,12 +818,22 @@ class ApplicationHandler
         WhatsappConversation $conversation,
         array $application,
         array $missing,
-        ?string $pendingQuestion
+        ?string $pendingQuestion,
+        array $extraPayload = [],
+        ?array $basePayload = null
     ): void {
-        $payload = $this->payload($conversation);
+        /*
+         * لو المتصل عنده نسخة payload محدّثة بالفعل (زي finalizeApplicationTurn
+         * بعد ما يمسح pending_conflicts محليًا)، لازم نبني عليها هي، مش
+         * نعيد قراءة $conversation->context_payload من جديد - ده كان
+         * بيرجّع أي تعديل محلي (زي pending_conflicts = null) للحالة
+         * القديمة تاني، فتعارض اترد عليه كان بيرجع يظهر تاني من غير نهاية.
+         */
+        $payload = $basePayload ?? $this->payload($conversation);
 
         $payload['application'] = $application;
         $payload['missing_fields'] = $missing;
+        $payload = array_merge($payload, $extraPayload);
 
         $conversation->forceFill([
             'last_topic' => 'application',

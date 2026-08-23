@@ -100,6 +100,7 @@ Laravel هو الذي سينفذ:
 - brand_models
 - application
 - application_status
+- delivery_question
 - general
 - unknown
 
@@ -136,6 +137,7 @@ target:
 - ممنوع تسأل عن اسم المكنة في application لو last_machine_ids موجودة.
 - لو last_topic = application والعميل قال ايه المطلوب أو أعمل ايه، intent=application و target=single_previous_machine.
 - application_status: العميل عنده طلب موجود بالفعل ويريد الاستعلام عن حالته أو أين وصل. مثال: "طلبي وصل لايه"، "حالة طلبي ايه"، "طلبي فين"، "الطلب بتاعي وصل لفين"، "عايز اعرف حالة طلبي"، "إيه أخبار طلبي"، "هل طلبي اتوافق عليه"، "طلبي لسه تحت المراجعة؟". هذه النية تعني الاستعلام فقط وليس إنشاء طلب جديد. لا تستخدم application_status للتقديم أو استكمال طلب جديد.
+- delivery_question: العميل بيسأل عن التوصيل بس (تكلفة التوصيل، مدته، هل بيوصل لمنطقته) - مش عن سعر أو تفاصيل المنتج نفسه. استخدم delivery_question حتى لو العميل وسط طلب تقديم لسه مكملوش، طالما السؤال ده عن التوصيل بس.
 تحويل المدد:
 - سنة = 12
 - سنة ونص = 18
@@ -326,6 +328,8 @@ PROMPT
             'installment_system',
             'brand_models',
             'application',
+            'application_status',
+            'delivery_question',
             'general',
             'unknown',
         ];

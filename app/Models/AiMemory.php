@@ -10,6 +10,11 @@ class AiMemory extends Model
     protected $fillable = [
         'title',
         'content',
+        'category',
+        'scope',
+        'applicable_intents',
+        'keywords',
+        'priority',
         'template_replies',
         'is_active',
         'sort',
@@ -17,6 +22,9 @@ class AiMemory extends Model
 
     protected $casts = [
         'template_replies' => 'array',
+        'applicable_intents' => 'array',
+        'keywords' => 'array',
+        'priority' => 'integer',
         'is_active' => 'boolean',
     ];
 
