@@ -13,23 +13,6 @@
 module.exports = {
   apps: [
     {
-      // Serves the actual Laravel webhook the Node bot posts every
-      // incoming WhatsApp message to (LARAVEL_WEBHOOK_URL in
-      // whatsapp-bot/.env, http://127.0.0.1:8000/api/whatsapp/incoming-message).
-      // WhatsappIntentRouter::handle() runs synchronously inside this
-      // process on every message - it is NOT one of the queue/worker
-      // processes below. Was previously started by hand outside pm2,
-      // which meant `pm2 restart` never actually picked up new code here.
-      name: 'laravel-server',
-      cwd: __dirname,
-      script: 'artisan',
-      interpreter: 'php',
-      args: 'serve --port=8000',
-      autorestart: true,
-      max_restarts: 20,
-      restart_delay: 3000,
-    },
-    {
       name: 'whatsapp-bot',
       cwd: __dirname + '/whatsapp-bot',
       script: 'index.js',
