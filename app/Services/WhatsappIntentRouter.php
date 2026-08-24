@@ -158,26 +158,24 @@ private function handleInternal(
         );
 
         /*
-         * "هي ايه المصاريف الإدارية دي" / "يعني ايه مصاريف إدارية" - سؤال
-         * توضيحي مستقل عن المصاريف الإدارية نفسها، مش طلب شرح نظام
-         * التقسيط الكامل من الأول. الكلاسيفاير كان بيصنفها installment_system
-         * فيرجع فقرة "التقسيط عندنا متاح لـ..." الكاملة اللي أصلاً معندهاش
-         * إجابة السؤال ده، وأحيانًا حرفيًا نفس الرد لو العميل سأل مرتين ورا
-         * بعض بصياغة مختلفة - يبان وكأن البوت مش بيسمع أو بيلف. رد مباشر
-         * ومحدد قبل أي تصنيف تاني.
+         * "هي ايه المصاريف الإدارية دي" / "كام %" / "يعني ايه مصاريف
+         * إدارية" - سؤال عن المصاريف الإدارية نفسها (شرحها أو قيمتها)،
+         * مش طلب شرح نظام التقسيط الكامل من الأول. الكلاسيفاير كان
+         * بيصنفها installment_system فيرجع فقرة "التقسيط عندنا متاح لـ..."
+         * الكاملة اللي أصلاً معندهاش إجابة السؤال. بنحول الـ intent بس هنا
+         * (مش بنرجع فورًا) عشان نكمل نفس مسار تحديد المكنة العادي تحت
+         * ونقدر نحسب رقم فعلي لو المكنة معروفة، بدل رد عام دايمًا.
+         * "كام %" لوحدها من غير كلمة "مصاريف" بترجع كمتابعة قصيرة لو آخر
+         * موضوع في المحادثة كان فعلاً شرح مصاريف إدارية.
          */
-        if ($this->isAdminFeeExplanationIntent($normalizedMessage)) {
-            $reply = $this->renderMemoryOrDefault(
-                'رد شرح المصاريف الإدارية',
-                [],
-                'المصاريف الإدارية دي مش حاجة إحنا حاططينها من عندنا، دي رسوم شركة التمويل نفسها مقابل إجراءات التقسيط، وبتتدفع مرة واحدة مع المقدم عند التعاقد، مش شهريًا.'
-            );
-
-            return $this->withApplicationResume(
-                $conversation,
-                $this->textReply($conversation, $reply),
-                $applicationIsPending
-            );
+        if (
+            $this->isAdminFeeExplanationIntent($normalizedMessage)
+            || ($conversation->last_topic === 'admin_fee_explanation' && $this->isBareAdminFeeFollowUp($normalizedMessage))
+        ) {
+            $intent = 'admin_fee_explanation';
+            $plan['intent'] = $intent;
+            $plan['needs_clarification'] = false;
+            $plan['clarification_question'] = null;
         }
 
         /*
@@ -216,7 +214,7 @@ private function handleInternal(
          * التأكيدات البسيطة أو الرسائل الغامضة (general/unknown) لسه
          * بترجع تلقائي لمسار التقديم زي ما كانت.
          */
-        $answerableDuringApplication = ['price', 'images', 'installment_system', 'installment_calc', 'delivery_question'];
+        $answerableDuringApplication = ['price', 'images', 'installment_system', 'installment_calc', 'delivery_question', 'admin_fee_explanation'];
         $isConfidentInterruptingQuestion = $applicationIsPending
             && in_array($intent, $answerableDuringApplication, true)
             && (float) ($plan['confidence'] ?? 1.0) >= 0.5;
@@ -467,6 +465,14 @@ private function handleInternal(
             return $this->withApplicationResume(
                 $conversation,
                 $this->handleInstallmentSystem($conversation, $message),
+                $resumeApplicationAfterAnswer
+            );
+        }
+
+        if ($intent === 'admin_fee_explanation') {
+            return $this->withApplicationResume(
+                $conversation,
+                $this->handleAdminFeeExplanation($conversation, $machines, $message),
                 $resumeApplicationAfterAnswer
             );
         }
@@ -1112,7 +1118,15 @@ $folder = $this->safeFolderName($machine->name);
     private function containsAny(string $text, array $needles): bool
     {
         foreach ($needles as $needle) {
-            if ($needle !== '' && str_contains($text, $this->normalizeText($needle))) {
+            $normalizedNeedle = $this->normalizeText($needle);
+
+            /*
+             * normalizeText() بيشيل أي حرف مش عربي/لاتيني/رقم/مسافة، فـ
+             * needle زي "%" بيتحول لسلسلة فاضية. str_contains($text, '')
+             * بيرجع true دايمًا في PHP، يعني أي needle زي ده كان بيخلي
+             * containsAny() ترجع true لأي رسالة مهما كانت.
+             */
+            if ($normalizedNeedle !== '' && str_contains($text, $normalizedNeedle)) {
                 return true;
             }
         }
@@ -1204,7 +1218,125 @@ $folder = $this->safeFolderName($machine->name);
             'هي ايه', 'هي اي', 'يعني ايه', 'يعني اي', 'ايه هي',
             'ليه', 'إيه', 'ايه دي', 'دي ايه', 'مش فاهم', 'مش فاهمه',
             'فيها ايه', 'بتتحسب ازاي', 'اد ايه',
+            'كام', 'قد ايه', 'نسبتها', 'نسبته', 'قيمتها', 'قيمته',
+            '%', 'في الميه', 'بالميه', 'في المئه',
         ]);
+    }
+
+    /**
+     * متابعة قصيرة زي "كام %" أو "قد ايه" لوحدها من غير كلمة "مصاريف" -
+     * بترجع كـadmin_fee_explanation بس لو آخر موضوع في المحادثة فعلاً كان
+     * شرح المصاريف الإدارية، عشان مانخطفش أي رسالة قصيرة تانية زي "كام
+     * شهر" أو "قد ايه القسط".
+     */
+    private function isBareAdminFeeFollowUp(string $normalizedMessage): bool
+    {
+        $normalized = trim($normalizedMessage);
+
+        if ($normalized === '' || str_word_count($normalized) > 4) {
+            return false;
+        }
+
+        return $this->containsAny($normalized, [
+            'كام', 'قد ايه', 'نسبتها', 'نسبته', '%', 'في الميه', 'بالميه', 'في المئه',
+        ]);
+    }
+
+    /**
+     * "هي ايه مصاريف اداريه" / "كام %" - العميل بيسأل عن المصاريف
+     * الإدارية نفسها. لو المكنة معروفة من السياق، برد رقم فعلي (7% من
+     * سعرها في التقسيط) مش شرح عام بس. لو كمان معروف حساب قسط سابق لنفس
+     * المكنة في المحادثة دي، بضيف إجمالي أول قسط (القسط الشهري + المصاريف
+     * الإدارية + المقدم لو فيه).
+     */
+    private function handleAdminFeeExplanation(
+        WhatsappConversation $conversation,
+        Collection $machines,
+        string $message
+    ): array {
+        if ($machines->isEmpty()) {
+            $last = $this->lastMachinesFromConversation($conversation);
+
+            if ($last->isNotEmpty()) {
+                $machines = $last;
+            }
+        }
+
+        if ($machines->isEmpty()) {
+            $reply = $this->renderMemoryOrDefault(
+                'رد شرح المصاريف الإدارية',
+                [],
+                'المصاريف الإدارية بتكون 7% من تمن المكنة، بتتدفع مرة واحدة عند الاستلام، ودي رسوم شركة التمويل بتحطها مش من المعرض.'
+            );
+
+            $this->saveOutgoing($conversation, $reply, ['source' => 'admin_fee_explanation_generic']);
+            $this->updateConversationState($conversation, 'admin_fee_explanation');
+
+            return $this->textResult($reply);
+        }
+
+        $machine = $machines->first();
+        $installmentPrice = (float) ($machine->installment_price ?? 0);
+        $displayName = $this->machineDisplayName($machine);
+
+        if ($installmentPrice <= 0) {
+            $reply = 'المصاريف الإدارية بتكون 7% من تمن المكنة في التقسيط، بتتدفع مرة واحدة عند الاستلام، ودي رسوم شركة التمويل مش من المعرض. سعر التقسيط لسه محتاج تأكيد لـ ' . $displayName . ' عشان أقولك الرقم بالظبط.';
+
+            $this->saveOutgoing($conversation, $reply, ['source' => 'admin_fee_explanation_no_price']);
+            $this->rememberMachines($conversation, $machines);
+            $this->updateConversationState($conversation, 'admin_fee_explanation');
+
+            return $this->textResult($reply);
+        }
+
+        $adminFee = (int) round($installmentPrice * 0.07);
+
+        $lines = [
+            "المصاريف الإدارية لـ {$displayName} بتكون " . number_format($adminFee)
+                . ' جنيه (7% من تمنها في التقسيط)، بتتدفع مرة واحدة عند الاستلام، ودي رسوم شركة التمويل بتحطها مش من المعرض.',
+        ];
+
+        $payload = $conversation->context_payload ?? [];
+        $lastCalcMachineIds = collect($payload['last_calc_machine_ids'] ?? [])->all();
+        $hasMatchingCalc = in_array($machine->id, $lastCalcMachineIds, true)
+            && array_key_exists('last_months', $payload);
+
+        if ($hasMatchingCalc) {
+            $months = (int) $payload['last_months'];
+            $deposit = (float) ($payload['last_deposit'] ?? 0);
+            $system = (string) ($payload['last_system'] ?? '20');
+
+            $calc = app(InstallmentCalculator::class)->calculate($machine, $months, $deposit, $system);
+
+            if ($calc['ok'] ?? false) {
+                $monthly = (int) $calc['monthly_payment'];
+                $calcAdminFee = (int) $calc['admin_fee'];
+                $freelanceExtra = (float) ($calc['freelance_extra_deposit'] ?? 0);
+                $totalFirstPayment = $monthly + $calcAdminFee + $deposit + $freelanceExtra;
+
+                $depositLine = $deposit > 0 ? ' + المقدم ' . number_format($deposit) . ' جنيه' : '';
+                $freelanceLine = $freelanceExtra > 0 ? ' + مقدم إضافي (سقف الدخل الحر) ' . number_format($freelanceExtra) . ' جنيه' : '';
+
+                $lines[] = 'يبقى أول قسط عليك تدفعه: القسط الشهري ' . number_format($monthly)
+                    . ' جنيه + المصاريف الإدارية ' . number_format($calcAdminFee) . ' جنيه'
+                    . $depositLine . $freelanceLine
+                    . ' = إجمالي ' . number_format($totalFirstPayment) . ' جنيه.';
+            }
+        }
+
+        $reply = implode("\n\n", $lines);
+
+        $this->saveOutgoing($conversation, $reply, [
+            'source' => 'admin_fee_explanation',
+            'machine_id' => $machine->id,
+        ]);
+
+        $this->rememberMachines($conversation, $machines);
+        $this->updateConversationState($conversation, 'admin_fee_explanation', null, [
+            'machine_ids' => $machines->pluck('id')->values()->all(),
+        ]);
+
+        return array_merge($this->textResult($reply), $this->machineMeta($machines));
     }
 
     /**
