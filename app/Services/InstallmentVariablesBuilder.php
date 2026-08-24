@@ -25,21 +25,31 @@ class InstallmentVariablesBuilder
             })
             ->implode("\n");
 
+        $deposit = (float) ($first['deposit'] ?? 0);
+        $system = (string) ($first['system'] ?? '20');
+        $freelanceExtraDeposit = (float) ($first['freelance_extra_deposit'] ?? 0);
+        $totalDepositDue = $deposit + $freelanceExtraDeposit;
+
         $adminFeeList = $valid
-            ->map(function ($item) {
-                return '- ' . $item['machine_name'] . ': ' . $this->money($item['admin_fee'] ?? 0);
+            ->map(function ($item) use ($totalDepositDue) {
+                $adminFee = (float) ($item['admin_fee'] ?? 0);
+                $totalAtSigning = $totalDepositDue + $adminFee;
+
+                return '- ' . $item['machine_name'] . ': ' . $this->money($adminFee)
+                    . ' (يعني إجمالي المطلوب عند التعاقد ' . $this->money($totalAtSigning) . ')';
             })
             ->implode("\n");
 
-        $deposit = (float) ($first['deposit'] ?? 0);
-        $system = (string) ($first['system'] ?? '20');
+        $freelanceCapText = $freelanceExtraDeposit > 0
+            ? "\n\nالسعر ده أعلى من سقف تمويل الدخل الحر (60,000 جنيه)، فالقسط والمصاريف الإدارية متحسبين على 60,000 جنيه بس، والفرق (" . $this->money($freelanceExtraDeposit) . ") لازم يتدفع مقدم إضافي مع باقي المقدم."
+            : '';
 
         return [
             'ok' => true,
             'variables' => [
                 'months' => (string) ($first['months'] ?? ''),
                 'deposit' => $this->money($deposit),
-                'deposit_text' => $deposit > 0 ? 'بمقدم ' . $this->money($deposit) : '',
+                'deposit_text' => $totalDepositDue > 0 ? 'بمقدم ' . $this->money($totalDepositDue) : '',
 
                 'system' => $system,
                 'system_name' => $system === '30' ? 'نظام 30%' : 'نظام 20%',
@@ -51,9 +61,12 @@ class InstallmentVariablesBuilder
                 'installment_list' => $installmentList,
                 'admin_fee_list' => $adminFeeList,
 
-                'admin_fee_text' => $system === '20'
-                    ? "المصاريف الإدارية:\n" . $adminFeeList
-                    : 'النظام ده بدون مصاريف إدارية.',
+                'freelance_extra_deposit' => $this->money($freelanceExtraDeposit),
+                'freelance_cap_text' => $freelanceCapText,
+
+                'admin_fee_text' => ($system === '20'
+                    ? "المصاريف الإدارية (بتتدفع مع المقدم عند التعاقد، مش شهريًا):\n" . $adminFeeList
+                    : 'النظام ده بدون مصاريف إدارية.') . $freelanceCapText,
             ],
         ];
     }

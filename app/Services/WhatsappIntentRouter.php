@@ -879,9 +879,17 @@ private function handleImages(
     $allImages = array_values(array_unique(array_filter($allImages)));
 
     if (! count($allImages)) {
-        $reply = $machines->count() > 1
-            ? 'للأسف مفيش صور متسجلة حاليًا للموديلات دي.'
-            : 'للأسف مفيش صور متسجلة حاليًا لـ ' . $this->machineDisplayName($machines->first()) . '.';
+        $reply = $this->renderMemoryOrDefault(
+            'رد لا توجد صور للموديل',
+            [
+                'machine_name' => $machines->count() > 1
+                    ? $machines->map(fn (Machine $machine) => $this->machineDisplayName($machine))->implode('، ')
+                    : $this->machineDisplayName($machines->first()),
+            ],
+            $machines->count() > 1
+                ? 'للأسف مفيش صور متسجلة حاليًا للموديلات دي.'
+                : 'للأسف مفيش صور متسجلة حاليًا لـ ' . $this->machineDisplayName($machines->first()) . '.'
+        );
     } elseif ($machines->count() > 1) {
         $reply = $this->renderMemoryOrDefault(
             'رد صور عائلة موديل',
@@ -2107,8 +2115,13 @@ private function handleInstallmentCalc(
 
     $repeatStreak = $isRepeatOfLastCalc ? ((int) ($payload['installment_repeat_streak'] ?? 0) + 1) : 0;
 
+    $isFreelance = app(ApplicationHandler::class)->categorizeIncome(
+        (string) ($payload['application']['job_type'] ?? ''),
+        (string) ($payload['application']['income_proof'] ?? '')
+    ) === 'freelance';
+
     $calculations = app(InstallmentCalculator::class)
-        ->calculateMany($machines, (int) $months, $deposit, $system);
+        ->calculateMany($machines, (int) $months, $deposit, $system, $isFreelance);
 
     $built = app(InstallmentVariablesBuilder::class)->build($calculations);
 
