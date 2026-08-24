@@ -224,6 +224,13 @@ class AiGoldenSet extends Command
                 ],
             ],
             [
+                'name' => 'admin fee mentioned inside a calc request still calculates',
+                'turns' => ['احسبلي قسط دايو ٤ على 12 شهر بالمصاريف الإدارية'],
+                'assertions' => [
+                    ['contains_all', ['12', 'جنيه']],
+                ],
+            ],
+            [
                 'name' => 'application status query does not start a new application',
                 'turns' => ['طلبي وصل لايه'],
                 'assertions' => [

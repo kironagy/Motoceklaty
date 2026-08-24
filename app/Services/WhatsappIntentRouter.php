@@ -351,7 +351,23 @@ private function handleInternal(
             $plan['needs_clarification'] = false;
             $plan['clarification_question'] = null;
         } elseif (
-            $this->isAdminFeeExplanationIntent($normalizedMessage)
+            (
+                $this->isAdminFeeExplanationIntent($normalizedMessage)
+                /*
+                 * Plan task 2.5: this used to fire on the keyword alone and
+                 * beat a perfectly good plan - "احسبلي القسط على 12 شهر
+                 * بالمصاريف الإدارية" is a calculation request that merely
+                 * mentions the fee, and it was being answered with the
+                 * generic fee explanation instead. The classifier already
+                 * emits admin_fee_explanation itself, so the regex is now
+                 * only a safety net for when it did not understand
+                 * (general/unknown or a low-confidence guess).
+                 */
+                && (
+                    in_array($intent, ['general', 'unknown', 'admin_fee_explanation'], true)
+                    || (float) ($plan['confidence'] ?? 0.0) < 0.5
+                )
+            )
             || ($conversation->last_topic === 'admin_fee_explanation' && $this->isBareAdminFeeFollowUp($normalizedMessage))
         ) {
             $intent = 'admin_fee_explanation';
