@@ -34,6 +34,14 @@ class WhatsappIntentRouter
      */
     private array $lastTurnExtraSteps = [];
 
+    /**
+     * Thin wrapper around handleInternal() with two jobs it keeps out of
+     * that method's many early-return branches: appending any extra steps
+     * the planner found in the same message, and one structured log line
+     * per turn answering "what did the AI decide and why" without needing
+     * to re-read code (see AI_MEMORY_CONVERSATION_IMPROVEMENT_PLAN.md
+     * Section 22).
+     */
     public function handle(
         WhatsappConversation $conversation,
         string $message,
@@ -389,7 +397,25 @@ private function handleInternal(
          * بترجع تلقائي لمسار التقديم زي ما كانت.
          */
         $answerableDuringApplication = ['price', 'images', 'installment_system', 'installment_calc', 'delivery_question', 'admin_fee_explanation'];
+
+        /*
+         * "تقسيط" / "كاش" مباشرة بعد سؤال "حضرتك عاوز تدفع كاش ولا تقسيط؟"
+         * هي *إجابة* السؤال ده، لكن الـ planner بيقراها طلب installment_calc
+         * جديد بثقة 1.0، فكانت بتتحسب "سؤال مقاطع" وتروح لحساب القسط -
+         * والإجابة تضيع، والتقديم يفضل يسأل نفس السؤال في كل دور بعد كده
+         * (loop حقيقي اتشاف في ai:golden-set: missing_fields=[payment_method]
+         * على ٦ أدوار متتالية، فـ job_type وبوابة المهن الممنوعة عمرها ما
+         * اتنفذت). رد قصير على السؤال المعلّق بيرجع للتقديم دايمًا.
+         */
+        $awaitingPaymentMethod = $applicationIsPending
+            && in_array('payment_method', (array) (($conversation->context_payload['missing_fields'] ?? [])), true);
+
+        $isAnswerToPendingApplicationQuestion = $awaitingPaymentMethod
+            && count(preg_split('/\s+/u', trim($normalizedMessage)) ?: []) <= 3
+            && preg_match('/(كاش|تقسيط|قسط|نقدي|نقدا)/u', $normalizedMessage) === 1;
+
         $isConfidentInterruptingQuestion = $applicationIsPending
+            && ! $isAnswerToPendingApplicationQuestion
             && in_array($intent, $answerableDuringApplication, true)
             && (float) ($plan['confidence'] ?? 1.0) >= 0.5;
 

@@ -24,7 +24,10 @@ use Illuminate\Console\Command;
  */
 class AiGoldenSet extends Command
 {
-    protected $signature = 'ai:golden-set {--phone-prefix=29990000 : Prefix for the throwaway test phone numbers}';
+    protected $signature = 'ai:golden-set
+        {--phone-prefix=29990000 : Prefix for the throwaway test phone numbers}
+        {--delay=3 : Seconds to wait between turns, to stay inside the per-minute Gemini limits}
+        {--filter= : Only run cases whose name contains this substring}';
 
     protected $description = 'Run a small live regression suite against WhatsappIntentRouter (Phase 4.1 starter set)';
 
@@ -43,7 +46,26 @@ class AiGoldenSet extends Command
 
         $cases = $this->cases();
 
+        if ($filter = (string) $this->option('filter')) {
+            $cases = array_values(array_filter(
+                $cases,
+                fn (array $case) => str_contains($case['name'], $filter)
+            ));
+
+            if (empty($cases)) {
+                $this->error("No case name contains \"{$filter}\".");
+
+                return self::FAILURE;
+            }
+        }
+
+        $delay = max(0, (int) $this->option('delay'));
+
         foreach ($cases as $i => $case) {
+            if ($i > 0 && $delay > 0) {
+                sleep($delay);
+            }
+
             $this->runCase($bot->id, (string) $this->option('phone-prefix') . str_pad((string) ($i + 1), 3, '0', STR_PAD_LEFT), $case);
         }
 
@@ -136,6 +158,79 @@ class AiGoldenSet extends Command
                     ['contains_all', ['نظام']],
                 ],
             ],
+
+            /*
+             * The cases below cover the behaviours currently protected by the
+             * router's regex overrides (isHumanSupportRequest,
+             * isComplaintMessage, isAdminFeeExplanationIntent,
+             * isInstallmentCalcIntent, ...). They exist so plan task 2.5
+             * (deleting those overrides one at a time) has something to fail
+             * against - assertions are deliberately loose where the exact
+             * wording is the model's choice.
+             */
+            [
+                'name' => 'explicit human-support request escalates to an agent',
+                'turns' => ['عايز اكلم موظف من فضلك'],
+                'assertions' => [
+                    ['status_is', 'awaiting_agent'],
+                ],
+            ],
+            [
+                'name' => 'complaint gets an answer instead of a repeated price offer',
+                'turns' => ['انتوا نصابين والله'],
+                'assertions' => [
+                    ['reply_not_empty'],
+                    ['not_contains', ['جنيه']],
+                ],
+            ],
+            [
+                'name' => 'explicit installment calc: months + deposit are honoured',
+                'turns' => ['احسبلي قسط دايو ٤ على ١٨ شهر بمقدم ١٠ الاف'],
+                'assertions' => [
+                    ['contains_all', ['18', 'جنيه']],
+                    ['not_contains', ['تحب التقسيط على كام شهر']],
+                ],
+            ],
+            [
+                'name' => 'admin fee question is explained, not escalated',
+                'turns' => ['يعني ايه مصاريف اداريه'],
+                'assertions' => [
+                    ['reply_not_empty'],
+                    ['status_is', 'open'],
+                ],
+            ],
+            [
+                'name' => 'brand models question lists models without a handoff',
+                'turns' => ['ايه الموديلات المتاحة عندكم من دايو'],
+                'assertions' => [
+                    ['reply_not_empty'],
+                    ['status_is', 'open'],
+                ],
+            ],
+            [
+                'name' => 'delivery question is answered from memory',
+                'turns' => ['بتوصلوا لحد المنصورة؟'],
+                'assertions' => [
+                    ['reply_not_empty'],
+                    ['status_is', 'open'],
+                ],
+            ],
+            [
+                'name' => 'branches question is answered from memory (title-miss guard)',
+                'turns' => ['فروعكم فين؟'],
+                'assertions' => [
+                    ['reply_not_empty'],
+                    ['status_is', 'open'],
+                ],
+            ],
+            [
+                'name' => 'application status query does not start a new application',
+                'turns' => ['طلبي وصل لايه'],
+                'assertions' => [
+                    ['reply_not_empty'],
+                    ['not_contains', ['ابعتلي صورة البطاقة', 'ممكن اسم حضرتك']],
+                ],
+            ],
         ];
     }
 
@@ -150,7 +245,20 @@ class AiGoldenSet extends Command
         $result = [];
 
         try {
-            foreach ($case['turns'] as $message) {
+            /*
+             * Every turn is one or more live Gemini calls and the reasoning
+             * model is capped at 10 rpm per key. Without a pause a multi-turn
+             * case burns the whole minute budget and later cases fail on
+             * transient 503/429 rather than on behaviour - which is exactly
+             * how the first run of this command produced a false failure.
+             */
+            $delay = max(0, (int) $this->option('delay'));
+
+            foreach ($case['turns'] as $i => $message) {
+                if ($i > 0 && $delay > 0) {
+                    sleep($delay);
+                }
+
                 $result = app(WhatsappIntentRouter::class)->handle($conversation->fresh(), $message);
             }
 
@@ -159,7 +267,7 @@ class AiGoldenSet extends Command
             foreach ($case['assertions'] as $assertion) {
                 $check = $assertion[0];
                 $args = array_slice($assertion, 1);
-                $error = $this->evaluate($check, $args, $result);
+                $error = $this->evaluate($check, $args, $result, $conversation->fresh());
 
                 if ($error !== null) {
                     $failures[] = $error;
@@ -188,11 +296,14 @@ class AiGoldenSet extends Command
         }
     }
 
-    private function evaluate(string $check, array $args, array $result): ?string
+    private function evaluate(string $check, array $args, array $result, WhatsappConversation $conversation): ?string
     {
         $reply = (string) ($result['reply'] ?? '');
 
         return match ($check) {
+            'status_is' => ($conversation->status ?? null) === $args[0]
+                ? null
+                : 'expected conversation status "' . $args[0] . '", got "' . ($conversation->status ?? 'null') . '"',
             'contains_all' => $this->firstMissing($reply, $args[0]),
             'not_contains' => $this->firstPresent($reply, $args[0]),
             'reply_not_empty' => trim($reply) === '' ? 'reply was empty' : null,

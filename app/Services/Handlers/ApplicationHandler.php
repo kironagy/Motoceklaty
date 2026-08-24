@@ -170,12 +170,8 @@ class ApplicationHandler
         \App\Services\ApplicationStateService $stateService
     ): array {
         /*
-         * لازم نقارن بالقيمة قبل الدور ده (من $payload، قبل الدمج)، مش
-         * بـ $application['income_proof'] بعد الدمج - لإن AiIntentClassifier
-         * نفسه (prompt خط 443) بيحط "لا يوجد" مباشرة جوه application_data
-         * لما يكتشف مهنة حرة، يعني بيوصل هنا already-non-empty قبل حتى ما
-         * نوصل للـ fallback تحت. لو اعتمدنا على القيمة بعد الدمج، كنا
-         * هنفوّت بالظبط الحالة دي ونعتبرها "استلمت فعليًا".
+         * أول حاجة تتفحص بمجرد ما نعرف الوظيفة: الفئات الممنوعة. من غير
+         * كده العميل الممنوع بيكمّل كل الأسئلة والمستندات وبعدين يترفض يدوي.
          */
         $jobType = trim((string) ($application['job_type'] ?? ''));
 
@@ -183,6 +179,14 @@ class ApplicationHandler
             return $this->reply($conversation, $banReason);
         }
 
+        /*
+         * لازم نقارن بالقيمة قبل الدور ده (من $payload، قبل الدمج)، مش
+         * بـ $application['income_proof'] بعد الدمج - لإن AiIntentClassifier
+         * نفسه (prompt خط 443) بيحط "لا يوجد" مباشرة جوه application_data
+         * لما يكتشف مهنة حرة، يعني بيوصل هنا already-non-empty قبل حتى ما
+         * نوصل للـ fallback تحت. لو اعتمدنا على القيمة بعد الدمج، كنا
+         * هنفوّت بالظبط الحالة دي ونعتبرها "استلمت فعليًا".
+         */
         $incomeProofWasEmpty = empty($payload['application']['income_proof'] ?? null);
 
         if (empty($application['income_proof'])) {
@@ -574,27 +578,66 @@ class ApplicationHandler
      *
      * Keywords are hardcoded (not parsed from the memory text) to keep this
      * a plain, fast, reviewable check - matches how categorizeIncome() above
-     * already works. 'أمين' alone is intentionally not matched: the memory
-     * means the police rank (أمين شرطة), and a bare 'أمين' would also match
-     * unrelated jobs like أمين مخزن (storekeeper).
+     * already works. Matching runs on normalizeJobText() output so the many
+     * spellings of the same job ("أمين الشرطة" / "امين شرطه", "محامى" /
+     * "محاماة") all fold onto one form.
      */
     public function bannedProfessionReason(string $jobType): ?string
     {
-        $text = mb_strtolower($jobType);
+        $text = $this->normalizeJobText($jobType);
+
+        /*
+         * Interior-ministry ranks. The memory lists them bare (ضابط / أمين /
+         * معاون) but a bare أمين or معاون is ambiguous in Egyptian job
+         * wording (أمين مخزن, معاون مدير), so those two only count when the
+         * message also places the customer inside the ministry. ضابط has no
+         * such civilian meaning here.
+         */
+        $interiorContext = $this->containsAny($text, [
+            'شرطه', 'مباحث', 'داخليه', 'وزاره داخليه', 'امن مركزي', 'سجون', 'مرور',
+        ]);
 
         $isBanned =
-            str_contains($text, 'ضابط')
-            || str_contains($text, 'امين شرطه') || str_contains($text, 'أمين شرطة')
-            || str_contains($text, 'معاون')
-            || str_contains($text, 'محامي') || str_contains($text, 'محاماة') || str_contains($text, 'محاماه')
-            || str_contains($text, 'قاضي') || str_contains($text, 'قضاء')
-            || str_contains($text, 'نيابة') || str_contains($text, 'نيابه');
+            $this->containsAny($text, ['ضابط', 'ظابط'])
+            || ($interiorContext && $this->containsAny($text, ['امين', 'معاون', 'فرد', 'مجند', 'عسكري']))
+            // Lawyers: محامي / محامى / محاماه / محاماة all normalize onto محام.
+            || $this->containsAny($text, ['محام'])
+            // Judiciary: judges, prosecution, court officials.
+            || $this->containsAny($text, ['قاضي', 'قضاء', 'قضائي', 'نيابه', 'محكمه', 'مستشار قضائي']);
 
         if (! $isBanned) {
             return null;
         }
 
         return 'للأسف يا فندم، نظام التقسيط عندنا مش متاح لوظيفتك حاليًا. تحب تعرف تفاصيل الشراء كاش؟';
+    }
+
+    /**
+     * Same Arabic folding the router uses before any keyword match: hamza
+     * forms onto ا, ة onto ه, ى onto ي, and the definite article stripped -
+     * so "أمين الشرطة" and "امين شرطه" are one string here.
+     */
+    private function normalizeJobText(string $text): string
+    {
+        $text = mb_strtolower($text);
+        $text = str_replace(['أ', 'إ', 'آ'], 'ا', $text);
+        $text = str_replace('ة', 'ه', $text);
+        $text = str_replace('ى', 'ي', $text);
+        $text = preg_replace('/\bال(?=[\p{Arabic}]{2,})/u', '', $text);
+        $text = preg_replace('/[^\p{Arabic}a-zA-Z0-9\s]/u', ' ', $text);
+
+        return trim(preg_replace('/\s+/u', ' ', $text));
+    }
+
+    private function containsAny(string $haystack, array $needles): bool
+    {
+        foreach ($needles as $needle) {
+            if (str_contains($haystack, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

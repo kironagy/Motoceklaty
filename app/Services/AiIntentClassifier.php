@@ -29,17 +29,20 @@ class AiIntentClassifier
         $prompt = $this->prompt($conversation, $message, $recent, $lastMachines, $context);
 
         try {
-            $result = app(GeminiClient::class)->generateText($prompt, config('gemini.models.reasoning'), [
-                'temperature' => 0.05,
-                'maxOutputTokens' => 2048,
-            ]);
+            $json = $this->requestPlanJson($prompt);
 
-            if (! ($result['ok'] ?? false)) {
-                return $this->fallback();
+            if (! is_array($json)) {
+                /*
+                 * Gemini 3.x spends part of maxOutputTokens on internal
+                 * thinking, so a long prompt (this one now carries the whole
+                 * memory context) can come back truncated mid-JSON or with no
+                 * text part at all. Falling straight through to fallback()
+                 * means intent=unknown for a message we could have understood,
+                 * so retry once with thinking off - the entire budget then
+                 * goes to the JSON. Costs a second call only on failure.
+                 */
+                $json = $this->requestPlanJson($prompt, ['thinkingBudget' => 0]);
             }
-
-            $text = trim((string) ($result['reply'] ?? $result['text'] ?? ''));
-            $json = $this->extractJson($text);
 
             if (! is_array($json)) {
                 return $this->fallback();
@@ -53,6 +56,26 @@ class AiIntentClassifier
 
             return $this->fallback();
         }
+    }
+
+    /**
+     * One planner call: returns the decoded JSON object, or null when the
+     * call failed, was truncated, or did not contain a JSON object.
+     */
+    private function requestPlanJson(string $prompt, array $extraOptions = []): ?array
+    {
+        $result = app(GeminiClient::class)->generateText($prompt, config('gemini.models.reasoning'), array_merge([
+            'temperature' => 0.05,
+            'maxOutputTokens' => 2048,
+        ], $extraOptions));
+
+        if (! ($result['ok'] ?? false)) {
+            return null;
+        }
+
+        $json = $this->extractJson(trim((string) ($result['reply'] ?? $result['text'] ?? '')));
+
+        return is_array($json) ? $json : null;
     }
 
     private function prompt(
@@ -397,6 +420,9 @@ PROMPT
 
             $step['needs_clarification'] = false;
             $step['clarification_question'] = null;
+            // A step is never itself a multi-step plan - drop anything the
+            // model nested here so it can't be carried around unexecuted.
+            $step['steps'] = [];
 
             $steps[] = $step;
         }
@@ -561,16 +587,14 @@ PROMPT
         . "\n" . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 
     try {
-        $result = app(GeminiClient::class)->generateText($prompt, config('gemini.models.reasoning'), [
-            'temperature' => 0.05,
-            'maxOutputTokens' => 2048,
-        ]);
+        $json = $this->requestPlanJson($prompt);
 
-        if (! ($result['ok'] ?? false)) {
-            return ['application_data' => []];
+        if (! is_array($json)) {
+            // Same truncation guard as classify() above: an extraction that
+            // silently returns [] loses the customer's name/ID for that turn
+            // and the flow asks for it again.
+            $json = $this->requestPlanJson($prompt, ['thinkingBudget' => 0]);
         }
-
-        $json = $this->extractJson(trim((string) ($result['reply'] ?? $result['text'] ?? '')));
 
         return is_array($json) ? $json : ['application_data' => []];
     } catch (\Throwable $e) {
