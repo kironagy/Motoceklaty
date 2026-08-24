@@ -3,13 +3,15 @@
 namespace Tests\Unit;
 
 use App\Services\Handlers\ApplicationHandler;
-use PHPUnit\Framework\TestCase;
+use Tests\TestCase;
 
 /**
  * Plan tasks 3.1 and 3.2: which job category a customer falls into decides
  * both the documents asked for and whether the installment flow may start
- * at all. Both are pure string logic, so they are covered here without a
- * database or a Gemini call.
+ * at all. No Gemini call is involved; the Laravel TestCase is only needed
+ * because both methods now also consult AiMemoryRules (task 3.3), which
+ * resolves to an empty rule set on the suite's empty in-memory database -
+ * so what is asserted here is exactly the built-in floor.
  */
 class ApplicationCategoryTest extends TestCase
 {

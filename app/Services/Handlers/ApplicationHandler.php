@@ -6,6 +6,7 @@ use App\Models\InstallmentRequest;
 use App\Models\Machine;
 use App\Models\WhatsappConversation;
 use App\Services\AiMemoryResolver;
+use App\Services\AiMemoryRules;
 use App\Services\DocumentDataExtractor;
 use App\Services\Ocr\OcrProviderInterface;
 use Illuminate\Support\Facades\Storage;
@@ -529,7 +530,10 @@ class ApplicationHandler
             default => ['salary_slip'],
         };
 
-        return array_merge($base, $categorySpecific);
+        // A memory's rules block may redefine what its own category needs.
+        $fromMemory = app(AiMemoryRules::class)->requiredDocumentsFor($category);
+
+        return array_merge($base, $fromMemory ?? $categorySpecific);
     }
 
     /**
@@ -562,6 +566,20 @@ class ApplicationHandler
     public function categorizeIncome(string $jobType, string $incomeProof): string
     {
         $text = mb_strtolower($jobType . ' ' . $incomeProof);
+
+        /*
+         * Plan task 3.3: a memory can teach a new job category (or new
+         * wording for an existing one) without a deploy. Checked first so a
+         * hand-added category wins over the generic freelance catch-all
+         * below, which is what would otherwise swallow it.
+         */
+        foreach (app(AiMemoryRules::class)->jobCategoryKeywords() as $category => $keywords) {
+            foreach ($keywords as $keyword) {
+                if ($keyword !== '' && str_contains($text, mb_strtolower($keyword))) {
+                    return $category;
+                }
+            }
+        }
 
         if (str_contains($text, 'معاش') || str_contains($text, 'تقاعد')) {
             return 'pension';
@@ -656,6 +674,23 @@ class ApplicationHandler
             || $this->containsAny($text, ['محام'])
             // Judiciary: judges, prosecution, court officials.
             || $this->containsAny($text, ['قاضي', 'قضاء', 'قضائي', 'نيابه', 'محكمه', 'مستشار قضائي']);
+
+        /*
+         * Plan task 3.3: anything staff added to the «الفئات الممنوعة»
+         * memory's rules block counts too. Additive only - the list above is
+         * a floor a mistyped rules block cannot lower.
+         */
+        if (! $isBanned) {
+            foreach (app(AiMemoryRules::class)->bannedProfessions() as $keyword) {
+                $keyword = $this->normalizeJobText($keyword);
+
+                if ($keyword !== '' && str_contains($text, $keyword)) {
+                    $isBanned = true;
+
+                    break;
+                }
+            }
+        }
 
         if (! $isBanned) {
             return null;

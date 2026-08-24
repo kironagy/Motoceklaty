@@ -14,6 +14,7 @@ class AiMemory extends Model
         'scope',
         'applicable_intents',
         'keywords',
+        'rules',
         'priority',
         'template_replies',
         'is_active',
@@ -24,6 +25,8 @@ class AiMemory extends Model
         'template_replies' => 'array',
         'applicable_intents' => 'array',
         'keywords' => 'array',
+        // Structured mirror of the prose in `content` - see AiMemoryRules.
+        'rules' => 'array',
         'priority' => 'integer',
         'is_active' => 'boolean',
     ];
