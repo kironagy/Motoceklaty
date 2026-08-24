@@ -13,6 +13,21 @@ use Illuminate\Support\Facades\Storage;
 
 class ApplicationHandler
 {
+    /*
+     * Injected by the container in normal use; constructed on demand when
+     * this handler is built by hand (unit tests). AiMemoryRules degrades to
+     * an empty rule set without a database, so either way the built-in
+     * lists below are what answers.
+     */
+    public function __construct(private ?AiMemoryRules $memoryRules = null)
+    {
+    }
+
+    private function memoryRules(): AiMemoryRules
+    {
+        return $this->memoryRules ??= new AiMemoryRules();
+    }
+
     public function handle(WhatsappConversation $conversation, string $message): array
     {
         $conversation->refresh();
@@ -531,7 +546,7 @@ class ApplicationHandler
         };
 
         // A memory's rules block may redefine what its own category needs.
-        $fromMemory = app(AiMemoryRules::class)->requiredDocumentsFor($category);
+        $fromMemory = $this->memoryRules()->requiredDocumentsFor($category);
 
         return array_merge($base, $fromMemory ?? $categorySpecific);
     }
@@ -573,7 +588,7 @@ class ApplicationHandler
          * hand-added category wins over the generic freelance catch-all
          * below, which is what would otherwise swallow it.
          */
-        foreach (app(AiMemoryRules::class)->jobCategoryKeywords() as $category => $keywords) {
+        foreach ($this->memoryRules()->jobCategoryKeywords() as $category => $keywords) {
             foreach ($keywords as $keyword) {
                 if ($keyword !== '' && str_contains($text, mb_strtolower($keyword))) {
                     return $category;
@@ -681,7 +696,7 @@ class ApplicationHandler
          * a floor a mistyped rules block cannot lower.
          */
         if (! $isBanned) {
-            foreach (app(AiMemoryRules::class)->bannedProfessions() as $keyword) {
+            foreach ($this->memoryRules()->bannedProfessions() as $keyword) {
                 $keyword = $this->normalizeJobText($keyword);
 
                 if ($keyword !== '' && str_contains($text, $keyword)) {

@@ -96,17 +96,26 @@ class AiMemoryRules
             return $this->cache;
         }
 
-        if (! class_exists(AiMemory::class) || ! Schema::hasTable('ai_memories') || ! Schema::hasColumn('ai_memories', 'rules')) {
+        /*
+         * Rules are an enhancement, never a dependency: outside a booted
+         * application (plain unit tests) or before the migration has run,
+         * an empty rule set is the correct answer, not a fatal.
+         */
+        try {
+            if (! class_exists(AiMemory::class) || ! Schema::hasTable('ai_memories') || ! Schema::hasColumn('ai_memories', 'rules')) {
+                return $this->cache = [];
+            }
+
+            return $this->cache = AiMemory::query()
+                ->where('is_active', true)
+                ->whereNotNull('rules')
+                ->pluck('rules')
+                ->filter(fn ($rules) => is_array($rules))
+                ->values()
+                ->all();
+        } catch (\Throwable $e) {
             return $this->cache = [];
         }
-
-        return $this->cache = AiMemory::query()
-            ->where('is_active', true)
-            ->whereNotNull('rules')
-            ->pluck('rules')
-            ->filter(fn ($rules) => is_array($rules))
-            ->values()
-            ->all();
     }
 
     /**
