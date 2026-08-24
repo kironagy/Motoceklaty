@@ -25,6 +25,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | AI-Written Phrasing (plan task 2.4)
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, AiReplyPhraser rewords an already-correct deterministic
+    | reply so it reads like a person wrote it. The rewording is discarded
+    | unless it carries exactly the same numbers, so prices and installments
+    | can never drift. Set GEMINI_AI_PHRASING=false to fall back to the
+    | fixed templates everywhere (one less Gemini call per money reply).
+    |
+    */
+
+    'ai_phrasing' => [
+        'enabled' => env('GEMINI_AI_PHRASING', true),
+        'max_chars' => 1200,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | AI Providers Default Models
     |--------------------------------------------------------------------------
     */

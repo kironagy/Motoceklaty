@@ -1057,6 +1057,17 @@ if ($machines->count() > 1) {
     ], $default);
 }
 
+    /*
+     * Plan task 2.4: the model words this, it never computes it. $reply is
+     * already the correct sentence built from cash_price; AiReplyPhraser
+     * only returns a reword that carries the exact same digits and the same
+     * "- model: price" lines, otherwise this same text goes out untouched.
+     */
+    $reply = app(AiReplyPhraser::class)->phrase($reply, [
+        'context' => 'سعر كاش',
+        'must_keep' => $machines->map(fn (Machine $machine) => $this->machineDisplayName($machine))->all(),
+    ]);
+
     $this->saveOutgoing($conversation, $reply, [
         'source' => 'simple_cash_price',
         'message' => $message,
@@ -2582,6 +2593,13 @@ private function handleInstallmentCalc(
         $variables,
         $defaultReply
     );
+
+    // Same guarded rewording as the cash-price path above - every جنيه in
+    // here comes from InstallmentCalculator and has to survive verbatim.
+    $reply = app(AiReplyPhraser::class)->phrase($reply, [
+        'context' => 'حساب قسط',
+        'must_keep' => $machines->map(fn (Machine $machine) => $this->machineDisplayName($machine))->all(),
+    ]);
 
     $this->saveOutgoing($conversation, $reply, [
         'source' => 'installment_calc_ai_state',
