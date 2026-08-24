@@ -169,7 +169,9 @@ class ApplicationHandler
         string $message,
         \App\Services\ApplicationStateService $stateService
     ): array {
-        if (empty($application['income_proof'])) {
+        $incomeProofWasEmpty = empty($application['income_proof']);
+
+        if ($incomeProofWasEmpty) {
             if ($this->messageDeniesIncomeProof($message) || $this->categorizeIncome((string) ($application['job_type'] ?? ''), '') === 'freelance') {
                 $application['income_proof'] = 'لا يوجد';
             }
@@ -194,6 +196,18 @@ class ApplicationHandler
              */
             $newlyFilled = array_values(array_diff($previousMissing, $missing));
 
+            $categoryNote = $this->categoryRequirementsNote($application, $newlyFilled);
+
+            /*
+             * income_proof بيختفي من الناقص لما الفئة تتحدد "دخل حر" (أو
+             * العميل رفض يبعته)، مش لإنه فعلاً بعت حاجة - lines أعلى بتحط
+             * "لا يوجد" تلقائيًا. قول "استلمت إثبات الدخل" هنا كذب صريح؛
+             * categoryRequirementsNote() فوق بيوضح الصح بدل منه.
+             */
+            if ($incomeProofWasEmpty && in_array('income_proof', $newlyFilled, true)) {
+                $newlyFilled = array_values(array_diff($newlyFilled, ['income_proof']));
+            }
+
             /*
              * لو محصلش تقدم تاني ورا بعض (مفيش newlyFilled) وده مش أول
              * مرة بنسأل فيها أصلاً، بنعد المرات عشان الجملة الافتتاحية
@@ -216,10 +230,13 @@ class ApplicationHandler
                 $payload
             );
 
-            return $this->reply(
-                $conversation,
-                $stateService->questionForMissing($missing, $application, $newlyFilled, $noProgressStreak)
-            );
+            $reply = $stateService->questionForMissing($missing, $application, $newlyFilled, $noProgressStreak);
+
+            if ($categoryNote !== null) {
+                $reply = "{$categoryNote}\n\n{$reply}";
+            }
+
+            return $this->reply($conversation, $reply);
         }
 
         $requiredDocuments = $this->requiredDocuments($application);
@@ -500,6 +517,47 @@ class ApplicationHandler
         }
 
         return 'employee';
+    }
+
+    /**
+     * أول مرة نعرف فئة شغل العميل (job_type اتملى في نفس الدور ده)، بنقوله
+     * على طول إيه المطلوب منه فعليًا حسب فئته - بدل ما يفضل يكتشف كل بند
+     * لوحده على مدار كذا رسالة. لو الفئة "army" مفيش ميموري مخصصة لها
+     * حاليًا فبيرجع null (السلوك القديم كما هو).
+     */
+    private function categoryRequirementsNote(array $application, array $newlyFilled): ?string
+    {
+        if (! in_array('job_type', $newlyFilled, true)) {
+            return null;
+        }
+
+        $category = $this->categorizeIncome(
+            (string) ($application['job_type'] ?? ''),
+            (string) ($application['income_proof'] ?? '')
+        );
+
+        $titles = [
+            'employee' => 'رد متطلبات الموظف',
+            'freelance' => 'رد متطلبات العمل الحر',
+            'business' => 'رد متطلبات صاحب المشروع',
+            'pension' => 'رد متطلبات المعاش',
+        ];
+
+        $title = $titles[$category] ?? null;
+
+        if ($title === null) {
+            return null;
+        }
+
+        $memory = app(AiMemoryResolver::class)->memoryByExactTitle($title);
+
+        if (! $memory) {
+            return null;
+        }
+
+        $reply = trim((string) app(\App\Services\AiReplyBuilder::class)->fromMemories(collect([$memory]), [], ''));
+
+        return $reply !== '' ? $reply : null;
     }
 
     private function rulesTextFor(string $docType): string
