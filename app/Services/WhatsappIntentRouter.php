@@ -158,6 +158,29 @@ private function handleInternal(
         );
 
         /*
+         * "هي ايه المصاريف الإدارية دي" / "يعني ايه مصاريف إدارية" - سؤال
+         * توضيحي مستقل عن المصاريف الإدارية نفسها، مش طلب شرح نظام
+         * التقسيط الكامل من الأول. الكلاسيفاير كان بيصنفها installment_system
+         * فيرجع فقرة "التقسيط عندنا متاح لـ..." الكاملة اللي أصلاً معندهاش
+         * إجابة السؤال ده، وأحيانًا حرفيًا نفس الرد لو العميل سأل مرتين ورا
+         * بعض بصياغة مختلفة - يبان وكأن البوت مش بيسمع أو بيلف. رد مباشر
+         * ومحدد قبل أي تصنيف تاني.
+         */
+        if ($this->isAdminFeeExplanationIntent($normalizedMessage)) {
+            $reply = $this->renderMemoryOrDefault(
+                'رد شرح المصاريف الإدارية',
+                [],
+                'المصاريف الإدارية دي مش حاجة إحنا حاططينها من عندنا، دي رسوم شركة التمويل نفسها مقابل إجراءات التقسيط، وبتتدفع مرة واحدة مع المقدم عند التعاقد، مش شهريًا.'
+            );
+
+            return $this->withApplicationResume(
+                $conversation,
+                $this->textReply($conversation, $reply),
+                $applicationIsPending
+            );
+        }
+
+        /*
          * تحية صرفة ("مساء الخير") وسط طلب تقديم كانت بتروح على طول
          * لـ ApplicationHandler، وهو مش عنده حاجة يستخرجها منها فيرجع
          * نفس رسالة "ناقصني البيانات دي" تاني - يبان وكأنه متجاهل كلام
@@ -1165,6 +1188,24 @@ $folder = $this->safeFolderName($machine->name);
         ]);
     }
 
+
+    /**
+     * العميل بيسأل يفهم إيه هي المصاريف الإدارية بالظبط ("هي ايه"، "يعني
+     * ايه"، "ليه فيه"...)، مش بيسأل عن نظام التقسيط عمومًا. normalizeText()
+     * بيشيل "ال" التعريف، فـ"المصاريف الإدارية" بتتحول "مصاريف اداريه".
+     */
+    private function isAdminFeeExplanationIntent(string $normalizedMessage): bool
+    {
+        if (! $this->containsAny($normalizedMessage, ['مصاريف اداريه', 'مصاريف ادارية'])) {
+            return false;
+        }
+
+        return $this->containsAny($normalizedMessage, [
+            'هي ايه', 'هي اي', 'يعني ايه', 'يعني اي', 'ايه هي',
+            'ليه', 'إيه', 'ايه دي', 'دي ايه', 'مش فاهم', 'مش فاهمه',
+            'فيها ايه', 'بتتحسب ازاي', 'اد ايه',
+        ]);
+    }
 
     /**
      * A short message that's basically just a greeting, not carrying any
