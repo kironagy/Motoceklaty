@@ -251,7 +251,8 @@ class ApplicationStateService
         array $missing,
         array $application,
         array $newlyFilled = [],
-        int $noProgressStreak = 0
+        int $noProgressStreak = 0,
+        array $labelOverrides = []
     ): string {
         $acknowledgment = '';
 
@@ -312,7 +313,7 @@ class ApplicationStateService
          * بالظبط بدل ما يرجع للتسمية العامة "بالتفصيل" اللي كأنها متجاهلة
          * إن العميل بعت حاجة أصلاً.
          */
-        $items = array_map(fn ($key) => $this->missingFieldLine($key, $application), $missing);
+        $items = array_map(fn ($key) => $this->missingFieldLine($key, $application, $labelOverrides), $missing);
 
         if (count($items) === 1) {
             return $acknowledgment !== ''
@@ -341,8 +342,13 @@ class ApplicationStateService
      * the generic "بالتفصيل" label, so the customer can see the message
      * actually understood what they sent.
      */
-    private function missingFieldLine(string $key, array $application): string
+    private function missingFieldLine(string $key, array $application, array $labelOverrides = []): string
     {
+        if (isset($labelOverrides[$key])) {
+            return $labelOverrides[$key];
+        }
+
+
         if (in_array($key, self::ADDRESS_FIELDS, true)) {
             $missingComponents = $application["{$key}_missing_components"] ?? [];
 

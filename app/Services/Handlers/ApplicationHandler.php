@@ -169,13 +169,34 @@ class ApplicationHandler
         string $message,
         \App\Services\ApplicationStateService $stateService
     ): array {
-        $incomeProofWasEmpty = empty($application['income_proof']);
+        /*
+         * لازم نقارن بالقيمة قبل الدور ده (من $payload، قبل الدمج)، مش
+         * بـ $application['income_proof'] بعد الدمج - لإن AiIntentClassifier
+         * نفسه (prompt خط 443) بيحط "لا يوجد" مباشرة جوه application_data
+         * لما يكتشف مهنة حرة، يعني بيوصل هنا already-non-empty قبل حتى ما
+         * نوصل للـ fallback تحت. لو اعتمدنا على القيمة بعد الدمج، كنا
+         * هنفوّت بالظبط الحالة دي ونعتبرها "استلمت فعليًا".
+         */
+        $incomeProofWasEmpty = empty($payload['application']['income_proof'] ?? null);
 
-        if ($incomeProofWasEmpty) {
+        if (empty($application['income_proof'])) {
             if ($this->messageDeniesIncomeProof($message) || $this->categorizeIncome((string) ($application['job_type'] ?? ''), '') === 'freelance') {
                 $application['income_proof'] = 'لا يوجد';
             }
         }
+
+        $incomeProofExempted = $incomeProofWasEmpty && ($application['income_proof'] ?? null) === 'لا يوجد';
+
+        /*
+         * فئة الشغل ممكن تتغيّر مش بس تتعرف أول مرة - العميل قال "معاش"
+         * وبعدين غيّر لـ"سباك عمل حر" في نفس المحادثة. لازم رسالة
+         * المتطلبات تتحدّث كل مرة الفئة تتغيّر، مش بس أول مرة job_type
+         * يتملى من فاضي.
+         */
+        $previousJobType = trim((string) ($payload['application']['job_type'] ?? ''));
+        $previousCategory = $previousJobType !== ''
+            ? $this->categorizeIncome($previousJobType, (string) ($payload['application']['income_proof'] ?? ''))
+            : null;
 
         $application = $stateService->refreshAddressComponents($application);
 
@@ -196,7 +217,14 @@ class ApplicationHandler
              */
             $newlyFilled = array_values(array_diff($previousMissing, $missing));
 
-            $categoryNote = $this->categoryRequirementsNote($application, $newlyFilled);
+            $currentJobType = trim((string) ($application['job_type'] ?? ''));
+            $currentCategory = $currentJobType !== ''
+                ? $this->categorizeIncome($currentJobType, (string) ($application['income_proof'] ?? ''))
+                : null;
+
+            $categoryNote = ($currentCategory !== null && $currentCategory !== $previousCategory)
+                ? $this->categoryRequirementsNote($currentCategory)
+                : null;
 
             /*
              * income_proof بيختفي من الناقص لما الفئة تتحدد "دخل حر" (أو
@@ -204,7 +232,7 @@ class ApplicationHandler
              * "لا يوجد" تلقائيًا. قول "استلمت إثبات الدخل" هنا كذب صريح؛
              * categoryRequirementsNote() فوق بيوضح الصح بدل منه.
              */
-            if ($incomeProofWasEmpty && in_array('income_proof', $newlyFilled, true)) {
+            if ($incomeProofExempted && in_array('income_proof', $newlyFilled, true)) {
                 $newlyFilled = array_values(array_diff($newlyFilled, ['income_proof']));
             }
 
@@ -230,7 +258,17 @@ class ApplicationHandler
                 $payload
             );
 
-            $reply = $stateService->questionForMissing($missing, $application, $newlyFilled, $noProgressStreak);
+            /*
+             * أصحاب المعاشات لسه محتاجين "إثبات دخل" فعليًا (بيان معاش)،
+             * مش معفيين زي أصحاب المهن الحرة - بس اللابل العام "مفردات
+             * مرتب" بتاع الموظفين مش منطقي ليهم ويناقض رسالة categoryNote
+             * اللي فوق. لابل مخصص بدل العام لما الفئة الحالية معاش.
+             */
+            $labelOverrides = $currentCategory === 'pension'
+                ? ['income_proof' => 'بيان معاش حديث (مختوم وأقل من شهر)']
+                : [];
+
+            $reply = $stateService->questionForMissing($missing, $application, $newlyFilled, $noProgressStreak, $labelOverrides);
 
             if ($categoryNote !== null) {
                 $reply = "{$categoryNote}\n\n{$reply}";
@@ -525,17 +563,8 @@ class ApplicationHandler
      * لوحده على مدار كذا رسالة. لو الفئة "army" مفيش ميموري مخصصة لها
      * حاليًا فبيرجع null (السلوك القديم كما هو).
      */
-    private function categoryRequirementsNote(array $application, array $newlyFilled): ?string
+    private function categoryRequirementsNote(string $category): ?string
     {
-        if (! in_array('job_type', $newlyFilled, true)) {
-            return null;
-        }
-
-        $category = $this->categorizeIncome(
-            (string) ($application['job_type'] ?? ''),
-            (string) ($application['income_proof'] ?? '')
-        );
-
         $titles = [
             'employee' => 'رد متطلبات الموظف',
             'freelance' => 'رد متطلبات العمل الحر',
