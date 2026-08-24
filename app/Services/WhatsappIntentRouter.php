@@ -27,13 +27,13 @@ class WhatsappIntentRouter
     private ?float $lastTurnRepetitionScore = null;
 
     /**
-     * Thin wrapper around handleInternal() whose only job is observability:
-     * one structured log line per turn answering "what did the AI decide
-     * and why" without needing to re-read code (see
-     * AI_MEMORY_CONVERSATION_IMPROVEMENT_PLAN.md Section 22). Kept
-     * separate from handleInternal() so none of that method's many
-     * early-return branches needed touching to get logging on every path.
+     * Extra independent requests classified alongside the primary intent
+     * (e.g. "سعرها وصورها" -> primary=price, one extra step=images). Only
+     * ever populated past the needs_clarification guard in handleInternal(),
+     * so a clarification question or handoff naturally leaves this empty.
      */
+    private array $lastTurnExtraSteps = [];
+
     public function handle(
         WhatsappConversation $conversation,
         string $message,
@@ -47,6 +47,19 @@ class WhatsappIntentRouter
         $result = $this->handleInternal($conversation, $message, $mediaItems);
 
         $conversation->refresh();
+
+        /*
+         * Extra steps (independent requests bundled in the same message,
+         * e.g. "سعرها وصورها") only get appended to an answer that actually
+         * went out cleanly - never to a clarification question or a handoff.
+         */
+        if (
+            ($result['handled'] ?? false) === true
+            && ! empty($result['reply'])
+            && $conversation->status !== 'awaiting_agent'
+        ) {
+            $result = $this->appendExtraSteps($conversation, $message, $result);
+        }
 
         Log::info('ai_turn', [
             'conversation_id' => $conversation->id,
@@ -65,11 +78,138 @@ class WhatsappIntentRouter
             'escalated' => $statusBefore !== 'awaiting_agent' && $conversation->status === 'awaiting_agent',
             'pending_question' => $conversation->pending_question ?? null,
             'last_topic' => $conversation->last_topic ?? null,
+            'extra_steps' => count($this->lastTurnExtraSteps),
             'latency_ms' => (int) ((microtime(true) - $startedAt) * 1000),
         ]);
 
         return $result;
     }
+
+
+/**
+ * Executes any extra steps captured for this turn and appends their
+ * replies/images onto the primary result. Runs after the primary handler
+ * has already saved its own outgoing message and updated conversation
+ * state, so:
+ * - the primary machine(s) and last_topic take priority: extra-step
+ *   machines are added to last_machine_ids (union), never replace it, and
+ *   last_topic is restored to whatever the primary handler set;
+ * - a failing extra step is logged and skipped, never lets an exception
+ *   swallow the primary reply that already succeeded.
+ */
+private function appendExtraSteps(WhatsappConversation $conversation, string $message, array $result): array
+{
+    $steps = $this->lastTurnExtraSteps;
+
+    if (empty($steps)) {
+        return $result;
+    }
+
+    $primaryTopic = $conversation->last_topic;
+    $primaryMachineIds = is_array($conversation->last_machine_ids ?? null)
+        ? $conversation->last_machine_ids
+        : [];
+
+    $extraReplies = [];
+    $extraImages = $result['images'] ?? [];
+    $extraImageItems = $result['image_items'] ?? [];
+    $extraImageGroups = $result['image_groups'] ?? [];
+
+    foreach ($steps as $step) {
+        try {
+            $stepResult = $this->executeAnswerableStep($conversation, $message, $step);
+        } catch (\Throwable $e) {
+            Log::warning('extra_step_failed', [
+                'conversation_id' => $conversation->id,
+                'step' => $step,
+                'error' => $e->getMessage(),
+            ]);
+
+            continue;
+        }
+
+        if (! empty($stepResult['reply'])) {
+            $extraReplies[] = trim($stepResult['reply']);
+        }
+
+        $extraImages = array_merge($extraImages, $stepResult['images'] ?? []);
+        $extraImageItems = array_merge($extraImageItems, $stepResult['image_items'] ?? []);
+        $extraImageGroups = array_merge($extraImageGroups, $stepResult['image_groups'] ?? []);
+
+        $conversation->refresh();
+    }
+
+    if (empty($extraReplies) && $extraImages === ($result['images'] ?? [])) {
+        return $result;
+    }
+
+    $mergedMachineIds = array_values(array_unique(array_merge(
+        $primaryMachineIds,
+        is_array($conversation->last_machine_ids ?? null) ? $conversation->last_machine_ids : []
+    )));
+
+    $conversation->forceFill([
+        'last_topic' => $primaryTopic,
+        'last_machine_ids' => $mergedMachineIds,
+    ])->save();
+
+    if (! empty($extraReplies)) {
+        $result['reply'] = trim(($result['reply'] ?? '') . "\n\n" . implode("\n\n", $extraReplies));
+    }
+
+    $result['images'] = array_values(array_unique(array_filter($extraImages)));
+    $result['image_items'] = $extraImageItems;
+    $result['image_groups'] = $extraImageGroups;
+    $result['image'] = $result['image'] ?? ($result['images'][0] ?? null);
+
+    return $result;
+}
+
+/**
+ * One extra step is a plan-shaped array (same fields AiIntentClassifier
+ * produces for the primary plan) restricted to intents that have a real
+ * deterministic handler - no free-form AI fallback and no application
+ * flow from a secondary request.
+ */
+private function executeAnswerableStep(WhatsappConversation $conversation, string $message, array $step): array
+{
+    $intent = $step['intent'] ?? null;
+
+    $answerable = ['price', 'images', 'installment_calc', 'installment_system', 'brand_models', 'admin_fee_explanation'];
+
+    if (! in_array($intent, $answerable, true)) {
+        return ['reply' => null, 'images' => []];
+    }
+
+    if ($intent === 'installment_system') {
+        return $this->handleInstallmentSystem($conversation, $message);
+    }
+
+    $machines = $this->resolveMachinesFromPlan($conversation, $message, $step);
+
+    $brandFiltered = $this->filterMachinesByRequestedBrand($machines, $message);
+
+    if (($brandFiltered['machines'] ?? collect())->isNotEmpty()) {
+        $machines = $brandFiltered['machines'];
+    }
+
+    if ($machines->count() > 1) {
+        $machines = $this->narrowMachinesByVariant($machines, $message);
+    }
+
+    if ($machines->isEmpty()) {
+        return ['reply' => null, 'images' => []];
+    }
+
+    return match ($intent) {
+        'price' => $this->handleCashPrice($conversation, $machines, $message),
+        'images' => $this->handleImages($conversation, $machines, $message, $step),
+        'installment_calc' => $this->handleInstallmentCalc($conversation, $machines, $message, $step),
+        'brand_models' => $this->handleBrandModels($conversation, $machines, $message),
+        'admin_fee_explanation' => $this->handleAdminFeeExplanation($conversation, $machines, $message),
+        default => ['reply' => null, 'images' => []],
+    };
+}
 
 private function handleInternal(
     WhatsappConversation $conversation,
@@ -79,6 +219,7 @@ private function handleInternal(
     $this->lastTurnIntent = null;
     $this->lastTurnConfidence = null;
     $this->lastTurnRepetitionScore = null;
+    $this->lastTurnExtraSteps = [];
 
     try {
         $message = trim($message);
@@ -366,6 +507,13 @@ private function handleInternal(
          * مش مرتبطة ببعض.
          */
         app(\App\Services\ClarificationService::class)->reset($conversation);
+
+        /*
+         * Only reachable once understanding was confident enough to skip
+         * clarification, so a clarification question or an escalation never
+         * has extra steps attached to it - see handle()'s appendExtraSteps().
+         */
+        $this->lastTurnExtraSteps = $plan['steps'] ?? [];
 
         $machines = $this->resolveMachinesFromPlan($conversation, $message, $plan);
 
@@ -2590,6 +2738,31 @@ private function narrowMachinesByVariant(Collection $machines, string $message):
                 && ! str_contains($name, 'فرز تاني')
                 && ! str_contains($name, 'فرز ثاني');
         })->values();
+
+        return $filtered->isNotEmpty() ? $filtered : $machines;
+    }
+
+    /*
+     * "اصلي"/"محلي" were already recognised as narrowing signals by
+     * isVariantNarrowingReply() (used to decide THAT a short reply is a
+     * narrowing reply), but this function - the one that actually filters
+     * the machine list - had no matching branch for them, only for
+     * استيراد/فرز تاني. A query like "دايو 4 اصلي" kept both دايو 4 and
+     * دايو 4 اصلي because family search matches both on the shared "4"
+     * token and nothing here ever filtered by "اصلي".
+     */
+    if ($fuzzy->containsAnyFuzzyPhrase($m, ['اصلي', 'اصليه'])) {
+        $filtered = $machines->filter(fn ($machine) =>
+            str_contains($this->normalizeText($machine->name), 'اصلي')
+        )->values();
+
+        return $filtered->isNotEmpty() ? $filtered : $machines;
+    }
+
+    if ($fuzzy->containsAnyFuzzyPhrase($m, ['محلي', 'محليه'])) {
+        $filtered = $machines->filter(fn ($machine) =>
+            str_contains($this->normalizeText($machine->name), 'محلي')
+        )->values();
 
         return $filtered->isNotEmpty() ? $filtered : $machines;
     }

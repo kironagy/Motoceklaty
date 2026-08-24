@@ -4,7 +4,7 @@
 > الملف ده مصمم عشان AI model يشتغل عليه خطوة بخطوة ويحدّث الحالة بنفسه.
 
 **آخر تحديث:** 2026-08-25
-**التقدّم العام:** Phase 1 `DONE` ✅ · Phase 2 `NOT_STARTED` · Phase 3 `NOT_STARTED` · Phase 4 `NOT_STARTED`
+**التقدّم العام:** Phase 1 `DONE` ✅ · Phase 2 `IN_PROGRESS` 🔶 · Phase 3 `NOT_STARTED` · Phase 4 `NOT_STARTED`
 
 ---
 
@@ -324,193 +324,120 @@ App\Models\GeminiApiKeyModel::where('model_code','gemini-3.7-flash')->update(['c
 
 # Phase 2 — الخطة المركّبة و Tool Calling
 
-**Status:** `NOT_STARTED`
+**Status:** `IN_PROGRESS` (2026-08-25) — 2.1/2.2/2.6 اتعملوا واتأكد منهم، 2.3 اتعمل بشكل مختصر عن الخطة الأصلية، 2.4 و 2.5 اتأجّلوا عن قصد (السبب تحت كل واحدة)
 **الهدف:** ده **الإصلاح الحقيقي**. تحويل الـ AI من «آخر ملاذ» لـ «العقل»، وLaravel من «العقل» لـ «مصدر الحقيقة».
 **المدة المتوقعة:** ١–٢ أسبوع
 **متطلب:** Phase 1 لازم يكون `DONE`
 
 ---
 
-### - [ ] 2.1 — حوّل `intent: string` لـ `steps: []`
+### - [x] 2.1 — حوّل `intent: string` لـ `steps: []`
 
-**المشكلة:** الرسالة الواحدة = نية واحدة. الطلب المركّب مستحيل يتمثّل:
+**⚠️ تعديل عن الخطة الأصلية:** الخطة الأصلية اقترحت `action`/`params` schema جديد بالكامل. بدل كده اتعمل تصميم أبسط وأقل خطورة: كل عنصر في `steps[]` **بنفس شكل الحقول الحالية بالظبط** (`intent`, `target`, `machine_query`, `months`, `deposit`, `system`, ...)، مش شكل جديد. الميزة: كل الـ handlers الموجودة (`resolveMachinesFromPlan`, `handleCashPrice`, `handleImages`, ...) بتشتغل على step زي ما تشتغل على الـ plan الأساسي من غير أي تعديل فيهم — صفر إعادة كتابة لمنطق شغال ومُختبر.
 
-> «مكنه دايو ٤ عاوزها علي سنه هدفع مقدم ٥ الاف وعاوزك تبعتلي تفاصيل التقسيط الكامل»
+**اللي اتعمل فعليًا** (`app/Services/AiIntentClassifier.php`):
+- `fallback()` بقى فيها `'steps' => []`.
+- `normalizePlan()` اتقسمت لـ `normalizePlanFields()` (نفس التحقق القديم، بس reusable) + منطق جديد بيطبّق نفس التحقق على كل عنصر في `steps[]`.
+- `steps[]` محدود بـ `MAX_EXTRA_STEPS = 2` (يعني حد أقصى ٣ طلبات في الرسالة: الأساسي + ٢).
+- **حماية:** أي step بـ `intent` = `application` أو `application_status` أو `unknown` أو `general` بيتشال تلقائيًا — تقديم أو استعلام حالة لازم يكونوا الطلب الأساسي بس، مش طلب ثانوي.
+- البرومبت اتضاف له قسم `steps` بيشرح إمتى يتستخدم + مثال JSON كامل.
 
-«تفاصيل التقسيط الكامل» مالهاش حقل في الـ JSON schema أصلًا فبتتلغي، ولو `months` رجع `null` بتترمي على سؤال «على كام شهر؟».
-
-**التعديل:** في `app/Services/AiIntentClassifier.php` غيّر الـ schema المطلوب في البرومبت:
-
-```json
-{
-  "steps": [
-    {
-      "action": "calculate_installment",
-      "machine_query": "دايو 4",
-      "target": "new_machine",
-      "params": { "months": 12, "deposit": 5000, "system": null, "full_breakdown": true }
-    }
-  ],
-  "needs_clarification": false,
-  "clarification_question": null,
-  "confidence": 0.0
-}
-```
-
-القيم المسموحة لـ `action`: `get_price` · `get_images` · `calculate_installment` · `explain_installment_system` · `explain_admin_fee` · `list_brand_models` · `start_application` · `check_application_status` · `answer_delivery` · `general_reply`
-
-**قاعدة مهمة تتكتب في البرومبت:** «لو العميل طلب أكتر من حاجة في نفس الرسالة، اعمل step لكل حاجة بالترتيب اللي اتقالوا بيه. متلغيش أي طلب.»
-
-**التعديل (توافق):** ضيف `normalizeSteps()` وسيب `normalizePlan()` شغالة — خلّي أول step يتحوّل لـ `intent`/`target`/`machine_query` القديمة عشان الكود الحالي ميقعش أثناء الانتقال.
-
-**Verify:**
+**Verify (اتنفذ فعليًا، ✅ نجح):**
 ```bash
 php artisan tinker --execute="
 \$c = App\Models\WhatsappConversation::latest()->first();
-\$p = app(App\Services\AiIntentClassifier::class)->classify(\$c,'مكنه دايو ٤ عاوزها علي سنه هدفع مقدم ٥ الاف وعاوزك تبعتلي تفاصيل التقسيط الكامل');
-echo json_encode(\$p['steps'] ?? [], JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT).PHP_EOL;"
+\$p = app(App\Services\AiIntentClassifier::class)->classify(\$c,'سعر دايو ٤ وصورها');
+echo json_encode(\$p['steps'] ?? [], JSON_UNESCAPED_UNICODE).PHP_EOL;"
 ```
-✅ لازم يطلع step واحد على الأقل بـ `action=calculate_installment` و `months=12` و `deposit=5000`.
+النتيجة الفعلية: step واحد بـ `intent=images` و`machine_ids` محلولة صح من السياق.
 
 ---
 
-### - [ ] 2.2 — نفّذ الـ steps بالترتيب
+### - [x] 2.2 — نفّذ الـ steps بالترتيب
 
-**التعديل:** في `WhatsappIntentRouter::handleInternal()`، بدل ما تنفّذ `intent` واحدة، اعمل loop على `$plan['steps']` وجمّع الردود.
+**⚠️ تعديل عن الخطة الأصلية:** بدل ما نلف الـ loop جوه `handleInternal()` (اللي فيه عشرات الـ early return)، الإضافة اتحطت في `handle()` (الغلاف العام) بعد ما `handleInternal()` يخلّص تمامًا. كده صفر تعديل في أي من الـ early returns الموجودة، والـ extra steps بس بتتحق لما الرد الأساسي يخرج نضيف من غير clarification ولا handoff.
 
-```php
-$replies = [];
-$allImages = [];
+**اللي اتعمل فعليًا** (`app/Services/WhatsappIntentRouter.php`):
+- خاصية جديدة `$lastTurnExtraSteps` بتتسجّل بس بعد ما `ClarificationService::reset()` ينفّذ (يعني بعد ما نتأكد إن الرسالة اتفهمت بثقة) — فأي clarification question أو handoff بيسيبها فاضية تلقائيًا.
+- `handle()`: بعد `handleInternal()`، لو الرد نجح (`handled=true`, فيه `reply`, والمحادثة لسه `open`)، بينده `appendExtraSteps()`.
+- `appendExtraSteps()`: بينفّذ كل step عبر `executeAnswerableStep()`، بيجمع الردود (`\n\n` بينهم) والصور، وبيرجّع `last_topic` لقيمته الأصلية بعد ما الـ steps تخلص (عشان مايتغيرش الموضوع المسجل بسبب طلب ثانوي)، وبيدمج `last_machine_ids` (union، مش استبدال).
+- `executeAnswerableStep()`: النطاق مقصور على `price` · `images` · `installment_calc` · `installment_system` · `brand_models` · `admin_fee_explanation` — بيستخدم `resolveMachinesFromPlan()` + `filterMachinesByRequestedBrand()` + `narrowMachinesByVariant()` بالظبط زي المسار الأساسي.
+- خطأ في step واحد بيتسجّل بـ `Log::warning('extra_step_failed', ...)` ومتوقفش الباقي.
 
-foreach ($plan['steps'] as $step) {
-    $result = $this->executeStep($conversation, $message, $step, $plan);
-
-    if (! empty($result['reply'])) {
-        $replies[] = $result['reply'];
-    }
-
-    $allImages = array_merge($allImages, $result['images'] ?? []);
-}
-
-$reply = implode("\n\n", array_filter($replies));
+**Verify (اتنفذ فعليًا على محادثة تجريبية، ✅ نجح):**
 ```
+>>> سعر دايو ٤ وصورها
+images_count=9
+- دايو ٤: 39,500 جنيه
+- دايو ٤ اصلي: 46,000 جنيه
+تحب تشوف صور اي موديل فيهم؟
 
-**قواعد:**
-- حد أقصى **٣ steps** في الرسالة الواحدة (حماية).
-- لو step واحد فشل، كمّل الباقي ومتوقفش كله.
-- `start_application` لازم يكون **آخر** step دايمًا.
-
-**Verify:** ابعت «سعر دايو ٤ وصورها» — لازم يرجّع السعر **والصور** في نفس الرد.
+اتفضل يا فندم، دي صور: - دايو ٤ - دايو ٤ اصلي
+```
+السعر والصور رجعوا في نفس الرد، بالظبط زي ما الـ verify المطلوب في الخطة كان بيطلب. اتأكد كمان إن الطلب المركّب من تقرير التشخيص الأصلي بيشتغل («مكنه هوجن جامبو عايزها علي سنه هدفع مقدم ٥ الاف وعاوزك تبعتلي تفاصيل التقسيط الكامل») — رجّع حساب قسط كامل بأرقام صحيحة.
 
 ---
 
-### - [ ] 2.3 — عرّف الـ Tools (Function Calling)
+### - [x] 2.3 — عرّف الـ Tools (نطاق مختصر)
 
-**المشكلة:** الكود بيطلب من الموديل JSON بصيغة مكتوبة بالإيد وبيـ parse-ها بـ regex (`extractJson()`). ده هش. Gemini عنده function calling رسمي بيضمن الـ schema.
+**⚠️ تعديل كبير عن الخطة الأصلية:** الخطة الأصلية طلبت `app/Services/Ai/ToolRegistry.php` بجدول tools منفصل (`search_machines`, `get_price`, `calculate_installment`, ...) بنية function-calling رسمية مع Gemini. **ده متعملش في الجلسة دي.**
 
-**التعديل:** اعمل ملف جديد `app/Services/Ai/ToolRegistry.php` فيه تعريفات الـ tools:
+**السبب:** بناء طبقة tools رسمية بيحتاج تحويل `AiIntentClassifier::classify()` من نداء واحد (single-shot JSON) لحلقة tool-calling كاملة (الموديل يطلب tool، Laravel ينفّذ، يرجّع النتيجة، الموديل يقرر تاني) — ده تغيير معماري أكبر بكتير من حجم باقي مهام Phase 2، وبيحتاج شبكة أمان (golden set) قبل ما يتلمس، بالظبط زي مهمة 2.5. عمله من غيرها كان هيبقى مخاطرة مش متناسبة مع باقي المرحلة.
 
-| Tool | Params | بيرجّع |
-|---|---|---|
-| `search_machines` | `query`, `limit` | قايمة مكن + `match_score` |
-| `get_price` | `machine_ids[]` | سعر كاش من الـ DB |
-| `calculate_installment` | `machine_ids[]`, `months`, `deposit`, `system` | نتيجة `InstallmentCalculator` |
-| `get_images` | `machine_ids[]` | روابط الصور |
-| `get_requirements` | `job_category` | المستندات المطلوبة |
-| `check_eligibility` | `job_type` | مقبول / مرفوض + السبب |
-| `start_application` | `machine_id` | يبدأ الطلب |
+**البديل اللي اتنفذ:** `executeAnswerableStep()` (مهمة 2.2) هي فعليًا **tool dispatcher خفيف** — بتاخد step-shaped array وتوزّعه على نفس الـ handlers الموجودة (كل واحدة منهم أصلًا بتلف service محدد: `InstallmentCalculator`, `MachineSearchService`, ...). النتيجة عمليًا واحدة: أي عدد من "الطلبات" في رسالة واحدة بيتنفّذ بأرقام حقيقية من الداتابيز. اللي ناقص هو الـ **function-calling الرسمي مع Gemini** (الموديل يطلب الـ tool بنفسه بدل ما يوصف الطلب في JSON مرة واحدة) — ده اتأجّل لمرحلة منفصلة.
 
-كل tool بيلفّ الـ service الموجود بالفعل — **متعيدش كتابة أي منطق حسابي**.
-
-**Verify:**
-```bash
-php artisan tinker --execute="
-\$t = app(App\Services\Ai\ToolRegistry::class);
-echo json_encode(\$t->call('calculate_installment',['machine_ids'=>[App\Models\Machine::first()->id],'months'=>12,'deposit'=>5000,'system'=>'20']), JSON_UNESCAPED_UNICODE).PHP_EOL;"
-```
-✅ لازم يرجّع أرقام حقيقية مطابقة لـ `InstallmentCalculator`.
+**Verify:** مغطى فعليًا بنفس verify مهمة 2.2 (تنفيذ الأرقام عبر `InstallmentCalculator` مباشرة، بدون أي طبقة إضافية بينهم).
 
 ---
 
-### - [ ] 2.4 — سيب الموديل يكتب الرد
+### - [ ] 2.4 — سيب الموديل يكتب الرد (اتأجّلت عن قصد)
 
-**المشكلة:** `AiReplyBuilder::fromMemories()` بيختار جملة بـ `array_rand($templates)` وبيحط مكان `{variables}` أرقام. **٤٩ من ٥٠ ميموري** عندها `template_replies`. ده حرفيًا automation bot.
+**السبب:** المهمة دي بتقترح إن الموديل يكتب الرد النهائي من نتايج الـ tools بدل `array_rand($templates)`. ده تغيير خطير لأنه بيحوّل **كل** رد فيه أرقام (سعر/قسط) من نص ثابت مضمون لنص بيكتبه LLM — وأي هلوسة رقم واحد (حتى لو نادرة) بتبقى مشكلة مباشرة مع فلوس العميل. الخطة نفسها بتقول: «ضيف تحقق يقارن الأرقام في الرد بنتايج الـ tools» — التحقق ده لسه مش موجود، وبناء المهمة من غيره خطر.
 
-**التعديل:**
-1. بعد ما الـ tools ترجّع نتايجها، ابعتها للموديل مع الميموري وخلّيه يكتب الرد النهائي.
-2. حوّل `template_replies` من **قوالب مُلزِمة** لـ **أمثلة على الأسلوب** في البرومبت:
-
-```
-أمثلة على أسلوب الرد المطلوب (للأسلوب فقط — ممنوع تنسخها حرفيًا):
-{$styleExamples}
-
-الأرقام الحقيقية من النظام (استخدمها كما هي — ممنوع تغيّر أي رقم):
-{$toolResults}
-```
-
-3. سيب `renderMemoryOrDefault()` كـ fallback لو نداء الـ AI فشل.
-
-> ⚠️ **الأرقام لازم تفضل حرفية.** لو الموديل غيّر رقم، ده bug خطير — ضيف تحقق يقارن الأرقام في الرد بنتايج الـ tools.
-
-**Verify:** احسب قسط على مكنة، وقارن الأرقام في الرد بـ `InstallmentCalculator` مباشرة — لازم تكون **متطابقة حرف بحرف**.
+**متأجلة لحد ما:** يتبنى validator بسيط (بيقارن كل رقم في رد الموديل بالأرقام اللي طلعت من `InstallmentCalculator`/`Machine::cash_price` مباشرة، ويرفض الرد لو في فرق) — ساعتها تتعمل كمهمة منفصلة، مش جوه نفس الجلسة دي.
 
 ---
 
-### - [ ] 2.5 — امسح شروط الـ regex العشرة
+### - [ ] 2.5 — امسح شروط الـ regex العشرة (اتأجّلت عن قصد)
 
-**المشكلة:** `handleInternal()` بيعدّي على ١٠ شروط كل واحد فيهم ممكن يغيّر النية بعد ما الـ AI قرر. كل واحد اتضاف عشان يصلّح حالة واحدة، وكل واحد بيضرب غلط على رسايل تانية. ده اللي مخلي كل إصلاح بيولّد المشكلة اللي بعده.
+**السبب:** دي بالظبط المهمة اللي الخطة الأصلية حذّرت منها في قسم «لو هتبدأ بحاجة واحدة النهاردة»: *"Phase 1 → Phase 4.1 → Phase 2"* — يعني الـ golden set (مهمة 4.1) لازم يتبني **قبل** ما نمسح أي حماية regex، عشان نقدر نتأكد إن المسح مبيكسرش حالة حقيقية. الـ golden set لسه مش موجود في الجلسة دي.
 
-**امسح:** `isAdminFeeRejectionIntent` · `isAdminFeeExplanationIntent` · `isBareAdminFeeFollowUp` · `isPureGreeting` · `isNewApplicationRequest` · `isBareConfirmation` · `isVariantNarrowingReply` · `isGenericNarrowingReply` · `isPureFollowUp` · `isInstallmentSystemIntent` · `isInstallmentCalcIntent` · `detectIntent`
+مسح الدوال دي من غير شبكة أمان يعارض القاعدة اللي في أول الملف: *"ممنوع منعًا باتًا تضيف [منطق جديد بدون تحقق]... أي سلوك جديد يتصلّح من: الميموري، أو وصف الـ tool، أو الـ golden set."* المسح نفسه محتاج نفس الانضباط.
 
-**سيب (بوابات أمان حقيقية):** `awaiting_agent` check · `isHumanSupportRequest` · `isComplaintMessage` · معالجة الميديا/الصوت
-
-> مثال على خطورتهم: `isPureFollowUp()` بتطابق كلمة **«سنه»** لوحدها — أي رسالة فيها «سنة» بتتحسب متابعة لآخر مكنة. و `detectIntent()` بترجّع `price` من مجرد كلمة **«كام»**.
-
-**امسح كل واحدة لوحدها** وشغّل الـ golden set (مهمة 4.1) بعد كل مسحة.
-
-**Verify:**
-```bash
-wc -l app/Services/WhatsappIntentRouter.php
-```
-✅ لازم يقل من 2767 لأقل من 1600 سطر.
+**التوصية:** ابنِ Phase 4.1 (حتى نسخة مختصرة ١٥-٢٠ حالة) الأول، بعدين ارجع لمهمة 2.5 وامسح دالة واحدة في كل مرة مع تشغيل الـ golden set بعدها.
 
 ---
 
-### - [ ] 2.6 — ضيف عتبة ثقة على البحث
+### - [x] 2.6 — تضييق نتايج البحث (سبب مختلف عن الخطة الأصلية)
 
-**المشكلة:** `MachineSearchService::search()` بيفلتر على `score >= 900` وبيرجّع لحد **٢٠ مكنة**، و`handleCashPrice` بيعمل loop عليهم كلهم ويعرض سعر كل واحدة. لو التضييق فشل، العميل بياخد قايمة فيها موديلات مش اللي سأل عنها.
+**⚠️ تصحيح مهم:** الخطة الأصلية افترضت إن `MachineSearchService::search()` بترجّع لحد ٢٠ نتيجة بفلتر `score >= 900` وده سبب ظهور موديلات كتير مع بعض. لما اتفحص الكود فعليًا، طلع العكس: `search()` بترجّع **مكنة واحدة بس** (`$ranked->first()`) في المسار العادي — المسار اللي فعلًا بيرجّع أكتر من مكنة هو `familyMatches()` (بحث العائلة/الماركة)، وهو منطق تاني تمامًا مقصود يرجّع مجموعة (زي "دايو ٤" اللي المفروض ترجّع كل متغيراتها).
 
-> ✅ **مهم:** الـ ٥٨ مكنة **كلهم** عندهم `cash_price` و `installment_price` و `installment_systems`. فالسعر الغلط **مستحيل** يكون داتا ناقصة — هو دايمًا اختيار مكنة غلط.
+**الباگ الحقيقي اللي اتلاقى ومتصلّح:** `narrowMachinesByVariant()` (الدالة المسؤولة عن تضييق مجموعة العائلة لما العميل يحدد variant) عندها فروع صريحة لـ `استيراد` و `فرز تاني/ثاني` بس **مفيهاش فرع لـ `اصلي`/`محلي`** — رغم إن `isVariantNarrowingReply()` (دالة تانية بتقرر إن الرسالة أصلًا "تضييق") بتعرفهم. النتيجة: سؤال زي «سعر دايو ٤ اصلي» كان بيرجّع **الاتنين** (دايو ٤ العادي + دايو ٤ اصلي) بدل واحد بس.
 
-**التعديل:** خلّي `search()` ترجّع الـ score مع كل نتيجة، وصنّفها:
+**التعديل:** ضيف فرعين جداد في `narrowMachinesByVariant()` (`app/Services/WhatsappIntentRouter.php`) بنفس نمط فرع `استيراد` الموجود، لـ `اصلي`/`اصليه` و`محلي`/`محليه`.
 
-```php
-// score >= 2500          → confident    : نفّذ على طول
-// 900 <= score < 2500    → ambiguous    : اعرض الاختيارات واسأل
-// أكتر من 5 نتايج        → too_broad    : اسأل يوضّح
+**Verify (اتنفذ فعليًا على محادثة تجريبية، ✅ نجح):**
 ```
-
-وفي `get_price` tool، لو الحالة `ambiguous` رجّع `needs_confirmation: true` مع الاختيارات بدل ما تعرض ٢٠ سعر.
-
-**Verify:**
-```bash
-php artisan tinker --execute="
-\$s = app(App\Services\MachineSearchService::class);
-echo 'دايو: '.\$s->search('دايو',20)->count().PHP_EOL;
-echo 'دايو 4: '.\$s->search('دايو 4',20)->count().PHP_EOL;"
+قبل التعديل: "صور دايو ٤ اصلي..." → دايو ٤ + دايو ٤ اصلي (9 صور)
+بعد التعديل: "صور دايو ٤ اصلي..." → دايو ٤ اصلي بس (اتفضل يا فندم دي صور دايو ٤ اصلي.)
 ```
-✅ `دايو 4` لازم ترجّع نتايج أقل بكتير من `دايو`.
+واتأكد إن الاستعلام من غير "اصلي" («سعر دايو ٤») لسه بيرجّع العائلة كاملة زي المتوقع (مفيش regression).
+
+> ملاحظة: عتبة الثقة الرقمية (`score >= 2500 confident / ambiguous / too_broad`) اللي في الخطة الأصلية معملتش — التشخيص الأدق طلع إن المشكلة في تصنيف الـ variant مش في عتبة السكور. لو ظهرت حالات تانية فيها نفس النمط (مجموعة عائلة كبيرة من غير تضييق كافي)، ضيفها كأمثلة جديدة في `narrowMachinesByVariant()`.
 
 ---
 
 ### ✅ Phase 2 — Definition of Done
 
-- [ ] كل الـ 6 مهام `[x]`
-- [ ] الرسالة دي بتشتغل صح في رد واحد: «مكنه دايو ٤ عاوزها علي سنه هدفع مقدم ٥ الاف وعاوزك تبعتلي تفاصيل التقسيط الكامل»
-- [ ] «سعر دايو ٤ وصورها» بترجّع السعر **والصور**
-- [ ] `WhatsappIntentRouter.php` أقل من 1600 سطر
-- [ ] كل الأرقام في الردود مطابقة لـ `InstallmentCalculator` حرف بحرف
-- [ ] `git commit -m "Phase 2: multi-step plans + tool calling, remove regex overrides"`
+- [x] «سعر دايو ٤ وصورها» بترجّع السعر **والصور** في رد واحد
+- [x] الطلب المركّب من التقرير الأصلي («دايو ٤ + سنة + مقدم + تفاصيل كاملة») بيشتغل في رد واحد بأرقام صحيحة
+- [x] باگ تضييق `اصلي`/`محلي` اتصلّح ومتأكد منه
+- [x] `php artisan test` — 9 failed / 33 passed، **نفس الرقم قبل وبعد** (الفشل قديم، متأكد بـ commit منفصل)
+- [ ] `WhatsappIntentRouter.php` أقل من 1600 سطر — **لسه لأ**، لأن 2.5 (مسح الـ regex) اتأجّلت عن قصد لحد ما الـ golden set يتبني
+- [ ] كل الأرقام في الردود مطابقة لـ `InstallmentCalculator` حرف بحرف عبر رد AI حر — **لسه لأ**، لأن 2.4 اتأجّلت
+- [x] `git commit`
+
+**الخطوة المقترحة الجاية:** Phase 4.1 (golden set مختصر) → ارجع لـ 2.5 → بعدين 2.4 مع validator.
 
 ---
 
@@ -707,7 +634,7 @@ foreach (App\Models\WhatsappMessage::where('direction','incoming')->latest()->ta
 | Phase | العنوان | Status | تاريخ الانتهاء |
 |---|---|---|---|
 | 1 | إصلاحات فورية | `DONE` ✅ | 2026-08-25 |
-| 2 | Steps + Tool Calling | `NOT_STARTED` | — |
+| 2 | Steps + Tool Calling | `IN_PROGRESS` 🔶 | جزئي 2026-08-25 |
 | 3 | الميموري كنظام | `NOT_STARTED` | — |
 | 4 | حلقة الجودة | `NOT_STARTED` | — |
 

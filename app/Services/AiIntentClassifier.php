@@ -11,6 +11,9 @@ class AiIntentClassifier
     /** Defensive cap only — a normal WhatsApp message never comes close to this. */
     private const MAX_MESSAGE_CHARS = 4000;
 
+    /** Max independent extra requests (see steps[] in the prompt) handled per message. */
+    private const MAX_EXTRA_STEPS = 2;
+
     public function classify(WhatsappConversation $conversation, string $message, array $context = []): array
     {
         $message = mb_substr($message, 0, self::MAX_MESSAGE_CHARS);
@@ -151,6 +154,15 @@ target:
 - لو last_topic = application والعميل قال ايه المطلوب أو أعمل ايه، intent=application و target=single_previous_machine.
 - application_status: العميل عنده طلب موجود بالفعل ويريد الاستعلام عن حالته أو أين وصل. مثال: "طلبي وصل لايه"، "حالة طلبي ايه"، "طلبي فين"، "الطلب بتاعي وصل لفين"، "عايز اعرف حالة طلبي"، "إيه أخبار طلبي"، "هل طلبي اتوافق عليه"، "طلبي لسه تحت المراجعة؟". هذه النية تعني الاستعلام فقط وليس إنشاء طلب جديد. لا تستخدم application_status للتقديم أو استكمال طلب جديد.
 - delivery_question: العميل بيسأل عن التوصيل بس (تكلفة التوصيل، مدته، هل بيوصل لمنطقته) - مش عن سعر أو تفاصيل المنتج نفسه. استخدم delivery_question حتى لو العميل وسط طلب تقديم لسه مكملوش، طالما السؤال ده عن التوصيل بس.
+
+steps (طلبات إضافية مستقلة في نفس الرسالة):
+- لو العميل طلب أكتر من حاجة مستقلة في نفس الرسالة (زي "سعرها وصورها"، أو "احسبلي القسط وابعتلي صورها")، الحقول العادية فوق (intent, target, machine_query, ...) بتمثل الطلب الأساسي بس، وأي طلب إضافي بعد كده يتحط كـ عنصر في steps[] بنفس شكل الحقول دي بالظبط (نفس الأسماء: intent, target, machine_query, months, deposit, system, ...).
+- steps[] للطلبات الإضافية فقط - متكررش الطلب الأساسي جواها.
+- لو الرسالة فيها طلب واحد بس، سيب steps[] = [].
+- حد أقصى عنصرين في steps[].
+- ممنوع تحط intent=application أو application_status جوه steps[] - دول لازم يكونوا الطلب الأساسي بس.
+- لو طلب إضافي غامض أو ناقص معلومة، سيبه برضو (بدون needs_clarification) - التنفيذ هيتجاهله لو مش واضح، أحسن من إنك توقف الرد كله عشانه.
+
 تحويل المدد:
 - سنة = 12
 - سنة ونص = 18
@@ -186,7 +198,24 @@ system:
   "needs_clarification": false,
   "clarification_reason": null,
   "clarification_question": null,
-  "confidence": 0.0
+  "confidence": 0.0,
+  "steps": [
+    {
+      "intent": "images",
+      "target": "new_machine",
+      "machine_query": null,
+      "machine_ids": [],
+      "selected_index": null,
+      "uses_last_machines": false,
+      "references_previous": false,
+      "references_all_previous": false,
+      "months": null,
+      "deposit": null,
+      "deposit_mentioned": false,
+      "system": null,
+      "confidence": 0.0
+    }
+  ]
 }
 
 معلومات المعرض (للفهم فقط - ممنوع ترد بيها، دي بس عشان تفهم قصد العميل صح):
@@ -332,10 +361,56 @@ PROMPT
             'clarification_reason' => null,
             'clarification_question' => null,
             'confidence' => 0.0,
+            // Extra independent requests in the same message (e.g. "سعرها
+            // وصورها"). Each entry has the exact same shape as this plan.
+            'steps' => [],
         ];
     }
 
     private function normalizePlan(array $plan): array
+    {
+        $rawSteps = is_array($plan['steps'] ?? null) ? $plan['steps'] : [];
+
+        $plan = $this->normalizePlanFields($plan);
+
+        /*
+         * Extra steps are independent additional requests in the same
+         * message (e.g. "سعرها وصورها"). Each is normalized through the
+         * exact same rules as the primary plan, so router handlers written
+         * for a single flat plan array work unchanged on a step too.
+         * Capped at MAX_EXTRA_STEPS as a safety limit, and application/
+         * application_status can never come from here - starting or
+         * mutating an application from a secondary request is unsafe.
+         */
+        $steps = [];
+
+        foreach (array_slice($rawSteps, 0, self::MAX_EXTRA_STEPS) as $rawStep) {
+            if (! is_array($rawStep)) {
+                continue;
+            }
+
+            $step = $this->normalizePlanFields(array_merge($this->fallback(), $rawStep));
+
+            if (in_array($step['intent'], ['application', 'application_status', 'unknown', 'general'], true)) {
+                continue;
+            }
+
+            $step['needs_clarification'] = false;
+            $step['clarification_question'] = null;
+
+            $steps[] = $step;
+        }
+
+        $plan['steps'] = $steps;
+
+        return $plan;
+    }
+
+    /**
+     * Validates/casts one plan-shaped array (the primary plan, or one entry
+     * of $plan['steps']). Never touches the 'steps' key itself.
+     */
+    private function normalizePlanFields(array $plan): array
     {
         $validIntents = [
             'price',
