@@ -434,7 +434,21 @@ class ApplicationHandler
         $documentAttributes = [];
 
         foreach ($collected as $docType => $doc) {
-            $documentAttributes = array_merge($documentAttributes, $this->mapDocumentToAttributes($docType, $doc));
+            foreach ($this->mapDocumentToAttributes($docType, $doc) as $key => $value) {
+                /*
+                 * أكتر من مستند ممكن يروحوا لنفس العمود (رخصة القيادة +
+                 * سكرين الرحلات الاتنين بيتحفظوا في free_income_proof_images)
+                 * - array_merge على المستوى ده كان بيخلي الأخير يمسح
+                 * اللي قبله، فصورة كاملة كانت بتضيع من الطلب.
+                 */
+                if (is_array($value) && is_array($documentAttributes[$key] ?? null)) {
+                    $documentAttributes[$key] = array_merge($documentAttributes[$key], $value);
+
+                    continue;
+                }
+
+                $documentAttributes[$key] = $value;
+            }
         }
 
         /*
@@ -482,6 +496,14 @@ class ApplicationHandler
             'bank_statement' => [
                 'free_income_proof_images' => [$path],
             ],
+            /*
+             * مفيش أعمدة مخصوصة للرخص في installment_requests، وأقرب عمود
+             * صح هو free_income_proof_images (array) - نوع كل صورة موصوف
+             * في notes وفي documents_collected بالمفتاح بتاعه.
+             */
+            'driver_license', 'vehicle_license', 'trips_screenshot' => [
+                'free_income_proof_images' => [$path],
+            ],
             default => [],
         };
     }
@@ -499,6 +521,10 @@ class ApplicationHandler
             'pension' => ['pension_statement'],
             'business' => ['activity_photo'],
             'army' => ['bank_statement'],
+            // ميموري «الدليفري»: رخصة سارية + سكرين رحلات أو تسجيل.
+            'delivery' => ['driver_license', 'trips_screenshot'],
+            // ميموري «التاكسي»: رخصة شخصية + رخصة التاكسي (لصاحب التاكسي).
+            'taxi_owner' => ['driver_license', 'vehicle_license'],
             'freelance' => [],
             default => ['salary_slip'],
         };
@@ -525,6 +551,9 @@ class ApplicationHandler
             'pension' => 'pension',
             'business' => 'self_employed',
             'freelance' => $hasNoIncomeProof ? 'no_income_proof' : 'self_employed',
+            // سواقين التطبيقات وأصحاب التاكسي دخلهم غير ثابت - نفس خانة
+            // العمل الحر في الداشبورد، بس بمستندات مخصوصة.
+            'delivery', 'taxi_owner' => 'self_employed',
             'army' => 'employee',
             default => $hasNoIncomeProof ? 'no_income_proof' : 'employee',
         };
@@ -547,6 +576,29 @@ class ApplicationHandler
             || str_contains($text, 'محل') || str_contains($text, 'مشروع')
         ) {
             return 'business';
+        }
+
+        /*
+         * ميموري «الدليفري» و«التاكسي»: الفئتين دول مطلوب منهم مستندات
+         * مختلفة تمامًا عن باقي العمل الحر (رخصة سارية + سكرين رحلات /
+         * رخصة المركبة)، وقبل كده كانوا بيتصنفوا freelance فيتطلب منهم
+         * البطاقة بس ويتكشف الناقص بعدين من الموظف.
+         */
+        if (
+            str_contains($text, 'تاكسي') || str_contains($text, 'تاكس')
+            || str_contains($text, 'ميكروباص') || str_contains($text, 'ميكروباس')
+        ) {
+            return 'taxi_owner';
+        }
+
+        if (
+            str_contains($text, 'دليفري') || str_contains($text, 'ديليفري')
+            || str_contains($text, 'طلبات') || str_contains($text, 'اوبر')
+            || str_contains($text, 'أوبر') || str_contains($text, 'uber')
+            || str_contains($text, 'اندرايف') || str_contains($text, 'indrive')
+            || str_contains($text, 'مرسول') || str_contains($text, 'بوسطجي')
+        ) {
+            return 'delivery';
         }
 
         if (
@@ -653,6 +705,8 @@ class ApplicationHandler
             'freelance' => 'رد متطلبات العمل الحر',
             'business' => 'رد متطلبات صاحب المشروع',
             'pension' => 'رد متطلبات المعاش',
+            'delivery' => 'الدليفري',
+            'taxi_owner' => 'التاكسي',
         ];
 
         $title = $titles[$category] ?? null;
@@ -682,6 +736,9 @@ class ApplicationHandler
             'pension_statement' => ['أصحاب المعاشات'],
             'activity_photo' => ['أصحاب الأنشطة التجارية', 'مراجعه صور النشاط'],
             'bank_statement' => ['الموظفين'],
+            'driver_license' => ['الدليفري', 'التاكسي'],
+            'trips_screenshot' => ['الدليفري'],
+            'vehicle_license' => ['التاكسي'],
             default => [],
         };
 
@@ -704,6 +761,9 @@ class ApplicationHandler
             'pension_statement' => 'بيان المعاش',
             'activity_photo' => 'صورة النشاط/المحل',
             'bank_statement' => 'كشف الحساب لآخر 6 شهور',
+            'driver_license' => 'رخصة القيادة (لازم تكون سارية)',
+            'trips_screenshot' => 'سكرين من التطبيق بالرحلات أو التسجيل',
+            'vehicle_license' => 'رخصة التاكسي/المركبة',
             default => 'المستند المطلوب',
         };
     }
