@@ -168,7 +168,40 @@ private function handleInternal(
          * "كام %" لوحدها من غير كلمة "مصاريف" بترجع كمتابعة قصيرة لو آخر
          * موضوع في المحادثة كان فعلاً شرح مصاريف إدارية.
          */
-        if (
+        /*
+         * "مش عايز ادفع مصاريف اداريه" - رفض صريح، مش سؤال فهم. الرد
+         * الصح مش شرح إن المصاريف "لازمة"، ده تحويل لـ installment_calc
+         * عادي: InstallmentTextParser::wantsNoAdminFee()/extractSystem()
+         * أصلاً بيحولوا النظام لـ 30% تلقائيًا (بدون مصاريف إدارية) لو
+         * لقوا نفس الصياغة دي جوه handleInstallmentCalc، وapplyAiParsedInstallment()
+         * بيدمج مقدم/مدة اتقالوا في نفس الرسالة من تصنيف الـ AI (اللي بيفهم
+         * "20 الف" = 20000 صح، عكس الـ regex الخام). أي حل تاني هنا كان
+         * هيكرر نفس المنطق ده بشكل أضعف.
+         */
+        $mentionsDepositOrMonths = app(InstallmentTextParser::class)->hasDepositMention($normalizedMessage)
+            || app(InstallmentTextParser::class)->extractMonths($normalizedMessage) !== null;
+
+        if ($this->isAdminFeeRejectionIntent($normalizedMessage)) {
+            $intent = 'installment_calc';
+            $plan['intent'] = $intent;
+            $plan['needs_clarification'] = false;
+            $plan['clarification_question'] = null;
+        } elseif (
+            $this->isAdminFeeExplanationIntent($normalizedMessage)
+            && $mentionsDepositOrMonths
+        ) {
+            /*
+             * "طيب انا هدفع 20 الف مقدم المصاريف الإدارية والإجمالي هيكون
+             * كام" - العميل مش بيسأل يفهم، بيطلب حسبة فعلية بمقدم/مدة
+             * جديدة. handleAdminFeeExplanation() بيقرا بس من last_deposit
+             * المخزن (قديم)، أما installment_calc فبيقرا المقدم/المدة من
+             * نفس الرسالة الحالية عن طريق الـ AI classifier مباشرة.
+             */
+            $intent = 'installment_calc';
+            $plan['intent'] = $intent;
+            $plan['needs_clarification'] = false;
+            $plan['clarification_question'] = null;
+        } elseif (
             $this->isAdminFeeExplanationIntent($normalizedMessage)
             || ($conversation->last_topic === 'admin_fee_explanation' && $this->isBareAdminFeeFollowUp($normalizedMessage))
         ) {
@@ -1260,6 +1293,24 @@ $folder = $this->safeFolderName($machine->name);
     }
 
     /**
+     * "مش عايز ادفع مصاريف اداريه" / "ينفع من غير مصاريف اداريه" - رفض
+     * صريح، مش سؤال فهم. الرد الصح هنا إحالة لنظام 30% مش شرح إن المصاريف
+     * "لازمة".
+     */
+    private function isAdminFeeRejectionIntent(string $normalizedMessage): bool
+    {
+        if (! $this->containsAny($normalizedMessage, ['مصاريف اداريه', 'مصاريف ادارية'])) {
+            return false;
+        }
+
+        return $this->containsAny($normalizedMessage, [
+            'مش عايز', 'مش عاوز', 'مش هدفع', 'مش حادفع', 'مش هادفع',
+            'من غير', 'بدون', 'الغي', 'إلغاء', 'الغاء', 'ملهاش',
+            'من غيرها', 'من غير كده', 'ينفع من غير', 'ينفع بدون',
+        ]);
+    }
+
+    /**
      * "هي ايه مصاريف اداريه" / "كام %" - العميل بيسأل عن المصاريف
      * الإدارية نفسها. لو المكنة معروفة من السياق، برد رقم فعلي (7% من
      * سعرها في التقسيط) مش شرح عام بس. لو كمان معروف حساب قسط سابق لنفس
@@ -1283,7 +1334,7 @@ $folder = $this->safeFolderName($machine->name);
             $reply = $this->renderMemoryOrDefault(
                 'رد شرح المصاريف الإدارية',
                 [],
-                'المصاريف الإدارية بتكون 7% من تمن المكنة، بتتدفع مرة واحدة عند الاستلام، ودي رسوم شركة التمويل بتحطها مش من المعرض.'
+                'المصاريف الإدارية بتكون 7% من تمن المكنة، وبتتدفع وانت بتستلم المكنة (مش أول قسط)، ودي رسوم شركة التمويل بتحطها مش من المعرض. وأول قسط شهري بيكون بعد الاستلام بـ 45 يوم.'
             );
 
             $this->saveOutgoing($conversation, $reply, ['source' => 'admin_fee_explanation_generic']);
@@ -1297,7 +1348,7 @@ $folder = $this->safeFolderName($machine->name);
         $displayName = $this->machineDisplayName($machine);
 
         if ($installmentPrice <= 0) {
-            $reply = 'المصاريف الإدارية بتكون 7% من تمن المكنة في التقسيط، بتتدفع مرة واحدة عند الاستلام، ودي رسوم شركة التمويل مش من المعرض. سعر التقسيط لسه محتاج تأكيد لـ ' . $displayName . ' عشان أقولك الرقم بالظبط.';
+            $reply = 'المصاريف الإدارية بتكون 7% من تمن المكنة في التقسيط، بتتدفع وانت بتستلم المكنة (مش أول قسط)، ودي رسوم شركة التمويل مش من المعرض. سعر التقسيط لسه محتاج تأكيد لـ ' . $displayName . ' عشان أقولك الرقم بالظبط.';
 
             $this->saveOutgoing($conversation, $reply, ['source' => 'admin_fee_explanation_no_price']);
             $this->rememberMachines($conversation, $machines);
@@ -1310,7 +1361,7 @@ $folder = $this->safeFolderName($machine->name);
 
         $lines = [
             "المصاريف الإدارية لـ {$displayName} بتكون " . number_format($adminFee)
-                . ' جنيه (7% من تمنها في التقسيط)، بتتدفع مرة واحدة عند الاستلام، ودي رسوم شركة التمويل بتحطها مش من المعرض.',
+                . ' جنيه (7% من تمنها في التقسيط)، بتتدفع وانت بتستلم المكنة، ودي رسوم شركة التمويل بتحطها مش من المعرض.',
         ];
 
         $payload = $conversation->context_payload ?? [];
@@ -1329,15 +1380,15 @@ $folder = $this->safeFolderName($machine->name);
                 $monthly = (int) $calc['monthly_payment'];
                 $calcAdminFee = (int) $calc['admin_fee'];
                 $freelanceExtra = (float) ($calc['freelance_extra_deposit'] ?? 0);
-                $totalFirstPayment = $monthly + $calcAdminFee + $deposit + $freelanceExtra;
+                $totalAtPickup = $calcAdminFee + $deposit + $freelanceExtra;
 
                 $depositLine = $deposit > 0 ? ' + المقدم ' . number_format($deposit) . ' جنيه' : '';
                 $freelanceLine = $freelanceExtra > 0 ? ' + مقدم إضافي (سقف الدخل الحر) ' . number_format($freelanceExtra) . ' جنيه' : '';
 
-                $lines[] = 'يبقى أول قسط عليك تدفعه: القسط الشهري ' . number_format($monthly)
-                    . ' جنيه + المصاريف الإدارية ' . number_format($calcAdminFee) . ' جنيه'
+                $lines[] = 'وقت استلام المكنة هتدفع: المصاريف الإدارية ' . number_format($calcAdminFee) . ' جنيه'
                     . $depositLine . $freelanceLine
-                    . ' = إجمالي ' . number_format($totalFirstPayment) . ' جنيه.';
+                    . ' = إجمالي ' . number_format($totalAtPickup) . ' جنيه.'
+                    . "\nوبعد كده بـ 45 يوم من الاستلام، أول قسط شهري يكون " . number_format($monthly) . ' جنيه.';
             }
         }
 
