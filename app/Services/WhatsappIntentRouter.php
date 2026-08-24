@@ -1115,6 +1115,23 @@ $folder = $this->safeFolderName($machine->name);
         return trim($text);
     }
 
+    /**
+     * str_word_count() بيعتبر بس أحرف لاتينية "كلمة" افتراضيًا - أي نص
+     * عربي صرف بيرجع منه 0 دايمًا، يعني أي شرط زي "str_word_count(...) >
+     * 4" كان بيفضل false مهما طالت الرسالة، وأي شرط "<= 3" كان بيفضل true
+     * مهما طالت. بديل بسيط بيعتمد على الفصل بمسافات فعليًا.
+     */
+    private function wordCount(string $text): int
+    {
+        $text = trim($text);
+
+        if ($text === '') {
+            return 0;
+        }
+
+        return count(preg_split('/\s+/u', $text));
+    }
+
     private function containsAny(string $text, array $needles): bool
     {
         foreach ($needles as $needle) {
@@ -1233,7 +1250,7 @@ $folder = $this->safeFolderName($machine->name);
     {
         $normalized = trim($normalizedMessage);
 
-        if ($normalized === '' || str_word_count($normalized) > 4) {
+        if ($normalized === '' || $this->wordCount($normalized) > 4) {
             return false;
         }
 
@@ -1353,7 +1370,7 @@ $folder = $this->safeFolderName($machine->name);
     {
         $normalized = trim($normalizedMessage);
 
-        if ($normalized === '' || str_word_count($normalized) > 4) {
+        if ($normalized === '' || $this->wordCount($normalized) > 4) {
             return false;
         }
 
@@ -1924,7 +1941,7 @@ private function isGenericNarrowingReply(Collection $lastMachines, string $messa
     $fuzzy = app(\App\Support\FuzzyArabicMatcher::class);
     $normalized = trim($search->normalizeSearchText($message));
 
-    if ($normalized === '' || str_word_count($normalized) > 3) {
+    if ($normalized === '' || $this->wordCount($normalized) > 3) {
         return false;
     }
 
@@ -2516,7 +2533,7 @@ private function narrowMachinesByVariant(Collection $machines, string $message):
     $search = app(MachineSearchService::class);
     $normalized = trim($search->normalizeSearchText($message));
 
-    if ($normalized !== '' && str_word_count($normalized) <= 3) {
+    if ($normalized !== '' && $this->wordCount($normalized) <= 3) {
         $filtered = $machines->filter(function (Machine $machine) use ($search, $normalized, $fuzzy) {
             $name = $search->normalizeSearchText(
                 trim($this->machineBrandName($machine) . ' ' . $machine->name)
