@@ -4,6 +4,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Task Models
+    |--------------------------------------------------------------------------
+    |
+    | 'reasoning' is used wherever we need real understanding or natural
+    | phrasing (conversation planning, application extraction, the free-form
+    | sales reply). 'fast' stays on the cheap lite model for high-volume,
+    | low-judgement work. Everything used to run on the lite model, which is
+    | why replies read mechanically and Egyptian slang was often missed.
+    |
+    | Both codes must exist in gemini_api_key_models for the key in use;
+    | GeminiKeyManager falls back to another provisioned model on rate limits.
+    |
+    */
+
+    'models' => [
+        'reasoning' => env('GEMINI_REASONING_MODEL', 'gemini-3.7-flash'),
+        'fast' => env('GEMINI_FAST_MODEL', 'gemini-3.1-flash-lite'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | AI Providers Default Models
     |--------------------------------------------------------------------------
     */
@@ -65,6 +86,17 @@ return [
                     'tps_limit' => 1000000,
                     'priority' => 4,
                     'is_embedding' => true,
+                ],
+
+                [
+                    'display_name' => 'Gemini 3.7 Flash',
+                    'model_code' => 'gemini-3.7-flash',
+                    'category' => 'Gemini',
+                    'rpm_limit' => 10,
+                    'rpd_limit' => 250,
+                    'tps_limit' => 1000000,
+                    'priority' => 0,
+                    'is_embedding' => false,
                 ],
 
                 [

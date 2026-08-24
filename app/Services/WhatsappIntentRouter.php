@@ -625,6 +625,12 @@ private function handleAiFallback(
 
     $result = app(AiComplexReplyService::class)->reply($message, [
         'conversation_id' => $conversation->id,
+        /*
+         * Without this the memory builder always saw intent=null, so its
+         * intent filter and every intent-based relevance boost were dead
+         * on every single turn (visible in ai_memory_retrieval_logs).
+         */
+        'intent' => $this->lastTurnIntent,
         'from' => $conversation->from ?? null,
         'is_first_message' => count($recentMessages) <= 1,
         'messages' => $recentMessages,
@@ -2118,6 +2124,13 @@ private function renderMemory(string $title, array $variables = []): ?string
     $memory = app(\App\Services\AiMemoryResolver::class)->memoryByExactTitle($title);
 
     if (! $memory) {
+        /*
+         * Memory titles are effectively an API here - renaming one in
+         * Filament silently drops the reply back to a hardcoded default
+         * with no error anywhere. Log it so a broken title is visible.
+         */
+        Log::warning('ai_memory_title_miss', ['title' => $title]);
+
         return null;
     }
 

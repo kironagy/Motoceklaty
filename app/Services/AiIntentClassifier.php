@@ -26,9 +26,9 @@ class AiIntentClassifier
         $prompt = $this->prompt($conversation, $message, $recent, $lastMachines, $context);
 
         try {
-            $result = app(GeminiClient::class)->generateText($prompt, null, [
+            $result = app(GeminiClient::class)->generateText($prompt, config('gemini.models.reasoning'), [
                 'temperature' => 0.05,
-                'maxOutputTokens' => 900,
+                'maxOutputTokens' => 2048,
             ]);
 
             if (! ($result['ok'] ?? false)) {
@@ -59,6 +59,19 @@ class AiIntentClassifier
         array $lastMachines,
         array $context
     ): string {
+        /*
+         * The planner used to run completely blind to ai_memories - it had to
+         * understand branch names, installment systems, excluded professions
+         * and model aliases with none of them in front of it. The memory is
+         * given here for comprehension only; the reply itself is still built
+         * by Laravel or by AiComplexReplyService.
+         */
+        $memoryContext = app(AiMemoryContextBuilder::class)
+            ->buildForMessage($message, [
+                'conversation_id' => $conversation->id,
+                'intent' => $conversation->last_topic ?? null,
+            ])['context'] ?? '';
+
         $payload = [
             'current_message' => $message,
             'conversation_state' => [
@@ -175,6 +188,9 @@ system:
   "clarification_question": null,
   "confidence": 0.0
 }
+
+معلومات المعرض (للفهم فقط - ممنوع ترد بيها، دي بس عشان تفهم قصد العميل صح):
+{$memoryContext}
 
 البيانات:
 PROMPT
@@ -470,9 +486,9 @@ PROMPT
         . "\n" . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 
     try {
-        $result = app(GeminiClient::class)->generateText($prompt, null, [
+        $result = app(GeminiClient::class)->generateText($prompt, config('gemini.models.reasoning'), [
             'temperature' => 0.05,
-            'maxOutputTokens' => 700,
+            'maxOutputTokens' => 2048,
         ]);
 
         if (! ($result['ok'] ?? false)) {

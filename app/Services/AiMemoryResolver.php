@@ -185,18 +185,25 @@ public function memoryByExactTitle(string $title): ?\App\Models\AiMemory
             ->values();
     }
 
+    /**
+     * These MUST match the intent names AiIntentClassifier::normalizePlan()
+     * actually emits. They previously used an older 'ask_*' vocabulary
+     * ('ask_price', 'ask_images', ...) that no caller has produced for a
+     * long time, so this method returned an empty array on every single
+     * call and the +40/+15 intent boost below never fired once.
+     */
     private function intentKeywords(string $intent): array
     {
         return match ($intent) {
-            'ask_images' => ['صور', 'صوره', 'شكل', 'ألوان', 'المخزون', 'موديلات'],
-            'ask_price' => ['سعر', 'أسعار', 'تسعير', 'كاش', 'تقسيط'],
-            'ask_installment' => ['تقسيط', 'قسط', 'مقدم', 'شهور', 'نظام التقسيط'],
-            'ask_branch' => ['فرع', 'فروع', 'عنوان', 'الشركة'],
-            'ask_available' => ['متاح', 'موجود', 'المخزون', 'موديلات'],
-            'ask_specs' => ['مواصفات', 'شرح المواصفات', 'تفاصيل'],
-            'ask_colors' => ['ألوان', 'الوان', 'صور', 'المخزون'],
-            'send_documents' => ['مستندات', 'أوراق', 'بطاقة', 'سجل', 'ضريبة'],
-            'create_order' => ['تأكيد البيانات', 'تأكيد الرفع', 'متابعة العميل'],
+            'price' => ['سعر', 'أسعار', 'تسعير', 'كاش'],
+            'images' => ['صور', 'صوره', 'شكل', 'ألوان', 'المخزون', 'موديلات'],
+            'installment_calc' => ['تقسيط', 'قسط', 'مقدم', 'شهور'],
+            'installment_system' => ['نظام التقسيط', 'تقسيط', 'شروط', 'أنظمة'],
+            'admin_fee_explanation' => ['مصاريف إدارية', 'مصاريف اداريه', 'نظام 20'],
+            'brand_models' => ['موديلات', 'المخزون', 'متاح', 'موجود'],
+            'application' => ['مستندات', 'أوراق', 'بطاقة', 'تقديم', 'متطلبات'],
+            'application_status' => ['متابعة العميل', 'حالة الطلب'],
+            'delivery_question' => ['توصيل', 'شحن', 'دليفري'],
             default => [],
         };
     }

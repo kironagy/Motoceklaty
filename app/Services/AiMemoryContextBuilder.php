@@ -18,6 +18,13 @@ class AiMemoryContextBuilder
      */
     private const RELEVANCE_LIMIT = 18;
 
+    /**
+     * While the whole active memory set fits in this many characters we send
+     * all of it and skip relevance scoring entirely - it stays comfortably
+     * under AiPromptBuilder::MAX_MEMORY_CHARS (20000).
+     */
+    private const FULL_SET_CHAR_BUDGET = 18000;
+
     public function buildForMessage(string $message, array $conversationContext = []): array
     {
         return [
@@ -35,18 +42,36 @@ class AiMemoryContextBuilder
             return '';
         }
 
-        $scoringText = $this->scoringText($message, $conversationContext);
         $resolver = app(AiMemoryResolver::class);
         $intent = $conversationContext['intent'] ?? null;
+        $all = $resolver->activeMemories();
+
+        if ($all->isEmpty()) {
+            return '';
+        }
+
+        /*
+         * The whole active memory set is currently ~13k characters while
+         * AiPromptBuilder::MAX_MEMORY_CHARS is 20k - everything fits in one
+         * prompt with room to spare. Scoring and then truncating to
+         * RELEVANCE_LIMIT was dropping ~21 memories every turn (confirmed in
+         * ai_memory_retrieval_logs: candidates=39, selected=18 on every row)
+         * to save room we don't need. Send the full set while it fits, and
+         * only fall back to scoring once the memory base actually outgrows
+         * the prompt budget.
+         */
+        $totalChars = $all->sum(fn (AiMemory $memory) => mb_strlen((string) $memory->content));
+
+        if ($totalChars <= self::FULL_SET_CHAR_BUDGET) {
+            $this->logRetrieval($conversationContext, $message, $intent, $all, $all, 'full_set', false);
+
+            return $this->toToon($all);
+        }
 
         $candidates = $resolver->candidateMemories($intent);
 
         if ($candidates->isEmpty()) {
-            // No candidates even survive the metadata pre-filter (e.g. an
-            // intent was passed that nothing is tagged for yet) - fall
-            // back to a small, bounded set of hard business rules rather
-            // than an unbounded dump of every active memory.
-            $fallback = $resolver->activeMemories()->filter(
+            $fallback = $all->filter(
                 fn (AiMemory $memory) => ($memory->scope ?? null) === 'always_include'
             );
 
@@ -55,6 +80,7 @@ class AiMemoryContextBuilder
             return $this->toToon($fallback);
         }
 
+        $scoringText = $this->scoringText($message, $conversationContext);
         $relevant = $resolver->relevantMemories($scoringText, $intent, self::RELEVANCE_LIMIT);
 
         if ($relevant->isEmpty()) {
