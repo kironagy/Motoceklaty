@@ -177,6 +177,12 @@ class ApplicationHandler
          * نوصل للـ fallback تحت. لو اعتمدنا على القيمة بعد الدمج، كنا
          * هنفوّت بالظبط الحالة دي ونعتبرها "استلمت فعليًا".
          */
+        $jobType = trim((string) ($application['job_type'] ?? ''));
+
+        if ($jobType !== '' && ($banReason = $this->bannedProfessionReason($jobType)) !== null) {
+            return $this->reply($conversation, $banReason);
+        }
+
         $incomeProofWasEmpty = empty($payload['application']['income_proof'] ?? null);
 
         if (empty($application['income_proof'])) {
@@ -555,6 +561,40 @@ class ApplicationHandler
         }
 
         return 'employee';
+    }
+
+
+    /**
+     * ai_memories "الفئات الممنوعة" (#51, scope=always_include) lists jobs
+     * the shop never finances at all - police/interior ranks, lawyers, and
+     * the judiciary. That memory only ever reached the AI fallback path;
+     * nothing gated on it here, so an excluded applicant could upload every
+     * document and only get rejected at the very end. Checked as soon as
+     * job_type is known, before any further questions are asked.
+     *
+     * Keywords are hardcoded (not parsed from the memory text) to keep this
+     * a plain, fast, reviewable check - matches how categorizeIncome() above
+     * already works. 'أمين' alone is intentionally not matched: the memory
+     * means the police rank (أمين شرطة), and a bare 'أمين' would also match
+     * unrelated jobs like أمين مخزن (storekeeper).
+     */
+    public function bannedProfessionReason(string $jobType): ?string
+    {
+        $text = mb_strtolower($jobType);
+
+        $isBanned =
+            str_contains($text, 'ضابط')
+            || str_contains($text, 'امين شرطه') || str_contains($text, 'أمين شرطة')
+            || str_contains($text, 'معاون')
+            || str_contains($text, 'محامي') || str_contains($text, 'محاماة') || str_contains($text, 'محاماه')
+            || str_contains($text, 'قاضي') || str_contains($text, 'قضاء')
+            || str_contains($text, 'نيابة') || str_contains($text, 'نيابه');
+
+        if (! $isBanned) {
+            return null;
+        }
+
+        return 'للأسف يا فندم، نظام التقسيط عندنا مش متاح لوظيفتك حاليًا. تحب تعرف تفاصيل الشراء كاش؟';
     }
 
     /**
