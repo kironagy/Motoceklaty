@@ -6,12 +6,28 @@ use App\Models\InstallmentRequest;
 use App\Models\Machine;
 use App\Models\WhatsappConversation;
 use App\Services\AiMemoryResolver;
+use App\Services\AiMemoryRules;
 use App\Services\DocumentDataExtractor;
 use App\Services\Ocr\OcrProviderInterface;
 use Illuminate\Support\Facades\Storage;
 
 class ApplicationHandler
 {
+    /*
+     * Injected by the container in normal use; constructed on demand when
+     * this handler is built by hand (unit tests). AiMemoryRules degrades to
+     * an empty rule set without a database, so either way the built-in
+     * lists below are what answers.
+     */
+    public function __construct(private ?AiMemoryRules $memoryRules = null)
+    {
+    }
+
+    private function memoryRules(): AiMemoryRules
+    {
+        return $this->memoryRules ??= new AiMemoryRules();
+    }
+
     public function handle(WhatsappConversation $conversation, string $message): array
     {
         $conversation->refresh();
@@ -170,6 +186,16 @@ class ApplicationHandler
         \App\Services\ApplicationStateService $stateService
     ): array {
         /*
+         * أول حاجة تتفحص بمجرد ما نعرف الوظيفة: الفئات الممنوعة. من غير
+         * كده العميل الممنوع بيكمّل كل الأسئلة والمستندات وبعدين يترفض يدوي.
+         */
+        $jobType = trim((string) ($application['job_type'] ?? ''));
+
+        if ($jobType !== '' && ($banReason = $this->bannedProfessionReason($jobType)) !== null) {
+            return $this->reply($conversation, $banReason);
+        }
+
+        /*
          * لازم نقارن بالقيمة قبل الدور ده (من $payload، قبل الدمج)، مش
          * بـ $application['income_proof'] بعد الدمج - لإن AiIntentClassifier
          * نفسه (prompt خط 443) بيحط "لا يوجد" مباشرة جوه application_data
@@ -177,6 +203,16 @@ class ApplicationHandler
          * نوصل للـ fallback تحت. لو اعتمدنا على القيمة بعد الدمج، كنا
          * هنفوّت بالظبط الحالة دي ونعتبرها "استلمت فعليًا".
          */
+        /*
+         * Plan task 3.5: name and job survive the conversation from here on,
+         * so a customer who comes back next week is not asked again.
+         */
+        app(\App\Services\CustomerProfileService::class)->rememberApplication(
+            $conversation,
+            $application,
+            $this->categorizeIncome($jobType, (string) ($application['income_proof'] ?? ''))
+        );
+
         $incomeProofWasEmpty = empty($payload['application']['income_proof'] ?? null);
 
         if (empty($application['income_proof'])) {
@@ -424,7 +460,21 @@ class ApplicationHandler
         $documentAttributes = [];
 
         foreach ($collected as $docType => $doc) {
-            $documentAttributes = array_merge($documentAttributes, $this->mapDocumentToAttributes($docType, $doc));
+            foreach ($this->mapDocumentToAttributes($docType, $doc) as $key => $value) {
+                /*
+                 * أكتر من مستند ممكن يروحوا لنفس العمود (رخصة القيادة +
+                 * سكرين الرحلات الاتنين بيتحفظوا في free_income_proof_images)
+                 * - array_merge على المستوى ده كان بيخلي الأخير يمسح
+                 * اللي قبله، فصورة كاملة كانت بتضيع من الطلب.
+                 */
+                if (is_array($value) && is_array($documentAttributes[$key] ?? null)) {
+                    $documentAttributes[$key] = array_merge($documentAttributes[$key], $value);
+
+                    continue;
+                }
+
+                $documentAttributes[$key] = $value;
+            }
         }
 
         /*
@@ -439,6 +489,8 @@ class ApplicationHandler
         );
 
         InstallmentRequest::query()->create($attributes);
+
+        app(\App\Services\CustomerProfileService::class)->recordSubmittedApplication($conversation);
     }
 
     private function mapDocumentToAttributes(string $docType, array $doc): array
@@ -472,6 +524,14 @@ class ApplicationHandler
             'bank_statement' => [
                 'free_income_proof_images' => [$path],
             ],
+            /*
+             * مفيش أعمدة مخصوصة للرخص في installment_requests، وأقرب عمود
+             * صح هو free_income_proof_images (array) - نوع كل صورة موصوف
+             * في notes وفي documents_collected بالمفتاح بتاعه.
+             */
+            'driver_license', 'vehicle_license', 'trips_screenshot' => [
+                'free_income_proof_images' => [$path],
+            ],
             default => [],
         };
     }
@@ -489,11 +549,18 @@ class ApplicationHandler
             'pension' => ['pension_statement'],
             'business' => ['activity_photo'],
             'army' => ['bank_statement'],
+            // ميموري «الدليفري»: رخصة سارية + سكرين رحلات أو تسجيل.
+            'delivery' => ['driver_license', 'trips_screenshot'],
+            // ميموري «التاكسي»: رخصة شخصية + رخصة التاكسي (لصاحب التاكسي).
+            'taxi_owner' => ['driver_license', 'vehicle_license'],
             'freelance' => [],
             default => ['salary_slip'],
         };
 
-        return array_merge($base, $categorySpecific);
+        // A memory's rules block may redefine what its own category needs.
+        $fromMemory = $this->memoryRules()->requiredDocumentsFor($category);
+
+        return array_merge($base, $fromMemory ?? $categorySpecific);
     }
 
     /**
@@ -515,6 +582,9 @@ class ApplicationHandler
             'pension' => 'pension',
             'business' => 'self_employed',
             'freelance' => $hasNoIncomeProof ? 'no_income_proof' : 'self_employed',
+            // سواقين التطبيقات وأصحاب التاكسي دخلهم غير ثابت - نفس خانة
+            // العمل الحر في الداشبورد، بس بمستندات مخصوصة.
+            'delivery', 'taxi_owner' => 'self_employed',
             'army' => 'employee',
             default => $hasNoIncomeProof ? 'no_income_proof' : 'employee',
         };
@@ -523,6 +593,20 @@ class ApplicationHandler
     public function categorizeIncome(string $jobType, string $incomeProof): string
     {
         $text = mb_strtolower($jobType . ' ' . $incomeProof);
+
+        /*
+         * Plan task 3.3: a memory can teach a new job category (or new
+         * wording for an existing one) without a deploy. Checked first so a
+         * hand-added category wins over the generic freelance catch-all
+         * below, which is what would otherwise swallow it.
+         */
+        foreach ($this->memoryRules()->jobCategoryKeywords() as $category => $keywords) {
+            foreach ($keywords as $keyword) {
+                if ($keyword !== '' && str_contains($text, mb_strtolower($keyword))) {
+                    return $category;
+                }
+            }
+        }
 
         if (str_contains($text, 'معاش') || str_contains($text, 'تقاعد')) {
             return 'pension';
@@ -537,6 +621,29 @@ class ApplicationHandler
             || str_contains($text, 'محل') || str_contains($text, 'مشروع')
         ) {
             return 'business';
+        }
+
+        /*
+         * ميموري «الدليفري» و«التاكسي»: الفئتين دول مطلوب منهم مستندات
+         * مختلفة تمامًا عن باقي العمل الحر (رخصة سارية + سكرين رحلات /
+         * رخصة المركبة)، وقبل كده كانوا بيتصنفوا freelance فيتطلب منهم
+         * البطاقة بس ويتكشف الناقص بعدين من الموظف.
+         */
+        if (
+            str_contains($text, 'تاكسي') || str_contains($text, 'تاكس')
+            || str_contains($text, 'ميكروباص') || str_contains($text, 'ميكروباس')
+        ) {
+            return 'taxi_owner';
+        }
+
+        if (
+            str_contains($text, 'دليفري') || str_contains($text, 'ديليفري')
+            || str_contains($text, 'طلبات') || str_contains($text, 'اوبر')
+            || str_contains($text, 'أوبر') || str_contains($text, 'uber')
+            || str_contains($text, 'اندرايف') || str_contains($text, 'indrive')
+            || str_contains($text, 'مرسول') || str_contains($text, 'بوسطجي')
+        ) {
+            return 'delivery';
         }
 
         if (
@@ -557,6 +664,96 @@ class ApplicationHandler
         return 'employee';
     }
 
+
+    /**
+     * ai_memories "الفئات الممنوعة" (#51, scope=always_include) lists jobs
+     * the shop never finances at all - police/interior ranks, lawyers, and
+     * the judiciary. That memory only ever reached the AI fallback path;
+     * nothing gated on it here, so an excluded applicant could upload every
+     * document and only get rejected at the very end. Checked as soon as
+     * job_type is known, before any further questions are asked.
+     *
+     * Keywords are hardcoded (not parsed from the memory text) to keep this
+     * a plain, fast, reviewable check - matches how categorizeIncome() above
+     * already works. Matching runs on normalizeJobText() output so the many
+     * spellings of the same job ("أمين الشرطة" / "امين شرطه", "محامى" /
+     * "محاماة") all fold onto one form.
+     */
+    public function bannedProfessionReason(string $jobType): ?string
+    {
+        $text = $this->normalizeJobText($jobType);
+
+        /*
+         * Interior-ministry ranks. The memory lists them bare (ضابط / أمين /
+         * معاون) but a bare أمين or معاون is ambiguous in Egyptian job
+         * wording (أمين مخزن, معاون مدير), so those two only count when the
+         * message also places the customer inside the ministry. ضابط has no
+         * such civilian meaning here.
+         */
+        $interiorContext = $this->containsAny($text, [
+            'شرطه', 'مباحث', 'داخليه', 'وزاره داخليه', 'امن مركزي', 'سجون', 'مرور',
+        ]);
+
+        $isBanned =
+            $this->containsAny($text, ['ضابط', 'ظابط'])
+            || ($interiorContext && $this->containsAny($text, ['امين', 'معاون', 'فرد', 'مجند', 'عسكري']))
+            // Lawyers: محامي / محامى / محاماه / محاماة all normalize onto محام.
+            || $this->containsAny($text, ['محام'])
+            // Judiciary: judges, prosecution, court officials.
+            || $this->containsAny($text, ['قاضي', 'قضاء', 'قضائي', 'نيابه', 'محكمه', 'مستشار قضائي']);
+
+        /*
+         * Plan task 3.3: anything staff added to the «الفئات الممنوعة»
+         * memory's rules block counts too. Additive only - the list above is
+         * a floor a mistyped rules block cannot lower.
+         */
+        if (! $isBanned) {
+            foreach ($this->memoryRules()->bannedProfessions() as $keyword) {
+                $keyword = $this->normalizeJobText($keyword);
+
+                if ($keyword !== '' && str_contains($text, $keyword)) {
+                    $isBanned = true;
+
+                    break;
+                }
+            }
+        }
+
+        if (! $isBanned) {
+            return null;
+        }
+
+        return 'للأسف يا فندم، نظام التقسيط عندنا مش متاح لوظيفتك حاليًا. تحب تعرف تفاصيل الشراء كاش؟';
+    }
+
+    /**
+     * Same Arabic folding the router uses before any keyword match: hamza
+     * forms onto ا, ة onto ه, ى onto ي, and the definite article stripped -
+     * so "أمين الشرطة" and "امين شرطه" are one string here.
+     */
+    private function normalizeJobText(string $text): string
+    {
+        $text = mb_strtolower($text);
+        $text = str_replace(['أ', 'إ', 'آ'], 'ا', $text);
+        $text = str_replace('ة', 'ه', $text);
+        $text = str_replace('ى', 'ي', $text);
+        $text = preg_replace('/\bال(?=[\p{Arabic}]{2,})/u', '', $text);
+        $text = preg_replace('/[^\p{Arabic}a-zA-Z0-9\s]/u', ' ', $text);
+
+        return trim(preg_replace('/\s+/u', ' ', $text));
+    }
+
+    private function containsAny(string $haystack, array $needles): bool
+    {
+        foreach ($needles as $needle) {
+            if (str_contains($haystack, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /**
      * أول مرة نعرف فئة شغل العميل (job_type اتملى في نفس الدور ده)، بنقوله
      * على طول إيه المطلوب منه فعليًا حسب فئته - بدل ما يفضل يكتشف كل بند
@@ -570,6 +767,8 @@ class ApplicationHandler
             'freelance' => 'رد متطلبات العمل الحر',
             'business' => 'رد متطلبات صاحب المشروع',
             'pension' => 'رد متطلبات المعاش',
+            'delivery' => 'الدليفري',
+            'taxi_owner' => 'التاكسي',
         ];
 
         $title = $titles[$category] ?? null;
@@ -599,6 +798,9 @@ class ApplicationHandler
             'pension_statement' => ['أصحاب المعاشات'],
             'activity_photo' => ['أصحاب الأنشطة التجارية', 'مراجعه صور النشاط'],
             'bank_statement' => ['الموظفين'],
+            'driver_license' => ['الدليفري', 'التاكسي'],
+            'trips_screenshot' => ['الدليفري'],
+            'vehicle_license' => ['التاكسي'],
             default => [],
         };
 
@@ -621,6 +823,9 @@ class ApplicationHandler
             'pension_statement' => 'بيان المعاش',
             'activity_photo' => 'صورة النشاط/المحل',
             'bank_statement' => 'كشف الحساب لآخر 6 شهور',
+            'driver_license' => 'رخصة القيادة (لازم تكون سارية)',
+            'trips_screenshot' => 'سكرين من التطبيق بالرحلات أو التسجيل',
+            'vehicle_license' => 'رخصة التاكسي/المركبة',
             default => 'المستند المطلوب',
         };
     }

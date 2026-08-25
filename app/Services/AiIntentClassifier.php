@@ -11,6 +11,9 @@ class AiIntentClassifier
     /** Defensive cap only — a normal WhatsApp message never comes close to this. */
     private const MAX_MESSAGE_CHARS = 4000;
 
+    /** Max independent extra requests (see steps[] in the prompt) handled per message. */
+    private const MAX_EXTRA_STEPS = 2;
+
     public function classify(WhatsappConversation $conversation, string $message, array $context = []): array
     {
         $message = mb_substr($message, 0, self::MAX_MESSAGE_CHARS);
@@ -26,17 +29,20 @@ class AiIntentClassifier
         $prompt = $this->prompt($conversation, $message, $recent, $lastMachines, $context);
 
         try {
-            $result = app(GeminiClient::class)->generateText($prompt, null, [
-                'temperature' => 0.05,
-                'maxOutputTokens' => 900,
-            ]);
+            $json = $this->requestPlanJson($prompt);
 
-            if (! ($result['ok'] ?? false)) {
-                return $this->fallback();
+            if (! is_array($json)) {
+                /*
+                 * Gemini 3.x spends part of maxOutputTokens on internal
+                 * thinking, so a long prompt (this one now carries the whole
+                 * memory context) can come back truncated mid-JSON or with no
+                 * text part at all. Falling straight through to fallback()
+                 * means intent=unknown for a message we could have understood,
+                 * so retry once with thinking off - the entire budget then
+                 * goes to the JSON. Costs a second call only on failure.
+                 */
+                $json = $this->requestPlanJson($prompt, ['thinkingBudget' => 0]);
             }
-
-            $text = trim((string) ($result['reply'] ?? $result['text'] ?? ''));
-            $json = $this->extractJson($text);
 
             if (! is_array($json)) {
                 return $this->fallback();
@@ -52,6 +58,49 @@ class AiIntentClassifier
         }
     }
 
+    /**
+     * One planner call: returns the decoded JSON object, or null when the
+     * call failed, was truncated, or did not contain a JSON object.
+     */
+    private function requestPlanJson(string $prompt, array $extraOptions = []): ?array
+    {
+        /*
+         * Two latency fixes live here.
+         *
+         * responseMimeType pins the answer to JSON at the API level, so the
+         * model can no longer wrap it in prose or a ```json fence - which is
+         * what used to make extractJson() fail and cost us a second full
+         * planner round trip.
+         *
+         * thinkingBudget bounds the internal thinking that Gemini 3.x spends
+         * before the first output token, on a prompt that carries the whole
+         * memory context plus the customer profile. The planner only has to
+         * fill a fixed JSON shape, so a bounded budget is plenty.
+         */
+        $result = app(GeminiClient::class)->generateText($prompt, config('gemini.models.reasoning'), array_merge([
+            'temperature' => 0.05,
+            'maxOutputTokens' => 2048,
+            'responseMimeType' => 'application/json',
+            'thinkingBudget' => (int) config('gemini.planner.thinking_budget', 512),
+            /*
+             * Deliberately far below GeminiClient's 25s default. The planner
+             * model answers in about a second when it is healthy, so a call
+             * still running after 12s is stuck, not slow - and every one of
+             * those seconds is a customer staring at no reply. Failing fast
+             * hands the message to the next key instead.
+             */
+            'timeout' => (int) config('gemini.planner.timeout', 12),
+        ], $extraOptions));
+
+        if (! ($result['ok'] ?? false)) {
+            return null;
+        }
+
+        $json = $this->extractJson(trim((string) ($result['reply'] ?? $result['text'] ?? '')));
+
+        return is_array($json) ? $json : null;
+    }
+
     private function prompt(
         WhatsappConversation $conversation,
         string $message,
@@ -59,8 +108,26 @@ class AiIntentClassifier
         array $lastMachines,
         array $context
     ): string {
+        /*
+         * The planner used to run completely blind to ai_memories - it had to
+         * understand branch names, installment systems, excluded professions
+         * and model aliases with none of them in front of it. The memory is
+         * given here for comprehension only; the reply itself is still built
+         * by Laravel or by AiComplexReplyService.
+         */
+        $memoryContext = app(AiMemoryContextBuilder::class)
+            ->buildForMessage($message, [
+                'conversation_id' => $conversation->id,
+                'intent' => $conversation->last_topic ?? null,
+            ])['context'] ?? '';
+
+        // Plan task 3.5 - lets the planner resolve "زي المرة اللي فاتت" and
+        // stop re-asking for a term the customer already settled on.
+        $profile = app(CustomerProfileService::class)->summaryFor($conversation);
+
         $payload = [
             'current_message' => $message,
+            'customer_profile' => $profile,
             'conversation_state' => [
                 'last_machine_id' => $conversation->last_machine_id ?? null,
                 'last_machine_ids' => $conversation->last_machine_ids ?? [],
@@ -96,8 +163,11 @@ Laravel هو الذي سينفذ:
 - price
 - images
 - installment_calc
+- installment_total
 - installment_system
+- admin_fee_explanation
 - brand_models
+- branches
 - application
 - application_status
 - delivery_question
@@ -123,7 +193,10 @@ target:
 - لو العميل قال عايز أقدم وفيه مكنة واحدة فقط في السياق، intent=application و target=single_previous_machine.
 - لو العميل ذكر موديل جديد، استخرج machine_query.
 - لو العميل سأل عن القسط أو مدة تقسيط، intent=installment_calc.
-- لو العميل سأل عن أنظمة/شروط/ورق التقسيط، intent=installment_system.
+- installment_total: العميل بيسأل عن الإجمالي اللي هيدفعه في الآخر أو على المدة كلها أو مجموع الأقساط أو "هيطلعلي بكام في الآخر" أو "اجمالي المبلغ" أو "كام كل اللي هدفعه". دي مش installment_calc - دي طلب مجموع، والحساب الشهري غالبًا اتعمل قبل كده في المحادثة.
+- لو العميل سأل عن أنظمة/شروط/ورق التقسيط بشكل عام (مين ينفع يقسط، إيه المستندات، إيه الأنظمة المتاحة)، intent=installment_system.
+- admin_fee_explanation: العميل بيسأل عن المصاريف الإدارية نفسها - "ايه هي المصاريف الادارية"، "المصاريف الادارية دي ايه"، "نسبتها كام"، "بتتدفع امتى"، "ليه بندفعها". دي **مش** installment_system: العميل مش بيسأل عن أنظمة التقسيط ولا الشروط، هو بيسأل عن بند واحد بس. ممنوع ترجع installment_system لسؤال عن المصاريف الإدارية.
+- branches: العميل بيسأل عن مكان المعرض/الفروع/العنوان/اللوكيشن - "مكانكم فين"، "العنوان ايه"، "فين المعرض"، "ابعتلي اللوكيشن"، "عندكم فروع فين"، "اقرب فرع".
 - لو العميل سأل عن الصور/الشكل/الألوان، intent=images.
 - لو العميل سأل عن السعر/الكاش/بكام، intent=price.
 - لو الرسالة ناقصة لكن يمكن فهمها من السياق، لا تطلب توضيح.
@@ -138,6 +211,16 @@ target:
 - لو last_topic = application والعميل قال ايه المطلوب أو أعمل ايه، intent=application و target=single_previous_machine.
 - application_status: العميل عنده طلب موجود بالفعل ويريد الاستعلام عن حالته أو أين وصل. مثال: "طلبي وصل لايه"، "حالة طلبي ايه"، "طلبي فين"، "الطلب بتاعي وصل لفين"، "عايز اعرف حالة طلبي"، "إيه أخبار طلبي"، "هل طلبي اتوافق عليه"، "طلبي لسه تحت المراجعة؟". هذه النية تعني الاستعلام فقط وليس إنشاء طلب جديد. لا تستخدم application_status للتقديم أو استكمال طلب جديد.
 - delivery_question: العميل بيسأل عن التوصيل بس (تكلفة التوصيل، مدته، هل بيوصل لمنطقته) - مش عن سعر أو تفاصيل المنتج نفسه. استخدم delivery_question حتى لو العميل وسط طلب تقديم لسه مكملوش، طالما السؤال ده عن التوصيل بس.
+
+steps (طلبات إضافية مستقلة في نفس الرسالة):
+- لو العميل طلب أكتر من حاجة مستقلة في نفس الرسالة (زي "سعرها وصورها"، أو "احسبلي القسط وابعتلي صورها")، الحقول العادية فوق (intent, target, machine_query, ...) بتمثل الطلب الأساسي بس، وأي طلب إضافي بعد كده يتحط كـ عنصر في steps[] بنفس شكل الحقول دي بالظبط (نفس الأسماء: intent, target, machine_query, months, deposit, system, ...).
+- steps[] للطلبات الإضافية فقط - متكررش الطلب الأساسي جواها.
+- steps[] بتتبني من **الرسالة الحالية بس**. ممنوع تمامًا تحط فيها طلب اتقال في رسالة قديمة وإحنا رددنا عليه خلاص (زي إن العميل سأل عن الفروع في رسالة فاتت) - ده بيخلي البوت يبعت نفس الإجابة تاني بلا سبب.
+- لو الرسالة فيها طلب واحد بس، سيب steps[] = [].
+- حد أقصى عنصرين في steps[].
+- ممنوع تحط intent=application أو application_status جوه steps[] - دول لازم يكونوا الطلب الأساسي بس.
+- لو طلب إضافي غامض أو ناقص معلومة، سيبه برضو (بدون needs_clarification) - التنفيذ هيتجاهله لو مش واضح، أحسن من إنك توقف الرد كله عشانه.
+
 تحويل المدد:
 - سنة = 12
 - سنة ونص = 18
@@ -173,8 +256,28 @@ system:
   "needs_clarification": false,
   "clarification_reason": null,
   "clarification_question": null,
-  "confidence": 0.0
+  "confidence": 0.0,
+  "steps": [
+    {
+      "intent": "images",
+      "target": "new_machine",
+      "machine_query": null,
+      "machine_ids": [],
+      "selected_index": null,
+      "uses_last_machines": false,
+      "references_previous": false,
+      "references_all_previous": false,
+      "months": null,
+      "deposit": null,
+      "deposit_mentioned": false,
+      "system": null,
+      "confidence": 0.0
+    }
+  ]
 }
+
+معلومات المعرض (للفهم فقط - ممنوع ترد بيها، دي بس عشان تفهم قصد العميل صح):
+{$memoryContext}
 
 البيانات:
 PROMPT
@@ -316,17 +419,69 @@ PROMPT
             'clarification_reason' => null,
             'clarification_question' => null,
             'confidence' => 0.0,
+            // Extra independent requests in the same message (e.g. "سعرها
+            // وصورها"). Each entry has the exact same shape as this plan.
+            'steps' => [],
         ];
     }
 
     private function normalizePlan(array $plan): array
     {
+        $rawSteps = is_array($plan['steps'] ?? null) ? $plan['steps'] : [];
+
+        $plan = $this->normalizePlanFields($plan);
+
+        /*
+         * Extra steps are independent additional requests in the same
+         * message (e.g. "سعرها وصورها"). Each is normalized through the
+         * exact same rules as the primary plan, so router handlers written
+         * for a single flat plan array work unchanged on a step too.
+         * Capped at MAX_EXTRA_STEPS as a safety limit, and application/
+         * application_status can never come from here - starting or
+         * mutating an application from a secondary request is unsafe.
+         */
+        $steps = [];
+
+        foreach (array_slice($rawSteps, 0, self::MAX_EXTRA_STEPS) as $rawStep) {
+            if (! is_array($rawStep)) {
+                continue;
+            }
+
+            $step = $this->normalizePlanFields(array_merge($this->fallback(), $rawStep));
+
+            if (in_array($step['intent'], ['application', 'application_status', 'unknown', 'general'], true)) {
+                continue;
+            }
+
+            $step['needs_clarification'] = false;
+            $step['clarification_question'] = null;
+            // A step is never itself a multi-step plan - drop anything the
+            // model nested here so it can't be carried around unexecuted.
+            $step['steps'] = [];
+
+            $steps[] = $step;
+        }
+
+        $plan['steps'] = $steps;
+
+        return $plan;
+    }
+
+    /**
+     * Validates/casts one plan-shaped array (the primary plan, or one entry
+     * of $plan['steps']). Never touches the 'steps' key itself.
+     */
+    private function normalizePlanFields(array $plan): array
+    {
         $validIntents = [
             'price',
             'images',
             'installment_calc',
+            'installment_total',
             'installment_system',
+            'admin_fee_explanation',
             'brand_models',
+            'branches',
             'application',
             'application_status',
             'delivery_question',
@@ -440,6 +595,7 @@ private function extractApplicationData(
   home_address (لأن السؤال بيتسأل بالترتيب ده). لو واحد بس منهم مذكور،
   حطه في الحقل الناقص المناسب بس، ومتخترعش الحقل التاني.
 - لو العميل قال إنه شغال في مصنع أو موظف، job_type = "موظف/عامل مصنع".
+- صيغ زي "انا شغال على المكنة"، "هشتغل عليها"، "شغال بيها"، "المكنة دي لشغلي"، "شغال طلبات"، "شغال دليفري"، "شغال اوبر/اندرايف/كريم"، "سواق تطبيقات" كلها معناها إنه هيستخدم الموتوسيكل في الشغل: job_type = "مندوب توصيل/سواق تطبيقات" وincome_proof = "لا يوجد". دي **إجابة على سؤال طبيعة الشغل**، مش رسالة فاضية - ممنوع تسيب job_type = null فيها.
 - لو العميل ذكر إنه شغال عمل حر أو مهنة حرة أو حرفي/صنايعي (مثل: "سباك"، "نجار"، "حداد"، "كهربائي"، "نقاش"، "سواق"، "دليفري"، "صنايعي"، "شغال حر")، اجعل job_type = مهنته واجعل income_proof = "لا يوجد" تلقائيًا (لأن أصحاب المهن الحرة ليس لديهم مفردات مرتب).
 - لو قال معاه مفردات مرتب أو مؤمن عليه، income_proof = وصف الإثبات (مثلاً "مفردات مرتب").
 - income_proof سؤال بإجابة أكيدة (معاه ولا لأ)، مش حقل ممكن يفضل فاضي طول
@@ -470,16 +626,14 @@ PROMPT
         . "\n" . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 
     try {
-        $result = app(GeminiClient::class)->generateText($prompt, null, [
-            'temperature' => 0.05,
-            'maxOutputTokens' => 700,
-        ]);
+        $json = $this->requestPlanJson($prompt);
 
-        if (! ($result['ok'] ?? false)) {
-            return ['application_data' => []];
+        if (! is_array($json)) {
+            // Same truncation guard as classify() above: an extraction that
+            // silently returns [] loses the customer's name/ID for that turn
+            // and the flow asks for it again.
+            $json = $this->requestPlanJson($prompt, ['thinkingBudget' => 0]);
         }
-
-        $json = $this->extractJson(trim((string) ($result['reply'] ?? $result['text'] ?? '')));
 
         return is_array($json) ? $json : ['application_data' => []];
     } catch (\Throwable $e) {

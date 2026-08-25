@@ -27,12 +27,20 @@ class WhatsappIntentRouter
     private ?float $lastTurnRepetitionScore = null;
 
     /**
-     * Thin wrapper around handleInternal() whose only job is observability:
-     * one structured log line per turn answering "what did the AI decide
-     * and why" without needing to re-read code (see
-     * AI_MEMORY_CONVERSATION_IMPROVEMENT_PLAN.md Section 22). Kept
-     * separate from handleInternal() so none of that method's many
-     * early-return branches needed touching to get logging on every path.
+     * Extra independent requests classified alongside the primary intent
+     * (e.g. "سعرها وصورها" -> primary=price, one extra step=images). Only
+     * ever populated past the needs_clarification guard in handleInternal(),
+     * so a clarification question or handoff naturally leaves this empty.
+     */
+    private array $lastTurnExtraSteps = [];
+
+    /**
+     * Thin wrapper around handleInternal() with two jobs it keeps out of
+     * that method's many early-return branches: appending any extra steps
+     * the planner found in the same message, and one structured log line
+     * per turn answering "what did the AI decide and why" without needing
+     * to re-read code (see AI_MEMORY_CONVERSATION_IMPROVEMENT_PLAN.md
+     * Section 22).
      */
     public function handle(
         WhatsappConversation $conversation,
@@ -47,6 +55,19 @@ class WhatsappIntentRouter
         $result = $this->handleInternal($conversation, $message, $mediaItems);
 
         $conversation->refresh();
+
+        /*
+         * Extra steps (independent requests bundled in the same message,
+         * e.g. "سعرها وصورها") only get appended to an answer that actually
+         * went out cleanly - never to a clarification question or a handoff.
+         */
+        if (
+            ($result['handled'] ?? false) === true
+            && ! empty($result['reply'])
+            && $conversation->status !== 'awaiting_agent'
+        ) {
+            $result = $this->appendExtraSteps($conversation, $message, $result);
+        }
 
         Log::info('ai_turn', [
             'conversation_id' => $conversation->id,
@@ -65,11 +86,232 @@ class WhatsappIntentRouter
             'escalated' => $statusBefore !== 'awaiting_agent' && $conversation->status === 'awaiting_agent',
             'pending_question' => $conversation->pending_question ?? null,
             'last_topic' => $conversation->last_topic ?? null,
+            'extra_steps' => count($this->lastTurnExtraSteps),
             'latency_ms' => (int) ((microtime(true) - $startedAt) * 1000),
         ]);
 
         return $result;
     }
+
+
+/**
+ * Executes any extra steps captured for this turn and appends their
+ * replies/images onto the primary result. Runs after the primary handler
+ * has already saved its own outgoing message and updated conversation
+ * state, so:
+ * - the primary machine(s) and last_topic take priority: extra-step
+ *   machines are added to last_machine_ids (union), never replace it, and
+ *   last_topic is restored to whatever the primary handler set;
+ * - a failing extra step is logged and skipped, never lets an exception
+ *   swallow the primary reply that already succeeded.
+ */
+private function appendExtraSteps(WhatsappConversation $conversation, string $message, array $result): array
+{
+    $steps = $this->dropAlreadyAnsweredSteps($conversation, $this->lastTurnExtraSteps);
+
+    if (empty($steps)) {
+        return $result;
+    }
+
+    $primaryTopic = $conversation->last_topic;
+    $primaryMachineIds = is_array($conversation->last_machine_ids ?? null)
+        ? $conversation->last_machine_ids
+        : [];
+
+    $extraReplies = [];
+    $extraImages = $result['images'] ?? [];
+    $extraImageItems = $result['image_items'] ?? [];
+    $extraImageGroups = $result['image_groups'] ?? [];
+
+    foreach ($steps as $step) {
+        try {
+            $stepResult = $this->executeAnswerableStep($conversation, $message, $step);
+        } catch (\Throwable $e) {
+            Log::warning('extra_step_failed', [
+                'conversation_id' => $conversation->id,
+                'step' => $step,
+                'error' => $e->getMessage(),
+            ]);
+
+            continue;
+        }
+
+        if (! empty($stepResult['reply'])) {
+            $extraReplies[] = trim($stepResult['reply']);
+        }
+
+        $extraImages = array_merge($extraImages, $stepResult['images'] ?? []);
+        $extraImageItems = array_merge($extraImageItems, $stepResult['image_items'] ?? []);
+        $extraImageGroups = array_merge($extraImageGroups, $stepResult['image_groups'] ?? []);
+
+        $conversation->refresh();
+    }
+
+    if (empty($extraReplies) && $extraImages === ($result['images'] ?? [])) {
+        return $result;
+    }
+
+    $mergedMachineIds = array_values(array_unique(array_merge(
+        $primaryMachineIds,
+        is_array($conversation->last_machine_ids ?? null) ? $conversation->last_machine_ids : []
+    )));
+
+    $conversation->forceFill([
+        'last_topic' => $primaryTopic,
+        'last_machine_ids' => $mergedMachineIds,
+    ])->save();
+
+    if (! empty($extraReplies)) {
+        $primaryReply = trim((string) ($result['reply'] ?? ''));
+
+        /*
+         * لما العميل يطلب حاجتين في رسالة واحدة ("سعر دايو ٤ وابعتلي
+         * مكانكم فين")، الردين كانوا بيتلزقوا في رسالة واتساب واحدة طويلة
+         * - بني آدم مكانّا كان هيبعت رسالتين. replies[] بيخلي كل إجابة
+         * رسالة لوحدها عند الإرسال، وreply بيفضل النص المجمّع زي ما هو
+         * عشان أي حاجة تانية بتقرا من النتيجة (الداشبورد/الـ API) ما تتكسرش.
+         */
+        $result['replies'] = array_values(array_filter(array_merge(
+            [$primaryReply],
+            $extraReplies
+        )));
+
+        $result['reply'] = trim($primaryReply . "\n\n" . implode("\n\n", $extraReplies));
+    }
+
+    $result['images'] = array_values(array_unique(array_filter($extraImages)));
+    $result['image_items'] = $extraImageItems;
+    $result['image_groups'] = $extraImageGroups;
+    $result['image'] = $result['image'] ?? ($result['images'][0] ?? null);
+
+    return $result;
+}
+
+/**
+ * الردود دي ثابتة (نفس النص كل مرة) - الفروع، التوصيل، أنظمة التقسيط،
+ * شرح المصاريف الإدارية. لو الـ planner حط واحد منهم في steps[] وهو
+ * أصلاً اتبعت في دور قريب، معناه إنه قرا طلب قديم من الرسايل السابقة
+ * مش من الرسالة الحالية - ولو نفذناه العميل بياخد نفس قايمة الفروع
+ * مرتين ورا بعض من غير ما يطلبها.
+ */
+private const STATIC_INFO_STEP_INTENTS = [
+    'branches',
+    'delivery_question',
+    'installment_system',
+    'admin_fee_explanation',
+];
+
+private function dropAlreadyAnsweredSteps(WhatsappConversation $conversation, array $steps): array
+{
+    if (empty($steps)) {
+        return $steps;
+    }
+
+    $recentIntents = $conversation->messages()
+        ->where('direction', 'outgoing')
+        ->latest('id')
+        ->take(4)
+        ->pluck('payload')
+        ->map(fn ($payload) => is_array($payload) ? ($payload['intent'] ?? $payload['source'] ?? null) : null)
+        ->filter()
+        ->values()
+        ->all();
+
+    return array_values(array_filter($steps, function (array $step) use ($recentIntents) {
+        $intent = $step['intent'] ?? null;
+
+        if (! in_array($intent, self::STATIC_INFO_STEP_INTENTS, true)) {
+            return true;
+        }
+
+        if (! in_array($intent, $recentIntents, true)) {
+            return true;
+        }
+
+        Log::info('extra_step_skipped_recently_answered', ['intent' => $intent]);
+
+        return false;
+    }));
+}
+
+/**
+ * One extra step is a plan-shaped array (same fields AiIntentClassifier
+ * produces for the primary plan) restricted to intents that have a real
+ * deterministic handler - no free-form AI fallback and no application
+ * flow from a secondary request.
+ */
+private function executeAnswerableStep(WhatsappConversation $conversation, string $message, array $step): array
+{
+    $intent = $step['intent'] ?? null;
+
+    $answerable = [
+        'price',
+        'images',
+        'installment_calc',
+        'installment_total',
+        'installment_system',
+        'brand_models',
+        'admin_fee_explanation',
+        'branches',
+        'delivery_question',
+    ];
+
+    if (! in_array($intent, $answerable, true)) {
+        return ['reply' => null, 'images' => []];
+    }
+
+    if ($intent === 'installment_system') {
+        return $this->handleInstallmentSystem($conversation, $message);
+    }
+
+    /*
+     * "عاوز اعرف سعر دايو ٤ وابعتلي مكانكم فين" - the second half used to
+     * be dropped on the floor: there was no branches intent at all, and a
+     * step whose intent is not in the list above returns nothing. Both of
+     * these are answered from ai_memories through the free AI path, scoped
+     * to the step's own intent so the memory retrieval pulls the branch
+     * list / delivery rules instead of whatever the primary intent was.
+     */
+    if (in_array($intent, ['branches', 'delivery_question'], true)) {
+        /*
+         * الرد الأساسي (السعر مثلاً) اتبعت خلاص في رسالة لوحدها، فلازم
+         * الخطوة دي ترد على جزئها بس - من غير التزكير بالسعر ولا سؤال
+         * ختامي تاني. من غير التوجيه ده الـ AI بيشوف الرسالة كاملة
+         * ويجاوب عليها من أولها لآخرها تاني.
+         */
+        $focus = $intent === 'branches'
+            ? 'مكان المعرض/الفروع والعناوين واللوكيشن بس'
+            : 'موضوع التوصيل بس';
+
+        return $this->handleAiFallback($conversation, $message, null, $intent, $focus);
+    }
+
+    $machines = $this->resolveMachinesFromPlan($conversation, $message, $step);
+
+    $brandFiltered = $this->filterMachinesByRequestedBrand($machines, $message);
+
+    if (($brandFiltered['machines'] ?? collect())->isNotEmpty()) {
+        $machines = $brandFiltered['machines'];
+    }
+
+    if ($machines->count() > 1) {
+        $machines = $this->narrowMachinesByVariant($machines, $message);
+    }
+
+    if ($machines->isEmpty()) {
+        return ['reply' => null, 'images' => []];
+    }
+
+    return match ($intent) {
+        'price' => $this->handleCashPrice($conversation, $machines, $message),
+        'images' => $this->handleImages($conversation, $machines, $message, $step),
+        'installment_calc' => $this->handleInstallmentCalc($conversation, $machines, $message, $step),
+        'installment_total' => $this->handleInstallmentTotal($conversation, $machines, $message, $step),
+        'brand_models' => $this->handleBrandModels($conversation, $machines, $message),
+        'admin_fee_explanation' => $this->handleAdminFeeExplanation($conversation, $machines, $message),
+        default => ['reply' => null, 'images' => []],
+    };
+}
 
 private function handleInternal(
     WhatsappConversation $conversation,
@@ -79,6 +321,7 @@ private function handleInternal(
     $this->lastTurnIntent = null;
     $this->lastTurnConfidence = null;
     $this->lastTurnRepetitionScore = null;
+    $this->lastTurnExtraSteps = [];
 
     try {
         $message = trim($message);
@@ -202,10 +445,52 @@ private function handleInternal(
             $plan['needs_clarification'] = false;
             $plan['clarification_question'] = null;
         } elseif (
-            $this->isAdminFeeExplanationIntent($normalizedMessage)
+            (
+                $this->isAdminFeeExplanationIntent($normalizedMessage)
+                /*
+                 * Plan task 2.5: this used to fire on the keyword alone and
+                 * beat a perfectly good plan - "احسبلي القسط على 12 شهر
+                 * بالمصاريف الإدارية" is a calculation request that merely
+                 * mentions the fee, and it was being answered with the
+                 * generic fee explanation instead. The classifier already
+                 * emits admin_fee_explanation itself, so the regex is now
+                 * only a safety net for when it did not understand
+                 * (general/unknown or a low-confidence guess).
+                 */
+                && (
+                    /*
+                     * installment_system is in here because it was the exact
+                     * misfire this guard exists for: "ايه هي المصاريف
+                     * الادارية" came back as installment_system with high
+                     * confidence, so the safety net never fired and the
+                     * customer got the whole "التقسيط عندنا متاح لـ..."
+                     * paragraph - which does not contain the answer to what
+                     * he asked. The classifier now has admin_fee_explanation
+                     * as a real intent; this stays as the belt-and-braces.
+                     */
+                    in_array($intent, ['general', 'unknown', 'admin_fee_explanation', 'installment_system'], true)
+                    || (float) ($plan['confidence'] ?? 0.0) < 0.5
+                )
+            )
             || ($conversation->last_topic === 'admin_fee_explanation' && $this->isBareAdminFeeFollowUp($normalizedMessage))
         ) {
             $intent = 'admin_fee_explanation';
+            $plan['intent'] = $intent;
+            $plan['needs_clarification'] = false;
+            $plan['clarification_question'] = null;
+        }
+
+        /*
+         * "اخر القسط هكون دافع كام اجمالي" - لو الكلاسيفاير قراها حساب قسط
+         * عادي، الرد بيبقى **نفس** رسالة القسط الشهري حرفيًا تاني والعميل
+         * عمره ما يشوف الرقم اللي سأل عنه. الصياغة دي واضحة كفاية إن
+         * نميّزها هنا حتى لو الكلاسيفاير واثق في installment_calc.
+         */
+        if (
+            $this->isInstallmentTotalIntent($normalizedMessage)
+            && in_array($intent, ['installment_calc', 'installment_system', 'general', 'unknown'], true)
+        ) {
+            $intent = 'installment_total';
             $plan['intent'] = $intent;
             $plan['needs_clarification'] = false;
             $plan['clarification_question'] = null;
@@ -248,7 +533,25 @@ private function handleInternal(
          * بترجع تلقائي لمسار التقديم زي ما كانت.
          */
         $answerableDuringApplication = ['price', 'images', 'installment_system', 'installment_calc', 'delivery_question', 'admin_fee_explanation'];
+
+        /*
+         * "تقسيط" / "كاش" مباشرة بعد سؤال "حضرتك عاوز تدفع كاش ولا تقسيط؟"
+         * هي *إجابة* السؤال ده، لكن الـ planner بيقراها طلب installment_calc
+         * جديد بثقة 1.0، فكانت بتتحسب "سؤال مقاطع" وتروح لحساب القسط -
+         * والإجابة تضيع، والتقديم يفضل يسأل نفس السؤال في كل دور بعد كده
+         * (loop حقيقي اتشاف في ai:golden-set: missing_fields=[payment_method]
+         * على ٦ أدوار متتالية، فـ job_type وبوابة المهن الممنوعة عمرها ما
+         * اتنفذت). رد قصير على السؤال المعلّق بيرجع للتقديم دايمًا.
+         */
+        $awaitingPaymentMethod = $applicationIsPending
+            && in_array('payment_method', (array) (($conversation->context_payload['missing_fields'] ?? [])), true);
+
+        $isAnswerToPendingApplicationQuestion = $awaitingPaymentMethod
+            && count(preg_split('/\s+/u', trim($normalizedMessage)) ?: []) <= 3
+            && preg_match('/(كاش|تقسيط|قسط|نقدي|نقدا)/u', $normalizedMessage) === 1;
+
         $isConfidentInterruptingQuestion = $applicationIsPending
+            && ! $isAnswerToPendingApplicationQuestion
             && in_array($intent, $answerableDuringApplication, true)
             && (float) ($plan['confidence'] ?? 1.0) >= 0.5;
 
@@ -366,6 +669,13 @@ private function handleInternal(
          * مش مرتبطة ببعض.
          */
         app(\App\Services\ClarificationService::class)->reset($conversation);
+
+        /*
+         * Only reachable once understanding was confident enough to skip
+         * clarification, so a clarification question or an escalation never
+         * has extra steps attached to it - see handle()'s appendExtraSteps().
+         */
+        $this->lastTurnExtraSteps = $plan['steps'] ?? [];
 
         $machines = $this->resolveMachinesFromPlan($conversation, $message, $plan);
 
@@ -510,6 +820,30 @@ private function handleInternal(
             );
         }
 
+        /*
+         * "مكانكم فين" / "ابعتلي اللوكيشن" - the branch list and its map
+         * links live in ai_memories, written as a formatted message, so the
+         * free AI path (which is what actually reads memories) answers it.
+         * What was missing was ever *routing* here: with no branches intent
+         * the planner had to squeeze the question into general/unknown, and
+         * as a second request in the same message it was dropped entirely.
+         */
+        if ($intent === 'branches') {
+            return $this->withApplicationResume(
+                $conversation,
+                $this->handleAiFallback($conversation, $message, null, 'branches'),
+                $resumeApplicationAfterAnswer
+            );
+        }
+
+        if ($intent === 'installment_total') {
+            return $this->withApplicationResume(
+                $conversation,
+                $this->handleInstallmentTotal($conversation, $machines, $message, $plan),
+                $resumeApplicationAfterAnswer
+            );
+        }
+
         if ($intent === 'installment_calc') {
             return $this->withApplicationResume(
                 $conversation,
@@ -584,7 +918,9 @@ private function handleInternal(
 private function handleAiFallback(
     WhatsappConversation $conversation,
     string $message,
-    ?Collection $machines = null
+    ?Collection $machines = null,
+    ?string $intentOverride = null,
+    ?string $focus = null
 ): array {
     /*
      * مهم:
@@ -625,7 +961,24 @@ private function handleAiFallback(
 
     $result = app(AiComplexReplyService::class)->reply($message, [
         'conversation_id' => $conversation->id,
-        'from' => $conversation->from ?? null,
+        /*
+         * كل الأرقام الحقيقية للسيناريو اللي العميل واقف فيه (سعر الكاش،
+         * سعر التقسيط، آخر مدة/مقدم/نظام اتحسبوا، القسط الشهري، المصاريف
+         * الإدارية، الإجمالي). من غيرها كان الـ AI بيشوف نص ردودنا القديمة
+         * بس، فأي سؤال حسابي جديد ("طب الاجمالي كام؟") ما كانش قدامه غير
+         * إنه يكرر آخر رسالة - وده بالظبط اللي كان بيحصل.
+         */
+        'installment_snapshot' => $this->installmentSnapshot($conversation),
+        /*
+         * Without this the memory builder always saw intent=null, so its
+         * intent filter and every intent-based relevance boost were dead
+         * on every single turn (visible in ai_memory_retrieval_logs).
+         */
+        'intent' => $intentOverride ?: $this->lastTurnIntent,
+        'step_focus' => $focus,
+        // Plan task 3.5 - one line about who this is, when we know them.
+        'customer_profile' => app(CustomerProfileService::class)->summaryFor($conversation),
+        'from' => $conversation->phone ?? null,
         'is_first_message' => count($recentMessages) <= 1,
         'messages' => $recentMessages,
         'recent_messages' => $recentMessages,
@@ -713,9 +1066,76 @@ private function handleAiFallback(
 }
 
 
+/**
+ * الحسبة الحالية بأرقامها من InstallmentCalculator - نفس المصدر اللي
+ * بيطلع منه رد القسط بالظبط، عشان أي رقم الـ AI يقوله في رد حر يبقى
+ * متطابق مع اللي بعتناه قبل كده مش تقدير من عنده.
+ */
+private function installmentSnapshot(WhatsappConversation $conversation): array
+{
+    $machine = $this->activeMachineFromConversation($conversation);
+
+    if (! $machine) {
+        return [];
+    }
+
+    $snapshot = [
+        'machine_name' => $this->machineDisplayName($machine),
+        'cash_price' => $machine->cash_price,
+        'installment_price' => $machine->installment_price,
+        'available_months' => $this->validMonthsForMachines(collect([$machine])),
+    ];
+
+    $payload = $conversation->context_payload ?? [];
+
+    if (! array_key_exists('last_months', $payload)) {
+        return $snapshot;
+    }
+
+    $months = (int) $payload['last_months'];
+    $deposit = (float) ($payload['last_deposit'] ?? 0);
+    $system = (string) ($payload['last_system'] ?? '20');
+
+    $isFreelance = app(ApplicationHandler::class)->categorizeIncome(
+        (string) ($payload['application']['job_type'] ?? ''),
+        (string) ($payload['application']['income_proof'] ?? '')
+    ) === 'freelance';
+
+    $calc = app(InstallmentCalculator::class)->calculate($machine, $months, $deposit, $system, $isFreelance);
+
+    if (! ($calc['ok'] ?? false)) {
+        return $snapshot;
+    }
+
+    $monthly = (int) $calc['monthly_payment'];
+    $adminFee = (int) ($calc['admin_fee'] ?? 0);
+    $depositDue = (float) ($calc['deposit'] ?? 0) + (float) ($calc['freelance_extra_deposit'] ?? 0);
+
+    return $snapshot + [
+        'months' => $months,
+        'system' => $system . '%',
+        'deposit' => (int) $depositDue,
+        'monthly_payment' => $monthly,
+        'admin_fee' => $adminFee,
+        'installments_total' => $monthly * $months,
+        'grand_total' => (int) ($monthly * $months + $adminFee + $depositDue),
+        'due_at_pickup' => (int) ($adminFee + $depositDue),
+        'first_installment_after_days' => 45,
+    ];
+}
+
 private function detectIntent(string $message): string
 {
     $m = $this->normalizeText($message);
+
+if ($this->isBranchesIntent($m)) {
+    return 'branches';
+}
+
+if ($this->isInstallmentTotalIntent($m)) {
+    return 'installment_total';
+}
+
 if ($this->isInstallmentSystemIntent($m)) {
     return 'installment_system';
 }
@@ -876,6 +1296,17 @@ if ($machines->count() > 1) {
         'cash_price' => $first['price'] ?? '',
     ], $default);
 }
+
+    /*
+     * Plan task 2.4: the model words this, it never computes it. $reply is
+     * already the correct sentence built from cash_price; AiReplyPhraser
+     * only returns a reword that carries the exact same digits and the same
+     * "- model: price" lines, otherwise this same text goes out untouched.
+     */
+    $reply = app(AiReplyPhraser::class)->phrase($reply, [
+        'context' => 'سعر كاش',
+        'must_keep' => $machines->map(fn (Machine $machine) => $this->machineDisplayName($machine))->all(),
+    ]);
 
     $this->saveOutgoing($conversation, $reply, [
         'source' => 'simple_cash_price',
@@ -1357,39 +1788,58 @@ $folder = $this->safeFolderName($machine->name);
             return $this->textResult($reply);
         }
 
-        $adminFee = (int) round($installmentPrice * 0.07);
-
-        $lines = [
-            "المصاريف الإدارية لـ {$displayName} بتكون " . number_format($adminFee)
-                . ' جنيه (7% من تمنها في التقسيط)، بتتدفع وانت بتستلم المكنة، ودي رسوم شركة التمويل بتحطها مش من المعرض.',
-        ];
-
         $payload = $conversation->context_payload ?? [];
         $lastCalcMachineIds = collect($payload['last_calc_machine_ids'] ?? [])->all();
         $hasMatchingCalc = in_array($machine->id, $lastCalcMachineIds, true)
             && array_key_exists('last_months', $payload);
+
+        $calc = null;
 
         if ($hasMatchingCalc) {
             $months = (int) $payload['last_months'];
             $deposit = (float) ($payload['last_deposit'] ?? 0);
             $system = (string) ($payload['last_system'] ?? '20');
 
-            $calc = app(InstallmentCalculator::class)->calculate($machine, $months, $deposit, $system);
+            $candidate = app(InstallmentCalculator::class)->calculate($machine, $months, $deposit, $system);
 
-            if ($calc['ok'] ?? false) {
-                $monthly = (int) $calc['monthly_payment'];
-                $calcAdminFee = (int) $calc['admin_fee'];
-                $freelanceExtra = (float) ($calc['freelance_extra_deposit'] ?? 0);
-                $totalAtPickup = $calcAdminFee + $deposit + $freelanceExtra;
-
-                $depositLine = $deposit > 0 ? ' + المقدم ' . number_format($deposit) . ' جنيه' : '';
-                $freelanceLine = $freelanceExtra > 0 ? ' + مقدم إضافي (سقف الدخل الحر) ' . number_format($freelanceExtra) . ' جنيه' : '';
-
-                $lines[] = 'وقت استلام المكنة هتدفع: المصاريف الإدارية ' . number_format($calcAdminFee) . ' جنيه'
-                    . $depositLine . $freelanceLine
-                    . ' = إجمالي ' . number_format($totalAtPickup) . ' جنيه.'
-                    . "\nوبعد كده بـ 45 يوم من الاستلام، أول قسط شهري يكون " . number_format($monthly) . ' جنيه.';
+            if ($candidate['ok'] ?? false) {
+                $calc = $candidate;
             }
+        }
+
+        /*
+         * المصاريف الإدارية 7% من المبلغ المموَّل - يعني *بعد* المقدم، مش
+         * من سعر التقسيط الكامل. لما يكون فيه حسبة شغالة بمقدم، الرقم
+         * الصح هو اللي طالع من InstallmentCalculator؛ الرقم المحسوب من
+         * السعر الكامل كان بيتكتب في أول سطر والرقم الصح في السطر اللي
+         * بعده، فالعميل يشوف رقمين مختلفين لنفس البند في نفس الرسالة.
+         */
+        $adminFee = $calc !== null
+            ? (int) $calc['admin_fee']
+            : (int) round($installmentPrice * 0.07);
+
+        $basisText = ($calc !== null && (float) $calc['deposit'] > 0)
+            ? '7% من المبلغ الباقي بعد المقدم'
+            : '7% من تمنها في التقسيط';
+
+        $lines = [
+            "المصاريف الإدارية لـ {$displayName} بتكون " . number_format($adminFee)
+                . " جنيه ({$basisText})، بتتدفع وانت بتستلم المكنة، ودي رسوم شركة التمويل بتحطها مش من المعرض.",
+        ];
+
+        if ($calc !== null) {
+            $monthly = (int) $calc['monthly_payment'];
+            $deposit = (float) $calc['deposit'];
+            $freelanceExtra = (float) ($calc['freelance_extra_deposit'] ?? 0);
+            $totalAtPickup = $adminFee + $deposit + $freelanceExtra;
+
+            $depositLine = $deposit > 0 ? ' + المقدم ' . number_format($deposit) . ' جنيه' : '';
+            $freelanceLine = $freelanceExtra > 0 ? ' + مقدم إضافي (سقف الدخل الحر) ' . number_format($freelanceExtra) . ' جنيه' : '';
+
+            $lines[] = 'وقت استلام المكنة هتدفع: المصاريف الإدارية ' . number_format($adminFee) . ' جنيه'
+                . $depositLine . $freelanceLine
+                . ' = إجمالي ' . number_format($totalAtPickup) . ' جنيه.'
+                . "\nوبعد كده بـ 45 يوم من الاستلام، أول قسط شهري يكون " . number_format($monthly) . ' جنيه.';
         }
 
         $reply = implode("\n\n", $lines);
@@ -2118,6 +2568,13 @@ private function renderMemory(string $title, array $variables = []): ?string
     $memory = app(\App\Services\AiMemoryResolver::class)->memoryByExactTitle($title);
 
     if (! $memory) {
+        /*
+         * Memory titles are effectively an API here - renaming one in
+         * Filament silently drops the reply back to a hardcoded default
+         * with no error anywhere. Log it so a broken title is visible.
+         */
+        Log::warning('ai_memory_title_miss', ['title' => $title]);
+
         return null;
     }
 
@@ -2232,6 +2689,46 @@ private function isInstallmentSystemIntent(string $m): bool
 'انظمتكم ايه',
 'انظمتكو ايه',
     ]);
+}
+
+/**
+ * الفرق بين "احسبلي القسط" و"اخر القسط هكون دافع كام اجمالي": التانية
+ * بتطلب مجموع، مش قسط شهري. لازم تبقى فيها كلمة إجمالي/مجموع/في الآخر
+ * *ومعاها* إشارة لفلوس أو للمدة، عشان "اجمالي المطلوب عند التعاقد" اللي
+ * إحنا نفسنا بنكتبه في ردودنا ما يترجعش علينا كنية غلط.
+ */
+private function isInstallmentTotalIntent(string $m): bool
+{
+    $totalWords = $this->containsAny($m, [
+        'اجمالي', 'إجمالي', 'الاجمالي', 'مجموع', 'المجموع',
+        'كل اللي هدفعه', 'كل الي هدفعه', 'كام هدفع في الاخر',
+        'هدفع كام اجمالي', 'هيطلع كام في الاخر', 'يطلعلي بكام',
+        'المبلغ الكلي', 'المبلغ الاجمالي', 'التكلفه الكليه', 'التكلفة الكلية',
+    ]);
+
+    if (! $totalWords) {
+        return false;
+    }
+
+    return $this->containsAny($m, [
+        'اخر المده', 'اخر المدة', 'في الاخر', 'اخر قسط', 'اخر القسط',
+        'المده كلها', 'المدة كلها', 'على المده', 'علي المده',
+        'هدفع', 'هدفعه', 'دافع', 'ادفع', 'القسط', 'الاقساط', 'اقساط',
+        'شهر', 'سنه', 'سنتين',
+    ]);
+}
+
+private function isBranchesIntent(string $m): bool
+{
+    return $this->containsAny($m, [
+        'مكانكم', 'مكانكو', 'انتم فين', 'انتو فين', 'المعرض فين',
+        'معرضكم فين', 'معرضكو فين', 'فين المعرض', 'فروعكم', 'فروعكو',
+        'الفروع', 'عنوانكم', 'عنوانكو', 'عناوينكم', 'العنوان ايه',
+        'العنوان فين', 'عندكم فرع', 'اقرب فرع', 'الفرع فين',
+        'لوكيشن', 'اللوكيشن', 'لوكشن', 'الموقع', 'موقعكم', 'خريطه',
+        'اجيلكم فين', 'اجيلكو فين', 'اجي فين', 'تيجي فين', 'وصل ازاي',
+        'اوصلكم ازاي', 'اوصلكو ازاي', 'انتم في اي منطقه', 'في اي منطقه',
+    ]) || preg_match('/\b(?:location|address|branch|branches|map)\b/i', $m) === 1;
 }
 
 private function isInstallmentCalcIntent(string $m): bool
@@ -2385,6 +2882,8 @@ private function handleInstallmentCalc(
         ? $openers[1 + ($repeatStreak % 2)]
         : $openers[0];
 
+    // ميعاد أول قسط جاي جوه admin_fee_text من InstallmentVariablesBuilder،
+    // عشان قوالب ai_memories تاخده هي كمان من غير تعديل يدوي.
     $defaultReply =
         "{$opener}\n\n" .
         "{$variables['installment_list']}\n\n" .
@@ -2396,6 +2895,13 @@ private function handleInstallmentCalc(
         $defaultReply
     );
 
+    // Same guarded rewording as the cash-price path above - every جنيه in
+    // here comes from InstallmentCalculator and has to survive verbatim.
+    $reply = app(AiReplyPhraser::class)->phrase($reply, [
+        'context' => 'حساب قسط',
+        'must_keep' => $machines->map(fn (Machine $machine) => $this->machineDisplayName($machine))->all(),
+    ]);
+
     $this->saveOutgoing($conversation, $reply, [
         'source' => 'installment_calc_ai_state',
         'message' => $message,
@@ -2406,6 +2912,18 @@ private function handleInstallmentCalc(
         'machine_names' => $machines->pluck('name')->values()->all(),
     ]);
 
+    /*
+     * Plan task 3.5: the machine, the term and the down payment a customer
+     * actually asked about are the most useful things we ever learn about
+     * them, and they used to die with the conversation row.
+     */
+    app(CustomerProfileService::class)->rememberInstallmentInterest(
+        $conversation,
+        $machines->first()?->id,
+        (int) $months,
+        $deposit
+    );
+
     $this->rememberMachines($conversation, $machines);
     $this->updateConversationState($conversation, 'installment_calc', null, [
         'last_months' => $months,
@@ -2413,6 +2931,140 @@ private function handleInstallmentCalc(
         'last_deposit' => $deposit,
         'last_calc_machine_ids' => $currentMachineIds,
         'installment_repeat_streak' => $repeatStreak,
+    ]);
+
+    return array_merge($this->textResult($reply), $this->machineMeta($machines));
+}
+
+/**
+ * "طيب اخر القسط هكون دافع كام اجمالي" / "الاجمالي في اخر المده كام".
+ *
+ * ده كان بيترجم لـ installment_calc، فالعميل كان بياخد **نفس** رسالة
+ * القسط الشهري حرفيًا مرة تانية - عمره ما شاف الرقم اللي سأل عليه. كل
+ * الأرقام المطلوبة كانت موجودة أصلاً (القسط الشهري × المدة + المقدم +
+ * المصاريف الإدارية)، ناقص بس حد يجمعها.
+ *
+ * المدة/المقدم/النظام بتتقري من الرسالة الحالية الأول (لو العميل غيّرهم
+ * في نفس السؤال)، وبعدين من آخر حسبة اتعملت في المحادثة - عشان سؤال
+ * متابعة قصير زي "والاجمالي؟" يكمل على نفس السيناريو مش يسأل من الأول.
+ */
+private function handleInstallmentTotal(
+    WhatsappConversation $conversation,
+    Collection $machines,
+    string $message,
+    array $plan = []
+): array {
+    $parsed = $this->applyAiParsedInstallment(
+        app(InstallmentTextParser::class)->parse($message),
+        $plan
+    );
+
+    if ($machines->isEmpty()) {
+        $last = $this->lastMachinesFromConversation($conversation);
+
+        if ($last->isNotEmpty()) {
+            $machines = $last;
+        }
+    }
+
+    if ($machines->isEmpty()) {
+        $this->updateConversationState($conversation, 'installment_calc', 'choose_machine');
+
+        return $this->textReply(
+            $conversation,
+            'تمام يا فندم، ابعتلي اسم المكنة وأحسبلك الإجمالي على المدة كلها.'
+        );
+    }
+
+    $payload = $conversation->context_payload ?? [];
+
+    $months = $parsed['months'] ?? ($payload['last_months'] ?? null);
+    $months = $months !== null ? (int) $months : null;
+
+    if (! $months) {
+        $this->rememberMachines($conversation, $machines);
+        $this->updateConversationState($conversation, 'installment_calc', 'choose_months', [
+            'machine_ids' => $machines->pluck('id')->values()->all(),
+        ]);
+
+        return $this->textReply(
+            $conversation,
+            'تحب أحسبلك الإجمالي على كام شهر يا فندم؟ 12 ولا 18 ولا 24 ولا 36؟'
+        );
+    }
+
+    $deposit = $parsed['deposit'] !== null && $parsed['deposit'] !== ''
+        ? (float) $parsed['deposit']
+        : (float) ($payload['last_deposit'] ?? 0);
+
+    $system = $parsed['system'] ?? ($payload['last_system'] ?? '20');
+    $system = (string) $system;
+
+    $isFreelance = app(ApplicationHandler::class)->categorizeIncome(
+        (string) ($payload['application']['job_type'] ?? ''),
+        (string) ($payload['application']['income_proof'] ?? '')
+    ) === 'freelance';
+
+    $calculations = collect(
+        app(InstallmentCalculator::class)->calculateMany($machines, $months, $deposit, $system, $isFreelance)
+    )->filter(fn ($calc) => ($calc['ok'] ?? false) === true)->values();
+
+    if ($calculations->isEmpty()) {
+        return $this->textReply(
+            $conversation,
+            $this->renderMemory('رد عدم توفر سعر التقسيط')
+                ?: 'الإجمالي محتاج تأكيد يا فندم لأن سعر التقسيط مش متسجل للموديل ده.'
+        );
+    }
+
+    $blocks = $calculations->map(function (array $calc) use ($months) {
+        $monthly = (int) $calc['monthly_payment'];
+        $adminFee = (int) ($calc['admin_fee'] ?? 0);
+        $depositDue = (float) ($calc['deposit'] ?? 0) + (float) ($calc['freelance_extra_deposit'] ?? 0);
+        $installmentsTotal = $monthly * $months;
+        $grandTotal = $installmentsTotal + $adminFee + $depositDue;
+
+        $lines = [
+            $calc['machine_name'] . ' على ' . $months . ' شهر:',
+            '- الأقساط: ' . number_format($monthly) . ' × ' . $months . ' شهر = ' . number_format($installmentsTotal) . ' جنيه',
+        ];
+
+        if ($depositDue > 0) {
+            $lines[] = '- المقدم: ' . number_format($depositDue) . ' جنيه';
+        }
+
+        if ($adminFee > 0) {
+            $lines[] = '- المصاريف الإدارية: ' . number_format($adminFee) . ' جنيه';
+        }
+
+        $lines[] = 'الإجمالي من أول ما تستلم لحد آخر قسط: ' . number_format($grandTotal) . ' جنيه';
+
+        return implode("\n", $lines);
+    })->implode("\n\n");
+
+    $reply = "تمام يا فندم، ده كل اللي هتدفعه لآخر المدة:\n\n" . $blocks;
+
+    $reply = app(AiReplyPhraser::class)->phrase($reply, [
+        'context' => 'إجمالي التقسيط',
+        'must_keep' => $machines->map(fn (Machine $machine) => $this->machineDisplayName($machine))->all(),
+    ]);
+
+    $this->saveOutgoing($conversation, $reply, [
+        'source' => 'installment_total',
+        'message' => $message,
+        'months' => $months,
+        'deposit' => $deposit,
+        'system' => $system,
+        'calculations' => $calculations->all(),
+        'machine_ids' => $machines->pluck('id')->values()->all(),
+    ]);
+
+    $this->rememberMachines($conversation, $machines);
+    $this->updateConversationState($conversation, 'installment_calc', null, [
+        'last_months' => $months,
+        'last_system' => $system,
+        'last_deposit' => $deposit,
+        'last_calc_machine_ids' => $machines->pluck('id')->sort()->values()->all(),
     ]);
 
     return array_merge($this->textResult($reply), $this->machineMeta($machines));
@@ -2577,6 +3229,31 @@ private function narrowMachinesByVariant(Collection $machines, string $message):
                 && ! str_contains($name, 'فرز تاني')
                 && ! str_contains($name, 'فرز ثاني');
         })->values();
+
+        return $filtered->isNotEmpty() ? $filtered : $machines;
+    }
+
+    /*
+     * "اصلي"/"محلي" were already recognised as narrowing signals by
+     * isVariantNarrowingReply() (used to decide THAT a short reply is a
+     * narrowing reply), but this function - the one that actually filters
+     * the machine list - had no matching branch for them, only for
+     * استيراد/فرز تاني. A query like "دايو 4 اصلي" kept both دايو 4 and
+     * دايو 4 اصلي because family search matches both on the shared "4"
+     * token and nothing here ever filtered by "اصلي".
+     */
+    if ($fuzzy->containsAnyFuzzyPhrase($m, ['اصلي', 'اصليه'])) {
+        $filtered = $machines->filter(fn ($machine) =>
+            str_contains($this->normalizeText($machine->name), 'اصلي')
+        )->values();
+
+        return $filtered->isNotEmpty() ? $filtered : $machines;
+    }
+
+    if ($fuzzy->containsAnyFuzzyPhrase($m, ['محلي', 'محليه'])) {
+        $filtered = $machines->filter(fn ($machine) =>
+            str_contains($this->normalizeText($machine->name), 'محلي')
+        )->values();
 
         return $filtered->isNotEmpty() ? $filtered : $machines;
     }

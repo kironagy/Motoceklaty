@@ -36,13 +36,21 @@ class InstallmentVariablesBuilder
                 $totalAtSigning = $totalDepositDue + $adminFee;
 
                 return '- ' . $item['machine_name'] . ': ' . $this->money($adminFee)
-                    . ' (يعني إجمالي المطلوب عند التعاقد ' . $this->money($totalAtSigning) . ')';
+                    . ' (يعني إجمالي المطلوب وقت الاستلام ' . $this->money($totalAtSigning) . ')';
             })
             ->implode("\n");
 
         $freelanceCapText = $freelanceExtraDeposit > 0
             ? "\n\nالسعر ده أعلى من سقف تمويل الدخل الحر (60,000 جنيه)، فالقسط والمصاريف الإدارية متحسبين على 60,000 جنيه بس، والفرق (" . $this->money($freelanceExtraDeposit) . ") لازم يتدفع مقدم إضافي مع باقي المقدم."
             : '';
+
+        /*
+         * ميعاد أول قسط أهم سؤال بيجي بعد الرقم نفسه، وكان معروف بس للعميل
+         * اللي يصادف يسأل عن المصاريف الإدارية. بيتحط جوه admin_fee_text
+         * عشان يوصل تلقائيًا لكل قوالب "رد حساب القسط" المتسجلة في
+         * ai_memories من غير ما حد يعدلها واحدة واحدة.
+         */
+        $firstInstallmentText = 'وأول قسط شهري بيبقى بعد استلام المكنة بـ 45 يوم.';
 
         return [
             'ok' => true,
@@ -64,9 +72,18 @@ class InstallmentVariablesBuilder
                 'freelance_extra_deposit' => $this->money($freelanceExtraDeposit),
                 'freelance_cap_text' => $freelanceCapText,
 
+                /*
+                 * "عند التعاقد" هنا كان بيناقض رد شرح المصاريف الإدارية في
+                 * الراوتر اللي بيقول "وانت بتستلم المكنة" - نفس البند
+                 * بميعادين مختلفين في نفس المحادثة. الميعاد الصح هو
+                 * الاستلام، وأول قسط بعده بـ 45 يوم.
+                 */
+                'first_installment_text' => $firstInstallmentText,
+
                 'admin_fee_text' => ($system === '20'
-                    ? "المصاريف الإدارية (بتتدفع مع المقدم عند التعاقد، مش شهريًا):\n" . $adminFeeList
-                    : 'النظام ده بدون مصاريف إدارية.') . $freelanceCapText,
+                    ? "المصاريف الإدارية (بتتدفع مرة واحدة وقت استلام المكنة، مش مع القسط الشهري):\n" . $adminFeeList
+                    : 'النظام ده بدون مصاريف إدارية.') . $freelanceCapText
+                    . "\n\n" . $firstInstallmentText,
             ],
         ];
     }

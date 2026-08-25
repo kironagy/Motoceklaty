@@ -126,6 +126,25 @@ public static function form(Form $form): Form
                         ->numeric()
                         ->default(0),
 
+                    /*
+                     * القواعد المنفَّذة (خطة 3.3): النص فوق بيقرأه الموديل،
+                     * والبلوك ده بينفّذه الكود نفسه - مهنة ممنوعة تتضاف هنا
+                     * بتقفل التقديم فورًا من غير نشر كود. الإضافة بس:
+                     * القوايم المكتوبة في الكود مبتتشالش من هنا.
+                     */
+                    Forms\Components\KeyValue::make('rules')
+                        ->label('قواعد منفَّذة (اختياري)')
+                        ->keyLabel('المفتاح')
+                        ->valueLabel('القيمة (افصل بينهم بفاصلة)')
+                        ->columnSpanFull()
+                        ->helperText(
+                            'المفاتيح المدعومة: banned_professions (مهن ممنوعة) · job_category (اسم فئة شغل) · '
+                            . 'job_keywords (كلمات بتدل على الفئة) · required_documents (المستندات المطلوبة للفئة: '
+                            . 'id_card_front, id_card_back, salary_slip, pension_statement, activity_photo, '
+                            . 'bank_statement, driver_license, trips_screenshot, vehicle_license). سيبها فاضية '
+                            . 'لو الميموري للقراءة بس.'
+                        ),
+
                 ])
                 ->columns(2),
 

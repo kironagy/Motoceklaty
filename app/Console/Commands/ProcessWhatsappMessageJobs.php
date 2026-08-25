@@ -10,22 +10,29 @@ use Illuminate\Support\Facades\Log;
 
 class ProcessWhatsappMessageJobs extends Command
 {
-    protected $signature = 'whatsapp:process-jobs {--sleep=2}';
+    protected $signature = 'whatsapp:process-jobs {--sleep=1} {--workers=3}';
     protected $description = 'Process queued WhatsApp AI message jobs';
 
     /** @var resource|null kept open for the process lifetime so flock() stays held */
     private $lockHandle = null;
 
+    /** 1-based slot this process holds, for log lines. */
+    private int $slot = 0;
+
     public function handle(): int
     {
-        if (! $this->acquireSingleInstanceLock()) {
-            $this->error('Another whatsapp:process-jobs instance is already running. Exiting.');
-            Log::warning('whatsapp:process-jobs refused to start: lock already held');
+        $workers = max(1, (int) $this->option('workers'));
+
+        if (! $this->acquireWorkerSlot($workers)) {
+            $this->error("All {$workers} whatsapp:process-jobs slots are already taken. Exiting.");
+            Log::warning('whatsapp:process-jobs refused to start: no free slot', [
+                'workers' => $workers,
+            ]);
 
             return self::FAILURE;
         }
 
-        $this->info('WhatsApp queue worker started');
+        $this->info("WhatsApp queue worker started (slot {$this->slot}/{$workers})");
 
         while (true) {
             $job = $this->claimNextJob();
@@ -103,35 +110,98 @@ class ProcessWhatsappMessageJobs extends Command
         }
     }
 
-    private function acquireSingleInstanceLock(): bool
+    /**
+     * Take one of --workers slots, so several processes can run side by side.
+     *
+     * The old single global lock meant one slow reply (the reasoning model can
+     * take tens of seconds) blocked every other customer waiting behind it.
+     * Slots keep the process count bounded while letting independent
+     * conversations be answered in parallel; ordering *within* one
+     * conversation is preserved by claimNextJob(), not by this lock.
+     */
+    private function acquireWorkerSlot(int $workers): bool
     {
-        $path = storage_path('app/whatsapp-process-jobs.lock');
+        for ($slot = 1; $slot <= $workers; $slot++) {
+            $handle = fopen(storage_path("app/whatsapp-process-jobs.{$slot}.lock"), 'c');
 
-        $handle = fopen($path, 'c');
+            if ($handle === false) {
+                continue;
+            }
+
+            if (flock($handle, LOCK_EX | LOCK_NB)) {
+                $this->lockHandle = $handle;
+                $this->slot = $slot;
+
+                return true;
+            }
+
+            fclose($handle);
+        }
+
+        return false;
+    }
+
+    /**
+     * Claiming has to be serialised across workers, otherwise two of them can
+     * read the same "no job is processing for this conversation" state and
+     * both pick up a message from that conversation - answering the customer
+     * out of order. Claiming takes milliseconds, processing takes seconds, so
+     * holding this lock only around the claim costs nothing in throughput.
+     */
+    private function withClaimLock(callable $callback)
+    {
+        $handle = fopen(storage_path('app/whatsapp-process-jobs.claim.lock'), 'c');
 
         if ($handle === false) {
-            return true;
+            return $callback();
         }
 
-        if (! flock($handle, LOCK_EX | LOCK_NB)) {
+        flock($handle, LOCK_EX);
+
+        try {
+            return $callback();
+        } finally {
+            flock($handle, LOCK_UN);
             fclose($handle);
-
-            return false;
         }
-
-        $this->lockHandle = $handle;
-
-        return true;
     }
 
     private function claimNextJob(): ?object
     {
-        return DB::transaction(function () {
+        return $this->withClaimLock(fn () => DB::transaction(function () {
+            $staleBefore = now()->subMinutes(10);
+
+            /*
+             * Messages from the same customer must still be answered in the
+             * order they arrived, so a conversation that another worker is
+             * already busy with is skipped rather than picked up in parallel.
+             * Jobs with no conversation id yet fall back to the sender.
+             */
+            $busy = DB::table('whatsapp_message_jobs')
+                ->where('status', 'processing')
+                ->where('locked_at', '>=', $staleBefore)
+                ->get(['whatsapp_conversation_id', 'from']);
+
+            $busyConversationIds = $busy->pluck('whatsapp_conversation_id')->filter()->unique()->values()->all();
+            $busySenders = $busy->pluck('from')->filter()->unique()->values()->all();
+
             $job = DB::table('whatsapp_message_jobs')
                 ->where('status', 'pending')
-                ->where(function ($q) {
+                ->where(function ($q) use ($staleBefore) {
                     $q->whereNull('locked_at')
-                        ->orWhere('locked_at', '<', now()->subMinutes(10));
+                        ->orWhere('locked_at', '<', $staleBefore);
+                })
+                ->when($busyConversationIds !== [], function ($q) use ($busyConversationIds) {
+                    $q->where(function ($q) use ($busyConversationIds) {
+                        $q->whereNull('whatsapp_conversation_id')
+                            ->orWhereNotIn('whatsapp_conversation_id', $busyConversationIds);
+                    });
+                })
+                ->when($busySenders !== [], function ($q) use ($busySenders) {
+                    $q->where(function ($q) use ($busySenders) {
+                        $q->whereNull('from')
+                            ->orWhereNotIn('from', $busySenders);
+                    });
                 })
                 ->orderBy('id')
                 ->lockForUpdate()
@@ -153,15 +223,22 @@ class ProcessWhatsappMessageJobs extends Command
             $job->attempts = ((int) $job->attempts) + 1;
 
             return $job;
-        });
+        }));
     }
 
     private function sendWhatsappResult(object $job, array $result): void
     {
-        $reply = trim((string) ($result['reply'] ?? ''));
+        foreach ($this->textMessagesFromResult($result) as $index => $text) {
+            /*
+             * A human answering two questions sends two messages, with a
+             * beat in between - not one block. The pause also keeps WhatsApp
+             * from reordering messages sent back-to-back.
+             */
+            if ($index > 0) {
+                usleep(1_200_000);
+            }
 
-        if ($reply !== '') {
-            $this->sendWhatsappText($job, $reply);
+            $this->sendWhatsappText($job, $text);
         }
 
         $mediaItems = $this->extractMediaItemsFromResult($result);
@@ -169,6 +246,31 @@ class ProcessWhatsappMessageJobs extends Command
         if (!empty($mediaItems)) {
             $this->sendWhatsappMediaItems($job, $mediaItems);
         }
+    }
+
+    /**
+     * One entry per WhatsApp message to send. 'replies' is set only when the
+     * customer asked for more than one thing in the same message; everything
+     * else still sends the single 'reply'.
+     */
+    private function textMessagesFromResult(array $result): array
+    {
+        $replies = $result['replies'] ?? null;
+
+        if (is_array($replies) && ! empty($replies)) {
+            $texts = array_values(array_filter(
+                array_map(fn ($reply) => trim((string) $reply), $replies),
+                fn (string $reply) => $reply !== ''
+            ));
+
+            if (! empty($texts)) {
+                return $texts;
+            }
+        }
+
+        $reply = trim((string) ($result['reply'] ?? ''));
+
+        return $reply === '' ? [] : [$reply];
     }
 
     private function extractMediaItemsFromResult(array $result): array

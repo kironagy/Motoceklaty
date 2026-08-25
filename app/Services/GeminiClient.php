@@ -14,6 +14,7 @@ class GeminiClient
         $failed429 = [];
         $triedIds = [];
         $transientFailures = 0;
+        $downgraded = false;
         $maxTransientFailovers = max(
             0,
             (int) ($options['maxTransientFailovers']
@@ -36,6 +37,29 @@ class GeminiClient
             );
 
             if (! $modelRow) {
+                /*
+                 * reserveAvailableModel() hard-filters on the preferred model
+                 * code, so a transient 503 or a rate limit on that one model
+                 * left us with nothing at all - even with other perfectly
+                 * healthy models provisioned on the same key. Drop down to the
+                 * cheap model once before giving up, so a spike on the
+                 * reasoning model degrades the reply instead of killing it.
+                 */
+                $fastModel = (string) config('gemini.models.fast', 'gemini-3.1-flash-lite');
+
+                if (! $downgraded && $fastModel !== '' && $modelCode !== $fastModel) {
+                    $downgraded = true;
+
+                    Log::warning('Gemini preferred model unavailable, downgrading', [
+                        'from' => $modelCode,
+                        'to' => $fastModel,
+                    ]);
+
+                    $modelCode = $fastModel;
+
+                    continue;
+                }
+
                 if (! empty($failed429)) {
                     app(GeminiAlertService::class)->startAllKeysExhaustedAlert($failed429);
                 }
@@ -72,10 +96,32 @@ class GeminiClient
                     'generationConfig' => [
                         'temperature' => $options['temperature'] ?? 0.2,
                         'topP' => $options['topP'] ?? 0.4,
-                        'topK' => $options['topK'] ?? 5,
                         'maxOutputTokens' => $options['maxOutputTokens'] ?? 260,
                     ],
                 ];
+
+                /*
+                 * topK is only sent when a caller asks for it. Forcing the old
+                 * default of 5 on every call made replies read mechanically,
+                 * and it fought the temperature/topP the reply path now sets.
+                 */
+                if (isset($options['topK'])) {
+                    $payload['generationConfig']['topK'] = $options['topK'];
+                }
+
+                /*
+                 * Gemini 3.x models spend part of maxOutputTokens on internal
+                 * thinking, so a budget that used to be plenty now truncates
+                 * the visible answer mid-sentence (finishReason=MAX_TOKENS
+                 * with only ~180 chars returned). Callers that just need
+                 * well-worded prose out of data we already resolved pass
+                 * thinkingBudget=0 to spend the whole budget on the answer.
+                 */
+                if (isset($options['thinkingBudget'])) {
+                    $payload['generationConfig']['thinkingConfig'] = [
+                        'thinkingBudget' => (int) $options['thinkingBudget'],
+                    ];
+                }
 
                 if (! empty($options['systemInstruction'])) {
                     $payload['systemInstruction'] = [

@@ -1,8 +1,8 @@
 // Optional pm2 process supervisor config for the long-running WhatsApp
 // pipeline processes (B2/B7 in PROJECT-ANALYSIS-AND-TASKS.md). Not required
-// for the app to run — the custom workers already refuse to start a second
-// instance of themselves (flock on the Laravel worker, a PID lockfile on the
-// Node bot) — but pm2 additionally restarts a process that crashes, which
+// for the app to run — the custom workers already bound how many copies of
+// themselves may run (slot flocks on the Laravel worker, a PID lockfile on
+// the Node bot) — but pm2 additionally restarts a process that crashes, which
 // neither lock mechanism does on its own.
 //
 // Usage (not run automatically by anything in this repo):
@@ -27,7 +27,16 @@ module.exports = {
       cwd: __dirname,
       script: 'artisan',
       interpreter: 'php',
-      args: 'whatsapp:process-jobs --sleep=2',
+      // Three parallel workers. Each one grabs a free --workers slot via
+      // flock and refuses to start if all are taken, so this number and the
+      // --workers value must stay in sync. Messages inside one conversation
+      // are still answered strictly in order (the command skips a
+      // conversation another worker is busy with); what runs in parallel is
+      // *different* customers, so one slow reply no longer holds up the
+      // whole queue.
+      instances: 3,
+      exec_mode: 'fork',
+      args: 'whatsapp:process-jobs --sleep=1 --workers=3',
       autorestart: true,
       max_restarts: 20,
       restart_delay: 3000,
