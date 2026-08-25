@@ -821,7 +821,9 @@ private function handleAiFallback(
          * on every single turn (visible in ai_memory_retrieval_logs).
          */
         'intent' => $this->lastTurnIntent,
-        'from' => $conversation->from ?? null,
+        // Plan task 3.5 - one line about who this is, when we know them.
+        'customer_profile' => app(CustomerProfileService::class)->summaryFor($conversation),
+        'from' => $conversation->phone ?? null,
         'is_first_message' => count($recentMessages) <= 1,
         'messages' => $recentMessages,
         'recent_messages' => $recentMessages,
@@ -2626,6 +2628,18 @@ private function handleInstallmentCalc(
         'machine_ids' => $machines->pluck('id')->values()->all(),
         'machine_names' => $machines->pluck('name')->values()->all(),
     ]);
+
+    /*
+     * Plan task 3.5: the machine, the term and the down payment a customer
+     * actually asked about are the most useful things we ever learn about
+     * them, and they used to die with the conversation row.
+     */
+    app(CustomerProfileService::class)->rememberInstallmentInterest(
+        $conversation,
+        $machines->first()?->id,
+        (int) $months,
+        $deposit
+    );
 
     $this->rememberMachines($conversation, $machines);
     $this->updateConversationState($conversation, 'installment_calc', null, [

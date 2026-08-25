@@ -300,6 +300,10 @@ class AiGoldenSet extends Command
         } finally {
             $conversation->messages()->delete();
             $conversation->delete();
+
+            // Turns now also write a durable customer_profiles row (plan task
+            // 3.5) - throwaway phones must not leave one behind.
+            \App\Models\CustomerProfile::query()->where('phone', $phone)->delete();
         }
     }
 

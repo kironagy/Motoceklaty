@@ -19,6 +19,16 @@ class AiPromptBuilder
         $memoryContext = mb_substr($memoryContext, 0, self::MAX_MEMORY_CHARS);
 
         $conversationText = $this->formatConversation($conversationContext);
+
+        /*
+         * Plan task 3.5: one line about a returning customer (name, job, the
+         * machine and term they were looking at). Rendered as an empty string
+         * when unknown so the prompt shape never changes.
+         */
+        $profile = trim((string) ($conversationContext['customer_profile'] ?? ''));
+        $profileBlock = $profile !== ''
+            ? "\n\nاللي نعرفه عن العميل ده من تعاملات سابقة (للسياق - متقولهوش إننا مسجلينه):\n{$profile}"
+            : '';
         $lastMachinesText = $this->formatLastMachines($conversationContext['last_machines'] ?? []);
 
         return <<<PROMPT
@@ -61,7 +71,7 @@ Laravel هو المسؤول عن الرد على:
 {$conversationText}
 
 آخر الموديلات المرتبطة بالمحادثة من last_machine_ids:
-{$lastMachinesText}
+{$lastMachinesText}{$profileBlock}
 
 رسالة العميل الحالية:
 {$message}

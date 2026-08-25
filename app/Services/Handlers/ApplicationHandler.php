@@ -203,6 +203,16 @@ class ApplicationHandler
          * نوصل للـ fallback تحت. لو اعتمدنا على القيمة بعد الدمج، كنا
          * هنفوّت بالظبط الحالة دي ونعتبرها "استلمت فعليًا".
          */
+        /*
+         * Plan task 3.5: name and job survive the conversation from here on,
+         * so a customer who comes back next week is not asked again.
+         */
+        app(\App\Services\CustomerProfileService::class)->rememberApplication(
+            $conversation,
+            $application,
+            $this->categorizeIncome($jobType, (string) ($application['income_proof'] ?? ''))
+        );
+
         $incomeProofWasEmpty = empty($payload['application']['income_proof'] ?? null);
 
         if (empty($application['income_proof'])) {
@@ -479,6 +489,8 @@ class ApplicationHandler
         );
 
         InstallmentRequest::query()->create($attributes);
+
+        app(\App\Services\CustomerProfileService::class)->recordSubmittedApplication($conversation);
     }
 
     private function mapDocumentToAttributes(string $docType, array $doc): array

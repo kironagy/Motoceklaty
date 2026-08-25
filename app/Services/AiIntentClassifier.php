@@ -98,8 +98,13 @@ class AiIntentClassifier
                 'intent' => $conversation->last_topic ?? null,
             ])['context'] ?? '';
 
+        // Plan task 3.5 - lets the planner resolve "زي المرة اللي فاتت" and
+        // stop re-asking for a term the customer already settled on.
+        $profile = app(CustomerProfileService::class)->summaryFor($conversation);
+
         $payload = [
             'current_message' => $message,
+            'customer_profile' => $profile,
             'conversation_state' => [
                 'last_machine_id' => $conversation->last_machine_id ?? null,
                 'last_machine_ids' => $conversation->last_machine_ids ?? [],
