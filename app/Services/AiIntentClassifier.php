@@ -64,9 +64,32 @@ class AiIntentClassifier
      */
     private function requestPlanJson(string $prompt, array $extraOptions = []): ?array
     {
+        /*
+         * Two latency fixes live here.
+         *
+         * responseMimeType pins the answer to JSON at the API level, so the
+         * model can no longer wrap it in prose or a ```json fence - which is
+         * what used to make extractJson() fail and cost us a second full
+         * planner round trip.
+         *
+         * thinkingBudget bounds the internal thinking that Gemini 3.x spends
+         * before the first output token, on a prompt that carries the whole
+         * memory context plus the customer profile. The planner only has to
+         * fill a fixed JSON shape, so a bounded budget is plenty.
+         */
         $result = app(GeminiClient::class)->generateText($prompt, config('gemini.models.reasoning'), array_merge([
             'temperature' => 0.05,
             'maxOutputTokens' => 2048,
+            'responseMimeType' => 'application/json',
+            'thinkingBudget' => (int) config('gemini.planner.thinking_budget', 512),
+            /*
+             * Deliberately far below GeminiClient's 25s default. The planner
+             * model answers in about a second when it is healthy, so a call
+             * still running after 12s is stuck, not slow - and every one of
+             * those seconds is a customer staring at no reply. Failing fast
+             * hands the message to the next key instead.
+             */
+            'timeout' => (int) config('gemini.planner.timeout', 12),
         ], $extraOptions));
 
         if (! ($result['ok'] ?? false)) {
@@ -140,8 +163,11 @@ Laravel هو الذي سينفذ:
 - price
 - images
 - installment_calc
+- installment_total
 - installment_system
+- admin_fee_explanation
 - brand_models
+- branches
 - application
 - application_status
 - delivery_question
@@ -167,7 +193,10 @@ target:
 - لو العميل قال عايز أقدم وفيه مكنة واحدة فقط في السياق، intent=application و target=single_previous_machine.
 - لو العميل ذكر موديل جديد، استخرج machine_query.
 - لو العميل سأل عن القسط أو مدة تقسيط، intent=installment_calc.
-- لو العميل سأل عن أنظمة/شروط/ورق التقسيط، intent=installment_system.
+- installment_total: العميل بيسأل عن الإجمالي اللي هيدفعه في الآخر أو على المدة كلها أو مجموع الأقساط أو "هيطلعلي بكام في الآخر" أو "اجمالي المبلغ" أو "كام كل اللي هدفعه". دي مش installment_calc - دي طلب مجموع، والحساب الشهري غالبًا اتعمل قبل كده في المحادثة.
+- لو العميل سأل عن أنظمة/شروط/ورق التقسيط بشكل عام (مين ينفع يقسط، إيه المستندات، إيه الأنظمة المتاحة)، intent=installment_system.
+- admin_fee_explanation: العميل بيسأل عن المصاريف الإدارية نفسها - "ايه هي المصاريف الادارية"، "المصاريف الادارية دي ايه"، "نسبتها كام"، "بتتدفع امتى"، "ليه بندفعها". دي **مش** installment_system: العميل مش بيسأل عن أنظمة التقسيط ولا الشروط، هو بيسأل عن بند واحد بس. ممنوع ترجع installment_system لسؤال عن المصاريف الإدارية.
+- branches: العميل بيسأل عن مكان المعرض/الفروع/العنوان/اللوكيشن - "مكانكم فين"، "العنوان ايه"، "فين المعرض"، "ابعتلي اللوكيشن"، "عندكم فروع فين"، "اقرب فرع".
 - لو العميل سأل عن الصور/الشكل/الألوان، intent=images.
 - لو العميل سأل عن السعر/الكاش/بكام، intent=price.
 - لو الرسالة ناقصة لكن يمكن فهمها من السياق، لا تطلب توضيح.
@@ -186,6 +215,7 @@ target:
 steps (طلبات إضافية مستقلة في نفس الرسالة):
 - لو العميل طلب أكتر من حاجة مستقلة في نفس الرسالة (زي "سعرها وصورها"، أو "احسبلي القسط وابعتلي صورها")، الحقول العادية فوق (intent, target, machine_query, ...) بتمثل الطلب الأساسي بس، وأي طلب إضافي بعد كده يتحط كـ عنصر في steps[] بنفس شكل الحقول دي بالظبط (نفس الأسماء: intent, target, machine_query, months, deposit, system, ...).
 - steps[] للطلبات الإضافية فقط - متكررش الطلب الأساسي جواها.
+- steps[] بتتبني من **الرسالة الحالية بس**. ممنوع تمامًا تحط فيها طلب اتقال في رسالة قديمة وإحنا رددنا عليه خلاص (زي إن العميل سأل عن الفروع في رسالة فاتت) - ده بيخلي البوت يبعت نفس الإجابة تاني بلا سبب.
 - لو الرسالة فيها طلب واحد بس، سيب steps[] = [].
 - حد أقصى عنصرين في steps[].
 - ممنوع تحط intent=application أو application_status جوه steps[] - دول لازم يكونوا الطلب الأساسي بس.
@@ -447,8 +477,11 @@ PROMPT
             'price',
             'images',
             'installment_calc',
+            'installment_total',
             'installment_system',
+            'admin_fee_explanation',
             'brand_models',
+            'branches',
             'application',
             'application_status',
             'delivery_question',
@@ -562,6 +595,7 @@ private function extractApplicationData(
   home_address (لأن السؤال بيتسأل بالترتيب ده). لو واحد بس منهم مذكور،
   حطه في الحقل الناقص المناسب بس، ومتخترعش الحقل التاني.
 - لو العميل قال إنه شغال في مصنع أو موظف، job_type = "موظف/عامل مصنع".
+- صيغ زي "انا شغال على المكنة"، "هشتغل عليها"، "شغال بيها"، "المكنة دي لشغلي"، "شغال طلبات"، "شغال دليفري"، "شغال اوبر/اندرايف/كريم"، "سواق تطبيقات" كلها معناها إنه هيستخدم الموتوسيكل في الشغل: job_type = "مندوب توصيل/سواق تطبيقات" وincome_proof = "لا يوجد". دي **إجابة على سؤال طبيعة الشغل**، مش رسالة فاضية - ممنوع تسيب job_type = null فيها.
 - لو العميل ذكر إنه شغال عمل حر أو مهنة حرة أو حرفي/صنايعي (مثل: "سباك"، "نجار"، "حداد"، "كهربائي"، "نقاش"، "سواق"، "دليفري"، "صنايعي"، "شغال حر")، اجعل job_type = مهنته واجعل income_proof = "لا يوجد" تلقائيًا (لأن أصحاب المهن الحرة ليس لديهم مفردات مرتب).
 - لو قال معاه مفردات مرتب أو مؤمن عليه، income_proof = وصف الإثبات (مثلاً "مفردات مرتب").
 - income_proof سؤال بإجابة أكيدة (معاه ولا لأ)، مش حقل ممكن يفضل فاضي طول

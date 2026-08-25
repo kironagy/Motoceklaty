@@ -30,6 +30,16 @@ class AiReplyPhraser
             return $deterministicReply;
         }
 
+        /*
+         * A one-line reply ("تمام، ابعتلي اسمك") already reads like a person
+         * wrote it, so rewording it buys nothing and costs a full extra
+         * round trip on the reasoning model - on top of the planner call the
+         * same message already paid for. Short replies now go out as-is.
+         */
+        if (mb_strlen($deterministicReply) < (int) config('gemini.ai_phrasing.min_chars', 80)) {
+            return $deterministicReply;
+        }
+
         try {
             $result = app(GeminiClient::class)->generateText(
                 prompt: $this->prompt($deterministicReply, $options),

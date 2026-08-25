@@ -7,20 +7,50 @@ return [
     | Task Models
     |--------------------------------------------------------------------------
     |
-    | 'reasoning' is used wherever we need real understanding or natural
-    | phrasing (conversation planning, application extraction, the free-form
-    | sales reply). 'fast' stays on the cheap lite model for high-volume,
-    | low-judgement work. Everything used to run on the lite model, which is
-    | why replies read mechanically and Egyptian slang was often missed.
+    | Both tasks now run on gemini-3.1-flash-lite. The split used to point
+    | 'reasoning' at gemini-3.7-flash for planning, extraction and the
+    | free-form sales reply, but that model is unusable in a live WhatsApp
+    | conversation from here: measured back to back on one key with one
+    | prompt, gemini-3.7-flash answered in 17s, 37s, and once not at all
+    | (40s timeout) with thoughtsTokenCount=0, while gemini-3.1-flash-lite
+    | answered the same prompt in 0.8-1.1s, four times running. Since the
+    | planner runs on every incoming message, that was the whole 40-59s tail
+    | customers were waiting through.
     |
-    | Both codes must exist in gemini_api_key_models for the key in use;
-    | GeminiKeyManager falls back to another provisioned model on rate limits.
+    | The two keys are kept as separate settings so a stronger model can be
+    | reintroduced from .env alone (GEMINI_REASONING_MODEL=...) if one shows
+    | up that answers fast enough - but nothing in the code assumes any more
+    | that they differ.
+    |
+    | Whatever is set here must exist in gemini_api_key_models for the key in
+    | use; GeminiKeyManager falls back to another key on rate limits.
     |
     */
 
     'models' => [
-        'reasoning' => env('GEMINI_REASONING_MODEL', 'gemini-3.7-flash'),
+        'reasoning' => env('GEMINI_REASONING_MODEL', 'gemini-3.1-flash-lite'),
         'fast' => env('GEMINI_FAST_MODEL', 'gemini-3.1-flash-lite'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Planner Thinking Budget
+    |--------------------------------------------------------------------------
+    |
+    | AiIntentClassifier runs on the reasoning model with the whole memory
+    | context in the prompt. Left unbounded, Gemini 3.x thinking before the
+    | first output token was the slowest single step in the reply path
+    | (measured: median 7s end-to-end, tail up to 59s). The planner only has
+    | to fill a fixed JSON shape, so the thinking budget is capped here.
+    | Raise it if plans start coming back shallow; set 0 to disable thinking.
+    |
+    */
+
+    'planner' => [
+        'thinking_budget' => (int) env('GEMINI_PLANNER_THINKING_BUDGET', 512),
+
+        // Seconds. See the comment at the call site in AiIntentClassifier.
+        'timeout' => (int) env('GEMINI_PLANNER_TIMEOUT', 12),
     ],
 
     /*
@@ -39,6 +69,10 @@ return [
     'ai_phrasing' => [
         'enabled' => env('GEMINI_AI_PHRASING', true),
         'max_chars' => 1200,
+
+        // Replies shorter than this skip the rewording call entirely: they
+        // already read naturally, and the call is pure added latency.
+        'min_chars' => (int) env('GEMINI_AI_PHRASING_MIN_CHARS', 80),
     ],
 
     /*
@@ -106,17 +140,10 @@ return [
                     'is_embedding' => true,
                 ],
 
-                [
-                    'display_name' => 'Gemini 3.7 Flash',
-                    'model_code' => 'gemini-3.7-flash',
-                    'category' => 'Gemini',
-                    'rpm_limit' => 10,
-                    'rpd_limit' => 250,
-                    'tps_limit' => 1000000,
-                    'priority' => 0,
-                    'is_embedding' => false,
-                ],
-
+                // The model every customer reply now runs on, so it is the
+                // first thing GeminiKeyManager should reach for. gemini-3.7-flash
+                // used to sit above it at priority 0 and was removed from this
+                // list - see the Task Models note at the top of this file.
                 [
                     'display_name' => 'Gemini 3.1 Flash Lite',
                     'model_code' => 'gemini-3.1-flash-lite',
@@ -124,7 +151,7 @@ return [
                     'rpm_limit' => 15,
                     'rpd_limit' => 500,
                     'tps_limit' => 1000000,
-                    'priority' => 5,
+                    'priority' => 0,
                     'is_embedding' => false,
                 ],
             ],
