@@ -311,6 +311,18 @@ class ProcessWhatsappMessageJobs extends Command
 
         $payload = $this->decodeJobPayload($job);
 
+        /*
+         * "رد بـ reply مش رسالة عادية" لما الرسالة دي جت في نص burst
+         * (فيه Job تاني من نفس المحادثة كان لسه منتظر/بيتعالج وقت ما
+         * الرسالة دي وصلت - علّمها incomingMessage() بـ quote_reply).
+         * الـ wa_message_id بتاع نفس الرسالة دي هو اللي المفروض نعمله
+         * quote، مش أي حاجة تانية - Node بيحتفظ بالرسالة الخام دي في
+         * الذاكرة ويقدر يبنيها quoted كاملة منها.
+         */
+        $quotedMessage = (! empty($payload['quote_reply']) && ! empty($payload['wa_message_id']))
+            ? $payload['wa_message_id']
+            : null;
+
         $response = Http::connectTimeout(10)
             ->timeout(60)
             ->withHeaders([
@@ -321,7 +333,7 @@ class ProcessWhatsappMessageJobs extends Command
                 'bot_id' => (string) $job->whatsapp_bot_id,
                 'jid' => $job->reply_jid ?: $job->from,
                 'message' => $reply,
-                'quoted_message' => $payload['quoted_message'] ?? null,
+                'quoted_message' => $quotedMessage,
             ]);
 
         Log::info('WHATSAPP SEND TEXT RESPONSE', [

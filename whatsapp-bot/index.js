@@ -26,6 +26,15 @@ const handledMessages = new Set();
 const mediaCollectors = {};
 const chatQueues = {};
 
+/*
+ * Laravel processes replies async (a queue worker, seconds later), so by
+ * the time it tells us "quote this one" via /send-message it can't hand us
+ * back the original Baileys message object - it only ever saw the id. Kept
+ * here in memory (same process the message arrived on) so /send-message
+ * can look it up and pass it straight to sock.sendMessage's `quoted` option.
+ */
+const recentRawMessages = new Map();
+
 const PORT = process.env.PORT || 3080;
 const LARAVEL_TIMEOUT = Number(process.env.LARAVEL_TIMEOUT || 30000);
 const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
@@ -469,6 +478,12 @@ async function handleIncomingMessage(sock, botId, msg) {
         const customerJid = await resolveCustomerJid(sock, originalFrom, msg);
         const quotedText = getQuotedText(msg);
 
+        recentRawMessages.set(messageId, msg);
+
+        if (recentRawMessages.size > 2000) {
+            recentRawMessages.clear();
+        }
+
         const payload = {
             bot_id: botId,
             from: originalFrom,
@@ -684,7 +699,11 @@ app.post('/send-message', checkToken, async (req, res) => {
             });
         }
 
-        const sent = await sendTextSafely(sock, jid, text);
+        const quotedMsg = req.body.quoted_message
+            ? recentRawMessages.get(req.body.quoted_message) || null
+            : null;
+
+        const sent = await sendTextSafely(sock, jid, text, quotedMsg);
 
         return res.json({
             ok: sent,

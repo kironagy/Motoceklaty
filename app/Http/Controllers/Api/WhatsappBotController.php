@@ -121,6 +121,41 @@ class WhatsappBotController extends Controller
         }
     }
 
+    /*
+     * "لو بعت نفس الرسالة مرتين رد على واحدة بس" - نفس نص آخر رسالة واردة
+     * فعلًا (بدون ميديا) وجاية خلال دقيقتين، اعتبرها العميل بيكرر نفسه
+     * (رسالة اترسلت مرتين بالغلط، أو نفس التحية تاني) - نسجّلها في
+     * التاريخ زي أي رسالة عادي، بس من غير ما نعمل لها Job/رد جديد.
+     * الفاصل بدقيقتين عشان ميضربش نفس الرسالة لو العميل بعتها تاني بعد
+     * ساعات مستني رد حقيقي جديد.
+     */
+    $trimmedMessage = trim($message);
+    $isDuplicateOfLast = false;
+
+    if ($trimmedMessage !== '' && !$hasMedia) {
+        $lastIncoming = $conversation->messages()
+            ->where('direction', 'incoming')
+            ->latest('id')
+            ->first();
+
+        $isDuplicateOfLast = $lastIncoming
+            && trim((string) $lastIncoming->message) === $trimmedMessage
+            && $lastIncoming->created_at
+            && $lastIncoming->created_at->gt(now()->subMinutes(2));
+    }
+
+    /*
+     * "لو بعت رسالتين أو تلاتة ورا بعض رد عليه بـ reply مش رسالة عادية" -
+     * لو لسه فيه Job من نفس المحادثة قاعد ينتظر أو بيتعالج، يبقى الرسالة
+     * دي جت قبل ما نرد على اللي قبلها - الرد عليها لازم يبقى quoted
+     * (reply) عشان يوضح إنه بيرد على السؤال ده بالذات، مش على آخر حاجة
+     * في الشات.
+     */
+    $hasUnansweredJob = DB::table('whatsapp_message_jobs')
+        ->where('whatsapp_conversation_id', $conversation->id)
+        ->whereIn('status', ['pending', 'processing'])
+        ->exists();
+
     $conversation->messages()->create([
         'direction' => 'incoming',
         'wa_message_id' => $waMessageId,
@@ -130,6 +165,17 @@ class WhatsappBotController extends Controller
         ]),
     ]);
 
+    if ($isDuplicateOfLast) {
+        return response()->json([
+            'ok' => true,
+            'queued' => false,
+            'duplicate' => true,
+            'reply' => null,
+            'image' => null,
+            'images' => [],
+        ]);
+    }
+
     $this->queueWhatsappMessageJob(
         $bot,
         $conversation,
@@ -137,7 +183,8 @@ class WhatsappBotController extends Controller
         $request->input('reply_jid') ?: $from,
         $message,
         $mediaItems,
-        $request
+        $request,
+        $hasUnansweredJob
     );
 
     return response()->json([
@@ -176,7 +223,8 @@ private function queueWhatsappMessageJob(
     string $replyJid,
     string $message,
     array $mediaItems,
-    Request $request
+    Request $request,
+    bool $quoteReply = false
 ): void {
     DB::table('whatsapp_message_jobs')->insert([
         'whatsapp_bot_id' => $bot->id,
@@ -188,6 +236,7 @@ private function queueWhatsappMessageJob(
             $request->except(['media_base64', 'media_items']),
             [
                 'saved_media_items' => $mediaItems,
+                'quote_reply' => $quoteReply,
             ]
         ), JSON_UNESCAPED_UNICODE),
         'status' => 'pending',
