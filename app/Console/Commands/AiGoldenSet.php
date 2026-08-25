@@ -230,6 +230,48 @@ class AiGoldenSet extends Command
                     ['contains_all', ['12', 'جنيه']],
                 ],
             ],
+            /*
+             * Reported live 25/08/2026 from a real chat - four separate
+             * complaints, one case each.
+             */
+            [
+                'name' => 'compound: price + branch location must be two separate replies',
+                'turns' => ['عاوز اعرف سعر دايو ٤ وابعتلي مكانكم فين'],
+                'assertions' => [
+                    ['contains_all', ['جنيه', 'maps']],
+                    ['replies_at_least', 2],
+                ],
+            ],
+            [
+                'name' => 'total over the whole term is calculated, not the monthly repeated',
+                'turns' => [
+                    'احسبلي قسط دايو ٤ على 24 شهر',
+                    'طيب اخر القسط هكون دافع كام اجمالي',
+                ],
+                'assertions' => [
+                    ['contains_all', ['جنيه']],
+                    ['not_repeat_of_previous_reply'],
+                ],
+            ],
+            [
+                'name' => 'admin fee question is answered with the fee, not the installment systems paragraph',
+                'turns' => [
+                    'احسبلي قسط دايو ٤ على 24 شهر',
+                    'ايه هي المصاريف الاداريه',
+                ],
+                'assertions' => [
+                    ['contains_all', ['المصاريف الإدارية', 'جنيه']],
+                    ['not_contains', ['التقسيط عندنا متاح', 'السن المطلوب']],
+                ],
+            ],
+            [
+                'name' => 'branches question routes to the branch list with map links',
+                'turns' => ['مكانكم فين'],
+                'assertions' => [
+                    ['contains_all', ['maps']],
+                    ['status_is', 'open'],
+                ],
+            ],
             [
                 'name' => 'application status query does not start a new application',
                 'turns' => ['طلبي وصل لايه'],
@@ -321,8 +363,42 @@ class AiGoldenSet extends Command
             'images_at_least' => count($result['images'] ?? []) >= $args[0]
                 ? null
                 : 'expected >= ' . $args[0] . ' images, got ' . count($result['images'] ?? []),
+            /*
+             * Two independent requests in one message have to go out as two
+             * WhatsApp messages, not one merged block - that is the whole
+             * point of replies[], so assert on it directly.
+             */
+            'replies_at_least' => count($result['replies'] ?? []) >= $args[0]
+                ? null
+                : 'expected >= ' . $args[0] . ' separate replies, got ' . count($result['replies'] ?? []),
+            /*
+             * The reported bug was the bot answering a NEW question by
+             * re-sending its previous message verbatim. Compare against the
+             * outgoing message before this one.
+             */
+            'not_repeat_of_previous_reply' => $this->repeatOfPreviousReply($reply, $conversation),
             default => 'unknown check: ' . $check,
         };
+    }
+
+    private function repeatOfPreviousReply(string $reply, WhatsappConversation $conversation): ?string
+    {
+        $previous = $conversation->messages()
+            ->where('direction', 'outgoing')
+            ->latest('id')
+            ->skip(1)
+            ->take(1)
+            ->value('message');
+
+        if (! $previous || trim($reply) === '') {
+            return null;
+        }
+
+        $score = app(\App\Support\RepetitionGuard::class)->score($reply, [$previous]);
+
+        return $score >= 0.75
+            ? 'reply repeats the previous outgoing message (repetition score ' . round($score, 2) . ')'
+            : null;
     }
 
     private function firstMissing(string $haystack, array $needles): ?string

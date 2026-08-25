@@ -291,6 +291,13 @@ public function processQueuedWhatsappJob(object $job): array
 
     return [
         'reply' => $intentHandled['reply'] ?? '',
+        /*
+         * Multi-request messages ("سعرها وابعتلي مكانكم فين") come back with
+         * one entry per answer so the worker sends them as separate WhatsApp
+         * messages instead of one wall of text. Absent for a normal single
+         * answer, where 'reply' alone is used.
+         */
+        'replies' => $intentHandled['replies'] ?? [],
         'image' => $intentHandled['image'] ?? null,
         'images' => $intentHandled['images'] ?? [],
         'image_items' => $intentHandled['image_items'] ?? [],
