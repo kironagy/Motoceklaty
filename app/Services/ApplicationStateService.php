@@ -195,9 +195,22 @@ class ApplicationStateService
      * the "who counts as freelance" keyword list keeps a single owner
      * instead of drifting between two copies.
      */
-    public function missingFields(array $application, bool $isFreelance): array
+    public function missingFields(array $application, bool $isFreelance, bool $requiresVehicle = false): array
     {
-        return array_values(array_filter(self::REQUIRED_FIELDS, function ($key) use ($application, $isFreelance) {
+        $fields = self::REQUIRED_FIELDS;
+
+        /*
+         * سواقين التطبيقات والدليفري: المستندات المطلوبة منهم بتتغير
+         * بالكامل حسب المركبة (العجلة مش محتاجة رخصة أصلاً، الموتوسيكل
+         * والعربية لازم رخصة سارية)، فمينفعش نعدّي لمرحلة المستندات وإحنا
+         * مش عارفين هو شغال على إيه. لباقي الفئات الحقل ده مالوش لازمة
+         * ومش بيتسأل.
+         */
+        if ($requiresVehicle) {
+            $fields[] = 'work_vehicle';
+        }
+
+        return array_values(array_filter($fields, function ($key) use ($application, $isFreelance) {
             if ($key === 'income_proof' && $isFreelance) {
                 return false;
             }
@@ -223,6 +236,7 @@ class ApplicationStateService
         'work_address' => 'عنوان الشغل',
         'home_address' => 'عنوان السكن',
         'installment_months' => 'مدة التقسيط',
+        'work_vehicle' => 'نوع المركبة',
     ];
 
     private const FIELD_LABELS_DETAILED = [
@@ -234,6 +248,7 @@ class ApplicationStateService
         'work_address' => 'عنوان الشغل بالتفصيل',
         'home_address' => 'عنوان السكن بالتفصيل',
         'installment_months' => 'مدة التقسيط اللي تحبها',
+        'work_vehicle' => 'بتشتغل على إيه دلوقتي: عجلة ولا موتوسيكل ولا عربية',
     ];
 
     /**

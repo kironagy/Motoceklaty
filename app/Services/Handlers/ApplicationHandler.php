@@ -196,6 +196,29 @@ class ApplicationHandler
         }
 
         /*
+         * التحقق من الهوية (الاسم بالكامل، الرقم القومي، واقعية العنوان)
+         * لازم يجري هنا بالظبط: بعد ما الاستخراج دمج القيم الجديدة، وقبل
+         * refreshAddressComponents وmissingFields - عشان أي قيمة اترفضت
+         * تتشال من الحقل فتتحسب "لسه ناقصة" في نفس الدورة، مش تعدي
+         * كمكتملة وتترفض يدويًا في الآخر.
+         */
+        $verification = app(\App\Services\ApplicantDataVerifier::class)->verify($application);
+        $application = $verification['application'];
+
+        /*
+         * السن بره حدود التمويل (من الرقم القومي نفسه) وقفة نهائية زي
+         * الوظيفة الممنوعة بالظبط - مفيش مستند بعد كده ممكن يغيّرها، فقوله
+         * دلوقتي بدل ما يرفع كل الأوراق ويترفض.
+         */
+        if (($verification['blocking_message'] ?? null) !== null) {
+            $this->saveState($conversation, $application, [], null, [], $payload);
+
+            return $this->reply($conversation, $verification['blocking_message']);
+        }
+
+        $verificationIssues = $verification['issues'] ?? [];
+
+        /*
          * لازم نقارن بالقيمة قبل الدور ده (من $payload، قبل الدمج)، مش
          * بـ $application['income_proof'] بعد الدمج - لإن AiIntentClassifier
          * نفسه (prompt خط 443) بيحط "لا يوجد" مباشرة جوه application_data
@@ -236,13 +259,37 @@ class ApplicationHandler
 
         $application = $stateService->refreshAddressComponents($application);
 
-        $isFreelance = $this->categorizeIncome(
+        $incomeCategory = $this->categorizeIncome(
             (string) ($application['job_type'] ?? ''),
             (string) ($application['income_proof'] ?? '')
-        ) === 'freelance';
+        );
+
+        $isFreelance = $incomeCategory === 'freelance';
+
+        /*
+         * الدليفري وسواقين التطبيقات: المطلوب منهم بيختلف جذريًا حسب
+         * المركبة - اللي على عجلة مش هيتطلب منه رخصة أصلاً (وطلبها منه
+         * بيوقّف طلبه على حاجة مش موجودة)، واللي على موتوسيكل أو عربية
+         * لازم رخصة سارية باسمه. فلازم نعرف المركبة قبل ما نبدأ نطلب
+         * مستندات، مش بعد كده.
+         */
+        $application['work_vehicle'] = $this->normalizeVehicle($application['work_vehicle'] ?? null);
+
+        /*
+         * الرد على سؤال المركبة بيبقى كلمة واحدة ("موتوسيكل") والاستخراج
+         * أحيانًا بيسيبها. بنقراها من نص الرسالة نفسها بس لما نكون فعلاً
+         * سألنا عنها في الدور اللي فات - مش في أي رسالة، لأن العميل بيقول
+         * "عايز أقسط موتوسيكل" وهو بيتكلم عن المكنة اللي بيشتريها مش عن
+         * اللي بيشتغل عليها دلوقتي.
+         */
+        if ($application['work_vehicle'] === null && in_array('work_vehicle', $payload['missing_fields'] ?? [], true)) {
+            $application['work_vehicle'] = $this->normalizeVehicle($message);
+        }
+
+        $requiresVehicle = $this->requiresVehicleAnswer($incomeCategory);
 
         $previousMissing = $payload['missing_fields'] ?? [];
-        $missing = $stateService->missingFields($application, $isFreelance);
+        $missing = $stateService->missingFields($application, $isFreelance, $requiresVehicle);
 
         if (!empty($missing)) {
             /*
@@ -304,7 +351,27 @@ class ApplicationHandler
                 ? ['income_proof' => 'بيان معاش حديث (مختوم وأقل من شهر)']
                 : [];
 
-            $reply = $stateService->questionForMissing($missing, $application, $newlyFilled, $noProgressStreak, $labelOverrides);
+            /*
+             * الحقول اللي التحقق رفضها (اسم ثنائي، رقم قومي مش بيفك،
+             * عنوان مش حقيقي) بتترجع في $missing لأنها اتفضّت - بس سؤالها
+             * الصح هو رسالة السبب المحددة، مش سطر "ناقصني الاسم بالكامل"
+             * العام اللي العميل شايف إنه بعته خلاص. فبنشيلهم من القايمة
+             * العامة وبنحط رسايلهم فوقها بدل ما نسأل عن نفس الحاجة مرتين
+             * بصيغتين مختلفتين في نفس الرسالة.
+             */
+            $missingForQuestion = array_values(array_diff($missing, array_keys($verificationIssues)));
+
+            $reply = ! empty($missingForQuestion)
+                ? $stateService->questionForMissing($missingForQuestion, $application, $newlyFilled, $noProgressStreak, $labelOverrides)
+                : '';
+
+            if (! empty($verificationIssues)) {
+                $issuesText = count($verificationIssues) === 1
+                    ? reset($verificationIssues)
+                    : implode("\n\n", array_map(fn ($issue) => "• {$issue}", $verificationIssues));
+
+                $reply = $reply !== '' ? "{$issuesText}\n\n{$reply}" : $issuesText;
+            }
 
             if ($categoryNote !== null) {
                 $reply = "{$categoryNote}\n\n{$reply}";
@@ -377,6 +444,14 @@ class ApplicationHandler
             [
                 'application' => $payload['application'] ?? [],
                 'documents_collected_so_far' => $payload['documents_collected'] ?? [],
+                /*
+                 * "أهم حاجة تكون باسمه" - المستند لازم يتقارن باسم مقدّم
+                 * الطلب نفسه، فالاسم بيتبعت مع نص الـ OCR بدل ما التحقق
+                 * يفضل على وضوح الصورة بس. الرقم القومي معاه عشان البطاقة
+                 * تتقارن برقم كمان مش بالاسم لوحده.
+                 */
+                'expected_name' => $payload['application']['full_name'] ?? null,
+                'expected_national_id' => $payload['application']['national_id'] ?? null,
             ]
         );
 
@@ -441,8 +516,18 @@ class ApplicationHandler
                 : 'امان',
             'status' => 'new',
             'staff_id' => $conversation->whatsappBot?->staff_id,
-            'notes' => 'طبيعة الشغل من كلام العميل: ' . ($application['job_type'] ?? '-'),
+            'notes' => $this->applicationNotes($application),
         ];
+
+        /*
+         * السن اتحسب من الرقم القومي نفسه وقت ما العميل كتبه (مش مستني
+         * OCR البطاقة)، فالطلب بيوصل للموظف وتاريخ الميلاد وعلامة السن
+         * مليانين فعلاً بدل ما يفضلوا فاضيين أو مليانين true على أعمى.
+         */
+        if (! empty($application['birthdate'])) {
+            $attributes['applicant_birthdate'] = $application['birthdate'];
+            $attributes['applicant_age_ok'] = (bool) ($application['age_ok'] ?? false);
+        }
 
         /*
          * الفورم في الداشبورد بيفرق حسب work_status: employee/self_employed
@@ -499,12 +584,18 @@ class ApplicationHandler
         $path = $doc['path'] ?? null;
 
         return match ($docType) {
+            /*
+             * applicant_age_ok كانت متحطوطة true ثابتة هنا لمجرد إن صورة
+             * بطاقة وصلت - يعني كل طلب بيوصل للموظف وعلامة "السن مظبوط"
+             * مرفوعة من غير ما حد يحسب السن أصلاً. السن دلوقتي بيتحسب من
+             * الرقم القومي في createInstallmentRequest()، والمستند بيسيب
+             * الخانة دي لصاحبها.
+             */
             'id_card_front' => [
                 'applicant_id_image' => $path,
                 'applicant_national_id' => $fields['national_id'] ?? null,
                 'applicant_name' => $fields['name'] ?? $fields['full_name'] ?? null,
                 'applicant_birthdate' => $fields['birthdate'] ?? null,
-                'applicant_age_ok' => true,
             ],
             'id_card_back' => [
                 'applicant_id_back_image' => $path,
@@ -536,6 +627,53 @@ class ApplicationHandler
         };
     }
 
+    /**
+     * Which income categories cannot have their document list decided
+     * without knowing what the customer actually rides. Delivery is the
+     * whole reason this exists: a courier on a bicycle has no licence to
+     * send, one on a motorcycle must send a valid one, and asking the
+     * first for the second stalls the application on a document that does
+     * not exist.
+     */
+    public function requiresVehicleAnswer(string $category): bool
+    {
+        return $category === 'delivery';
+    }
+
+    /**
+     * Folds every wording customers use onto the three vehicle classes the
+     * document list branches on. Returns null for anything it does not
+     * recognise - guessing here is worse than asking, because a wrong
+     * guess silently changes which documents the customer is required to
+     * produce.
+     */
+    public function normalizeVehicle(?string $raw): ?string
+    {
+        $text = $this->normalizeJobText((string) $raw);
+
+        if ($text === '') {
+            return null;
+        }
+
+        if (in_array($text, ['bicycle', 'motorcycle', 'car'], true)) {
+            return $text;
+        }
+
+        if ($this->containsAny($text, ['عجل', 'بسكلت', 'بيسكلت', 'دراجه هوائيه'])) {
+            return 'bicycle';
+        }
+
+        if ($this->containsAny($text, ['موتوسيكل', 'موتسيكل', 'موتور', 'سكوتر', 'اسكوتر', 'تروسيكل', 'دراجه ناريه'])) {
+            return 'motorcycle';
+        }
+
+        if ($this->containsAny($text, ['عربيه', 'عربية', 'ملاكي', 'سياره', 'تاكسي', 'اوبر', 'uber', 'كريم', 'careem', 'ديدي', 'didi', 'اندرايف', 'indrive'])) {
+            return 'car';
+        }
+
+        return null;
+    }
+
     private function requiredDocuments(array $application): array
     {
         $category = $this->categorizeIncome(
@@ -545,12 +683,27 @@ class ApplicationHandler
 
         $base = ['id_card_front', 'id_card_back'];
 
+        /*
+         * المطلوب من الدليفري بيتحدد بالمركبة، مش بالفئة لوحدها:
+         *  - عجلة: سكرين من تطبيق الشغل بس (مفيش رخصة أصلاً).
+         *  - موتوسيكل: سكرين + رخصة قيادة سارية.
+         *  - عربية (أوبر/كريم/إنdrive): البطاقة (موجودة في base) + سكرين
+         *    + رخصة سارية - وكلهم لازم يكونوا باسم العميل نفسه، وده
+         *    بيتفحص بالـ OCR في handleDocument().
+         * لو المركبة لسه مش معروفة، missingFields() مكانش يخلّينا نوصل
+         * هنا أصلاً - السطر ده احتياطي بيطلب أوسع مجموعة.
+         */
+        $deliveryDocuments = match ($this->normalizeVehicle($application['work_vehicle'] ?? null)) {
+            'bicycle' => ['trips_screenshot'],
+            'motorcycle', 'car' => ['trips_screenshot', 'driver_license'],
+            default => ['trips_screenshot', 'driver_license'],
+        };
+
         $categorySpecific = match ($category) {
             'pension' => ['pension_statement'],
             'business' => ['activity_photo'],
             'army' => ['bank_statement'],
-            // ميموري «الدليفري»: رخصة سارية + سكرين رحلات أو تسجيل.
-            'delivery' => ['driver_license', 'trips_screenshot'],
+            'delivery' => $deliveryDocuments,
             // ميموري «التاكسي»: رخصة شخصية + رخصة التاكسي (لصاحب التاكسي).
             'taxi_owner' => ['driver_license', 'vehicle_license'],
             'freelance' => [],
@@ -814,18 +967,50 @@ class ApplicationHandler
         return $chunks->isNotEmpty() ? $chunks->implode("\n---\n") : 'مفيش قواعد محددة، تحقق فقط إن المستند واضح وبيانات صحيحة.';
     }
 
+    /**
+     * Free-text note on the request. Beyond the job wording, this is where
+     * anything the automated checks could not settle gets surfaced: a name
+     * or an address that stayed unverified after MAX_ATTEMPTS is accepted
+     * so the customer is never trapped, but the reviewer has to be told
+     * that it was accepted rather than verified - otherwise "the bot let it
+     * through" reads as "the bot checked it".
+     */
+    private function applicationNotes(array $application): string
+    {
+        $lines = ['طبيعة الشغل من كلام العميل: ' . ($application['job_type'] ?? '-')];
+
+        if (! empty($application['age'])) {
+            $lines[] = 'السن من الرقم القومي: ' . $application['age'] . ' سنة'
+                . (($application['age_ok'] ?? false) ? '' : ' (بره حدود التمويل)');
+        }
+
+        $reviewLabels = [
+            'full_name_needs_review' => 'الاسم اتقبل من غير ما يتأكد إنه اسم كامل - راجعه مع البطاقة',
+            'home_address_needs_review' => 'عنوان السكن مش متأكدين إنه مكان معروف - محتاج مراجعة',
+            'work_address_needs_review' => 'عنوان الشغل مش متأكدين إنه مكان معروف - محتاج مراجعة',
+        ];
+
+        foreach ($reviewLabels as $flag => $label) {
+            if (! empty($application[$flag])) {
+                $lines[] = '⚠️ ' . $label;
+            }
+        }
+
+        return implode("\n", $lines);
+    }
+
     private function documentLabel(string $docType): string
     {
         return match ($docType) {
             'id_card_front' => 'صورة البطاقة (وش)',
             'id_card_back' => 'صورة البطاقة (ضهر)',
-            'salary_slip' => 'مفردات المرتب',
-            'pension_statement' => 'بيان المعاش',
+            'salary_slip' => 'مفردات المرتب (لازم تكون باسم حضرتك)',
+            'pension_statement' => 'بيان المعاش (لازم يكون باسم حضرتك)',
             'activity_photo' => 'صورة النشاط/المحل',
-            'bank_statement' => 'كشف الحساب لآخر 6 شهور',
-            'driver_license' => 'رخصة القيادة (لازم تكون سارية)',
-            'trips_screenshot' => 'سكرين من التطبيق بالرحلات أو التسجيل',
-            'vehicle_license' => 'رخصة التاكسي/المركبة',
+            'bank_statement' => 'كشف الحساب لآخر 6 شهور (باسم حضرتك)',
+            'driver_license' => 'رخصة القيادة - لازم تكون سارية وباسم حضرتك',
+            'trips_screenshot' => 'سكرين من تطبيق الشغل يبيّن الحساب والرحلات - لازم يكون حساب حضرتك',
+            'vehicle_license' => 'رخصة التاكسي/المركبة - لازم تكون سارية وباسم حضرتك',
             default => 'المستند المطلوب',
         };
     }

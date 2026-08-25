@@ -568,6 +568,7 @@ private function extractApplicationData(
 - work_address
 - home_address
 - installment_months
+- work_vehicle
 
 قواعد مهمة:
 - لو known_context.required_fields فيها full_name وken_context.current_application.full_name
@@ -618,6 +619,16 @@ private function extractApplicationData(
   الشغل - وده شائع عند الدليفري وسواقين التطبيقات والعمل الحر المتنقل)،
   اعتبر work_address = "لا يوجد" (قيمة نصية فعلية، مش null، وممنوع تحاول
   تفسرها كعنوان ناقص وتحطها في work_address_status = "incomplete").
+- work_vehicle: نوع المركبة اللي العميل بيشتغل عليها فعلاً دلوقتي (مش
+  المكنة اللي بيقدّم عليها). القيم المسموحة بس: "bicycle" أو "motorcycle"
+  أو "car" أو null.
+  * "عجلة"، "بسكلتة"، "بيسكلته"، "عجله" -> "bicycle"
+  * "موتوسيكل"، "موتور"، "سكوتر"، "تروسيكل" -> "motorcycle"
+  * "عربية"، "ملاكي"، "تاكسي"، "أوبر"، "كريم"، "ديدي"، "اندرايف" -> "car"
+  متخمنش: لو العميل قال إنه دليفري أو سواق تطبيقات من غير ما يذكر
+  المركبة، سيب work_vehicle = null. لو قال "شغال أوبر" من غير تفاصيل
+  اعتبرها "car" لأن أوبر وكريم عربيات، أما "شغال طلبات/مرسول" لوحدها
+  متحددش منها المركبة (null) لأنها بتتعمل بالعجلة والموتوسيكل الاتنين.
 
 رجع JSON بهذا الشكل فقط:
 
@@ -632,7 +643,8 @@ private function extractApplicationData(
     "work_address_status": null,
     "home_address": null,
     "home_address_status": null,
-    "installment_months": null
+    "installment_months": null,
+    "work_vehicle": null
   }
 }
 
