@@ -28,6 +28,15 @@ class ApplicationStateService
     private const ADDRESS_FIELDS = ['work_address', 'home_address'];
 
     /**
+     * Sentinel value for "no fixed workplace" (delivery/gig workers,
+     * customers who work from home, etc.) - same idea as income_proof's
+     * "لا يوجد" but for work_address. Set by AiIntentClassifier's
+     * extraction prompt when the customer explicitly denies having a
+     * workplace; treated as a satisfied field, not an incomplete address.
+     */
+    public const NO_WORKPLACE = 'لا يوجد';
+
+    /**
      * Fields where a changed value is unambiguously a conflict worth
      * pausing for, not a legitimate in-place correction/addition. Scoped
      * deliberately narrow: unlike a name or an address (which customers
@@ -68,6 +77,21 @@ class ApplicationStateService
             $text = (string) ($application[$field] ?? '');
 
             if (trim($text) === '') {
+                continue;
+            }
+
+            /*
+             * "لا يوجد" هنا معناها العميل صرّح إنه معندوش مكان شغل ثابت
+             * (دليفري، سواق تطبيقات، شغال متنقل...) - مش عنوان ناقص محتاج
+             * نفصّله لمكوّناته. لو سبناها تعدي على addressParser، هتترجع
+             * "incomplete" لأنها مفيهاش شارع/عمارة، فالبوت هيفضل يسأل عن
+             * عنوان شغل مش موجود أصلاً من غير ما ينتهي أبدًا.
+             */
+            if (trim($text) === self::NO_WORKPLACE) {
+                $application["{$field}_status"] = 'complete';
+                $application["{$field}_missing_components"] = [];
+                $application["{$field}_newly_received_components"] = [];
+
                 continue;
             }
 
@@ -321,17 +345,22 @@ class ApplicationStateService
                 : 'تمام يا فندم، ناقصني ' . $items[0] . ' عشان أكمل طلب التقديم.';
         }
 
-        $list = implode("\n", array_map(fn ($item) => '- ' . $item, $items));
+        /*
+         * كل بند على سطر لوحده مسبوق بـ"•" بدل "-" وبعده سطر فاضي - أسهل
+         * في القراءة على واتساب من فقرة طويلة متلاصقة، خصوصًا لما بند
+         * العنوان نفسه جملة طويلة فيها أكتر من مكوّن ناقص.
+         */
+        $list = implode("\n\n", array_map(fn ($item) => "• {$item}", $items));
 
         if ($acknowledgment !== '') {
-            return "{$acknowledgment} ولسه ناقصني:\n{$list}";
+            return "{$acknowledgment}\n\nولسه ناقصني:\n\n{$list}";
         }
 
         $opener = $noProgressStreak > 0
             ? self::NO_PROGRESS_OPENERS[$noProgressStreak % count(self::NO_PROGRESS_OPENERS)]
             : self::NO_PROGRESS_OPENERS[0];
 
-        return "{$opener}\n{$list}";
+        return "{$opener}\n\n{$list}";
     }
 
     /**
@@ -367,14 +396,16 @@ class ApplicationStateService
                         $newlyReceived
                     );
 
-                    return "{$addressLabel}: استلمت منك {$this->componentList($receivedLabels)}، بس لسه محتاج {$this->componentList($componentLabels)}";
+                    return "*{$addressLabel}*: استلمت منك {$this->componentList($receivedLabels)}، بس لسه محتاج {$this->componentList($componentLabels)}";
                 }
 
-                return "{$addressLabel}: لسه محتاج {$this->componentList($componentLabels)}";
+                return "*{$addressLabel}*: لسه محتاج {$this->componentList($componentLabels)}";
             }
         }
 
-        return self::FIELD_LABELS_DETAILED[$key] ?? $key;
+        $label = self::FIELD_LABELS_DETAILED[$key] ?? $key;
+
+        return "*{$label}*";
     }
 
     private function componentList(array $labels): string

@@ -97,6 +97,32 @@ class ApplicationHandlerTest extends TestCase
     }
 
     /**
+     * Reported bug: a delivery/gig worker with no fixed workplace
+     * ("مليش مكان عمل") explicitly denies having one. The extraction layer
+     * maps that to work_address = "لا يوجد" (ApplicationStateService::NO_WORKPLACE),
+     * and this sentinel must be accepted as satisfied - not run through
+     * address-component parsing, which would otherwise call it
+     * "incomplete" forever since it has no street/building.
+     */
+    public function test_work_address_no_workplace_sentinel_is_satisfied(): void
+    {
+        $data = [
+            'full_name' => 'كيرلس ناجي',
+            'national_id' => '29001011234567',
+            'phone' => '01012345678',
+            'job_type' => 'مندوب توصيل/سواق تطبيقات',
+            'income_proof' => 'لا يوجد',
+            'work_address' => ApplicationStateService::NO_WORKPLACE,
+            'home_address' => 'المهندسين شارع جامعة الدول عمارة 3 الدور 1 شقة 2 ملك بجوار نادي الشمس',
+            'installment_months' => 12,
+        ];
+
+        $missing = $this->missingFields($data, isFreelance: true);
+
+        $this->assertNotContains('work_address', $missing);
+    }
+
+    /**
      * Case 4: work_address has street + area + building.
      * Expected: work_address is considered complete.
      */
