@@ -125,6 +125,62 @@ class ApplicantNameValidator
     }
 
     /**
+     * Reads a customer message as an answer to "what is your full name?"
+     * - structurally only, and only meant to be called when that really
+     * was the open question (a name we rejected, still unanswered).
+     *
+     * Extraction is an LLM call, and in conversation 254 it kept coming
+     * back with full_name = null for a perfectly good four-part name,
+     * because the conversation history in front of it pointed at a
+     * different question. Holding the turn on the rejected field (see
+     * ApplicationStateService::fieldsToAsk) fixes the cause; this reads
+     * the answer without a model call so one shrugging call can no
+     * longer cost the customer another round trip.
+     *
+     * Returns the cleaned name, or null when the text is plainly not a
+     * name answer at all. Whether it is a real person's name is still
+     * validate()'s decision - this only decides "is this an answer".
+     */
+    public function recoverNameAnswer(?string $raw): ?string
+    {
+        $text = trim((string) $raw);
+
+        if ($text === '') {
+            return null;
+        }
+
+        // A number is an answer to a different question (national ID,
+        // phone), never to this one.
+        if (preg_match('/[\d٠-٩۰-۹]/u', $text) === 1) {
+            return null;
+        }
+
+        // A question back at us is not an answer.
+        if (preg_match('/[?؟]/u', $text) === 1) {
+            return null;
+        }
+
+        $name = $this->cleanup($text);
+
+        if ($name === '') {
+            return null;
+        }
+
+        /*
+         * An Egyptian legal name runs to about five parts; well past that
+         * the customer is telling us something, not naming themselves.
+         * The lower bound stays at one word on purpose - a single word IS
+         * an answer, just an incomplete one, and validate() says so far
+         * better than silence does.
+         */
+        if (count($this->parts($name)) > 6) {
+            return null;
+        }
+
+        return $name;
+    }
+
+    /**
      * Strips lead-in words and normalizes whitespace/punctuation, so the
      * stored value is the name itself and the part count is honest.
      */

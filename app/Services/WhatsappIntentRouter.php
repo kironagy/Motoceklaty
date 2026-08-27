@@ -711,7 +711,10 @@ private function handleInternal(
          * على موضوع تاني منتهية، نصفر العداد عشان مايتراكمش على مواضيع
          * مش مرتبطة ببعض.
          */
-        app(\App\Services\ClarificationService::class)->reset($conversation);
+        app(\App\Services\ClarificationService::class)->reset(
+            $conversation,
+            ! $this->isPureGreeting($normalizedMessage)
+        );
 
         /*
          * Only reachable once understanding was confident enough to skip
@@ -1053,13 +1056,23 @@ private function handleAiFallback(
             $result['error'] ?? null
         );
 
-        if ($failures >= 2) {
+        if (\App\Support\TransientAiFailurePolicy::actionFor($failures) === \App\Support\TransientAiFailurePolicy::HANDOFF) {
             return $this->handoffToAgent($conversation, $message, 'technical_failure');
         }
 
-        return $this->textReply(
-            $conversation,
-            'ثواني يا فندم، هراجعلك التفاصيل وأرد عليك.'
+        /*
+         * الرد القديم هنا كان "ثواني يا فندم، هراجعلك التفاصيل وأرد
+         * عليك." - وعد مكانش وراه أي حاجة. الرد ده بيتحسب رد الدور، فالـ
+         * job بيتقفل done والمراجعة الموعود بيها مبتحصلش أبدًا؛ في محادثة
+         * 253 العميل استنى 8 دقايق وفتح الكلام تاني بنفسه.
+         *
+         * الرمي هنا هو اللي بيعمل المحاولة التانية فعلًا: worker الرسايل
+         * بيرجّع الـ job لـ pending ويعيد توليد الدور من أول وجديد. لو
+         * فشل تاني، السطر اللي فوق بيحوّله لموظف - يعني في كل الحالات
+         * العميل بياخد رد حقيقي، مش وعد.
+         */
+        throw new \App\Exceptions\TransientAiFailure(
+            'AI reply generation failed transiently: ' . (string) ($result['error'] ?? 'unknown')
         );
     }
 

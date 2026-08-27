@@ -153,7 +153,15 @@ class ProcessWhatsappMessageJobs extends Command
                         'updated_at' => now(),
                     ]);
 
-                sleep(1);
+                /*
+                 * A transient AI failure (rate limit, a key mid-cooldown,
+                 * a flaky call) is retried by design - but re-claiming
+                 * the same job a second later usually walks straight back
+                 * into whatever caused it, which burns the one retry the
+                 * customer has before the turn goes to a human. Give the
+                 * provider a few seconds to come back first.
+                 */
+                sleep($e instanceof \App\Exceptions\TransientAiFailure ? 5 : 1);
             }
         }
     }

@@ -227,6 +227,63 @@ class ApplicationStateService
         }));
     }
 
+    /**
+     * Whether the category's requirements note can go out yet.
+     *
+     * For a courier the requirements are not one list - they branch on
+     * what they ride. Someone on a bicycle is never asked for a driving
+     * licence, someone on a motorcycle always is. Sending the note
+     * before the vehicle is known means the first thing a bicycle
+     * courier hears is a licence requirement that will never apply to
+     * them, which is what happened in conversation 254: he answered
+     * "مش معايا رخصه" and read himself as rejected over a document we
+     * were never going to ask him for.
+     *
+     * work_vehicle is already a required field for this category for
+     * exactly that reason (see missingFields()); the note waits on the
+     * same answer.
+     *
+     * @param  array<string, mixed>  $application
+     */
+    public function shouldSendCategoryNote(string $category, array $application): bool
+    {
+        if (! in_array($category, ['delivery', 'taxi_owner'], true)) {
+            return true;
+        }
+
+        return ! empty($application['work_vehicle']);
+    }
+
+    /**
+     * Which missing fields this turn's question is allowed to cover.
+     *
+     * A field the verifier rejected (a two-part "full name", a national
+     * ID whose checksum does not resolve, an address that reads as
+     * fiction) is not a field to step over - it IS the open question,
+     * and its rejection message already asks it in the customer's own
+     * terms. Asking for the NEXT field in the same breath is what broke
+     * conversation 254: the turn that rejected "احمد سيد" closed by
+     * asking for the national ID, so the corrected full name that came
+     * back was read against the wrong question and dropped by
+     * extraction. Nothing landed, the issue never cleared, and the two
+     * messages alternated until the customer gave up.
+     *
+     * So: while any verification issue is open, that issue is the whole
+     * turn.
+     *
+     * @param  array<int, string>  $missing
+     * @param  array<string, string>  $verificationIssues  field => rejection message
+     * @return array<int, string>
+     */
+    public function fieldsToAsk(array $missing, array $verificationIssues): array
+    {
+        if (! empty($verificationIssues)) {
+            return [];
+        }
+
+        return array_values($missing);
+    }
+
     private const FIELD_LABELS = [
         'full_name' => 'الاسم بالكامل',
         'national_id' => 'الرقم القومي',

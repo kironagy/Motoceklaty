@@ -42,8 +42,26 @@ class ClarificationService
      * earlier bout of confusion on an unrelated topic doesn't keep
      * counting against the customer.
      */
-    public function reset(WhatsappConversation $conversation): void
+    public function reset(WhatsappConversation $conversation, bool $carriedNewContent = true): void
     {
+        /*
+         * A turn can be understood perfectly and still say nothing about
+         * the question we are stuck on. In conversation 254 the customer
+         * asked three times for a brand we do not carry ("دايونج"); the
+         * bot asked the same clarifying question back every time, and
+         * would have handed off to a human on the third - except the
+         * customer said "سلام عليكم" in between. That greeting was
+         * understood confidently, cleared the streak, and the count
+         * started over. Four identical questions, no escalation.
+         *
+         * The streak measures "we still do not know what this customer
+         * wants". Only a turn that actually carried content can answer
+         * that, so a contentless one leaves the count where it is.
+         */
+        if (! $carriedNewContent) {
+            return;
+        }
+
         if ((int) ($conversation->clarification_attempts ?? 0) === 0) {
             return;
         }

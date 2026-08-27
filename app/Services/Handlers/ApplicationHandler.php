@@ -145,6 +145,27 @@ class ApplicationHandler
         ]);
 
         $extracted = $analysis['application_data'] ?? [];
+
+        /*
+         * لو الدور اللي فات كان رافض الاسم ولسه مستني تصحيحه، فالرسالة
+         * دي هي الرد على السؤال ده. الاستخراج (نداء LLM) رجّع null
+         * للاسم أكتر من مرة في محادثة 254 رغم إن العميل باعت اسم رباعي
+         * سليم - فبنقراه هنا قراءة تركيبية من غير نداء، عشان نداء واحد
+         * بيتلخبط ميكلّفش العميل دورة كاملة تانية. القرار إن ده اسم
+         * حقيقي لسه بتاع ApplicantDataVerifier زي ما هو.
+         */
+        if (
+            empty($extracted['full_name'])
+            && empty($application['full_name'])
+            && ! empty($application['full_name_issue'])
+        ) {
+            $recovered = app(\App\Services\ApplicantNameValidator::class)->recoverNameAnswer($message);
+
+            if ($recovered !== null) {
+                $extracted['full_name'] = $recovered;
+            }
+        }
+
         $extracted = $stateService->reconcileAddressAssignment($application, $extracted);
         $conflicts = $stateService->detectConflicts($application, $extracted);
 
@@ -348,7 +369,23 @@ class ApplicationHandler
                 ? $this->categorizeIncome($currentJobType, (string) ($application['income_proof'] ?? ''))
                 : null;
 
-            $categoryNote = ($currentCategory !== null && $currentCategory !== $previousCategory)
+            /*
+             * متطلبات الدليفري بتتفرع حسب المركبة (عجلة = مفيش رخصة
+             * أصلاً)، فالرسالة دي بتستنى إجابة work_vehicle زي ما الحقل
+             * نفسه بيستناها - راجع ApplicationStateService::shouldSendCategoryNote().
+             *
+             * ولإنها ممكن تتأجل كده، شرط "الفئة اتغيّرت" لوحده مش كفاية:
+             * لما المركبة توصل في الدور اللي بعده الفئة بتكون هي هي،
+             * فكانت الرسالة هتضيع خالص. بنفتكر إحنا بعتناها لأنهي فئة
+             * بدل ما نقارن بالدور اللي فات بس.
+             */
+            $noteSentForCategory = $payload['category_note_sent_for'] ?? null;
+
+            $categoryNote = (
+                $currentCategory !== null
+                && $currentCategory !== $noteSentForCategory
+                && $stateService->shouldSendCategoryNote($currentCategory, $application)
+            )
                 ? $this->categoryRequirementsNote($currentCategory)
                 : null;
 
@@ -380,7 +417,12 @@ class ApplicationHandler
                 $application,
                 $missing,
                 null,
-                ['no_progress_streak' => $noProgressStreak],
+                array_filter([
+                    'no_progress_streak' => $noProgressStreak,
+                    'category_note_sent_for' => $categoryNote !== null
+                        ? $currentCategory
+                        : $noteSentForCategory,
+                ], fn ($value) => $value !== null),
                 $payload
             );
 
@@ -398,11 +440,15 @@ class ApplicationHandler
              * الحقول اللي التحقق رفضها (اسم ثنائي، رقم قومي مش بيفك،
              * عنوان مش حقيقي) بتترجع في $missing لأنها اتفضّت - بس سؤالها
              * الصح هو رسالة السبب المحددة، مش سطر "ناقصني الاسم بالكامل"
-             * العام اللي العميل شايف إنه بعته خلاص. فبنشيلهم من القايمة
-             * العامة وبنحط رسايلهم فوقها بدل ما نسأل عن نفس الحاجة مرتين
-             * بصيغتين مختلفتين في نفس الرسالة.
+             * العام اللي العميل شايف إنه بعته خلاص.
+             *
+             * وطول ما فيه رفض مفتوح، الرفض ده هو سؤال الدور كله - مش
+             * بنسأل الحقل اللي بعده معاه. ده كان بالظبط اللي كسر محادثة
+             * 254: الدور اللي رفض "احمد سيد" قفل بسؤال عن الرقم القومي،
+             * فالاسم الصح اللي رجع بعده اتقرا في مقابل السؤال الغلط
+             * واتضاع. راجع ApplicationStateService::fieldsToAsk().
              */
-            $missingForQuestion = array_values(array_diff($missing, array_keys($verificationIssues)));
+            $missingForQuestion = $stateService->fieldsToAsk($missing, $verificationIssues);
 
             $reply = ! empty($missingForQuestion)
                 ? $stateService->questionForMissing($missingForQuestion, $application, $newlyFilled, $noProgressStreak, $labelOverrides, $hasAskedBefore)
