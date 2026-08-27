@@ -116,9 +116,33 @@ class GeminiKeyManager
         return $this->reserveAvailableModel($preferredModelCode, $estimatedTokens, $embedding);
     }
 
-    public function markUsed(GeminiApiKeyModel $model, int $usedTokens = 0): void
+    /**
+     * $estimatedTokens is what reserveAvailableModel() already added to
+     * tokens_this_second before dispatch (mb_strlen/4, optimistic for
+     * Arabic). $usedTokens is the real usageMetadata.totalTokenCount from
+     * the response. Reconciling the difference here means the TPS window
+     * reflects real usage instead of a permanently-approximate estimate
+     * (AI_WHATSAPP_BOT_MEMORY_INTELLIGENCE_AUDIT.md §15.3 G-2).
+     */
+    public function markUsed(GeminiApiKeyModel $model, int $usedTokens = 0, int $estimatedTokens = 0): void
     {
-        // Request/token allowance was already reserved before dispatch.
+        $delta = $usedTokens - $estimatedTokens;
+
+        if ($delta !== 0) {
+            DB::transaction(function () use ($model, $delta) {
+                $fresh = GeminiApiKeyModel::query()->whereKey($model->id)->lockForUpdate()->first();
+
+                if ($fresh) {
+                    $fresh->tokens_this_second = max(0, $fresh->tokens_this_second + $delta);
+                    $fresh->last_used_at = now();
+                    $fresh->last_error = null;
+                    $fresh->save();
+                }
+            });
+
+            return;
+        }
+
         $model->update([
             'last_used_at' => now(),
             'last_error' => null,
@@ -131,6 +155,31 @@ class GeminiKeyManager
             'last_error' => mb_substr($error, 0, 2000),
             'cooldown_until' => now()->addSeconds($cooldownSeconds),
         ]);
+    }
+
+    /**
+     * reserveAvailableModel() increments requests_today/requests_this_minute
+     * BEFORE the HTTP call, so a network exception or a 5xx that produced
+     * no answer was permanently burning daily/minute quota on calls that
+     * never actually reached (or were served by) Gemini - self-inflicted
+     * exhaustion on top of any real rate limiting (see
+     * AI_WHATSAPP_BOT_MEMORY_INTELLIGENCE_AUDIT.md §15.3 G-1). Deliberately
+     * NOT called for 429/quota responses - those did consume real quota on
+     * Google's side and must stay counted.
+     */
+    public function refundReservation(GeminiApiKeyModel $model): void
+    {
+        DB::transaction(function () use ($model) {
+            $fresh = GeminiApiKeyModel::query()->whereKey($model->id)->lockForUpdate()->first();
+
+            if (! $fresh) {
+                return;
+            }
+
+            $fresh->requests_today = max(0, $fresh->requests_today - 1);
+            $fresh->requests_this_minute = max(0, $fresh->requests_this_minute - 1);
+            $fresh->save();
+        });
     }
 
     public function markDailyLimitFinished(GeminiApiKeyModel $model): void

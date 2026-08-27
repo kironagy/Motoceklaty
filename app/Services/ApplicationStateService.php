@@ -291,7 +291,8 @@ class ApplicationStateService
         array $application,
         array $newlyFilled = [],
         int $noProgressStreak = 0,
-        array $labelOverrides = []
+        array $labelOverrides = [],
+        bool $hasAskedBefore = false
     ): string {
         $acknowledgment = '';
 
@@ -358,6 +359,43 @@ class ApplicationStateService
             return $acknowledgment !== ''
                 ? "{$acknowledgment} ولسه ناقصني {$items[0]} عشان أكمل طلب التقديم."
                 : 'تمام يا فندم، ناقصني ' . $items[0] . ' عشان أكمل طلب التقديم.';
+        }
+
+        /*
+         * A person collecting data asks for the next thing, not for all
+         * seven things again. Re-sending the identical bulleted list on
+         * every turn (which is what this did) is the single most robotic
+         * thing in the flow - it was sent five times verbatim in
+         * conversation 252 and reads as if nothing the customer typed was
+         * ever read. The full list still goes out once, the first time, so
+         * expectations are set; after that we ask for the next item and
+         * only say how many are left.
+         */
+        if ($hasAskedBefore) {
+            $next = $items[0];
+            $remaining = count($items) - 1;
+            $tail = $remaining > 0
+                ? ' (وبعدها فاضل ' . $remaining . ' ' . ($remaining === 1 ? 'بيان' : 'بيانات') . ' بس)'
+                : '';
+
+            if ($acknowledgment !== '') {
+                return "{$acknowledgment}\n\nطيب محتاج منك دلوقتي {$next}{$tail}.";
+            }
+
+            /*
+             * NO_PROGRESS_OPENERS are written for the full bulleted list
+             * ("ناقصني البيانات دي:") and read wrong in front of a single
+             * request, so the one-at-a-time path has its own variants.
+             */
+            $singleOpeners = [
+                'لسه مستنى منك',
+                'تمام يا فندم، محتاج منك',
+                'عشان نكمل الطلب، محتاج منك',
+            ];
+
+            $opener = $singleOpeners[$noProgressStreak % count($singleOpeners)];
+
+            return "{$opener} {$next}{$tail}.";
         }
 
         /*

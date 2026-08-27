@@ -5,6 +5,7 @@ namespace App\Services\Handlers;
 use App\Models\InstallmentRequest;
 use App\Models\Machine;
 use App\Models\WhatsappConversation;
+use App\Services\AiComplexReplyService;
 use App\Services\AiMemoryResolver;
 use App\Services\AiMemoryRules;
 use App\Services\DocumentDataExtractor;
@@ -46,7 +47,7 @@ class ApplicationHandler
         }
 
         if (($conversation->pending_question ?? null) === 'application_documents') {
-            return $this->reply($conversation, $this->documentPrompt($payload));
+            return $this->reply($conversation, $this->documentStageReply($conversation, $payload, $message));
         }
 
         $blocked = $this->blockedByExistingRequest($conversation);
@@ -211,7 +212,29 @@ class ApplicationHandler
          * دلوقتي بدل ما يرفع كل الأوراق ويترفض.
          */
         if (($verification['blocking_message'] ?? null) !== null) {
-            $this->saveState($conversation, $application, [], null, [], $payload);
+            /*
+             * Was saving missing=[] and pending_question=null, which ended
+             * the application outright - so even a customer who simply
+             * mistyped a digit had no way back into the flow, and the next
+             * message was handled as if no application had ever started
+             * (conversation 252). Keep the collected data and the real
+             * missing list so a corrected answer resumes normally; the
+             * blocking message itself already says what the problem is.
+             */
+            $application = $stateService->refreshAddressComponents($application);
+
+            $blockedCategory = $this->categorizeIncome(
+                (string) ($application['job_type'] ?? ''),
+                (string) ($application['income_proof'] ?? '')
+            );
+
+            $stillMissing = $stateService->missingFields(
+                $application,
+                $blockedCategory === 'freelance',
+                $this->requiresVehicleAnswer($blockedCategory)
+            );
+
+            $this->saveState($conversation, $application, $stillMissing, null, [], $payload);
 
             return $this->reply($conversation, $verification['blocking_message']);
         }
@@ -245,6 +268,26 @@ class ApplicationHandler
         }
 
         $incomeProofExempted = $incomeProofWasEmpty && ($application['income_proof'] ?? null) === 'لا يوجد';
+
+        /*
+         * A courier or an app driver has no fixed workplace by definition -
+         * the job IS moving around. Waiting for them to explicitly deny
+         * having one (which is all that set this sentinel before) meant the
+         * bot kept demanding "عنوان الشغل بالتفصيل" from someone who has no
+         * such address, and the application could not finish (conversation
+         * 252). Treat the category itself as the answer, exactly the way
+         * income_proof is already exempted for freelance above.
+         */
+        if (empty($application['work_address'])) {
+            $currentCategoryForWorkplace = $this->categorizeIncome(
+                (string) ($application['job_type'] ?? ''),
+                (string) ($application['income_proof'] ?? '')
+            );
+
+            if (in_array($currentCategoryForWorkplace, ['delivery', 'taxi_owner'], true)) {
+                $application['work_address'] = \App\Services\ApplicationStateService::NO_WORKPLACE;
+            }
+        }
 
         /*
          * فئة الشغل ممكن تتغيّر مش بس تتعرف أول مرة - العميل قال "معاش"
@@ -362,7 +405,7 @@ class ApplicationHandler
             $missingForQuestion = array_values(array_diff($missing, array_keys($verificationIssues)));
 
             $reply = ! empty($missingForQuestion)
-                ? $stateService->questionForMissing($missingForQuestion, $application, $newlyFilled, $noProgressStreak, $labelOverrides)
+                ? $stateService->questionForMissing($missingForQuestion, $application, $newlyFilled, $noProgressStreak, $labelOverrides, $hasAskedBefore)
                 : '';
 
             if (! empty($verificationIssues)) {
@@ -470,6 +513,7 @@ class ApplicationHandler
 
         $payload['documents_collected'] = $collected;
         $payload['documents_index'] = $index + 1;
+        unset($payload['document_prompt_repeat_streak']);
 
         if ($payload['documents_index'] >= count($required)) {
             $this->createInstallmentRequest($conversation, $payload);
@@ -795,6 +839,18 @@ class ApplicationHandler
             || str_contains($text, 'أوبر') || str_contains($text, 'uber')
             || str_contains($text, 'اندرايف') || str_contains($text, 'indrive')
             || str_contains($text, 'مرسول') || str_contains($text, 'بوسطجي')
+            /*
+             * "مندوب توصيل/سواق تطبيقات" is the exact literal the
+             * extraction prompt in AiIntentClassifier is told to write for
+             * this category - and none of the keywords above matched it, so
+             * it fell through to the generic freelance branch below on the
+             * word "سواق". Result: a courier was never asked which vehicle
+             * he rides and never got the delivery document list (seen live
+             * in conversation 252).
+             */
+            || str_contains($text, 'توصيل') || str_contains($text, 'تطبيقات')
+            || str_contains($text, 'كريم') || str_contains($text, 'careem')
+            || str_contains($text, 'طيار')
         ) {
             return 'delivery';
         }
@@ -1013,6 +1069,64 @@ class ApplicationHandler
             'vehicle_license' => 'رخصة التاكسي/المركبة - لازم تكون سارية وباسم حضرتك',
             default => 'المستند المطلوب',
         };
+    }
+
+    /**
+     * The old behaviour returned documentPrompt() byte-identical for any
+     * text sent while waiting on a document ("هبعتها بكرة", "معنديش
+     * سكانر", "شكراً"...), which read as the most literal "bot, not a
+     * person" moment in the product (audit §8.4). A genuine question
+     * ("ليه محتاجين ده؟"/"ينفع صورة من الموبايل؟") now gets a real answer
+     * from the free-reply model, focused on the document step, before the
+     * prompt is repeated; anything else still gets the same request but
+     * with a rotating opener instead of a flat repeat.
+     */
+    private function documentStageReply(WhatsappConversation $conversation, array $payload, string $message): string
+    {
+        $prompt = $this->documentPrompt($payload);
+        $trimmed = trim($message);
+
+        $looksLikeQuestion = $trimmed !== '' && (
+            str_contains($trimmed, '؟')
+            || str_contains($trimmed, '?')
+            || preg_match('/(ليه|ازاي|إزاي|امتى|إمتى|فين|ينفع|لازم|ممكن|هل)/u', $trimmed) === 1
+        );
+
+        if ($looksLikeQuestion) {
+            try {
+                $result = app(AiComplexReplyService::class)->reply($message, [
+                    'conversation_id' => $conversation->id,
+                    'intent' => 'application',
+                    'step_focus' => 'سؤاله عن المستند بس، من غير ما تطلب منه معلومة تانية غير المستند المطلوب حاليًا',
+                    'messages' => $conversation->messages()->latest()->take(10)->get()->reverse()
+                        ->map(fn ($m) => ['direction' => $m->direction, 'message' => $m->message])->values()->all(),
+                    'current_message' => $message,
+                ]);
+
+                if (($result['ok'] ?? false) && trim((string) ($result['reply'] ?? '')) !== '') {
+                    return trim($result['reply']) . "\n\n" . $prompt;
+                }
+            } catch (\Throwable $e) {
+                // Fall through to the plain prompt below - never break the flow.
+            }
+        }
+
+        $streak = (int) ($payload['document_prompt_repeat_streak'] ?? 0) + 1;
+
+        $payload['document_prompt_repeat_streak'] = $streak;
+        $conversation->forceFill(['context_payload' => $payload])->save();
+
+        if ($streak > 1) {
+            $openers = [
+                'لسه مستنى المستند ده يا فندم:',
+                'ولسه محتاج منك:',
+                'تمام، بس لسه ناقصني:',
+            ];
+
+            $prompt = $openers[$streak % count($openers)] . ' ' . $prompt;
+        }
+
+        return $prompt;
     }
 
     private function documentPrompt(array $payload): string

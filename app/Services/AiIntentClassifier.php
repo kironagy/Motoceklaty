@@ -571,7 +571,7 @@ private function extractApplicationData(
 - work_vehicle
 
 قواعد مهمة:
-- لو known_context.required_fields فيها full_name وken_context.current_application.full_name
+- لو known_context.required_fields فيها full_name وknown_context.current_application.full_name
   لسه null، وجاءت رسالة العميل الحالية قصيرة (من كلمة لحد 5 كلمات)، مفيهاش
   أرقام كتير، ومش رد واضح على سؤال تاني (زي كاش/تقسيط أو عنوان)، اعتبرها
   full_name = نص الرسالة كامل بعد شيل كلمة "الاسم"/"اسمي"/"انا" لو موجودة

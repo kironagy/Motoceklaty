@@ -127,12 +127,31 @@ class ApplicantDataVerifier
                 return [$application, null, false];
             }
 
+            $message = $this->nationalId->problemMessage($parsed);
+            $age = (int) ($parsed['age'] ?? 0);
+
             /*
-             * Outside 21-62 is the same kind of answer as an excluded
-             * profession: nothing later in the flow can change it, so
-             * saying it now is kinder than collecting six documents first.
+             * An age over 100 is a mistyped century digit, not a real
+             * applicant who is too old - treating it as a hard stop was
+             * wrong twice over (conversation 252): the flow was killed for
+             * what is really a typo, AND the bad number stayed on the
+             * application, so the customer's corrected number came back as
+             * a "which one do you mean?" conflict instead of just being
+             * accepted. Clear it like any other unusable number and let
+             * them retype.
              */
-            return [$application, $this->nationalId->problemMessage($parsed), true];
+            if ($age > 100) {
+                return [$this->clearNationalId($application, $parsed, $raw), $message, false];
+            }
+
+            /*
+             * A genuine age outside 21-62 is the same kind of answer as an
+             * excluded profession: nothing later in the flow can change it,
+             * so saying it now is kinder than collecting six documents
+             * first. The number is still cleared so a corrected one is
+             * never mistaken for a conflicting second value.
+             */
+            return [$this->clearNationalId($application, $parsed, $raw), $message, true];
         }
 
         /*
@@ -141,6 +160,17 @@ class ApplicantDataVerifier
          * street name, so this one has no attempt escape hatch. The field
          * is cleared so it reads as unanswered everywhere else.
          */
+        return [$this->clearNationalId($application, $parsed, $raw), $this->nationalId->problemMessage($parsed), false];
+    }
+
+    /**
+     * Drops an unusable national ID and everything derived from it, keeping
+     * the rejected digits only under `national_id_rejected` so
+     * ApplicationStateService::detectConflicts() never sees it as a real
+     * previous answer to conflict against the customer's corrected one.
+     */
+    private function clearNationalId(array $application, array $parsed, string $raw): array
+    {
         unset(
             $application['birthdate'],
             $application['age'],
@@ -151,7 +181,7 @@ class ApplicantDataVerifier
         $application['national_id'] = null;
         $application['national_id_rejected'] = $parsed['digits'] ?? $raw;
 
-        return [$application, $this->nationalId->problemMessage($parsed), false];
+        return $application;
     }
 
     /**

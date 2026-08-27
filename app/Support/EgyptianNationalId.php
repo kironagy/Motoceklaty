@@ -156,6 +156,25 @@ class EgyptianNationalId
             }
 
             $age = (int) ($parsed['age'] ?? 0);
+            $birthYear = $parsed['birthdate'] ? (int) substr((string) $parsed['birthdate'], 0, 4) : null;
+
+            /*
+             * An "age" this far outside a human lifetime is never a real
+             * applicant - it is the century digit typed wrong, and by far
+             * the most common version of that is someone born in the 2000s
+             * starting the number with 2 instead of 3. Telling them "سنك
+             * 120 سنة" and nothing else (which is what this used to do)
+             * reads as broken and gives them no way to fix it, so they
+             * re-send a number with the same mistake and get the same
+             * answer - the exact loop seen in conversation 252.
+             */
+            if ($age > 100) {
+                $yearText = $birthYear ? " (بيطلع مواليد {$birthYear})" : '';
+
+                return "الرقم ده مش مظبوط يا فندم{$yearText} 🙂"
+                    . "\nغالبًا أول رقم فيه: بيكون *٢* لو حضرتك من مواليد قبل سنة ٢٠٠٠، و*٣* لو من مواليد ٢٠٠٠ وبعدها."
+                    . "\nراجعه من البطاقة وابعته تاني وأنا أكمل معاك على طول.";
+            }
 
             if ($age < self::MIN_AGE) {
                 return 'الرقم القومي اللي حضرتك بعته بيقول إن سنك ' . $age . ' سنة، '

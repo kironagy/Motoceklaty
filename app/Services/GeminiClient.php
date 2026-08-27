@@ -165,7 +165,7 @@ class GeminiClient
                         $estimatedTokens
                     );
 
-                    $manager->markUsed($modelRow, $usedTokens);
+                    $manager->markUsed($modelRow, $usedTokens, $estimatedTokens);
 
                     return [
                         'ok' => true,
@@ -277,6 +277,7 @@ class GeminiClient
 
                 if (in_array($status, [500, 502, 503, 504], true)) {
                     $manager->markError($modelRow, $body, 120);
+                    $manager->refundReservation($modelRow);
                     $transientFailures++;
 
                     Log::warning('Gemini temporary server error, trying next key for same model', [
@@ -317,6 +318,7 @@ class GeminiClient
                 ];
             } catch (\Throwable $e) {
                 $manager->markError($modelRow, $e->getMessage(), 120);
+                $manager->refundReservation($modelRow);
                 $transientFailures++;
 
                 Log::error('Gemini request exception', [

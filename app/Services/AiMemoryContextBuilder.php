@@ -19,11 +19,15 @@ class AiMemoryContextBuilder
     private const RELEVANCE_LIMIT = 18;
 
     /**
-     * While the whole active memory set fits in this many characters we send
-     * all of it and skip relevance scoring entirely - it stays comfortably
-     * under AiPromptBuilder::MAX_MEMORY_CHARS (20000).
+     * While the model-facing memory set (see AiMemoryResolver::modelFacingMemories,
+     * which already drops reply-template rows) fits in this many characters
+     * we send all of it and skip relevance scoring. Deliberately kept well
+     * below the raw corpus size (~7-10k chars) so relevance scoring is the
+     * normal path, not a dead branch - a full-set dump was previously
+     * confirmed to run on every single production turn (see
+     * AI_WHATSAPP_BOT_MEMORY_INTELLIGENCE_AUDIT.md §4.2).
      */
-    private const FULL_SET_CHAR_BUDGET = 18000;
+    private const FULL_SET_CHAR_BUDGET = 3000;
 
     public function buildForMessage(string $message, array $conversationContext = []): array
     {
@@ -44,22 +48,12 @@ class AiMemoryContextBuilder
 
         $resolver = app(AiMemoryResolver::class);
         $intent = $conversationContext['intent'] ?? null;
-        $all = $resolver->activeMemories();
+        $all = $resolver->modelFacingMemories();
 
         if ($all->isEmpty()) {
             return '';
         }
 
-        /*
-         * The whole active memory set is currently ~13k characters while
-         * AiPromptBuilder::MAX_MEMORY_CHARS is 20k - everything fits in one
-         * prompt with room to spare. Scoring and then truncating to
-         * RELEVANCE_LIMIT was dropping ~21 memories every turn (confirmed in
-         * ai_memory_retrieval_logs: candidates=39, selected=18 on every row)
-         * to save room we don't need. Send the full set while it fits, and
-         * only fall back to scoring once the memory base actually outgrows
-         * the prompt budget.
-         */
         $totalChars = $all->sum(fn (AiMemory $memory) => mb_strlen((string) $memory->content));
 
         if ($totalChars <= self::FULL_SET_CHAR_BUDGET) {

@@ -27,6 +27,24 @@ class AiMemoryResolver
 
 
     /**
+     * Rows with category=NULL are reply templates (title "رد ..."),
+     * created only to be fetched by exact title via renderMemory() /
+     * AiReplyBuilder::fromMemories() - they carry unrendered {placeholders}
+     * and are never meant to be read as prose by the model. Excluding them
+     * from the model-facing set removes ~40% of prompt bytes that were
+     * pure noise (see AI_WHATSAPP_BOT_MEMORY_INTELLIGENCE_AUDIT.md §5.3).
+     * always_include rows are kept regardless of category since they are
+     * hard business rules the model must always see.
+     */
+    public function modelFacingMemories(): Collection
+    {
+        return $this->activeMemories()->filter(function (AiMemory $memory) {
+            return ($memory->scope ?? null) === 'always_include'
+                || $memory->category !== null;
+        })->values();
+    }
+
+    /**
      * Metadata pre-filter, run before any keyword scoring. Keeps the
      * scorer's candidate set small even at hundreds of memories: a memory
      * is a candidate when it's tagged 'always_include' (hard business
@@ -39,7 +57,7 @@ class AiMemoryResolver
      */
     public function candidateMemories(?string $intent = null): Collection
     {
-        return $this->activeMemories()->filter(function (AiMemory $memory) use ($intent) {
+        return $this->modelFacingMemories()->filter(function (AiMemory $memory) use ($intent) {
             if (($memory->scope ?? null) === 'always_include') {
                 return true;
             }

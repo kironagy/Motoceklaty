@@ -42,30 +42,68 @@ class ProcessWhatsappMessageJobs extends Command
                 continue;
             }
 
+            $wasAlreadyGenerated = $job->status === 'generated';
+            $generationSucceeded = false;
+
             try {
-                $this->line(sprintf(
-                    '[%s] Processing job #%d from %s: %s',
-                    now()->toDateTimeString(),
-                    $job->id,
-                    $job->reply_jid ?: $job->from,
-                    $job->message ?: '[media]'
-                ));
+                if ($wasAlreadyGenerated) {
+                    /*
+                     * Generation (reply text, state mutation, OCR,
+                     * InstallmentRequest creation, ...) already ran and
+                     * succeeded on a previous attempt - only delivery
+                     * failed. Re-running processQueuedWhatsappJob() here
+                     * would duplicate all of that (see
+                     * AI_WHATSAPP_BOT_MEMORY_INTELLIGENCE_AUDIT.md §16.1).
+                     * Resend the stored result instead.
+                     */
+                    $result = $this->decodeJobResult($job);
+                    $generationSucceeded = true;
 
-                $controller = app(WhatsappBotController::class);
+                    $this->line(sprintf(
+                        '[%s] Resending stored result for job #%d (previous delivery failed)',
+                        now()->toDateTimeString(),
+                        $job->id
+                    ));
+                } else {
+                    $this->line(sprintf(
+                        '[%s] Processing job #%d from %s: %s',
+                        now()->toDateTimeString(),
+                        $job->id,
+                        $job->reply_jid ?: $job->from,
+                        $job->message ?: '[media]'
+                    ));
 
-                $result = $controller->processQueuedWhatsappJob($job);
+                    $controller = app(WhatsappBotController::class);
 
-                if (!is_array($result)) {
-                    $result = [];
+                    $result = $controller->processQueuedWhatsappJob($job);
+
+                    if (!is_array($result)) {
+                        $result = [];
+                    }
+
+                    $this->line(sprintf(
+                        '[%s] AI result for job #%d: reply=%s images=%d',
+                        now()->toDateTimeString(),
+                        $job->id,
+                        !empty(trim((string) ($result['reply'] ?? ''))) ? 'yes' : 'no',
+                        count($result['image_items'] ?? $result['images'] ?? [])
+                    ));
+
+                    /*
+                     * Persist BEFORE attempting delivery. If sendWhatsappResult()
+                     * throws below, the catch block leaves this job at
+                     * status='generated' (not 'pending') so a retry skips
+                     * straight to resending this exact result.
+                     */
+                    DB::table('whatsapp_message_jobs')
+                        ->where('id', $job->id)
+                        ->update([
+                            'status' => 'generated',
+                            'result' => json_encode($result, JSON_UNESCAPED_UNICODE),
+                            'updated_at' => now(),
+                        ]);
+                    $generationSucceeded = true;
                 }
-
-                $this->line(sprintf(
-                    '[%s] AI result for job #%d: reply=%s images=%d',
-                    now()->toDateTimeString(),
-                    $job->id,
-                    !empty(trim((string) ($result['reply'] ?? ''))) ? 'yes' : 'no',
-                    count($result['image_items'] ?? $result['images'] ?? [])
-                ));
 
                 $this->sendWhatsappResult($job, $result);
 
@@ -96,10 +134,20 @@ class ProcessWhatsappMessageJobs extends Command
                     $e->getTraceAsString()
                 ));
 
+                /*
+                 * If generation already succeeded (this failure is purely a
+                 * delivery/network problem), fall back to 'generated' - not
+                 * 'pending' - so the retry resends the same stored result
+                 * instead of running the whole pipeline again.
+                 */
+                $failureStatus = ((int) $job->attempts >= 3)
+                    ? 'failed'
+                    : ($generationSucceeded ? 'generated' : 'pending');
+
                 DB::table('whatsapp_message_jobs')
                     ->where('id', $job->id)
                     ->update([
-                        'status' => ((int) $job->attempts >= 3) ? 'failed' : 'pending',
+                        'status' => $failureStatus,
                         'locked_at' => null,
                         'error' => $e->getMessage(),
                         'updated_at' => now(),
@@ -186,7 +234,14 @@ class ProcessWhatsappMessageJobs extends Command
             $busySenders = $busy->pluck('from')->filter()->unique()->values()->all();
 
             $job = DB::table('whatsapp_message_jobs')
-                ->where('status', 'pending')
+                /*
+                 * 'generated' = the reply/state mutation already happened
+                 * and is stored in `result`; only delivery failed or never
+                 * ran. Picking these up alongside 'pending' means a retry
+                 * resends the already-generated result instead of running
+                 * the whole pipeline again (see the split in handle()).
+                 */
+                ->whereIn('status', ['pending', 'generated'])
                 ->where(function ($q) use ($staleBefore) {
                     $q->whereNull('locked_at')
                         ->orWhere('locked_at', '<', $staleBefore);
@@ -392,5 +447,14 @@ class ProcessWhatsappMessageJobs extends Command
             : ($job->payload ?? []);
 
         return is_array($payload) ? $payload : [];
+    }
+
+    private function decodeJobResult(object $job): array
+    {
+        $result = is_string($job->result ?? null)
+            ? json_decode($job->result, true)
+            : ($job->result ?? []);
+
+        return is_array($result) ? $result : [];
     }
 }

@@ -51,6 +51,17 @@ class AiPromptBuilder
             ? "\n\nمهم: رسالة العميل فيها أكتر من طلب، والطلبات التانية اترد عليها في رسالة منفصلة خلاص. في الرد ده اتكلم عن {$focus} - ممنوع تكرر السعر أو أي إجابة تانية، وممنوع تقفل بسؤال لو مش لازم."
             : '';
 
+        /*
+         * Without this the model had no idea an application was in
+         * progress, what was already collected, or what's still missing -
+         * so a policy/side question mid-application got answered with no
+         * awareness of the flow, and the model could ask again for a field
+         * already given (see AI_WHATSAPP_BOT_MEMORY_INTELLIGENCE_AUDIT.md
+         * §2/§3: "the AI that writes the reply cannot see the application
+         * state").
+         */
+        $applicationStateBlock = $this->formatApplicationState($conversationContext['application_state'] ?? null);
+
         return <<<PROMPT
 أنت موظف سيلز بشري محترف لمعرض موتوسيكلات Moto Gate
 
@@ -87,15 +98,16 @@ Laravel هو المسؤول عن الرد على: السعر، الصور، حس
 - لو العميل بيتكلم عن "هي / ده / دي / دول / سعرها / صورها / قسطها"، افهمها من آخر موديلات وسياق المحادثة.
 - لو العميل سأل عن مكان المعرض أو الفروع أو العنوان، ابعتله الفروع بعناوينها وروابط اللوكيشن زي ما هي في الميموري، منسّقة وكل فرع في سطور لوحده، من غير ما يطلب اللوكيشن تاني.
 - لو السؤال عن سعر/صور/قسط/موديلات بشكل مباشر، رد رد مكمل قصير بدون اختراع تفاصيل.
-- الميموري تحت دي هي المصدر الحالي والمحدّث للمعلومات دايمًا. لو أي معلومة فيها (فروع، أسعار، شروط، أي حاجة) بتختلف عن حاجة إنت قلتها في ردودك السابقة في نفس المحادثة، اعتمد على الميموري الحالية فقط وصحح المعلومة، حتى لو كانت نفس المحادثة مستمرة من قبل.
+- الميموري تحت دي هي مصدر السياسات والشروط والفروع - لو معلومة سياسية فيها (فروع، شروط، أي حاجة غير رقمية) بتختلف عن رد قديم قلته في نفس المحادثة، اعتمد عليها وصحح المعلومة. لكن الأرقام (سعر، قسط، مصاريف إدارية) مصدرها الوحيد بلوك "أرقام السيناريو الحالي" تحت، وبيانات التقديم مصدرها الوحيد بلوك "حالة طلب التقسيط" تحت - الميموري ممنوع تغيّر أو "تصحح" أي رقم أو بيانة موجودة في البلوكين دول.
+- لو بلوك "حالة طلب التقسيط" تحت موجود وفيه بيانة معينة (زي الاسم أو الوظيفة) مكتوب إنها معروفة بالفعل، ممنوع تسأل عنها تاني - كمّل من غيرها.
 
 أرقام السيناريو الحالي (محسوبة من النظام - دي أرقام صح ومسموح تحسب عليها):
 {$snapshotBlock}
-
-الميموري النشطة من ai_memories (المصدر الحالي، له الأولوية دايمًا):
+{$applicationStateBlock}
+الميموري النشطة من ai_memories (سياسات وشروط - المصدر الحالي لغير الأرقام):
 {$memoryContext}
 
-آخر 20 رسالة من المحادثة بصيغة العميل/المعرض:
+آخر رسايل من المحادثة بصيغة العميل/المعرض:
 {$conversationText}
 
 آخر الموديلات المرتبطة بالمحادثة من last_machine_ids:
@@ -113,6 +125,40 @@ PROMPT;
      * short "nothing calculated yet" note rather than an empty block so the
      * prompt shape never changes.
      */
+    /**
+     * $applicationState shape (built by the caller from context_payload):
+     * ['pending_question' => string|null, 'known' => ['اسم' => 'value', ...],
+     *  'missing' => ['label', ...]]. Returns '' when there's no application
+     * in progress, so the prompt shape is unchanged for the common case.
+     */
+    private function formatApplicationState(?array $applicationState): string
+    {
+        if (empty($applicationState) || empty($applicationState['pending_question'])) {
+            return '';
+        }
+
+        $known = $applicationState['known'] ?? [];
+        $missing = $applicationState['missing'] ?? [];
+
+        $lines = ["- الخطوة الحالية: {$applicationState['pending_question']}"];
+
+        if (! empty($known)) {
+            $knownText = implode('، ', array_map(
+                fn ($label, $value) => "{$label}: {$value}",
+                array_keys($known),
+                array_values($known)
+            ));
+            $lines[] = "- معروف بالفعل (ممنوع تسأل عنه تاني): {$knownText}";
+        }
+
+        if (! empty($missing)) {
+            $lines[] = '- لسه ناقص: ' . implode('، ', $missing);
+        }
+
+        return "\nحالة طلب التقسيط الحالي (لو العميل سأل سؤال جانبي، جاوبه وبعدين فكّره بس باللي ناقص من هنا - من غير ما تعيد كل البيانات):\n"
+            . implode("\n", $lines) . "\n";
+    }
+
     private function formatInstallmentSnapshot(array $snapshot): string
     {
         if (empty($snapshot)) {

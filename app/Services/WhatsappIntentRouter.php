@@ -329,15 +329,13 @@ private function handleInternal(
         /*
          * المحادثة دي محوّلة لموظف دعم فعلاً - الـ AI بيسكت تمامًا ومايردش
          * لحد ما الموظف يقفل التحويل من الداشبورد (status يرجع 'open').
-         * بنسجل الرسالة الجديدة بس عشان الموظف يشوفها.
+         * الرسالة دي اتسجلت خلاص في WhatsappBotController::incomingMessage()
+         * قبل ما الـ job يتعمله process - إعادة تسجيلها هنا كانت بتنتج صف
+         * incoming مكرر لكل رسالة توصل أثناء التحويل (يبان في الداشبورد
+         * مرتين ويلوّث الـ 15/20 رسالة اللي بتتبعت للـ AI بعد ما الموظف
+         * يقفل التحويل).
          */
         if (($conversation->status ?? 'open') === 'awaiting_agent') {
-            $conversation->messages()->create([
-                'direction' => 'incoming',
-                'message' => $message,
-                'payload' => ['media_items' => $mediaItems],
-            ]);
-
             return $this->textResult(null);
         }
 
@@ -532,7 +530,27 @@ private function handleInternal(
          * التأكيدات البسيطة أو الرسائل الغامضة (general/unknown) لسه
          * بترجع تلقائي لمسار التقديم زي ما كانت.
          */
-        $answerableDuringApplication = ['price', 'images', 'installment_system', 'installment_calc', 'delivery_question', 'admin_fee_explanation'];
+        /*
+         * "لو الشخص سأل أي سؤال واحنا في مرحلة الطلب - سؤال على مكنة، أو
+         * بره المكنة، أو عن التقديم نفسه - لازم يترد عليه صح."
+         * الليستة دي كانت ٦ نوايا بس، فأي سؤال تاني (فين مكانكم، طلبي
+         * وصل لفين، سؤال عام) كان بيتبلع ويترد عليه بنفس قايمة البيانات
+         * الناقصة - وده أهم سبب إن التقديم بيحس إنه robot. دلوقتي كل نية
+         * ليها إجابة حقيقية بتقاطع التقديم، والرد بيرجع للتقديم بعده عن
+         * طريق withApplicationResume().
+         */
+        $answerableDuringApplication = [
+            'price',
+            'images',
+            'installment_system',
+            'installment_calc',
+            'installment_total',
+            'delivery_question',
+            'admin_fee_explanation',
+            'brand_models',
+            'branches',
+            'application_status',
+        ];
 
         /*
          * "تقسيط" / "كاش" مباشرة بعد سؤال "حضرتك عاوز تدفع كاش ولا تقسيط؟"
@@ -555,7 +573,32 @@ private function handleInternal(
             && in_array($intent, $answerableDuringApplication, true)
             && (float) ($plan['confidence'] ?? 1.0) >= 0.5;
 
-        $resumeApplicationAfterAnswer = $isConfidentInterruptingQuestion;
+        /*
+         * سؤال عام وسط التقديم ("ليه محتاجين الرقم القومي؟"، "الورق ده
+         * بيروح فين؟"، "لو اترفضت يحصل ايه؟") - الكلاسيفاير بيرجعه
+         * general/unknown، وقبل كده ده كان بيتحول لـ intent=application
+         * فيترد عليه بنفس قايمة البيانات الناقصة من غير ما يتجاوب خالص.
+         * الرد الحر بقى شايف حالة الطلب (applicationStateForPrompt)، فهو
+         * يقدر يجاوب السؤال ويكمّل من غير ما يعيد يسأل عن حاجة اتجمعت.
+         * بنشترط إنها تبان سؤال فعلاً، مش بيانات - عشان "كيرلس ناجي" أو
+         * رقم قومي ما يتفهموش كسؤال.
+         */
+        $isGeneralQuestionDuringApplication = $applicationIsPending
+            && ! $isAnswerToPendingApplicationQuestion
+            && in_array($intent, ['general', 'unknown'], true)
+            && $this->looksLikeQuestion($message)
+            && ! $this->looksLikeApplicationData($message);
+
+        $resumeApplicationAfterAnswer = $isConfidentInterruptingQuestion
+            || $isGeneralQuestionDuringApplication;
+
+        if ($isGeneralQuestionDuringApplication) {
+            return $this->withApplicationResume(
+                $conversation,
+                $this->handleAiFallback($conversation, $message, null, 'application'),
+                true
+            );
+        }
 
         if (
             $intent !== 'application_status'
@@ -976,6 +1019,7 @@ private function handleAiFallback(
          */
         'intent' => $intentOverride ?: $this->lastTurnIntent,
         'step_focus' => $focus,
+        'application_state' => $this->applicationStateForPrompt($conversation),
         // Plan task 3.5 - one line about who this is, when we know them.
         'customer_profile' => app(CustomerProfileService::class)->summaryFor($conversation),
         'from' => $conversation->phone ?? null,
@@ -1800,7 +1844,19 @@ $folder = $this->safeFolderName($machine->name);
             $deposit = (float) ($payload['last_deposit'] ?? 0);
             $system = (string) ($payload['last_system'] ?? '20');
 
-            $candidate = app(InstallmentCalculator::class)->calculate($machine, $months, $deposit, $system);
+            /*
+             * Was missing $isFreelance - handleInstallmentCalc() and
+             * installmentSnapshot() both pass it, so a freelance customer
+             * above the 60,000 finance cap got a DIFFERENT admin fee here
+             * than the one already quoted for the same machine (see
+             * AI_WHATSAPP_BOT_MEMORY_INTELLIGENCE_AUDIT.md §17 A-4).
+             */
+            $isFreelance = app(ApplicationHandler::class)->categorizeIncome(
+                (string) ($payload['application']['job_type'] ?? ''),
+                (string) ($payload['application']['income_proof'] ?? '')
+            ) === 'freelance';
+
+            $candidate = app(InstallmentCalculator::class)->calculate($machine, $months, $deposit, $system, $isFreelance);
 
             if ($candidate['ok'] ?? false) {
                 $calc = $candidate;
@@ -1951,13 +2007,31 @@ $folder = $this->safeFolderName($machine->name);
         $payload = $conversation->context_payload ?? [];
         $application = $payload['application'] ?? [];
 
-        foreach (['machine_id', 'machine_name', 'payment_method'] as $key) {
+        foreach (['machine_id', 'machine_name', 'payment_method', 'installment_months'] as $key) {
             unset($application[$key]);
         }
 
         $payload['application'] = $application;
         $payload['missing_fields'] = [];
-        unset($payload['pending_conflicts'], $payload['no_progress_streak'], $payload['documents_required'], $payload['documents_index'], $payload['documents_collected']);
+        unset(
+            $payload['pending_conflicts'],
+            $payload['no_progress_streak'],
+            $payload['documents_required'],
+            $payload['documents_index'],
+            $payload['documents_collected'],
+            /*
+             * These fed ApplicationHandler's "customer already calculated a
+             * term" auto-fill and installmentSnapshot() - left in place, a
+             * restart on a new machine silently inherited the OLD machine's
+             * term/deposit/system (AI_WHATSAPP_BOT_MEMORY_INTELLIGENCE_AUDIT.md
+             * §18, "term bleeds across machines").
+             */
+            $payload['last_months'],
+            $payload['last_deposit'],
+            $payload['last_system'],
+            $payload['last_calc_machine_ids'],
+            $payload['installment_repeat_streak']
+        );
 
         $conversation->forceFill([
             'last_machine_id' => null,
@@ -2154,6 +2228,125 @@ $folder = $this->safeFolderName($machine->name);
      * application normally - this only makes the current reply mention
      * what's still missing instead of silently dropping the topic.
      */
+    /**
+     * Does this message read as a question rather than an answer? Used to
+     * decide whether a general/unknown message arriving mid-application is
+     * something to answer or data to extract.
+     */
+    private function looksLikeQuestion(string $message): bool
+    {
+        $trimmed = trim($message);
+
+        if ($trimmed === '') {
+            return false;
+        }
+
+        if (str_contains($trimmed, '؟') || str_contains($trimmed, '?')) {
+            return true;
+        }
+
+        $normalized = $this->normalizeText($trimmed);
+
+        return preg_match(
+            '/(^|\s)(ليه|ازاي|امتى|فين|هل|ينفع|يعني ايه|ايه ال|ايه هي|ايه هو|مين|كام|بكام|ممكن|لو سمحت اعرف|عايز اعرف|عاوز اعرف|محتاج اعرف|ولو|طب لو|ماذا|متى)(\s|$)/u',
+            $normalized
+        ) === 1;
+    }
+
+    /**
+     * Guards looksLikeQuestion() against treating an actual answer as a
+     * question: a national ID, a phone number, a bare name, or an address
+     * line can contain a word like "فين" or "كام" without being a question.
+     */
+    private function looksLikeApplicationData(string $message): bool
+    {
+        $trimmed = trim($message);
+
+        if ($trimmed === '') {
+            return false;
+        }
+
+        // Mostly digits (national ID / phone / months) - always data.
+        $digits = preg_replace('/\D+/u', '', $trimmed) ?? '';
+
+        if (mb_strlen($digits) >= 8) {
+            return true;
+        }
+
+        // Address-shaped: mentions street/building/floor/flat vocabulary.
+        $normalized = $this->normalizeText($trimmed);
+
+        return preg_match('/(شارع|ش |متفرع|عماره|عمارة|الدور|شقه|شقة|محافظه|محافظة|منطقه|منطقة|بجوار|امام|خلف)/u', $normalized) === 1;
+    }
+
+    /**
+     * Compact, model-facing snapshot of the in-progress application, or
+     * null when there is none. Feeds AiPromptBuilder::formatApplicationState
+     * so the free-reply model stops being blind to application state (see
+     * AI_WHATSAPP_BOT_MEMORY_INTELLIGENCE_AUDIT.md §2/§3/§6.2) - it can
+     * answer a side question mid-application without re-asking for a field
+     * already collected.
+     */
+    private function applicationStateForPrompt(WhatsappConversation $conversation): ?array
+    {
+        $pendingQuestion = $conversation->pending_question ?? null;
+
+        if (! in_array($pendingQuestion, ['application_missing_data', 'application_documents'], true)) {
+            return null;
+        }
+
+        try {
+            $payload = $conversation->context_payload ?? [];
+            $application = $payload['application'] ?? [];
+
+            if (empty($application)) {
+                return null;
+            }
+
+            $stateService = app(\App\Services\ApplicationStateService::class);
+            $application = $stateService->refreshAddressComponents($application);
+
+            $incomeCategory = app(ApplicationHandler::class)->categorizeIncome(
+                (string) ($application['job_type'] ?? ''),
+                (string) ($application['income_proof'] ?? '')
+            );
+            $isFreelance = $incomeCategory === 'freelance';
+            $requiresVehicle = app(ApplicationHandler::class)->requiresVehicleAnswer($incomeCategory);
+
+            $missing = $stateService->missingFields($application, $isFreelance, $requiresVehicle);
+
+            $labels = [
+                'full_name' => 'الاسم بالكامل',
+                'national_id' => 'الرقم القومي',
+                'phone' => 'رقم الموبايل',
+                'job_type' => 'طبيعة شغلك',
+                'income_proof' => 'إثبات الدخل',
+                'work_address' => 'عنوان الشغل',
+                'home_address' => 'عنوان السكن',
+                'installment_months' => 'مدة التقسيط',
+                'work_vehicle' => 'نوع المركبة',
+            ];
+
+            $known = [];
+
+            foreach ($labels as $field => $label) {
+                if (! empty($application[$field]) && ! in_array($field, $missing, true)) {
+                    $known[$label] = is_string($application[$field]) ? mb_substr($application[$field], 0, 60) : $application[$field];
+                }
+            }
+
+            return [
+                'pending_question' => $pendingQuestion === 'application_documents'
+                    ? 'جمع المستندات - البيانات الأساسية اتجمعت'
+                    : 'جمع بيانات التقديم',
+                'known' => $known,
+                'missing' => array_map(fn ($field) => $labels[$field] ?? $field, $missing),
+            ];
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
     private function withApplicationResume(WhatsappConversation $conversation, array $result, bool $shouldResume): array
     {
         if (! $shouldResume || empty($result['reply'])) {
@@ -2171,12 +2364,20 @@ $folder = $this->safeFolderName($machine->name);
             $stateService = app(\App\Services\ApplicationStateService::class);
             $application = $stateService->refreshAddressComponents($application);
 
-            $isFreelance = app(ApplicationHandler::class)->categorizeIncome(
+            $incomeCategory = app(ApplicationHandler::class)->categorizeIncome(
                 (string) ($application['job_type'] ?? ''),
                 (string) ($application['income_proof'] ?? '')
-            ) === 'freelance';
+            );
+            $isFreelance = $incomeCategory === 'freelance';
 
-            $missing = $stateService->missingFields($application, $isFreelance);
+            /*
+             * Was missing $requiresVehicle - a delivery/taxi customer with
+             * only work_vehicle left could get "result already complete"
+             * here while ApplicationHandler still blocks on it, so the
+             * resume line silently dropped the one field actually needed.
+             */
+            $requiresVehicle = app(ApplicationHandler::class)->requiresVehicleAnswer($incomeCategory);
+            $missing = $stateService->missingFields($application, $isFreelance, $requiresVehicle);
 
             if (empty($missing)) {
                 return $result;
@@ -2191,6 +2392,7 @@ $folder = $this->safeFolderName($machine->name);
                 'work_address' => 'عنوان الشغل',
                 'home_address' => 'عنوان السكن',
                 'installment_months' => 'مدة التقسيط',
+                'work_vehicle' => 'نوع المركبة',
             ];
 
             $missingLabels = implode(' و', array_map(fn ($key) => $labels[$key] ?? $key, $missing));
