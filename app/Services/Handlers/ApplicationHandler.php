@@ -47,6 +47,16 @@ class ApplicationHandler
         }
 
         if (($conversation->pending_question ?? null) === 'application_documents') {
+            /*
+             * القايمة المتصلّحة لازم تتحفظ، مش تتصلّح في الذاكرة وترجع في
+             * الرد بس - documentStageReply بياخد $payload بالقيمة، فمن غير
+             * الحفظ ده كل دور جاي كان بيقرا نفس القايمة الغلط من الداتابيز
+             * تاني (والفروع اللي بتحفظ جواه ممكن ما تتنفذش أصلاً).
+             */
+            if ($this->enforceBicycleHasNoLicence($conversation, $payload)) {
+                $conversation->forceFill(['context_payload' => $payload])->save();
+            }
+
             return $this->reply($conversation, $this->documentStageReply($conversation, $payload, $message));
         }
 
@@ -59,6 +69,21 @@ class ApplicationHandler
         $application = $payload['application'] ?? [];
 
         if (!$machine) {
+            /*
+             * كان بيرجع من هنا على طول. لو العميل بعت اسمه وسنه وشغله
+             * وعنوانه في نفس الرسالة (وده اللي بيحصل فعلًا لما نسأله
+             * سؤال مفتوح)، كل ده كان بيتمسح، وبعد ما يختار المكنة كنا
+             * بنطلب منه الـ ٨ بيانات من الأول تاني. دلوقتي بنبنّك أي
+             * بيانات في الرسالة قبل ما نسأل عن المكنة.
+             */
+            $application = $this->bankVolunteeredData($conversation, $application, $message, null);
+
+            $payload['application'] = $application;
+            $conversation->forceFill([
+                'last_topic' => 'application',
+                'context_payload' => $payload,
+            ])->save();
+
             return $this->reply($conversation, 'تمام يا فندم، تحب تقدم على أنهي مكنة؟');
         }
 
@@ -83,6 +108,13 @@ class ApplicationHandler
         }
 
         if (empty($application['payment_method'])) {
+            /*
+             * نفس مشكلة الفرع اللي فوق: الرجوع من هنا من غير استخراج كان
+             * بيرمي أي بيانات في نفس الرسالة. بنبنّكها الأول، وبعدين
+             * نسأل عن طريقة الدفع.
+             */
+            $application = $this->bankVolunteeredData($conversation, $application, $message, $machine);
+
             $this->saveState($conversation, $application, ['payment_method'], null);
 
             return $this->reply($conversation, 'تمام يا فندم، حضرتك عاوز تدفع كاش ولا تقسيط؟');
@@ -177,7 +209,27 @@ class ApplicationHandler
             $payload['pending_conflicts'] = $conflicts;
         }
 
+        /*
+         * الاستخراج بالـ LLM بيهلوس ساعات في نص العنوان - بيرجّع تفاصيل
+         * (رقم عمارة، دور، شقة، علامة مميزة) العميل ماكتبهاش خالص. لازم
+         * نعرف *قبل* الدمج هل الموديل غيّر الحقل ده فعلاً، عشان بعد
+         * الدمج نصحح نص العنوان المخزّن من رسالة العميل الخام نفسها -
+         * مش من صياغة الموديل.
+         */
+        $addressFieldsTouchedByAi = array_filter(
+            ['work_address', 'home_address'],
+            fn ($field) => array_key_exists($field, $extracted)
+                && filled($extracted[$field])
+                && $extracted[$field] !== ($application[$field] ?? null)
+        );
+
+        $extracted = $this->guardStoredWorkVehicle($application, $extracted, $message);
+
         $application = $this->mergeApplicationData($application, $extracted);
+
+        foreach ($addressFieldsTouchedByAi as $field) {
+            $application = $stateService->groundAddressInRawMessage($application, $field, $message);
+        }
 
         if (!empty($conflicts)) {
             $payload['application'] = $application;
@@ -299,7 +351,23 @@ class ApplicationHandler
          * 252). Treat the category itself as the answer, exactly the way
          * income_proof is already exempted for freelance above.
          */
-        if (empty($application['work_address'])) {
+        /*
+         * الشرط كان "لو work_address فاضي" بس. المشكلة إن العميل لما
+         * يبعت عنوانه في رسالة واحدة مع باقي بياناته، الاستخراج بيحط
+         * نفس العنوان في الحقلين (سكن وشغل) - فالحقل مبقاش فاضي،
+         * والإعفاء مبيتنفذش، والبوت يفضل يطلب من مندوب التوصيل "رقم
+         * العمارة والدور والشقة" بتاع عنوان شغل مش موجود أصلًا.
+         *
+         * عنوان شغل مطابق حرفيًا لعنوان السكن مش عنوان شغل - ده نفس
+         * العنوان اتكرر. بنعامله زي الفاضي بالظبط.
+         */
+        $workAddress = trim((string) ($application['work_address'] ?? ''));
+        $homeAddress = trim((string) ($application['home_address'] ?? ''));
+        $workAddressIsEchoOfHome = $workAddress !== ''
+            && $workAddress !== \App\Services\ApplicationStateService::NO_WORKPLACE
+            && $workAddress === $homeAddress;
+
+        if ($workAddress === '' || $workAddressIsEchoOfHome) {
             $currentCategoryForWorkplace = $this->categorizeIncome(
                 (string) ($application['job_type'] ?? ''),
                 (string) ($application['income_proof'] ?? '')
@@ -307,6 +375,9 @@ class ApplicationHandler
 
             if (in_array($currentCategoryForWorkplace, ['delivery', 'taxi_owner'], true)) {
                 $application['work_address'] = \App\Services\ApplicationStateService::NO_WORKPLACE;
+                $application['work_address_status'] = 'complete';
+                $application['work_address_missing_components'] = [];
+                unset($application['work_address_components'], $application['work_address_raw']);
             }
         }
 
@@ -320,6 +391,33 @@ class ApplicationHandler
         $previousCategory = $previousJobType !== ''
             ? $this->categorizeIncome($previousJobType, (string) ($payload['application']['income_proof'] ?? ''))
             : null;
+
+        /*
+         * الدور اللي فات سألنا عن مكوّن عنوان واحد بالظبط (زي العلامة
+         * المميزة)، فالرسالة دي هي الرد عليه. لازم نربطها بالمكوّن ده
+         * **قبل** refreshAddressComponents، عشان الـ parser مش بيعرف
+         * يستخرج جواب مجرد من غير كلمة مفتاحية - وده كان بيخلي البوت
+         * يعيد نفس السؤال بعد ما العميل جاوبه.
+         */
+        $askedComponent = $payload['asked_address_component'] ?? null;
+        $askedField = $payload['asked_address_field'] ?? null;
+
+        if ($askedComponent && $askedField) {
+            $application = $stateService->bindAnswerToAskedComponent(
+                $application,
+                $askedField,
+                $askedComponent,
+                $message
+            );
+        } elseif ($askedField) {
+            /*
+             * سألنا عن أكتر من مكوّن في نفس الحقل ("محتاج رقم العمارة
+             * والدور ورقم الشقة وعلامة مميزة")، والعميل رد بجزء من
+             * العنوان ("فيلا ١١٥"). لو الاستخراج بالـ LLM رجّع فاضي،
+             * الرد كان بيضيع والبوت يعيد نفس السؤال حرفيًا.
+             */
+            $application = $stateService->absorbAddressAnswer($application, $askedField, $message);
+        }
 
         $application = $stateService->refreshAddressComponents($application);
 
@@ -346,8 +444,39 @@ class ApplicationHandler
          * "عايز أقسط موتوسيكل" وهو بيتكلم عن المكنة اللي بيشتريها مش عن
          * اللي بيشتغل عليها دلوقتي.
          */
-        if ($application['work_vehicle'] === null && in_array('work_vehicle', $payload['missing_fields'] ?? [], true)) {
-            $application['work_vehicle'] = $this->normalizeVehicle($message);
+        if ($application['work_vehicle'] === null) {
+            /*
+             * الشرط القديم كان بيقرا المركبة من نص الرسالة بس لو إحنا
+             * سألنا عنها في الدور اللي فات. فالعميل اللي بيقول من أول
+             * رسالة "أنا شغال طلبات على العجلة" كانت الكلمة "العجلة"
+             * بتضيع، والبوت يطلب منه رخصة قيادة (اللي على عجلة مش
+             * بتتطلب منه رخصة أصلًا)، وهو يضطر يعيد "أنا على عجلة" تاني.
+             *
+             * دلوقتي بنقرا من أي رسالة - بس بشرط أمان مهم: كلمات
+             * "موتوسيكل/سكوتر/عربية" ممكن تكون بيتكلم بيها عن المكنة
+             * اللي بيشتريها مش اللي بيشتغل عليها، فدول مبيتقبلوش إلا
+             * لما نكون سألنا فعلًا. "عجلة" ملهاش اللبس ده - إحنا
+             * مبنبيعش عجل - فبتتقبل من أي رسالة.
+             */
+            $weAsked = in_array('work_vehicle', $payload['missing_fields'] ?? [], true);
+            $fromMessage = $this->normalizeVehicle($message);
+
+            if ($fromMessage === 'bicycle' || ($fromMessage !== null && $weAsked)) {
+                $application['work_vehicle'] = $fromMessage;
+            } elseif ($fromMessage !== null && $this->messageStatesCurrentWorkVehicle($message)) {
+                $application['work_vehicle'] = $fromMessage;
+            }
+        }
+
+        /*
+         * التصحيح الصريح. الشرط فوق بيقرا المركبة بس لما تكون لسه
+         * مش معروفة، فقيمة اتسجلت غلط (من كلمة في رسالة عن المكنة اللي
+         * بيشتريها مثلاً) كانت تفضل للأبد والعميل يقول "أنا على عجلة"
+         * من غير ما حاجة تتغير. "عجلة" ملهاش لبس - إحنا مبنبيعش عجل -
+         * فتصحيحها بيتقبل في أي وقت.
+         */
+        if ($application['work_vehicle'] !== 'bicycle' && $this->normalizeVehicle($message) === 'bicycle') {
+            $application['work_vehicle'] = 'bicycle';
         }
 
         $requiresVehicle = $this->requiresVehicleAnswer($incomeCategory);
@@ -386,7 +515,7 @@ class ApplicationHandler
                 && $currentCategory !== $noteSentForCategory
                 && $stateService->shouldSendCategoryNote($currentCategory, $application)
             )
-                ? $this->categoryRequirementsNote($currentCategory)
+                ? $this->categoryRequirementsNote($currentCategory, $application['work_vehicle'] ?? null)
                 : null;
 
             /*
@@ -412,20 +541,6 @@ class ApplicationHandler
                 ? (int) ($payload['no_progress_streak'] ?? 0) + 1
                 : 0;
 
-            $this->saveState(
-                $conversation,
-                $application,
-                $missing,
-                null,
-                array_filter([
-                    'no_progress_streak' => $noProgressStreak,
-                    'category_note_sent_for' => $categoryNote !== null
-                        ? $currentCategory
-                        : $noteSentForCategory,
-                ], fn ($value) => $value !== null),
-                $payload
-            );
-
             /*
              * أصحاب المعاشات لسه محتاجين "إثبات دخل" فعليًا (بيان معاش)،
              * مش معفيين زي أصحاب المهن الحرة - بس اللابل العام "مفردات
@@ -450,9 +565,47 @@ class ApplicationHandler
              */
             $missingForQuestion = $stateService->fieldsToAsk($missing, $verificationIssues);
 
+            $askedComponentNow = null;
+            $askedFieldNow = null;
+
             $reply = ! empty($missingForQuestion)
-                ? $stateService->questionForMissing($missingForQuestion, $application, $newlyFilled, $noProgressStreak, $labelOverrides, $hasAskedBefore)
+                ? $stateService->questionForMissing(
+                    $missingForQuestion,
+                    $application,
+                    $newlyFilled,
+                    $noProgressStreak,
+                    $labelOverrides,
+                    $hasAskedBefore,
+                    $askedComponentNow,
+                    $askedFieldNow
+                )
                 : '';
+
+            $this->saveState(
+                $conversation,
+                $application,
+                $missing,
+                null,
+                array_merge(
+                    array_filter([
+                        'no_progress_streak' => $noProgressStreak,
+                        'category_note_sent_for' => $categoryNote !== null
+                            ? $currentCategory
+                            : $noteSentForCategory,
+                    ], fn ($value) => $value !== null),
+                    /*
+                     * دول لازم يتكتبوا حتى لو null - عشان لو الدور ده
+                     * سأل عن أكتر من حقل (مش مكوّن عنوان واحد)، القيمة
+                     * القديمة من دور فات (مثلاً "landmark") تتمسح، وإلا
+                     * رد العميل التالي هيتربط غلط بسؤال قديم خلص.
+                     */
+                    [
+                        'asked_address_component' => $askedComponentNow,
+                        'asked_address_field' => $askedFieldNow,
+                    ]
+                ),
+                $payload
+            );
 
             if (! empty($verificationIssues)) {
                 $issuesText = count($verificationIssues) === 1
@@ -495,10 +648,15 @@ class ApplicationHandler
         $conversation->refresh();
 
         $payload = $this->payload($conversation);
+
+        $this->enforceBicycleHasNoLicence($conversation, $payload);
+
         $required = $payload['documents_required'] ?? [];
         $index = (int) ($payload['documents_index'] ?? 0);
 
         if (empty($required) || $index >= count($required)) {
+            $conversation->forceFill(['context_payload' => $payload])->save();
+
             return $this->reply($conversation, 'تمام يا فندم، طلبك مكتمل بالفعل ومحتاجش مستندات تانية دلوقتي.');
         }
 
@@ -520,7 +678,44 @@ class ApplicationHandler
 
         $this->sendInstantAck($conversation, 'لحظات معايا يافندم، براجع البيانات.');
 
+        /*
+         * أول حاجة: نبص على الصورة نفسها قبل أي OCR.
+         *
+         * الترتيب ده مقصود. الاستخراج كله شغال على نص الـ OCR، وده
+         * معناه إنه مش قادر أصلًا يفرّق بين "بطاقة مش واضحة" و"صورة
+         * موتوسيكل". النتيجة اللي كانت بتحصل: العميل يبعت صورة مكنة
+         * والبوت يقوله "مش قادر أقرا الرقم القومي، ابعت صورة أوضح
+         * للبطاقة" - فيصوّر المكنة تاني. أو يبعت سكرين تطبيق فالبوت
+         * يتهمه إنه باعت بطاقة حد تاني.
+         *
+         * الفحص ده بيقف على حالتين بس وبيرد فيهم برسالة محددة: الصورة
+         * نوعها غلط، أو الصورة مش مقروءة. أي حاجة تانية (أو فشل الفحص
+         * نفسه) بتكمّل عادي - مش بوابة تقدر توقف طلب سليم.
+         */
+        $inspection = app(\App\Services\DocumentImageInspector::class)
+            ->inspect($disk->path($path), $mime, $docType);
+
+        if (($inspection['message'] ?? null) !== null) {
+            \Illuminate\Support\Facades\Log::info('document_image_rejected', [
+                'conversation_id' => $conversation->id,
+                'expected' => $docType,
+                'verdict' => $inspection['verdict'],
+                'detected' => $inspection['detected'],
+            ]);
+
+            return $this->reply($conversation, $inspection['message']);
+        }
+
         $ocr = app(OcrProviderInterface::class)->recognize($disk->path($path), $mime);
+
+        if ($docType === 'work_app_screens') {
+            return $this->handleWorkAppScreenshot(
+                $conversation,
+                $payload,
+                ['path' => $path, 'absolute' => $disk->path($path), 'mime' => $mime],
+                (string) ($ocr['text'] ?? '')
+            );
+        }
 
         if (! ($ocr['ok'] ?? false)) {
             return $this->reply($conversation, 'مقدرتش أقرا بيانات من الصورة، ممكن تبعتها تاني بجودة أوضح؟');
@@ -529,7 +724,7 @@ class ApplicationHandler
         $extraction = app(DocumentDataExtractor::class)->extract(
             (string) ($ocr['text'] ?? ''),
             $docType,
-            $this->rulesTextFor($docType),
+            $this->rulesTextFor($docType, $payload['application']['work_vehicle'] ?? null),
             [
                 'application' => $payload['application'] ?? [],
                 'documents_collected_so_far' => $payload['documents_collected'] ?? [],
@@ -541,7 +736,14 @@ class ApplicationHandler
                  */
                 'expected_name' => $payload['application']['full_name'] ?? null,
                 'expected_national_id' => $payload['application']['national_id'] ?? null,
-            ]
+            ],
+            /*
+             * الصورة نفسها بتتبعت مع نص الـ OCR: التحقق من الرقم القومي
+             * بيرجع للصورة مباشرةً لما الـ OCR ميقراش الرقم صح - وده
+             * بيحصل باستمرار على وش البطاقة المصرية (الأرقام صغيرة وورا
+             * رسمة الأهرامات).
+             */
+            ['path' => $disk->path($path), 'mime' => $mime]
         );
 
         if (! ($extraction['ok'] ?? false) || ! ($extraction['valid'] ?? false)) {
@@ -583,6 +785,128 @@ class ApplicationHandler
         ])->save();
 
         return $this->reply($conversation, $this->documentPrompt($payload));
+    }
+
+    /**
+     * خطوة سكرينات تطبيق الشغل: بنجمع **بيانات** مش صور.
+     *
+     * كل سكرين بيتقري وبيتاخد منه اللي فيه، والناقص بس هو اللي بيتطلب
+     * تاني. يعني سكرين واحد فيه التلات حاجات بيقفل الخطوة، وسكرين
+     * لصفحة مالهاش لازمة مش بيوقف الفلو - بيتقال للعميل الناقص بالظبط.
+     */
+    private function handleWorkAppScreenshot(
+        WhatsappConversation $conversation,
+        array $payload,
+        array $image,
+        string $ocrText
+    ): array {
+        $application = $payload['application'] ?? [];
+
+        $extraction = app(DocumentDataExtractor::class)->extractWorkAppFacts(
+            $ocrText,
+            ['path' => $image['absolute'], 'mime' => $image['mime']],
+            ['expected_name' => $application['full_name'] ?? null]
+        );
+
+        if (! ($extraction['ok'] ?? false)) {
+            return $this->reply($conversation, 'مقدرتش أراجع السكرين دلوقتي، ابعته تاني من فضلك.');
+        }
+
+        $incoming = $extraction['facts'] ?? [];
+
+        /*
+         * الحساب لازم يكون بتاع مقدّم الطلب نفسه. المقارنة بتفهم الاسم
+         * بالعربي وبالإنجليزي (تطبيقات التوصيل بتكتبه لاتيني).
+         */
+        $nameOnScreen = trim((string) ($incoming['account_name'] ?? ''));
+        $expectedName = trim((string) ($application['full_name'] ?? ''));
+
+        if ($nameOnScreen !== '' && $expectedName !== ''
+            && ! app(DocumentDataExtractor::class)->namesBelongToSamePerson($expectedName, $nameOnScreen)) {
+            return $this->reply(
+                $conversation,
+                "الحساب اللي في السكرين ده باسم \"{$nameOnScreen}\" مش باسم حضرتك ({$expectedName})."
+                    . ' لازم السكرينات تكون من حساب مقدّم الطلب نفسه.'
+            );
+        }
+
+        $facts = $this->mergeWorkAppFacts($payload['work_app_facts'] ?? [], $incoming);
+        $paths = $payload['work_app_paths'] ?? [];
+        $paths[] = $image['path'];
+
+        $payload['work_app_facts'] = $facts;
+        $payload['work_app_paths'] = array_values(array_unique($paths));
+
+        $missing = $this->missingWorkAppFacts($facts);
+
+        if ($missing !== []) {
+            $conversation->forceFill([
+                'pending_question' => 'application_documents',
+                'context_payload' => $payload,
+            ])->save();
+
+            $taken = array_values(array_diff(array_keys(self::WORK_APP_FACTS), $missing));
+
+            $lines = [];
+
+            if ($taken !== []) {
+                $lines[] = 'تمام يا فندم، خدت من السكرين ده: '
+                    . implode('، ', array_map(fn ($key) => self::WORK_APP_FACTS[$key], $taken)) . '.';
+            }
+
+            $lines[] = 'لسه محتاج سكرين يبيّن: '
+                . implode('، ', array_map(fn ($key) => self::WORK_APP_FACTS[$key], $missing)) . '.';
+
+            if (in_array('income', $missing, true)) {
+                $months = count($facts['income_months'] ?? []);
+
+                $lines[] = $months > 0
+                    ? "استلمت دخل {$months} شهر لحد دلوقتي، محتاج باقي الشهور عشان تكمل 3 شهور."
+                    : 'محتاج صفحة الدخل/الأرباح اللي بتبيّن مبالغ آخر 3 شهور.';
+            }
+
+            return $this->reply($conversation, implode("\n", $lines));
+        }
+
+        $required = $payload['documents_required'] ?? [];
+        $index = (int) ($payload['documents_index'] ?? 0);
+
+        $collected = $payload['documents_collected'] ?? [];
+        $collected['work_app_screens'] = [
+            'path' => $image['path'],
+            'paths' => $payload['work_app_paths'],
+            'fields' => $facts,
+        ];
+
+        $payload['documents_collected'] = $collected;
+        $payload['documents_index'] = $index + 1;
+        unset($payload['document_prompt_repeat_streak']);
+
+        if ($payload['documents_index'] >= count($required)) {
+            $this->createInstallmentRequest($conversation, $payload);
+
+            $conversation->forceFill([
+                'pending_question' => null,
+                'context_payload' => $payload,
+            ])->save();
+
+            return $this->reply(
+                $conversation,
+                "تمام يا فندم، استلمت بيانات التطبيق كاملة ✅\n"
+                    . "تم رفع طلبك بنجاح! استلمنا كل بياناتك ومستنداتك، وطلبك دلوقتي تحت المراجعة من فريقنا.\n"
+                    . 'هنتواصل معاك في أقرب وقت بمجرد ما نخلص المراجعة. شكرًا لثقتك فينا 🙏'
+            );
+        }
+
+        $conversation->forceFill([
+            'pending_question' => 'application_documents',
+            'context_payload' => $payload,
+        ])->save();
+
+        return $this->reply(
+            $conversation,
+            "تمام يا فندم، استلمت بيانات التطبيق كاملة ✅\n" . $this->documentPrompt($payload)
+        );
     }
 
     private function createInstallmentRequest(WhatsappConversation $conversation, array $payload): void
@@ -710,6 +1034,9 @@ class ApplicationHandler
              * صح هو free_income_proof_images (array) - نوع كل صورة موصوف
              * في notes وفي documents_collected بالمفتاح بتاعه.
              */
+            'work_app_screens' => [
+                'free_income_proof_images' => $doc['paths'] ?? array_filter([$path]),
+            ],
             'driver_license', 'vehicle_license', 'trips_screenshot' => [
                 'free_income_proof_images' => [$path],
             ],
@@ -728,6 +1055,63 @@ class ApplicationHandler
     public function requiresVehicleAnswer(string $category): bool
     {
         return $category === 'delivery';
+    }
+
+    /**
+     * مركبة الشغل اللي اتسجلت خلاص مبتتغيّرش إلا لما العميل نفسه يقولها
+     * في الرسالة دي.
+     *
+     * الباج اللي بتصلحه (محادثة العجلة): العميل قال من الأول "أنا شغال
+     * طلبات على عجلة"، واتسجلت bicycle فعلاً والبوت قاله "مفيش رخصة
+     * مطلوبة". بعدين بعت اسمه ورقمه القومي وعنوانه - والاستخراج بالـ LLM
+     * رجّع work_vehicle تاني من سياق المحادثة (اسم المكنة اللي بيشتريها
+     * "دايونج" موتوسيكل)، فالدمج دهس bicycle بـ motorcycle من غير ما
+     * العميل يقول أي حاجة. النتيجة: قايمة المستندات اتبنت وفيها رخصة
+     * قيادة، والبوت فضل يطلب منه رخصة مستحيل توصل.
+     *
+     * الاستخراج مصدر شرعي للمركبة **أول مرة** بس. بعد ما تتسجل، التغيير
+     * لازم ييجي من نص رسالة العميل نفسه (اللي handle() بيقراه تحت في
+     * تصحيح المركبة الصريح)، مش من تخمين الموديل.
+     *
+     * @param  array<string, mixed>  $application
+     * @param  array<string, mixed>  $extracted
+     * @return array<string, mixed>
+     */
+    private function guardStoredWorkVehicle(array $application, array $extracted, string $message): array
+    {
+        if (! array_key_exists('work_vehicle', $extracted)) {
+            return $extracted;
+        }
+
+        $stored = $this->normalizeVehicle($application['work_vehicle'] ?? null);
+
+        if ($stored === null) {
+            return $extracted;
+        }
+
+        $incoming = $this->normalizeVehicle(is_string($extracted['work_vehicle'] ?? null) ? $extracted['work_vehicle'] : null);
+
+        if ($incoming === null || $incoming === $stored) {
+            return $extracted;
+        }
+
+        /*
+         * الاستثناء الوحيد: العميل بيصحح مركبته في الرسالة دي فعلاً -
+         * "أنا بقيت شغال على موتوسيكل". ساعتها الاستخراج بيوافق كلامه
+         * فبنسيبه يعدي.
+         */
+        $fromMessage = $this->normalizeVehicle($message);
+
+        $statedNow = $fromMessage === $incoming
+            && ($fromMessage === 'bicycle' || $this->messageStatesCurrentWorkVehicle($message));
+
+        if ($statedNow) {
+            return $extracted;
+        }
+
+        unset($extracted['work_vehicle']);
+
+        return $extracted;
     }
 
     /**
@@ -764,6 +1148,33 @@ class ApplicationHandler
         return null;
     }
 
+    /**
+     * هل الرسالة بتتكلم عن المركبة اللي العميل **بيشتغل عليها دلوقتي**،
+     * مش عن المكنة اللي بيشتريها؟
+     *
+     * "أنا شغال طلبات على موتوسيكل"  -> أيوه (مركبة الشغل)
+     * "عايز أقسط موتوسيكل"           -> لأ  (المكنة اللي بيشتريها)
+     *
+     * من غير التمييز ده، أي حد يقول "عايز موتوسيكل" كان هيتسجل إنه
+     * شغال على موتوسيكل ونطلب منه رخصة من غير وجه حق.
+     */
+    private function messageStatesCurrentWorkVehicle(string $message): bool
+    {
+        $text = $this->normalizeJobText($message);
+
+        /*
+         * الكلمات دي بتتقارن بنص **بعد** normalizeJobText، واللي بيحوّل
+         * الألف المقصورة لياء - فـ"على" بتبقى "علي". لو سيبنا "على"
+         * بالمقصورة هنا، الشرط ده مبيتحققش أبدًا ("أنا شغال على موتوسيكل"
+         * ما كانتش بتتسجل مركبة خالص).
+         */
+        return $this->containsAny($text, [
+            'شغال علي', 'شغال ب', 'بشتغل علي', 'بشتغل ب',
+            'معايا', 'عندي', 'بستخدم', 'بسوق', 'بركب',
+            'شغلي علي', 'شغلي ب', 'بشتغل بيها', 'شغال بيها',
+        ]);
+    }
+
     private function requiredDocuments(array $application): array
     {
         $category = $this->categorizeIncome(
@@ -784,9 +1195,17 @@ class ApplicationHandler
          * هنا أصلاً - السطر ده احتياطي بيطلب أوسع مجموعة.
          */
         $deliveryDocuments = match ($this->normalizeVehicle($application['work_vehicle'] ?? null)) {
-            'bicycle' => ['trips_screenshot'],
-            'motorcycle', 'car' => ['trips_screenshot', 'driver_license'],
-            default => ['trips_screenshot', 'driver_license'],
+            'bicycle' => ['work_app_screens'],
+            'motorcycle', 'car' => ['work_app_screens', 'driver_license'],
+            /*
+             * المركبة لسه مش معروفة. الـ default القديم كان بيطلب رخصة
+             * قيادة - وده أسوأ افتراض ممكن: العميل اللي على عجلة بيسمع
+             * إن مطلوب منه رخصة مش هتتطلب منه أصلًا، فيفهم إنه اترفض
+             * ويسيب المحادثة. missingFields() بتوقف الفلو قبل مرحلة
+             * المستندات لحد ما work_vehicle يتحدد، فالسطر ده احتياطي -
+             * والاحتياطي المفروض يبقى الأقل تطلبًا مش الأكتر.
+             */
+            default => ['work_app_screens'],
         };
 
         $categorySpecific = match ($category) {
@@ -803,7 +1222,128 @@ class ApplicationHandler
         // A memory's rules block may redefine what its own category needs.
         $fromMemory = $this->memoryRules()->requiredDocumentsFor($category);
 
-        return array_merge($base, $fromMemory ?? $categorySpecific);
+        $documents = array_merge($base, $fromMemory ?? $categorySpecific);
+
+        /*
+         * العجلة مالهاش رخصة قيادة ولا رخصة مركبة - أيًا كانت الفئة اللي
+         * اتصنف عليها الطلب. ده مش تكرار للـ match فوق: الفئة ممكن تكون
+         * "تاكسي" (اتصنفت من كلمة في رسالة قديمة) أو تكون جاية من ميموري،
+         * والاتنين بيطلبوا رخصة. طلب رخصة من واحد على عجلة معناه إن الطلب
+         * بيقف على مستند مستحيل يوصل.
+         */
+        if ($this->normalizeVehicle($application['work_vehicle'] ?? null) === 'bicycle') {
+            $documents = array_values(array_diff($documents, ['driver_license', 'vehicle_license']));
+        }
+
+        /*
+         * الميموريات اللي اتكتبت في الداشبورد قبل ما خطوة بيانات التطبيق
+         * تتعمل بتقول "trips_screenshot" (سكرين واحد عام). الاسم ده بقى
+         * اسم قديم لنفس الخطوة، والخطوة الجديدة بتجمع البيانات المطلوبة
+         * (تاريخ التعيين + الاسم + دخل 3 شهور) مهما كان عدد السكرينات.
+         * من غير التحويل ده، أي ميموري قديمة بتلغي الخطوة الجديدة وترجع
+         * تقبل سكرين واحد - وده اللي كان بيحصل فعلاً مع ميموري
+         * «ديلفري عجله».
+         */
+        $documents = array_map(
+            fn ($document) => $document === 'trips_screenshot' ? 'work_app_screens' : $document,
+            $documents
+        );
+
+        return array_values(array_unique($documents));
+    }
+
+    /**
+     * هل المستند ده سكرين من تطبيق شغل (عام أو صفحة بعينها)؟
+     */
+    private function isWorkAppScreenshot(?string $docType): bool
+    {
+        return in_array($docType, ['trips_screenshot', 'work_app_screens'], true);
+    }
+
+    /**
+     * البيانات المطلوبة من سكرينات تطبيق الشغل، ووصف كل واحدة للعميل.
+     *
+     * المطلوب بيانات مش عدد صور: لو سكرين واحد فيه التلاتة يبقى خلاص،
+     * ولو متفرقين بيتجمعوا. الترتيب ده هو ترتيب الطلب من العميل.
+     */
+    private const WORK_APP_FACTS = [
+        'hiring_date' => 'تاريخ التعيين/الانضمام للتطبيق',
+        'account_name' => 'الملف التعريفي اللي فيه اسم حضرتك',
+        'income' => 'دخل آخر 3 شهور',
+    ];
+
+    /**
+     * البيانات اللي لسه ناقصة من سكرينات تطبيق الشغل.
+     *
+     * @return array<int, string>
+     */
+    private function missingWorkAppFacts(array $facts): array
+    {
+        $missing = [];
+
+        if (empty($facts['hiring_date']) && empty($facts['hiring_date_text'])) {
+            $missing[] = 'hiring_date';
+        }
+
+        if (empty($facts['account_name'])) {
+            $missing[] = 'account_name';
+        }
+
+        /*
+         * الدخل مش بس رقم موجود - لازم يبيّن شغل فعلي (مش حساب فاضي)
+         * ويغطي 3 شهور. الشهور بتتجمع من كل السكرينات اللي بعتها.
+         */
+        if (count($facts['income_months'] ?? []) < 3 || ($facts['account_active'] ?? null) === false) {
+            $missing[] = 'income';
+        }
+
+        return $missing;
+    }
+
+    /**
+     * بيدمج بيانات سكرين جديد مع اللي اتجمع قبل كده.
+     */
+    private function mergeWorkAppFacts(array $facts, array $incoming): array
+    {
+        foreach (['hiring_date', 'hiring_date_text', 'account_name', 'app_name', 'deliveries_count'] as $key) {
+            if (empty($facts[$key]) && ! empty($incoming[$key])) {
+                $facts[$key] = $incoming[$key];
+            }
+        }
+
+        if (($incoming['account_active'] ?? null) === true) {
+            $facts['account_active'] = true;
+        } elseif (! array_key_exists('account_active', $facts)) {
+            $facts['account_active'] = $incoming['account_active'] ?? null;
+        }
+
+        $months = $facts['income_months'] ?? [];
+
+        foreach ($incoming['income_periods'] ?? [] as $period) {
+            if (! is_array($period) || (float) ($period['amount'] ?? 0) <= 0) {
+                continue;
+            }
+
+            /*
+             * الشهر هو وحدة العد، مش السكرين: سكرين أسبوعي وسكرين يومي من
+             * نفس الشهر مايبقوش شهرين. لو الموديل مقدرش يحدد الشهر،
+             * بنستعمل نص الفترة زي ما هو عشان على الأقل ما نعدّش نفس
+             * الصورة مرتين.
+             */
+            $key = (string) ($period['month'] ?? $period['label'] ?? '');
+
+            if ($key === '') {
+                continue;
+            }
+
+            $key = mb_substr($key, 0, 7);
+
+            $months[$key] = (float) ($months[$key] ?? 0) + (float) $period['amount'];
+        }
+
+        $facts['income_months'] = $months;
+
+        return $facts;
     }
 
     /**
@@ -1015,7 +1555,7 @@ class ApplicationHandler
      * لوحده على مدار كذا رسالة. لو الفئة "army" مفيش ميموري مخصصة لها
      * حاليًا فبيرجع null (السلوك القديم كما هو).
      */
-    private function categoryRequirementsNote(string $category): ?string
+    private function categoryRequirementsNote(string $category, ?string $workVehicle = null): ?string
     {
         $titles = [
             'employee' => 'رد متطلبات الموظف',
@@ -1027,6 +1567,17 @@ class ApplicationHandler
         ];
 
         $title = $titles[$category] ?? null;
+
+        /*
+         * متطلبات الدليفري مش قايمة واحدة - بتتفرع على المركبة. ميموري
+         * "الدليفري" العامة أول template_reply فيها بيقول حرفيًا "محتاجين
+         * رخصة سارية"، فاللي شغال على عجلة كان بيسمع إن مطلوب منه رخصة
+         * مش هتيجي أبدًا (العجلة مالهاش رخصة) ويفهم إنه اترفض. ميموري
+         * "ديلفري عجله" هي النسخة الصح ليه: بطاقة + سكرين التطبيق وبس.
+         */
+        if ($category === 'delivery' && $this->normalizeVehicle($workVehicle) === 'bicycle') {
+            $title = 'ديلفري عجله';
+        }
 
         if ($title === null) {
             return null;
@@ -1043,7 +1594,7 @@ class ApplicationHandler
         return $reply !== '' ? $reply : null;
     }
 
-    private function rulesTextFor(string $docType): string
+    private function rulesTextFor(string $docType, ?string $workVehicle = null): string
     {
         $resolver = app(AiMemoryResolver::class);
 
@@ -1056,8 +1607,18 @@ class ApplicationHandler
             'driver_license' => ['الدليفري', 'التاكسي'],
             'trips_screenshot' => ['الدليفري'],
             'vehicle_license' => ['التاكسي'],
-            default => [],
+            default => $this->isWorkAppScreenshot($docType) ? ['الدليفري'] : [],
         };
+
+        /*
+         * سكرين تطبيق الشغل من واحد شغال على عجلة لازم يتقيّم بقواعد
+         * "ديلفري عجله" مش بقواعد "الدليفري" العامة - دي بتتكلم عن رخصة
+         * سارية، فالموديل كان ممكن يرفض سكرين سليم أو يطلب رخصة في
+         * violation_message لحد شغال على عجلة.
+         */
+        if ($this->isWorkAppScreenshot($docType) && $this->normalizeVehicle($workVehicle) === 'bicycle') {
+            $titles = ['ديلفري عجله'];
+        }
 
         $chunks = collect($titles)
             ->map(fn ($title) => $resolver->memoryByExactTitle($title))
@@ -1112,8 +1673,15 @@ class ApplicationHandler
             'bank_statement' => 'كشف الحساب لآخر 6 شهور (باسم حضرتك)',
             'driver_license' => 'رخصة القيادة - لازم تكون سارية وباسم حضرتك',
             'trips_screenshot' => 'سكرين من تطبيق الشغل يبيّن الحساب والرحلات - لازم يكون حساب حضرتك',
+            'work_app_screens' => "سكرينات من تطبيق الشغل بتبيّن التلات حاجات دول:\n"
+                . "• تاريخ التعيين/الانضمام للتطبيق\n"
+                . "• الملف التعريفي اللي فيه اسم حضرتك\n"
+                . "• دخل آخر 3 شهور\n"
+                . 'لو التلاتة ظاهرين في سكرين واحد ابعته لوحده، ولو متفرقين ابعتهم ورا بعض عادي',
             'vehicle_license' => 'رخصة التاكسي/المركبة - لازم تكون سارية وباسم حضرتك',
-            default => 'المستند المطلوب',
+            // صفحات التطبيقات المحددة - نص الطلب جاي من نفس المصدر اللي
+            // بيتحقق منها عشان ما يبقاش فيه وصفين مختلفين لنفس الصفحة.
+            default => DocumentDataExtractor::APP_SCREENSHOTS[$docType]['ask'] ?? 'المستند المطلوب',
         };
     }
 
@@ -1129,6 +1697,42 @@ class ApplicationHandler
      */
     private function documentStageReply(WhatsappConversation $conversation, array $payload, string $message): string
     {
+        /*
+         * تصحيح بيانات وسط مرحلة المستندات.
+         *
+         * الباج اللي بتصلحه: العميل كتب رقمه القومي غلط، رفع البطاقة،
+         * فالنظام قارن رقم البطاقة بالرقم المكتوب ورفضه ("الرقم القومي
+         * الموجود في البطاقة لا يطابق الرقم القومي المسجل في الطلب").
+         * بعدها كتب "معلش كتبته غلط، الرقم القومي 3051...". المرحلة دي
+         * كانت بتعامل أي نص كأنه مش بيانات - يا سؤال يترد عليه، يا
+         * تكرار لطلب المستند - فالتصحيح كان بيتضاع، expected_national_id
+         * يفضل الرقم الغلط القديم، وأي رفع جديد للبطاقة يترفض بنفس
+         * الرسالة للأبد. حرفيًا loop مالهاش نهاية.
+         *
+         * القراءة هنا حتمية (أرقام، مش نداء LLM) عشان تصحيح صريح زي ده
+         * ما يعتمدش على تخمين.
+         */
+        $corrected = $this->correctedIdentityFromText($conversation, $payload, $message);
+
+        if ($corrected !== null) {
+            return $corrected;
+        }
+
+        /*
+         * تصحيح المركبة وسط مرحلة المستندات.
+         *
+         * الباج اللي بتصلحه: البوت طلب "رخصة القيادة" من عميل شغال على
+         * عجلة، وهو رد "انا شغال علي عجله مش معايا رخصه" - والمرحلة دي
+         * كانت بتتعامل مع أي نص كأنه مش بيانات، فبتعيد طلب الرخصة حرفيًا.
+         * العجلة مالهاش رخصة أصلاً، فالطلب كان بيقف على مستند مستحيل
+         * يوصل، للأبد.
+         */
+        $vehicleFix = $this->vehicleCorrectionDuringDocuments($conversation, $payload, $message);
+
+        if ($vehicleFix !== null) {
+            return $vehicleFix;
+        }
+
         $prompt = $this->documentPrompt($payload);
         $trimmed = trim($message);
 
@@ -1150,7 +1754,25 @@ class ApplicationHandler
                 ]);
 
                 if (($result['ok'] ?? false) && trim((string) ($result['reply'] ?? '')) !== '') {
-                    return trim($result['reply']) . "\n\n" . $prompt;
+                    $aiReply = trim($result['reply']);
+
+                    /*
+                     * الرد الحر والـ prompt الثابت مصدرين مختلفين، وكانوا
+                     * بيتلزقوا في بعض من غير ما حد يبص هما بيقولوا إيه.
+                     * النتيجة كانت رسالة بتناقض نفسها حرفيًا: "ومش محتاجين
+                     * رخصة قيادة خالص، ابعتلي الصور دي" وتحتها على طول
+                     * "ابعتلي رخصة القيادة من فضلك". ده أسوأ من أي رد
+                     * غلط - العميل بيقرا الاتنين ويحس إن مفيش حد فاهم.
+                     *
+                     * لو الرد نفى مستند إحنا لسه طالبينه، مش بنلزق الطلب
+                     * المتناقض. بنسأل عن المركبة بدل كده - دي الإجابة
+                     * الوحيدة اللي بتحسم أي المستندين صح.
+                     */
+                    if ($this->replyContradictsPendingDocument($payload, $aiReply)) {
+                        return $aiReply . "\n\n" . 'بس عشان أتأكد وأقفل الموضوع: حضرتك بتشتغل على إيه؟ عجلة ولا موتوسيكل ولا عربية؟';
+                    }
+
+                    return $aiReply . "\n\n" . $prompt;
                 }
             } catch (\Throwable $e) {
                 // Fall through to the plain prompt below - never break the flow.
@@ -1173,6 +1795,323 @@ class ApplicationHandler
         }
 
         return $prompt;
+    }
+
+    /**
+     * يقرا تصحيح رقم قومي / رقم موبايل من رسالة نصية وسط مرحلة المستندات،
+     * ويحدّث الطلب فورًا. بيرجّع نص الرد لو حصل تصحيح فعلاً، وnull لو
+     * الرسالة مفيهاش تصحيح (فالمرحلة تكمل زي ما هي).
+     *
+     * ليه الشرط "لازم تختلف عن المحفوظ": العميل بيعيد كتابة نفس الرقم
+     * أحيانًا للتأكيد - ده مش تصحيح ومش لازم يعيد دورة كاملة.
+     */
+    private function correctedIdentityFromText(WhatsappConversation $conversation, array $payload, string $message): ?string
+    {
+        $application = $payload['application'] ?? [];
+
+        $nationalIdSupport = app(\App\Support\EgyptianNationalId::class);
+
+        /*
+         * لازم نحوّل الأرقام العربية (٣٠٥...) للاتيني **من غير** ما نشيل
+         * المسافات والحروف اللي بينهم. normalizeDigits بتشيل كل حاجة مش
+         * رقم، فرسالة فيها رقمين ("الرقم القومي 305... والموبايل 010...")
+         * كانت هتتحول لسلسلة أرقام واحدة ملزوقة، والاستخراج ياخد أول 14
+         * خانة من رقمين مختلفين مع بعض - بيانة معطوبة تمامًا. بنطبّع
+         * الأرقام في مكانها وبس، وبعدين نقرا كل تتابع أرقام لوحده.
+         */
+        $normalized = str_replace(
+            ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩','۰','۱','۲','۳','۴','۵','۶','۷','۸','۹'],
+            ['0','1','2','3','4','5','6','7','8','9','0','1','2','3','4','5','6','7','8','9'],
+            $message
+        );
+
+        preg_match_all('/\d+/u', $normalized, $matches);
+
+        $candidates = array_values(array_filter(
+            $matches[0] ?? [],
+            fn ($run) => in_array(strlen($run), [11, 14], true)
+        ));
+
+        if (empty($candidates)) {
+            return null;
+        }
+
+        $updated = [];
+
+        foreach ($candidates as $candidate) {
+            // رقم موبايل مصري: 11 رقم بيبدأ بـ01.
+            if (strlen($candidate) === 11 && str_starts_with($candidate, '01')) {
+                if (($application['phone'] ?? null) !== $candidate) {
+                    $application['phone'] = $candidate;
+                    $updated['phone'] = 'رقم الموبايل';
+                }
+
+                continue;
+            }
+
+            if (strlen($candidate) !== 14) {
+                continue;
+            }
+
+            $parsed = $nationalIdSupport->parse($candidate);
+
+            /*
+             * رقم مش بيفك أصلاً (تاريخ ميلاد مستحيل، قرن غلط) مش تصحيح -
+             * سيبه يعدي للمسار العادي بدل ما نكتب بيانة معطوبة فوق
+             * بيانة تانية.
+             */
+            if (! ($parsed['valid'] ?? false)) {
+                continue;
+            }
+
+            if (($application['national_id'] ?? null) !== $candidate) {
+                $application['national_id'] = $candidate;
+                $updated['national_id'] = 'الرقم القومي';
+
+                /*
+                 * أي رفض متسجّل على الرقم القديم لازم يتشال، وإلا الرقم
+                 * الجديد الصح يفضل محمول عليه رفض قديم.
+                 */
+                unset($application['national_id_issue']);
+            }
+        }
+
+        if (empty($updated)) {
+            return null;
+        }
+
+        $payload['application'] = $application;
+
+        /*
+         * البطاقة اللي اترفضت اتشالت من المجمّع خلاص، فلازم تترفع تاني
+         * عشان تتقارن بالرقم الجديد - documents_index زي ما هو، إحنا بس
+         * بنحدّث البيانة اللي المقارنة بتحصل عليها.
+         */
+        $conversation->forceFill(['context_payload' => $payload])->save();
+
+        $labels = implode(' و', array_values($updated));
+
+        return "تمام يا فندم، عدّلت {$labels} عندي. " . $this->documentPrompt($payload);
+    }
+
+    /**
+     * حارس ثابت: العجلة مالهاش رخصة قيادة ولا رخصة مركبة - نقطة النهاية
+     * دي. بتتنفذ في **أول** كل تعامل مع مرحلة المستندات (قبل أي رسالة
+     * أو صورة)، مش بس لما العميل يكتب "أنا على عجلة" صراحةً في نفس
+     * الدور - عشان لو القايمة اتسجلت غلط قبل كده (لأي سبب: استخراج AI
+     * حط مركبة تانية غلط، أو الفئة اتغيّرت)، العميل يفضل يتطلب منه
+     * مستند مستحيل يوصل **كل** دور جاي، مش بس أول مرة تتغير فيها
+     * المركبة. يرجّع true لو القايمة اتصلحت (يستاهل حفظ الـ payload).
+     */
+    private function enforceBicycleHasNoLicence(WhatsappConversation $conversation, array &$payload): bool
+    {
+        $application = $payload['application'] ?? [];
+
+        if ($this->normalizeVehicle($application['work_vehicle'] ?? null) !== 'bicycle') {
+            /*
+             * الحقل مش bicycle - بس ده مش معناه إن العميل مقالش. الحقل ده
+             * بيضيع (استخراج رجّع مركبة تانية، تعارض، فئة اتغيّرت)، وساعتها
+             * كنا بنطلب رخصة من واحد قال بصوت عالي في نفس المحادثة إنه على
+             * عجلة. كلام العميل نفسه أقوى من حقل ضاع، فبنرجع نقراه منه.
+             */
+            if (! $this->bicycleStatedInConversation($conversation)) {
+                return false;
+            }
+
+            $application['work_vehicle'] = 'bicycle';
+            $payload['application'] = $application;
+        }
+
+        $required = $payload['documents_required'] ?? [];
+        $filtered = array_values(array_diff($required, ['driver_license', 'vehicle_license']));
+
+        if ($filtered === $required) {
+            // القايمة سليمة أصلاً؛ بس لو استرجعنا المركبة فوق، التغيير
+            // ده لوحده يستاهل يتحفظ عشان مايضيعش تاني.
+            return ($payload['application']['work_vehicle'] ?? null) !== ($application['work_vehicle'] ?? null);
+        }
+
+        $collected = $payload['documents_collected'] ?? [];
+        $nextIndex = count($filtered);
+
+        foreach ($filtered as $position => $document) {
+            if (! isset($collected[$document])) {
+                $nextIndex = $position;
+                break;
+            }
+        }
+
+        $payload['documents_required'] = $filtered;
+        $payload['documents_index'] = $nextIndex;
+
+        return true;
+    }
+
+    /**
+     * هل الرد الحر بينفي المستند اللي إحنا واقفين مستنينه؟
+     *
+     * الحالة الوحيدة اللي بتحصل فعلاً: المستند المطلوب رخصة، والرد بيقول
+     * إن مفيش رخصة مطلوبة (لإن الموديل شايف من المحادثة إن العميل على
+     * عجلة). لزق الطلب بعد كده بيطلّع رسالة بتناقض نفسها في نفس النص.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function replyContradictsPendingDocument(array $payload, string $reply): bool
+    {
+        $required = $payload['documents_required'] ?? [];
+        $index = (int) ($payload['documents_index'] ?? 0);
+        $pending = $required[$index] ?? null;
+
+        if (! in_array($pending, ['driver_license', 'vehicle_license'], true)) {
+            return false;
+        }
+
+        $text = $this->normalizeJobText($reply);
+
+        if (! str_contains($text, 'رخصه')) {
+            return false;
+        }
+
+        return $this->containsAny($text, [
+            'مش محتاجين رخصه', 'مش محتاج رخصه', 'مفيش رخصه', 'من غير رخصه',
+            'مش هنطلب رخصه', 'مش مطلوب رخصه', 'رخصه مش مطلوبه', 'مش مطلوبه رخصه',
+            'مش لازم رخصه', 'بدون رخصه', 'مش محتاجين منك رخصه',
+        ]);
+    }
+
+    /**
+     * هل العميل قال في أي رسالة في المحادثة دي إنه شغال على عجلة؟
+     *
+     * "عجلة" ملهاش لبس في السياق ده - إحنا مبنبيعش عجل، فأي ذكر ليها في
+     * رسالة من العميل بيتكلم عن المركبة اللي بيشتغل عليها. القراءة حتمية
+     * (نص، مش نداء LLM) عشان الحارس ده مايعتمدش على تخمين.
+     */
+    private function bicycleStatedInConversation(WhatsappConversation $conversation): bool
+    {
+        try {
+            $messages = $conversation->messages()
+                ->where('direction', 'incoming')
+                ->latest('id')
+                ->take(40)
+                ->pluck('message');
+        } catch (\Throwable $e) {
+            return false;
+        }
+
+        foreach ($messages as $text) {
+            if ($this->normalizeVehicle((string) $text) === 'bicycle') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * بيقرا تصحيح مركبة الشغل من رسالة نصية وسط مرحلة المستندات، وبيعيد
+     * بناء قايمة المستندات المطلوبة على أساسها. بيرجّع نص الرد لو حصل
+     * تصحيح فعلاً، وnull لو الرسالة مالهاش علاقة (فالمرحلة تكمل زي ما هي).
+     */
+    private function vehicleCorrectionDuringDocuments(
+        WhatsappConversation $conversation,
+        array $payload,
+        string $message
+    ): ?string {
+        $required = $payload['documents_required'] ?? [];
+        $index = (int) ($payload['documents_index'] ?? 0);
+        $pendingDocument = $required[$index] ?? null;
+
+        // بس لما المستند المطلوب دلوقتي بيتغيّر أصلاً بالمركبة.
+        if (! in_array($pendingDocument, ['driver_license', 'vehicle_license'], true)
+            && ! $this->isWorkAppScreenshot($pendingDocument)) {
+            return null;
+        }
+
+        $stated = $this->normalizeVehicle($message);
+
+        /*
+         * نفس شرط الأمان بتاع handle(): "موتوسيكل/عربية" ممكن يكونوا
+         * كلام عن المكنة اللي بيشتريها، فمش بيتقبلوا غير لما الجملة
+         * بتقول إنه شغال عليها. "عجلة" مالهاش اللبس ده - إحنا مبنبيعش عجل.
+         */
+        $accepted = $stated === 'bicycle'
+            || ($stated !== null && $this->messageStatesCurrentWorkVehicle($message));
+
+        if (! $accepted) {
+            /*
+             * "مش معايا رخصة" من غير ما يقول بيشتغل على إيه: إعادة نفس
+             * الطلب مالهاش أي معنى - نسأله على المركبة عشان نعرف هل
+             * الرخصة مطلوبة منه أصلاً ولا لأ.
+             */
+            if (! $this->isWorkAppScreenshot($pendingDocument) && $this->messageDeniesLicense($message)) {
+                return 'تمام يا فندم، وحضرتك بتشتغل على إيه؟ عجلة ولا موتوسيكل ولا عربية؟';
+            }
+
+            return null;
+        }
+
+        $application = $payload['application'] ?? [];
+        $application['work_vehicle'] = $stated;
+        $payload['application'] = $application;
+
+        $documents = $this->requiredDocuments($application);
+
+        $collected = $payload['documents_collected'] ?? [];
+
+        $nextIndex = count($documents);
+
+        foreach ($documents as $position => $document) {
+            if (! isset($collected[$document])) {
+                $nextIndex = $position;
+                break;
+            }
+        }
+
+        $payload['documents_required'] = $documents;
+        $payload['documents_index'] = $nextIndex;
+        unset($payload['document_prompt_repeat_streak']);
+
+        $opener = $stated === 'bicycle'
+            ? 'تمام يا فندم، ما دام شغال على عجلة يبقى مفيش رخصة مطلوبة منك خالص.'
+            : 'تمام يا فندم، سجلت إن حضرتك شغال على ' . ($stated === 'motorcycle' ? 'موتوسيكل' : 'عربية') . '.';
+
+        if ($nextIndex >= count($documents)) {
+            $this->createInstallmentRequest($conversation, $payload);
+
+            $conversation->forceFill([
+                'pending_question' => null,
+                'context_payload' => $payload,
+            ])->save();
+
+            return $opener . "\n"
+                . "تم رفع طلبك بنجاح يا فندم! ✅\n"
+                . 'استلمنا كل بياناتك ومستنداتك، وطلبك دلوقتي تحت المراجعة من فريقنا.';
+        }
+
+        $conversation->forceFill([
+            'pending_question' => 'application_documents',
+            'context_payload' => $payload,
+        ])->save();
+
+        return $opener . "\n" . $this->documentPrompt($payload);
+    }
+
+    /**
+     * "مش معايا رخصة" / "مليش رخصة" - نفي امتلاك الرخصة، مش سؤال ومش
+     * مستند. بيتقري حتميًا عشان ما يعتمدش على نداء LLM.
+     */
+    private function messageDeniesLicense(string $message): bool
+    {
+        $text = $this->normalizeJobText($message);
+
+        if (! str_contains($text, 'رخصه')) {
+            return false;
+        }
+
+        return $this->containsAny($text, [
+            'مش معايا', 'معنديش', 'مليش', 'مفيش', 'مش معي', 'ملهاش',
+            'مستخرجهاش', 'مش مستخرج', 'مش عندي', 'ماعنديش', 'مالييش',
+        ]);
     }
 
     private function documentPrompt(array $payload): string
@@ -1417,6 +2356,94 @@ class ApplicationHandler
         $machineId = $this->payload($conversation)['application']['machine_id'] ?? null;
 
         return $machineId ? (int) $machineId : null;
+    }
+
+    /**
+     * بيستخرج أي بيانات طلب موجودة في الرسالة ويدمجها في الحالة، من
+     * غير ما يغيّر مسار المحادثة.
+     *
+     * الحاجة ليه: مراحل الطلب كانت بتترتب بالترتيب اللي إحنا عايزينه
+     * (اختار المكنة -> كاش ولا تقسيط -> بياناتك)، والعميل الحقيقي مش
+     * بيمشي بالترتيب ده - بيبعت اسمه وشغله وعنوانه في رسالة واحدة من
+     * أول الكلام. أي معلومة بيقولها لازم تتحفظ أول مرة يقولها، حتى لو
+     * إحنا لسه بنسأل عن حاجة تانية. موظف حقيقي كان هيكتبها ورا ودانه،
+     * مش هيقوله "دي مش دورها".
+     */
+    public function bankVolunteeredData(
+        WhatsappConversation $conversation,
+        array $application,
+        string $message,
+        ?Machine $machine
+    ): array {
+        if (trim($message) === '' || mb_strlen(trim($message)) < 3) {
+            return $application;
+        }
+
+        try {
+            $analysis = app(\App\Services\AiIntentClassifier::class)->classify($conversation, $message, [
+                'mode' => 'application_data_extraction',
+                'required_fields' => [
+                    'full_name',
+                    'national_id',
+                    'phone',
+                    'job_type',
+                    'income_proof',
+                    'work_address',
+                    'home_address',
+                    'installment_months',
+                ],
+                'current_application' => $application,
+                'selected_machine' => $machine ? [
+                    'id' => $machine->id,
+                    'name' => $this->machineDisplayName($machine),
+                ] : null,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('bankVolunteeredData extraction failed', [
+                'conversation_id' => $conversation->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $application;
+        }
+
+        $extracted = $analysis['application_data'] ?? [];
+
+        if (! is_array($extracted) || empty($extracted)) {
+            return $application;
+        }
+
+        /*
+         * في المرحلة دي إحنا لسه مش في حوار البيانات، فمش هنفتح تعارضات
+         * ولا نسأل عنها - بنملا الفاضي بس. أي قيمة موجودة خلاص بتفضل زي
+         * ما هي، وdetectConflicts هيشتغل عادي بعدين لو العميل غيّر رأيه.
+         */
+        $extracted = array_filter(
+            $extracted,
+            fn ($value, $field) => filled($value) && blank($application[$field] ?? null),
+            ARRAY_FILTER_USE_BOTH
+        );
+
+        /*
+         * قاعدة الاستخراج بتقول "رسالة قصيرة = اسم" وهي قاعدة صح جوه
+         * حوار البيانات، وغلط هنا: في المرحلة دي الرسالة القصيرة غالبًا
+         * محاولة رد على سؤالنا إحنا (اسم مكنة، "تقسيط"، "ايوه"). كلمة
+         * واحدة مش اسم عميل، فبنسيبها للمرحلة الصح.
+         */
+        if (isset($extracted['full_name']) && count(preg_split('/\s+/u', trim($message)) ?: []) < 2) {
+            unset($extracted['full_name']);
+        }
+
+        if (empty($extracted)) {
+            return $application;
+        }
+
+        \Illuminate\Support\Facades\Log::info('application_data_banked_early', [
+            'conversation_id' => $conversation->id,
+            'fields' => array_keys($extracted),
+        ]);
+
+        return $this->mergeApplicationData($application, $extracted);
     }
 
     private function mergeApplicationData(array $current, array $extracted): array

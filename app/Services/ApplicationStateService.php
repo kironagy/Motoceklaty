@@ -109,6 +109,22 @@ class ApplicationStateService
                     continue;
                 }
 
+                /*
+                 * حماية إضافية فوق حماية AddressParser: مكوّن اتمسك
+                 * بثقة قبل كده (زي اسم شارع كامل) ممنوع يتبدّل بنص
+                 * أطول ومبهم جاي من رسالة إجابة قصيرة. الاستثناء
+                 * الوحيد هو ownership - دي إجابة صريحة والعميل ليه
+                 * حق يغيّرها.
+                 */
+                if (
+                    $component !== 'ownership'
+                    && isset($known[$component])
+                    && filled($known[$component])
+                    && mb_strlen((string) $value) > mb_strlen((string) $known[$component]) * 2
+                ) {
+                    continue;
+                }
+
                 if (! isset($known[$component]) || $known[$component] !== $value) {
                     // city/area/governorate all map to the single
                     // "المنطقة" label used everywhere else (status(),
@@ -139,6 +155,298 @@ class ApplicationStateService
         }
 
         return $application;
+    }
+
+    /**
+     * تربط رد العميل المجرد بالمكوّن اللي إحنا سألنا عنه في الدور اللي فات.
+     *
+     * المشكلة اللي بتحلها:
+     * البوت بيسأل "لسه محتاج علامة مميزة قريبة من العنوان"، والعميل يرد
+     * "سوبر ماركت الاخوه". الكود القديم كان بيرمي الرد على AddressParser
+     * كأنه عنوان جديد كامل - فمكانش بيلاقي كلمة مفتاحية للاندمارك،
+     * والرد يضيع، والبوت يسأل نفس السؤال تاني. ده كان أوضح سبب إن
+     * البوت يبان إنه مش فاهم.
+     *
+     * القاعدة هنا: لو إحنا سألنا عن مكوّن واحد بالظبط، والرسالة الجاية
+     * قصيرة ومفيهاش أي كلمة عنوان مفتاحية تانية، فهي إجابة عليه - حتى لو
+     * العميل ما استخدمش الكلمة المفتاحية.
+     *
+     * @param  string  $field  work_address أو home_address
+     * @param  string|null  $askedComponent  المكوّن اللي سألنا عنه الدور اللي فات
+     * @return array<string, mixed> الـ application بعد التعديل
+     */
+    public function bindAnswerToAskedComponent(
+        array $application,
+        string $field,
+        ?string $askedComponent,
+        string $message
+    ): array {
+        if ($askedComponent === null || ! in_array($field, self::ADDRESS_FIELDS, true)) {
+            return $application;
+        }
+
+        $answer = trim(preg_replace('/\s+/u', ' ', $message) ?? $message);
+
+        if ($answer === '') {
+            return $application;
+        }
+
+        // رد طويل قوي = العميل بعت عنوان كامل، سيب الـ parser يشتغل عادي.
+        if (mb_strlen($answer) > 60) {
+            return $application;
+        }
+
+        $componentsKey = "{$field}_components";
+        $components = $application[$componentsKey] ?? [];
+
+        // المكوّن اتملى خلاص من الـ parser في نفس الدور - مفيش داعي.
+        if (filled($components[$askedComponent] ?? null)) {
+            return $application;
+        }
+
+        $value = match ($askedComponent) {
+            'ownership' => $this->readOwnershipAnswer($answer),
+            'building', 'floor', 'apartment' => $this->readShortValueAnswer($answer),
+            default => $this->cleanFreeTextAnswer($answer),
+        };
+
+        if (! filled($value)) {
+            return $application;
+        }
+
+        if ($askedComponent === 'area_or_governorate') {
+            $components['area'] = $value;
+        } else {
+            $components[$askedComponent] = $value;
+        }
+
+        $application[$componentsKey] = $components;
+
+        $status = $this->addressParser->status($components, $field === 'home_address');
+
+        $application["{$field}_status"] = $status['status'] === 'complete' ? 'complete' : 'incomplete';
+        $application["{$field}_missing_components"] = $status['missing'];
+        $application["{$field}_newly_received_components"] = [$askedComponent];
+
+        return $application;
+    }
+
+    /**
+     * قراءة حتمية لرد العميل على سؤال عنوان طلب أكتر من مكوّن.
+     *
+     * bindAnswerToAskedComponent() بتشتغل لما نكون سألنا عن مكوّن **واحد**
+     * بالظبط. لكن السؤال الشائع بيطلب أكتر من مكوّن ("لسه محتاج رقم
+     * العمارة والدور ورقم الشقة وعلامة مميزة")، والرد بيبقى جزء من عنوان
+     * ("فيلا ١١٥" / "عماره ١٢ إيجار"). ساعتها إحنا معتمدين بالكامل على إن
+     * استخراج الـ LLM يرجّع العنوان المدمّج - ولما بيرجع فاضي (وده بيحصل)،
+     * الرد بيضيع خالص والبوت بيعيد نفس السؤال حرفيًا. ده كان أوضح سبب إن
+     * العميل يحس إن البوت مش بيقرا.
+     *
+     * القاعدة: بنقرا الرد بالـ parser، وبنملا بيه المكوّنات **الفاضية بس**
+     * (مش بنستبدل حاجة اتعرفت قبل كده)، وبنضيف نص الرد على نص العنوان
+     * المحفوظ عشان السجل النهائي يبقى كامل.
+     */
+    public function absorbAddressAnswer(array $application, string $field, string $message): array
+    {
+        if (! in_array($field, self::ADDRESS_FIELDS, true)) {
+            return $application;
+        }
+
+        $answer = trim(preg_replace('/\s+/u', ' ', $message) ?? $message);
+
+        // رد طويل قوي = عنوان كامل جديد، الـ parser العادي بيتعامل معاه.
+        if ($answer === '' || mb_strlen($answer) > 140) {
+            return $application;
+        }
+
+        $parsed = array_filter($this->addressParser->parse($answer), fn ($value) => filled($value));
+
+        if (empty($parsed)) {
+            return $application;
+        }
+
+        $componentsKey = "{$field}_components";
+        $known = $application[$componentsKey] ?? [];
+
+        $newlyReceived = [];
+
+        foreach ($parsed as $component => $value) {
+            // ownership إجابة صريحة والعميل ليه حق يغيّرها؛ باقي المكوّنات
+            // اللي اتعرفت قبل كده ممنوع رد قصير يمسحها.
+            if ($component !== 'ownership' && filled($known[$component] ?? null)) {
+                continue;
+            }
+
+            if (($known[$component] ?? null) === $value) {
+                continue;
+            }
+
+            $known[$component] = $value;
+
+            $reported = in_array($component, ['city', 'area', 'governorate'], true)
+                ? 'area_or_governorate'
+                : $component;
+
+            if (! in_array($reported, $newlyReceived, true)) {
+                $newlyReceived[] = $reported;
+            }
+        }
+
+        if (empty($newlyReceived)) {
+            return $application;
+        }
+
+        $existing = trim((string) ($application[$field] ?? ''));
+
+        if ($existing === '') {
+            $application[$field] = $answer;
+        } elseif (mb_stripos($existing, $answer) === false) {
+            $application[$field] = $existing . ' - ' . $answer;
+        }
+
+        $application[$componentsKey] = $known;
+
+        $status = $this->addressParser->status($known, $field === 'home_address');
+
+        $application["{$field}_status"] = $status['status'] === 'complete' ? 'complete' : 'incomplete';
+        $application["{$field}_missing_components"] = $status['missing'];
+        $application["{$field}_newly_received_components"] = $newlyReceived;
+
+        return $application;
+    }
+
+    /**
+     * الاستخراج بالـ LLM أحيانًا بيهلوس في نص عنوان طويل: العميل بيبعت
+     * "٦ اكتوبر ١٥ أ مربع ٣ فيلا ١١٥" (عنوان ناقص وحقيقي)، والـ LLM
+     * بيرجّع home_address = نفس النص + "رقم العماره ٢ والدور التاني شقه
+     * ١٥ امام سوبر مركت بيم، إيجار" - تفاصيل مختلقة العميل ماكتبهاش
+     * خالص، ومعاها home_address_status = "complete" كذب. ده مش تصحيح
+     * إملائي ولا تلخيص - ده اختراع بيانات طلب تمويل حقيقي.
+     *
+     * الحل: منسيبش نص العنوان المخزّن يعتمد على إعادة صياغة الـ LLM
+     * خالص. بعد كل استخراج، بنعيد بناء المكوّنات من **رسالة العميل
+     * الخام نفسها** بالـ parser الحتمي، ونراكم النص المعروض من كلام
+     * العميل الفعلي بس - مش من نص الموديل. لو رسالة الدور ده مفيهاش أي
+     * مكوّن عنوان حقيقي (parse رجع فاضي)، منلمسش الحقل خالص بدل ما نقبل
+     * نص الموديل كمصدر وحيد.
+     */
+    public function groundAddressInRawMessage(array $application, string $field, string $message): array
+    {
+        if (! in_array($field, self::ADDRESS_FIELDS, true)) {
+            return $application;
+        }
+
+        $text = trim(preg_replace('/\s+/u', ' ', $message) ?? $message);
+
+        if ($text === '') {
+            return $application;
+        }
+
+        $parsed = array_filter($this->addressParser->parse($text), fn ($value) => filled($value));
+
+        if (empty($parsed)) {
+            return $application;
+        }
+
+        $componentsKey = "{$field}_components";
+        $known = $application[$componentsKey] ?? [];
+
+        foreach ($parsed as $component => $value) {
+            // ownership إجابة صريحة والعميل ليه حق يغيّرها؛ باقي المكوّنات
+            // اللي اتعرفت قبل كده من رسالة خام سابقة ممنوع تتبدّل.
+            if ($component !== 'ownership' && filled($known[$component] ?? null)) {
+                continue;
+            }
+
+            $known[$component] = $value;
+        }
+
+        $application[$componentsKey] = $known;
+
+        /*
+         * "{field}_raw" هو تراكم كلام العميل الخام بس عبر الأدوار - أبدًا
+         * نص الموديل. application[$field] العادي بيتبنى منه، عشان أي
+         * كود تاني بيقرا application[$field] (رسالة المستندات، ملخص
+         * الطلب) يشوف كلام العميل الحقيقي.
+         */
+        $existingRaw = trim((string) ($application["{$field}_raw"] ?? ''));
+
+        if ($existingRaw === '') {
+            $application[$field] = $text;
+        } elseif (mb_stripos($existingRaw, $text) === false) {
+            $application[$field] = $existingRaw . ' - ' . $text;
+        } else {
+            $application[$field] = $existingRaw;
+        }
+
+        $application["{$field}_raw"] = $application[$field];
+
+        return $application;
+    }
+
+    private function readOwnershipAnswer(string $answer): ?string
+    {
+        $folded = str_replace(['ة', 'ى', 'أ', 'إ', 'آ'], ['ه', 'ي', 'ا', 'ا', 'ا'], mb_strtolower($answer));
+
+        foreach (['ملك', 'تمليك', 'مالك', 'بتاعي', 'بتاعنا'] as $word) {
+            if (str_contains($folded, $word)) {
+                return 'ملك';
+            }
+        }
+
+        foreach (['ايجار', 'مستاجر', 'مؤجر', 'بالايجار'] as $word) {
+            if (str_contains($folded, $word)) {
+                return 'إيجار';
+            }
+        }
+
+        return null;
+    }
+
+    /** رقم عمارة/دور/شقة: بناخد أول رقم أو أول كلمة ترتيبية. */
+    private function readShortValueAnswer(string $answer): ?string
+    {
+        $latin = str_replace(
+            ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'],
+            ['0','1','2','3','4','5','6','7','8','9'],
+            $answer
+        );
+
+        if (preg_match('/\d{1,4}/u', $latin, $m)) {
+            return $m[0];
+        }
+
+        $ordinals = ['الاول', 'الأول', 'التاني', 'الثاني', 'التالت', 'الثالث',
+                     'الرابع', 'الخامس', 'السادس', 'السابع', 'التامن', 'الثامن',
+                     'ارضي', 'أرضي', 'الارضي'];
+
+        foreach ($ordinals as $ordinal) {
+            if (str_contains($answer, $ordinal)) {
+                return $ordinal;
+            }
+        }
+
+        return null;
+    }
+
+    /** علامة مميزة / شارع / منطقة: بنشيل كلمات الحشو بس. */
+    private function cleanFreeTextAnswer(string $answer): ?string
+    {
+        $fillers = [
+            'والله', 'يعني', 'انا', 'أنا', 'ساكن', 'ساكنه', 'ساكنة',
+            'العلامه المميزه', 'العلامة المميزة', 'علامه مميزه', 'علامة مميزة',
+            'قدام', 'جنب', 'جمب', 'بجوار', 'امام', 'أمام', 'قرب', 'في', 'هي',
+        ];
+
+        $cleaned = $answer;
+
+        foreach ($fillers as $filler) {
+            $cleaned = preg_replace('/(?:^|\s)' . preg_quote($filler, '/') . '(?:\s|$)/u', ' ', $cleaned) ?? $cleaned;
+        }
+
+        $cleaned = trim(preg_replace('/\s+/u', ' ', $cleaned) ?? $cleaned);
+
+        return mb_strlen($cleaned) >= 2 ? $cleaned : null;
     }
 
     /**
@@ -342,6 +650,11 @@ class ApplicationStateService
      *    AI_MEMORY_CONVERSATION_IMPROVEMENT_PLAN.md: vary wording only
      *    when repetition isn't logically necessary, never touch the
      *    actual missing-field list itself).
+     *
+     * @param  string|null  $askedComponent  بيترجع فيه اسم المكوّن اللي
+     *   السؤال ده بيطلبه، لما يبقى مكوّن واحد بالظبط. الراوتر بيحفظه في
+     *   context_payload عشان الدور اللي بعده يعرف الرد المجرد إجابة على
+     *   إيه (شوف bindAnswerToAskedComponent).
      */
     public function questionForMissing(
         array $missing,
@@ -349,21 +662,33 @@ class ApplicationStateService
         array $newlyFilled = [],
         int $noProgressStreak = 0,
         array $labelOverrides = [],
-        bool $hasAskedBefore = false
+        bool $hasAskedBefore = false,
+        ?string &$askedComponent = null,
+        ?string &$askedField = null
     ): string {
+        $askedComponent = null;
+        $askedField = null;
         $acknowledgment = '';
 
         if (! empty($newlyFilled)) {
-            $newlyFilledLabels = array_map(
-                fn ($key) => self::FIELD_LABELS[$key] ?? $key,
-                $newlyFilled
-            );
-
-            $acknowledgment = 'تمام يا فندم، استلمت ' . implode(' و', $newlyFilledLabels) . '.';
-
+            /*
+             * قرار من صاحب المعرض: ممنوع نعدّد اللي استلمناه. "تمام يا
+             * فندم، استلمت اسم الشارع ورقم العمارة" بتخلي الرسالة طويلة
+             * وبتحس إنها روبوت بيقرا تقرير - العميل عايز يعرف اللي ناقص
+             * وخلاص. بنسيب بس تأكيد قصير جدًا لما الطلب يكتمل بالفعل
+             * (empty($missing))، لأن ساعتها الرسالة محتاجة تقفل بحاجة
+             * إيجابية.
+             */
             if (empty($missing)) {
-                return $acknowledgment;
+                $newlyFilledLabels = array_map(
+                    fn ($key) => self::FIELD_LABELS[$key] ?? $key,
+                    $newlyFilled
+                );
+
+                return 'تمام يا فندم، استلمت ' . implode(' و', $newlyFilledLabels) . '.';
             }
+
+            $acknowledgment = 'تمام يا فندم.';
         }
 
         if (count($missing) === 1 && in_array($missing[0], self::ADDRESS_FIELDS, true)) {
@@ -383,19 +708,34 @@ class ApplicationStateService
                  * سؤال العنوان تاني. صيغة جملة طبيعية بدل قوسين تقنيين.
                  */
                 $newlyReceivedComponents = $application["{$field}_newly_received_components"] ?? [];
+
+                /*
+                 * لو السؤال بيطلب مكوّن واحد بالظبط، نسجّله عشان الدور
+                 * اللي بعده يعرف إن رد العميل المجرد ("سوبر ماركت
+                 * الاخوه") هو إجابة على السؤال ده - مش عنوان جديد.
+                 */
+                /*
+                 * الحقل بيتسجّل دايمًا، حتى لو السؤال بيطلب أكتر من
+                 * مكوّن. الاستخراج بالـ LLM ساعات بيرجع فاضي على رد زي
+                 * "فيلا ١١٥"، وساعتها absorbAddressAnswer() بتقرا الرد
+                 * قراءة حتمية وتحطه في نفس الحقل - من غير كده الرد كان
+                 * بيضيع والبوت يعيد نفس السؤال حرفيًا.
+                 */
+                $askedField = $field;
+
+                if (count($missingComponents) === 1) {
+                    $askedComponent = $missingComponents[0];
+                }
+
                 $missingText = implode(' و', $componentLabels);
 
-                if (! empty($newlyReceivedComponents)) {
-                    $newlyReceivedLabels = array_map(
-                        fn ($component) => self::MISSING_COMPONENT_LABELS[$component] ?? $component,
-                        $newlyReceivedComponents
-                    );
-
-                    $receivedText = implode(' و', $newlyReceivedLabels);
-                    $line = "استلمت منك {$receivedText} في {$addressLabel}، بس لسه محتاج {$missingText}.";
-                } else {
-                    $line = "لسه محتاج {$missingText} في {$addressLabel}.";
-                }
+                /*
+                 * قرار من صاحب المعرض: ممنوع نعدّد اللي استلمناه. "استلمت
+                 * منك اسم الشارع ورقم العمارة، بس لسه محتاج علامة مميزة"
+                 * بتخلي الرسالة طويلة وبتحس إنها روبوت بيقرا تقرير -
+                 * العميل عايز يعرف اللي ناقص وخلاص.
+                 */
+                $line = "لسه محتاج {$missingText} في {$addressLabel}.";
 
                 return $acknowledgment !== ''
                     ? "{$acknowledgment} {$line}"

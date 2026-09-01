@@ -52,7 +52,35 @@ class WhatsappIntentRouter
         $missingFieldsBefore = $conversation->context_payload['missing_fields'] ?? null;
         $clarificationAttemptsBefore = (int) ($conversation->clarification_attempts ?? 0);
 
+        /*
+         * لقطة لآخر الردود اللي خرجت *قبل* الدور ده. لازم تتاخد هنا
+         * بالظبط، لأن الهاندلر جوه handleInternal() بيسجّل رده بنفسه
+         * فبعد ما يرجّع مش هينفع نفرّق بين "رد النهاردة" و"رد امبارح".
+         */
+        $lastOutgoingIdBefore = (int) $conversation->messages()
+            ->where('direction', 'outgoing')
+            ->max('id');
+        $previousOutgoing = $conversation->messages()
+            ->where('direction', 'outgoing')
+            ->latest('id')
+            ->take(3)
+            ->pluck('message')
+            ->filter()
+            ->values()
+            ->all();
+
         $result = $this->handleInternal($conversation, $message, $mediaItems);
+
+        $conversation->refresh();
+
+        $result = $this->guardAgainstLoop(
+            $conversation,
+            $result,
+            $message,
+            $previousOutgoing,
+            $lastOutgoingIdBefore,
+            $missingFieldsBefore
+        );
 
         $conversation->refresh();
 
@@ -92,6 +120,247 @@ class WhatsappIntentRouter
 
         return $result;
     }
+
+
+/**
+ * بيفكّر القايمة اللي عرضناها على العميل في الدور اللي فات، عشان رده
+ * الجاي يتحل عليها.
+ */
+private function rememberApplicationChoices(WhatsappConversation $conversation, Collection $machines): void
+{
+    $context = is_array($conversation->context_payload) ? $conversation->context_payload : [];
+    $context['application_machine_choices'] = $machines->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
+
+    $conversation->forceFill(['context_payload' => $context])->save();
+}
+
+/**
+ * بيحاول يطابق رسالة العميل على القايمة اللي عرضناها. بيرجّع Collection
+ * فيها مكنة واحدة لو لقى مطابقة أكيدة، وnull غير كده.
+ *
+ * بيقبل كمان الرد بالترتيب ("الأول"، "التاني"، "١") لأن ده رد طبيعي
+ * تمامًا على قايمة مرقّمة والعميل بيستخدمه كتير.
+ */
+private function resolveApplicationChoice(WhatsappConversation $conversation, string $message): ?Collection
+{
+    $context = is_array($conversation->context_payload) ? $conversation->context_payload : [];
+    $choices = $context['application_machine_choices'] ?? null;
+
+    if (! is_array($choices) || count($choices) < 2) {
+        return null;
+    }
+
+    $machines = Machine::query()->whereIn('id', $choices)->get();
+
+    if ($machines->isEmpty()) {
+        return null;
+    }
+
+    $normalized = $this->normalizeText($message);
+
+    if ($normalized === '') {
+        return null;
+    }
+
+    $ordinals = [
+        1 => ['الاول', 'الاولانى', 'الاولاني', 'اول واحده', 'رقم 1', '1', 'الأول'],
+        2 => ['التانى', 'التاني', 'الثانى', 'الثاني', 'رقم 2', '2'],
+        3 => ['التالت', 'الثالث', 'رقم 3', '3'],
+    ];
+
+    foreach ($ordinals as $position => $words) {
+        foreach ($words as $word) {
+            if ($normalized === $this->normalizeText($word)) {
+                $picked = $machines->values()->get($position - 1);
+
+                if ($picked) {
+                    $this->clearApplicationChoices($conversation);
+
+                    return collect([$picked]);
+                }
+            }
+        }
+    }
+
+    $matched = $machines->filter(function (Machine $machine) use ($normalized) {
+        $name = $this->normalizeText($this->machineDisplayName($machine));
+        $bare = $this->normalizeText($machine->name);
+
+        return $name !== '' && (str_contains($normalized, $name) || str_contains($normalized, $bare));
+    });
+
+    if ($matched->count() === 1) {
+        $this->clearApplicationChoices($conversation);
+
+        return $matched->values();
+    }
+
+    return null;
+}
+
+private function clearApplicationChoices(WhatsappConversation $conversation): void
+{
+    $context = is_array($conversation->context_payload) ? $conversation->context_payload : [];
+
+    if (! array_key_exists('application_machine_choices', $context)) {
+        return;
+    }
+
+    unset($context['application_machine_choices']);
+
+    $conversation->forceFill(['context_payload' => $context])->save();
+}
+
+/**
+ * بيحفظ أي بيانات طلب موجودة في رسالة وصلت قبل ما الموديل يتحدد.
+ * best-effort - أي فشل هنا ميوقفش المحادثة.
+ */
+private function bankApplicationDataEarly(WhatsappConversation $conversation, string $message): void
+{
+    try {
+        $context = is_array($conversation->context_payload) ? $conversation->context_payload : [];
+        $application = is_array($context['application'] ?? null) ? $context['application'] : [];
+
+        $updated = app(ApplicationHandler::class)->bankVolunteeredData(
+            $conversation,
+            $application,
+            $message,
+            null
+        );
+
+        if ($updated === $application) {
+            return;
+        }
+
+        $context['application'] = $updated;
+
+        $conversation->forceFill([
+            'last_topic' => 'application',
+            'context_payload' => $context,
+        ])->save();
+    } catch (\Throwable $e) {
+        Log::warning('early application banking failed', [
+            'conversation_id' => $conversation->id,
+            'error' => $e->getMessage(),
+        ]);
+    }
+}
+
+/**
+ * نقطة الاختناق الوحيدة لمنع اللوب. أي رد خارج من أي هاندلر بيعدي من
+ * هنا، فمش ممكن هاندلر جديد "ينسى" يستخدم المانع زي ما كان بيحصل قبل
+ * كده لما كان الفحص في handleAiFallback() بس.
+ *
+ * لو الرد مكرر: بنستبدله بنسخة متصعّدة (إعادة صياغة -> باب خروج ->
+ * تحويل لموظف) *وبنحدّث الصف اللي الهاندلر سجّله فعلًا* عشان اللي في
+ * الداشبورد يبقى هو اللي العميل شافه بالظبط.
+ */
+private function guardAgainstLoop(
+    WhatsappConversation $conversation,
+    array $result,
+    string $message,
+    array $previousOutgoing,
+    int $lastOutgoingIdBefore,
+    ?array $missingFieldsBefore = null
+): array {
+    $reply = trim((string) ($result['reply'] ?? ''));
+
+    if ($reply === '' || ($result['handled'] ?? false) !== true) {
+        return $result;
+    }
+
+    /*
+     * الطلب اتقدّم فعلًا في الدور ده (بيانة ناقصة اتملت)، فالرد ده مش
+     * لوب حتى لو شكله قريب من اللي قبله - أسئلة البيانات المتتالية
+     * بتشترك في نفس القالب بطبيعتها ("محتاج منك دلوقتي كذا"). من غير
+     * الشرط ده كان ممكن طلب ماشي صح يتحوّل لموظف عند التالت سؤال.
+     */
+    $missingAfter = $conversation->context_payload['missing_fields'] ?? null;
+
+    if (
+        is_array($missingFieldsBefore)
+        && is_array($missingAfter)
+        && count($missingAfter) < count($missingFieldsBefore)
+    ) {
+        return $result;
+    }
+
+    // التحويل نفسه رسالة متكررة بطبيعتها - مش لوب.
+    if (($conversation->status ?? 'open') === 'awaiting_agent') {
+        return $result;
+    }
+
+    // رد فيه صور أو أكتر من رسالة مش سؤال عالق، سيبه.
+    if (! empty($result['images']) || ! empty($result['image_items'])) {
+        return $result;
+    }
+
+    try {
+        $verdict = app(ConversationLoopGuard::class)->inspect(
+            $conversation,
+            $reply,
+            $previousOutgoing,
+            $message
+        );
+    } catch (\Throwable $e) {
+        Log::warning('loop guard failed', [
+            'conversation_id' => $conversation->id,
+            'error' => $e->getMessage(),
+        ]);
+
+        return $result;
+    }
+
+    $this->lastTurnRepetitionScore = $verdict['score'] ?? null;
+
+    if ($verdict['streak'] === 0) {
+        return $result;
+    }
+
+    if ($verdict['handoff'] === true) {
+        $this->deleteOutgoingSince($conversation, $lastOutgoingIdBefore);
+
+        return $this->handoffToAgent($conversation, $message, 'loop_guard_exhausted');
+    }
+
+    $replacement = trim((string) ($verdict['reply'] ?? ''));
+
+    if ($replacement === '' || $replacement === $reply) {
+        return $result;
+    }
+
+    $conversation->messages()
+        ->where('direction', 'outgoing')
+        ->where('id', '>', $lastOutgoingIdBefore)
+        ->latest('id')
+        ->take(1)
+        ->get()
+        ->each(function ($row) use ($replacement) {
+            $payload = is_array($row->payload) ? $row->payload : [];
+            $payload['loop_guard_rewritten'] = true;
+            $row->forceFill(['message' => $replacement, 'payload' => $payload])->save();
+        });
+
+    $result['reply'] = $replacement;
+
+    if (isset($result['replies']) && is_array($result['replies']) && count($result['replies']) === 1) {
+        $result['replies'] = [$replacement];
+    }
+
+    return $result;
+}
+
+/**
+ * بيمسح الرد اللي الهاندلر سجّله في الدور ده قبل ما نستبدله بتحويل
+ * لموظف - عشان الداشبورد ميعرضش رسالة العميل عمره ما شافها.
+ */
+private function deleteOutgoingSince(WhatsappConversation $conversation, int $lastOutgoingIdBefore): void
+{
+    $conversation->messages()
+        ->where('direction', 'outgoing')
+        ->where('id', '>', $lastOutgoingIdBefore)
+        ->delete();
+}
 
 
 /**
@@ -327,8 +596,9 @@ private function handleInternal(
         $message = trim($message);
 
         /*
-         * المحادثة دي محوّلة لموظف دعم فعلاً - الـ AI بيسكت تمامًا ومايردش
-         * لحد ما الموظف يقفل التحويل من الداشبورد (status يرجع 'open').
+         * المحادثة دي محوّلة لموظف دعم فعلاً - الـ AI مش بيرد ردود
+         * موضوعية لحد ما الموظف يقفل التحويل من الداشبورد (status يرجع
+         * 'open')، بس مبقاش بيسكت تمامًا: شوف handleWhileAwaitingAgent().
          * الرسالة دي اتسجلت خلاص في WhatsappBotController::incomingMessage()
          * قبل ما الـ job يتعمله process - إعادة تسجيلها هنا كانت بتنتج صف
          * incoming مكرر لكل رسالة توصل أثناء التحويل (يبان في الداشبورد
@@ -336,10 +606,32 @@ private function handleInternal(
          * يقفل التحويل).
          */
         if (($conversation->status ?? 'open') === 'awaiting_agent') {
-            return $this->textResult(null);
+            return $this->handleWhileAwaitingAgent($conversation, $message, $mediaItems);
         }
 
         if (count($mediaItems) && $this->allMediaAreVoice($mediaItems)) {
+            /*
+             * بنحاول نفرّغ الفويس لنص ونكمّل المحادثة عادي بدل ما نقول
+             * "اكتبلي". مندوبين التوصيل - أهم شريحة عندنا - بيبعتوا فويس
+             * وهما على الموتوسيكل، وردنا القديم كان بيوقفهم ويحوّلهم
+             * لموظف بعد تلات محاولات.
+             */
+            $transcript = app(\App\Services\VoiceTranscriptionService::class)->transcribe($mediaItems);
+
+            if ($transcript !== null) {
+                $conversation->messages()->create([
+                    'direction' => 'incoming',
+                    'message' => $transcript,
+                    'payload' => ['source' => 'voice_transcript'],
+                ]);
+
+                $context = is_array($conversation->context_payload) ? $conversation->context_payload : [];
+                unset($context['voice_message_count']);
+                $conversation->forceFill(['context_payload' => $context])->save();
+
+                return $this->handleInternal($conversation->refresh(), $transcript, []);
+            }
+
             return $this->handleVoiceMessage($conversation, $message);
         }
 
@@ -351,6 +643,20 @@ private function handleInternal(
 
         if (! count($mediaItems) && $this->isHumanSupportRequest($message)) {
             return $this->handoffToAgent($conversation, $message);
+        }
+
+        /*
+         * "مش فاهم حاجة" كانت بتتحسب طلب موظف بشري وتنهي المحادثة. دي
+         * أسوأ قراءة ممكنة للجملة دي: العميل بيقول إن آخر رسالة منّا
+         * مكانتش واضحة. الرد الصح إننا نعيد شرح آخر حاجة قلناها بأبسط
+         * صياغة - وده اللي موظف حقيقي كان هيعمله.
+         */
+        if (! count($mediaItems) && $this->isConfusionMessage($message)) {
+            $simplified = $this->handleConfusionMessage($conversation, $message);
+
+            if ($simplified !== null) {
+                return $simplified;
+            }
         }
 
         if (count($mediaItems)) {
@@ -489,6 +795,31 @@ private function handleInternal(
             && in_array($intent, ['installment_calc', 'installment_system', 'general', 'unknown'], true)
         ) {
             $intent = 'installment_total';
+            $plan['intent'] = $intent;
+            $plan['needs_clarification'] = false;
+            $plan['clarification_question'] = null;
+        }
+
+        /*
+         * "انا شغال طلبات علي عجله" - العميل بيعرّف بشغله ومركبته، مش
+         * بيطلب حسبة قسط. الكلاسيفاير رجّعها installment_calc، فالرسالة
+         * كانت رايحة على handleInstallmentCalc وممكن ترجع نفس أرقام
+         * القسط اللي اتبعتت قبلها بثواني بدل ما ترد على اللي قاله فعلاً.
+         *
+         * الشرط ضيق بقصد: جملة تعريف بالشغل، ومفيهاش أي إشارة لحسبة
+         * (مقدم/مدة/كلمة قسط أو سعر). لو قال شغله وطلب حسبة في نفس
+         * الرسالة، دي تفضل حسبة زي ما هي.
+         *
+         * ملحوظة: ده بيأثر بره مرحلة التقديم بس - جوّه المرحلة الرسالة
+         * أصلاً بتروح لـ ApplicationHandler من الشرط اللي فوق مهما كان
+         * تصنيف الكلاسيفاير.
+         */
+        if (
+            in_array($intent, ['installment_calc', 'installment_total', 'installment_system', 'price'], true)
+            && ! $mentionsDepositOrMonths
+            && $this->statesOwnJobOnly($normalizedMessage)
+        ) {
+            $intent = 'general';
             $plan['intent'] = $intent;
             $plan['needs_clarification'] = false;
             $plan['clarification_question'] = null;
@@ -725,9 +1056,30 @@ private function handleInternal(
 
         $machines = $this->resolveMachinesFromPlan($conversation, $message, $plan);
 
-        if (in_array($intent, ['general', 'unknown'], true) && ! $isComplaint && $machines->isNotEmpty()) {
-            $intent = $this->detectIntent($message);
-            $plan['intent'] = $intent;
+        /*
+         * شرط "&& $machines->isNotEmpty()" كان بيسيب أخطر حالة تعدي:
+         * رسالة سعر صريحة ("سعرها كام") لما الموديل ما اتحلّش. الـ planner
+         * بيرجّع general، والشرط ده كان بيمنع إعادة التصنيف، فالرسالة
+         * كانت بتروح لـ handleAiFallback والـ LLM يرد بسعر من دماغه
+         * (رد "دايونج سعرها كاش 65,000" وده سعر H250 أصلاً، مش سعرها).
+         *
+         * إعادة التصنيف دلوقتي بتجري حتى لو المكن فاضي - وساعتها الحارس
+         * الحتمي تحت (intent === 'price' && machines->isEmpty()) بيسأل
+         * العميل يأكد اسم الموديل بدل ما يديله رقم غلط.
+         */
+        if (in_array($intent, ['general', 'unknown'], true) && ! $isComplaint) {
+            $detected = $this->detectIntent($message);
+
+            /*
+             * من غير مكن متعرّف عليه، مينفعش نعيد التصنيف غير للنوايا
+             * اللي ليها حارس حتمي بيتعامل مع الحالة الفاضية (السعر).
+             * باقي النوايا محتاجة موديل عشان ترد صح، فسيبها تعدي
+             * للمسار العام زي ما كانت.
+             */
+            if ($machines->isNotEmpty() || $detected === 'price') {
+                $intent = $detected;
+                $plan['intent'] = $intent;
+            }
         }
 
         $searchMessage = $plan['machine_query'] ?: $message;
@@ -818,6 +1170,27 @@ private function handleInternal(
                 return app(ApplicationHandler::class)->handle($conversation, $message);
             }
 
+            /*
+             * لو إحنا اللي عرضنا قايمة موديلات في الدور اللي فات، الرد
+             * الجاي لازم يتحل على القايمة دي الأول. من غير ده كان الرد
+             * بيترجم من أول وجديد كل دور، فلو العميل بعت اسمه بدل ما
+             * يختار كنا بنعرض نفس القايمة تاني... وتالت.
+             */
+            $resolvedFromChoices = $this->resolveApplicationChoice($conversation, $message);
+
+            if ($resolvedFromChoices) {
+                $machines = $resolvedFromChoices;
+            }
+
+            if ($machines->isEmpty() || $machines->count() > 1) {
+                /*
+                 * أي بيانات في الرسالة (اسم، شغل، عنوان، موبايل) بتتحفظ
+                 * دلوقتي قبل ما نسأل عن الموديل. قبل كده كانت بتتمسح،
+                 * والعميل كان بيعيد كتابتها كلها بعد ما يختار.
+                 */
+                $this->bankApplicationDataEarly($conversation, $message);
+            }
+
             if ($machines->isEmpty()) {
                 return $this->textReply(
                     $conversation,
@@ -829,6 +1202,8 @@ private function handleInternal(
                 $list = $machines
                     ->map(fn (Machine $machine) => '- ' . $this->machineDisplayName($machine))
                     ->implode("\n");
+
+                $this->rememberApplicationChoices($conversation, $machines);
 
                 return $this->textReply(
                     $conversation,
@@ -896,6 +1271,50 @@ private function handleInternal(
                 $this->handleInstallmentCalc($conversation, $machines, $message, $plan),
                 $resumeApplicationAfterAnswer
             );
+        }
+
+        /*
+         * "عندكم بينيلي؟" - سؤال توفر. لازم يترد عليه من الداتابيز مش من
+         * الـ LLM: الـ LLM كان بينكر براندات موجودة عندنا فعلًا لأنه
+         * معندوش كتالوج (شوف CatalogSummaryService). الرد هنا deterministic
+         * ومستحيل يهلوس.
+         */
+        if ($intent === 'availability') {
+            if ($machines->isNotEmpty()) {
+                return $this->handleBrandModels($conversation, $machines, $message);
+            }
+
+            $catalog = app(\App\Services\CatalogSummaryService::class)->brandNames();
+
+            return $this->textReply(
+                $conversation,
+                "الماركات المتوفرة عندنا دلوقتي:\n- " . implode("\n- ", $catalog)
+                . "\n\nتحب أعرفلك أنهي موديل بالظبط يا فندم؟"
+            );
+        }
+
+        /*
+         * "رشحلي حاجة كويسة" / "معايا ٣٠ ألف، فيه إيه؟" / "ينفع بـ ٢٠
+         * ألف؟" - أكتر سؤال حقيقي في المعرض، والبوت كان بيرمي السؤال
+         * على العميل تاني كل مرة (٣ مرات ورا بعض في التجربة الحقيقية)
+         * أو يفهمها غلط على إنها طلب حساب قسط.
+         *
+         * الرد deterministic من الداتابيز للسبب اللي في كل مكان تاني:
+         * الترشيح لازم يكون بأسماء وأسعار حقيقية.
+         */
+        if ($intent === 'recommendation') {
+            $budget = isset($plan['budget']) && $plan['budget'] > 0
+                ? (float) $plan['budget']
+                : null;
+
+            $recommendation = app(\App\Services\MachineRecommendationService::class)
+                ->recommend($conversation, $message, $budget);
+
+            if ($recommendation['machines']->isNotEmpty()) {
+                $this->rememberMachines($conversation, $recommendation['machines']);
+            }
+
+            return $this->textReply($conversation, $recommendation['reply']);
         }
 
         if ($machines->isNotEmpty() && $isBrandOnly) {
@@ -1682,6 +2101,96 @@ $folder = $this->safeFolderName($machine->name);
         ];
     }
 
+    /**
+     * جُمل معناها "آخر رسالة منك مكانتش واضحة" - مش "عايز أكلم موظف".
+     */
+    private function isConfusionMessage(string $message): bool
+    {
+        $m = $this->normalizeText($message);
+
+        return $this->containsAny($m, [
+            'مش فاهم حاجه',
+            'مش فاهمه حاجه',
+            'مش فاهم قصدك',
+            'مش فاهمه قصدك',
+            'مش فاهم انت بتقول ايه',
+            'انا مش فاهم',
+            'انا مش فاهمه',
+            'وضحلي',
+            'وضحلى',
+            'مش واضح',
+            'اشرحلي تاني',
+            'اشرحلى تاني',
+            'يعني ايه كده',
+            'معرفتش اقصد ايه',
+        ]);
+    }
+
+    /**
+     * بيعيد شرح آخر رسالة خرجت منّا بصياغة أبسط. بيرجّع null لو مفيش
+     * رسالة سابقة نشرحها (ساعتها الرسالة تكمل مسارها الطبيعي).
+     */
+    private function handleConfusionMessage(WhatsappConversation $conversation, string $message): ?array
+    {
+        $previous = trim((string) $conversation->messages()
+            ->where('direction', 'outgoing')
+            ->whereNotIn('payload->source', ['human_handoff', 'handoff_waiting_ack'])
+            ->latest('id')
+            ->value('message'));
+
+        if ($previous === '') {
+            return null;
+        }
+
+        $prompt = <<<TXT
+        إنت موظف خدمة عملاء مصري في معرض موتوسيكلات، بتتكلم مصري عامي بسيط.
+
+        العميل قال إنه مش فاهم آخر رسالة بعتناها له. دي الرسالة:
+        ---
+        {$previous}
+        ---
+
+        وده اللي كتبه العميل: "{$message}"
+
+        اشرحله نفس المعلومة تاني بكلام أبسط بكتير، في سطرين بحد أقصى.
+
+        قواعد إلزامية:
+        - ممنوع تضيف أي رقم أو معلومة مش موجودة في الرسالة فوق، وممنوع
+          تشيل أي رقم منها.
+        - ممنوع تعتذر بكلام كتير - جملة قصيرة تكفي.
+        - لو الرسالة كانت سؤال، سيبها سؤال، وحط الاختيارات صريحة.
+        - رد بنص الرسالة الجديدة بس.
+        TXT;
+
+        try {
+            $result = app(GeminiClient::class)->generateText(
+                prompt: $prompt,
+                preferredModelCode: config('gemini.models.fast'),
+                options: [
+                    'timeout' => 12,
+                    'temperature' => 0.6,
+                    'thinkingBudget' => 0,
+                    'maxOutputTokens' => 400,
+                ]
+            );
+
+            $reply = trim((string) ($result['reply'] ?? ''));
+
+            if (($result['ok'] ?? false) && $reply !== '') {
+                app(ClarificationService::class)->reset($conversation);
+
+                return $this->textReply($conversation, trim($reply, "\"' \n\t"));
+            }
+        } catch (\Throwable $e) {
+            Log::warning('confusion rephrase failed', [
+                'conversation_id' => $conversation->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
     private function isHumanSupportRequest(string $message): bool
     {
         $m = $this->normalizeText($message);
@@ -1704,8 +2213,12 @@ $folder = $this->safeFolderName($machine->name);
             'انسان حقيقي',
             'مش عايز اتكلم مع بوت',
             'مش عاوز اتكلم مع بوت',
-            'مش فاهم حاجه',
-            'مش فاهمه حاجه',
+            /*
+             * "مش فاهم حاجة" كانت هنا وكانت بتشيل العميل من المحادثة على
+             * طول وتحطه في انتظار موظف - وهو أصلًا بيقول إنه محتاج شرح
+             * أبسط، مش إنه عايز حد تاني. اتشالت عمدًا: دلوقتي بتتعامل
+             * كطلب تبسيط في handleConfusionMessage().
+             */
         ]);
     }
 
@@ -2155,6 +2668,82 @@ $folder = $this->safeFolderName($machine->name);
     }
 
     /**
+     * قبل كده المحادثة المحوّلة لموظف كانت ثقب أسود: البوت بيرجّع null
+     * على أي رسالة، والعميل بيبعت "في حد؟" و"ردوا عليا" ومحدش بيرد
+     * خالص - حتى على سؤال سعر البوت يعرف إجابته في ثانية. ده أسوأ من
+     * إنه ميحولش أصلًا.
+     *
+     * دلوقتي بنعمل حاجتين:
+     *  ١) لو عدّى وقت طويل من غير ما موظف يرد فعلًا، بنفتح المحادثة تاني
+     *     ونكمل عادي بدل ما العميل يفضل مستني للأبد.
+     *  ٢) طول ما احنا مستنيين، بنبعت طمأنة قصيرة *مرة واحدة كل فترة*
+     *     (مش على كل رسالة) عشان العميل يعرف إن رسايله واصلة.
+     *
+     * الـ AI لسه مش بيرد ردود موضوعية طول ما الموظف ماسك المحادثة - ده
+     * كان قرار مقصود عشان ميتعارضش مع الموظف - بس السكوت التام اتشال.
+     */
+    private function handleWhileAwaitingAgent(
+        WhatsappConversation $conversation,
+        string $message,
+        array $mediaItems = []
+    ): array {
+        $handoffAt = $conversation->messages()
+            ->where('direction', 'outgoing')
+            ->where('payload->source', 'human_handoff')
+            ->latest('id')
+            ->value('created_at');
+
+        $agentReplied = $handoffAt
+            ? $conversation->messages()
+                ->where('direction', 'outgoing')
+                ->where('payload->source', 'agent_dashboard_reply')
+                ->where('created_at', '>=', $handoffAt)
+                ->exists()
+            : false;
+
+        $reopenAfter = (int) config('whatsapp.handoff_auto_reopen_minutes', 180);
+
+        if (
+            ! $agentReplied
+            && $reopenAfter > 0
+            && $handoffAt
+            && $handoffAt->diffInMinutes(now()) >= $reopenAfter
+        ) {
+            $conversation->forceFill([
+                'status' => 'open',
+                'clarification_attempts' => 0,
+                'last_clarification_question' => null,
+            ])->save();
+
+            Log::info('ai_handoff_auto_reopen', [
+                'conversation_id' => $conversation->id,
+                'minutes_waiting' => $handoffAt->diffInMinutes(now()),
+            ]);
+
+            return $this->handleInternal($conversation->refresh(), $message, $mediaItems);
+        }
+
+        $lastAck = $conversation->messages()
+            ->where('direction', 'outgoing')
+            ->where('payload->source', 'handoff_waiting_ack')
+            ->latest('id')
+            ->value('created_at');
+
+        $ackEvery = (int) config('whatsapp.handoff_ack_every_minutes', 60);
+
+        if ($lastAck && $lastAck->diffInMinutes(now()) < $ackEvery) {
+            return $this->textResult(null);
+        }
+
+        $reply = $this->renderMemory('رد انتظار الموظف')
+            ?: 'رسالتك وصلت يا فندم، وزميلي هيكلمك من هنا في أقرب وقت. لو الموضوع مستعجل قولي وأنا أعلّم عليه.';
+
+        $this->saveOutgoing($conversation, $reply, ['source' => 'handoff_waiting_ack']);
+
+        return $this->textResult($reply);
+    }
+
+    /**
      * بيحول المحادثة لموظف دعم: status = awaiting_agent يوقف رد الـ AI
      * تمامًا (شيك أول handle())، وتظهر في tab "الرسائل المنتظر الرد
      * عليها" بالداشبورد لحد ما الموظف يرد ويقفل التحويل.
@@ -2525,6 +3114,19 @@ private function lastMachinesFromConversation(WhatsappConversation $conversation
         return collect();
     }
 
+    /*
+     * الموديلات المحفوظة بتبقى صالحة لسياق الجلسة الحالية بس. من غير
+     * الحد ده، عميل سأل عن بينيلي إمبارح كان بيلاقي البوت بيرشّحله
+     * VLR 150 بسعرها النهارده رد على رسالة مالهاش أي علاقة، لأن
+     * last_machine_ids كانت بتتحقن في البرومبت مع الأسعار للأبد.
+     */
+    $staleAfterMinutes = (int) config('whatsapp.last_machines_ttl_minutes', 180);
+    $lastActivity = $conversation->updated_at;
+
+    if ($lastActivity && $lastActivity->diffInMinutes(now()) > $staleAfterMinutes) {
+        return collect();
+    }
+
     return Machine::query()
         ->with('brand')
         ->whereIn('id', $ids)
@@ -2551,6 +3153,54 @@ private function activeMachineFromConversation(WhatsappConversation $conversatio
     return $this->lastMachinesFromConversation($conversation)->first();
 }
 
+/**
+ * بيدوّر على أسماء موديلات في نص رسالة العميل الخام، ويرجّعها بس لو
+ * مفيش ولا واحد منهم في مجموعة الموديلات اللي المحادثة واقفة عليها.
+ *
+ * بيرجّع null معناها "مفيش دليل إن ده موضوع جديد" - سواء الرسالة مفيهاش
+ * اسم موديل خالص (زي "سعرها كام")، أو الأسماء اللي فيها جوه المجموعة
+ * القديمة أصلاً (تضييق حقيقي). في الحالتين الفرع اللي بعده بيكمّل عادي.
+ */
+private function machinesNamedOutsideLastSet(
+    WhatsappConversation $conversation,
+    string $message
+): ?Collection {
+    $message = trim($message);
+
+    if ($message === '') {
+        return null;
+    }
+
+    $last = $this->lastMachinesFromConversation($conversation);
+
+    if ($last->isEmpty()) {
+        return null;
+    }
+
+    $found = app(MachineSearchService::class)->search($message, 20);
+
+    if ($found->isEmpty()) {
+        return null;
+    }
+
+    $lastIds = $last->pluck('id')->map(fn ($id) => (int) $id)->all();
+
+    $overlaps = $found->contains(fn (Machine $machine) => in_array((int) $machine->id, $lastIds, true));
+
+    if ($overlaps) {
+        return null;
+    }
+
+    Log::info('new_machine_named_outside_last_set', [
+        'conversation_id' => $conversation->id,
+        'message' => mb_substr($message, 0, 120),
+        'resolved' => $found->pluck('name')->all(),
+        'last_set' => $last->pluck('name')->all(),
+    ]);
+
+    return $found;
+}
+
 private function resolveMachinesFromPlan(
     WhatsappConversation $conversation,
     string $message,
@@ -2558,6 +3208,35 @@ private function resolveMachinesFromPlan(
 ): Collection {
     $target = $plan['target'] ?? 'unknown';
     $hasMachineQuery = ! empty($plan['machine_query']);
+
+    /*
+     * العميل سمّى موديل تاني بالاسم - ده طلب جديد، مش تضييق على اللي فات.
+     *
+     * الحالة اللي كشفت ده: البوت عرض "دايو 2" و"دايو 2 استيراد"، والعميل
+     * سأل بعدها "سعر دايونج كام". الـ planner رجّع
+     * target=previous_selection وmachine_query="دايو" (قصّ الاسم!)، فالرد
+     * رجّع نفس موديلات دايو 2 تاني - و"دايونج" (موديل حقيقي id=56 سعره
+     * 45,000) مرجعش خالص.
+     *
+     * السبب إن فرع previous_selection تحت كان بيرجّع الموديلات القديمة
+     * على طول من غير ما يبص على نص رسالة العميل أصلاً. فأي غلطة في
+     * الـ planner مكانش قدامها أي حاجة توقفها.
+     *
+     * الفحص ده حتمي ومستقل عن الـ planner: بندوّر في نص الرسالة الخام،
+     * ولو طلّعت موديلات **مفيش ولا واحد فيهم في المجموعة القديمة**، يبقى
+     * دي رسالة عن حاجة تانية خالص.
+     *
+     * الشرط "ولا واحد" مقصود بالظبط: "دايو 2 استيراد" بعد عرض العيلة
+     * بترجّع موديل جوه المجموعة، فتفضل تضييق زي ما هي؛ و"سعرها كام"
+     * مبترجّعش أي موديل، فمبتلمسش الفرع ده.
+     */
+    if (in_array($target, ['previous_selection', 'single_previous_machine', 'selected_index'], true)) {
+        $named = $this->machinesNamedOutsideLastSet($conversation, $message);
+
+        if ($named !== null) {
+            return $named;
+        }
+    }
 
     /*
      * لو الـ AI قال "target = يرجع لموديل سابق" بس فعليًا مفيش موديل
@@ -2847,9 +3526,27 @@ private function handleInstallmentSystem(
         . "المدد المتاحة: 12 أو 18 أو 24 أو 36 شهر.\n"
         . "ولو حابب أحسبلك القسط ابعتلي المدة، ولو مكنة مختلفة ابعتلي اسمها.";
 
+    /*
+     * الرد ده بلوك جاهز فيه كل حاجة عن التقسيط - المؤهلين والسن
+     * والنظامين والمصاريف والمستندات. وكان بيخرج كامل على أي سؤال
+     * يتصنّف installment_system، حتى لو العميل سأل سؤال واحد محدد.
+     * فـ"هي الفوايد كام؟" كان بيرجعله ١٢ سطر مفيهمش رقم الفايدة، و"يعني
+     * ايه؟" بيرجعله نفس البلوك بالحرف. العميل بيتوه وميلاقيش إجابته.
+     *
+     * دلوقتي بنجاوب من نفس البلوك بس على السؤال اللي اتسأل. البلوك
+     * الكامل لسه بيخرج زي ما هو لما السؤال يكون عام فعلًا، أو لو
+     * التركيز فشل - فأسوأ حالة هي اللي كانت شغالة قبل كده.
+     */
+    $focused = $this->focusedAnswerFrom($reply, $message, $conversation);
+
+    if ($focused !== null) {
+        $reply = $focused;
+    }
+
     $this->saveOutgoing($conversation, $reply, [
         'source' => 'installment_system',
         'message' => $message,
+        'focused' => $focused !== null,
     ]);
 
 $this->updateConversationState($conversation, 'installment_system', null, [
@@ -2858,6 +3555,130 @@ $this->updateConversationState($conversation, 'installment_system', null, [
     return $this->textResult($reply);
 }
 
+
+/**
+ * بياخد بلوك معلومات جاهز وسؤال العميل، ويرجّع الجزء اللي بيجاوب على
+ * السؤال ده بس. بيرجّع null لو السؤال عام (يعني البلوك كله هو الإجابة
+ * الصح)، أو لو الرد المختصر مش موثوق.
+ *
+ * الأمان هنا مهم: الرد الجديد ممنوع يحتوي أي رقم مش موجود في البلوك
+ * الأصلي - نفس ضمانة AiReplyPhraser بالظبط، عشان اختصار الرسالة عمره
+ * ما يتحوّل لاختراع شرط أو نسبة.
+ */
+private function focusedAnswerFrom(string $block, string $question, ?WhatsappConversation $conversation = null): ?string
+{
+    $question = trim($question);
+
+    if ($question === '' || mb_strlen($block) < 200) {
+        return null;
+    }
+
+    $prompt = <<<TXT
+    إنت موظف خدمة عملاء مصري في معرض موتوسيكلات.
+
+    دي كل المعلومات المعتمدة عن التقسيط:
+    ---
+    {$block}
+    ---
+
+    العميل سأل: "{$question}"
+
+    رجّع JSON بالشكل ده بس:
+    {"answer": "..." أو null, "unanswered": "..." أو null}
+
+    - answer: لو السؤال بيسأل عن **جزء محدد** من المعلومات اللي فوق
+      (نسبة، مصاريف، مدد، مين ينفع يقسط، السن، المستندات)، اكتب الإجابة
+      على السؤال ده بس في سطرين بحد أقصى. لو السؤال عام وعايز يعرف
+      النظام كله، خلي answer = null.
+    - unanswered: لو العميل سأل سؤال محدد **إجابته مش موجودة خالص** في
+      المعلومات فوق (زي "ينفع من غير مقدم؟" أو "معنديش رخصة ينفع؟")،
+      اكتب السؤال ده في جملة قصيرة جدًا بصيغة "من غير مقدم" أو "من غير
+      رخصة". أكتر من سؤال؟ اكتبهم مفصولين بـ"و". غير كده خليه null.
+
+    قواعد إلزامية:
+    - ممنوع تكتب أي رقم أو نسبة أو شرط مش مكتوب حرفيًا في المعلومات فوق.
+    - ممنوع تخمّن إجابة سؤال مش مذكور فوق - مكانه unanswered.
+    - مصري عامي، من غير مقدمات.
+    TXT;
+
+    try {
+        $result = app(GeminiClient::class)->generateText(
+            prompt: $prompt,
+            preferredModelCode: config('gemini.models.fast'),
+            options: [
+                'timeout' => 12,
+                'temperature' => 0.3,
+                'thinkingBudget' => 0,
+                'maxOutputTokens' => 400,
+                'responseMimeType' => 'application/json',
+            ]
+        );
+    } catch (\Throwable $e) {
+        return null;
+    }
+
+    if (! ($result['ok'] ?? false)) {
+        return null;
+    }
+
+    $decoded = json_decode(trim((string) ($result['reply'] ?? '')), true);
+
+    if (! is_array($decoded)) {
+        return null;
+    }
+
+    $answer = trim((string) ($decoded['answer'] ?? ''));
+    $unanswered = trim((string) ($decoded['unanswered'] ?? ''));
+
+    /*
+     * العميل سأل حاجة إجابتها مش عندنا في البلوك ("ينفع من غير مقدم؟"،
+     * "معنديش رخصة ينفع؟"). قبل كده كان بياخد البلوك كامل وسؤاله بيضيع
+     * فيه من غير ما حد يرد عليه أصلًا. بنقر بالسؤال صراحة بدل ما نتجاهله.
+     */
+    if ($unanswered !== '') {
+        /*
+         * اللوج ده مقصود يبقى مصدر تغذية للميموري: كل سطر هنا معناه
+         * سؤال عميل حقيقي إحنا معندناش إجابته مكتوبة. صاحب المعرض
+         * بيضيف القاعدة في ai_memories مرة واحدة، والبوت يبقى بيجاوب
+         * عليه لوحده بعد كده من غير أي تعديل كود.
+         */
+        Log::info('ai_missing_policy_answer', [
+            'conversation_id' => $conversation->id ?? null,
+            'question' => mb_substr($question, 0, 200),
+            'missing' => $unanswered,
+        ]);
+    }
+
+    $note = $unanswered !== ''
+        ? "\n\nوبالنسبة لسؤالك عن {$unanswered} - دي محتاجة أتأكدلك منها وأرد على حضرتك حالًا."
+        : '';
+
+    if ($answer === '') {
+        return $note !== '' ? $block . $note : null;
+    }
+
+    $answer .= $note;
+
+    /*
+     * أي رقم في الرد لازم يكون موجود في البلوك الأصلي. رقم جديد معناه
+     * إن الموديل اخترع نسبة أو مدة - وده بيوصل للعميل كأنه شرط رسمي.
+     */
+    if (app(AiReplyPhraser::class)->rejectionReason($answer, $block) !== null) {
+        preg_match_all('/\d+/u', $answer, $answerNumbers);
+        preg_match_all('/\d+/u', $block, $blockNumbers);
+
+        if (! empty(array_diff($answerNumbers[0] ?? [], $blockNumbers[0] ?? []))) {
+            Log::warning('focused_answer_rejected_invented_numbers', [
+                'question' => mb_substr($question, 0, 100),
+                'answer' => mb_substr($answer, 0, 200),
+            ]);
+
+            return null;
+        }
+    }
+
+    return $answer;
+}
 
 private function isInstallmentSystemIntent(string $m): bool
 {
@@ -3328,7 +4149,19 @@ private function extractRequestedBrand(string $message): ?array
     foreach ($brands as $brand) {
         $name = trim((string) $brand->name);
 
-        if ($name !== '' && str_contains($m, $this->normalizeText($name))) {
+        if ($name === '') {
+            continue;
+        }
+
+        /*
+         * str_contains لوحده كان بيطابق جوه الكلمات: "دايونج" (موديل
+         * قائم بذاته) فيها "دايو" كـ substring، فأي رسالة فيها "عاوز
+         * دايونج" كانت بتتقري كأنها طلب براند دايو كله - والعميل يلاقي
+         * قدامه قايمة أسعار كل موديلات دايو بدل الموديل اللي طلبه
+         * بالاسم. نفس نوع الباج اللي اتصلح في
+         * MachineSearchService::applyWordBoundaryMap.
+         */
+        if ($this->containsAsWholeWord($m, $this->normalizeText($name))) {
             return [
                 'id' => $brand->id,
                 'name' => $name,
@@ -3337,6 +4170,25 @@ private function extractRequestedBrand(string $message): ?array
     }
 
     return null;
+}
+
+/**
+ * str_contains بحدود كلمات. \b مش شغالة صح مع العربي في PCRE، فبنعرّف
+ * "حرف الكلمة" يدويًا (عربي أو لاتيني أو رقم) ونتأكد إن اللي قبل
+ * وبعد المطابقة مش حرف كلمة.
+ */
+private function containsAsWholeWord(string $haystack, string $needle): bool
+{
+    $needle = trim($needle);
+
+    if ($needle === '' || $haystack === '') {
+        return false;
+    }
+
+    $wordChar = '[\p{Arabic}a-zA-Z0-9]';
+    $pattern = '/(?<!' . $wordChar . ')' . preg_quote($needle, '/') . '(?!' . $wordChar . ')/u';
+
+    return (bool) preg_match($pattern, $haystack);
 }
 
 
@@ -3634,6 +4486,36 @@ private function isBareConfirmation(string $normalizedMessage): bool
         'ايوه',
         'ايوا',
     ], true);
+}
+
+/**
+ * هل الرسالة تعريف بشغل العميل ومركبته وبس، من غير أي طلب حسبة؟
+ *
+ * "انا شغال طلبات علي عجله" -> أيوه
+ * "انا شغال طلبات، القسط كام؟" -> لأ (فيها طلب حسبة)
+ */
+private function statesOwnJobOnly(string $normalizedMessage): bool
+{
+    $statesJob = false;
+
+    foreach (['انا شغال', 'بشتغل', 'شغال في', 'شغال علي', 'شغلي', 'انا سواق', 'انا موظف', 'انا صاحب', 'مهنتي', 'وظيفتي'] as $phrase) {
+        if (str_contains($normalizedMessage, $phrase)) {
+            $statesJob = true;
+            break;
+        }
+    }
+
+    if (! $statesJob) {
+        return false;
+    }
+
+    foreach (['قسط', 'تقسيط', 'مقدم', 'سعر', 'بكام', 'كام', 'حساب', 'احسب', 'اجمالي', 'شهر', 'سنه', 'سنتين'] as $calculation) {
+        if (str_contains($normalizedMessage, $calculation)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 private function isApplicationIntent(string $normalizedMessage, WhatsappConversation $conversation): bool

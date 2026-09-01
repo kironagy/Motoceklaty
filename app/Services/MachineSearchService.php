@@ -24,7 +24,36 @@ class MachineSearchService
             return collect();
         }
 
+        /*
+         * مطابقة تامة لاسم مكنة لازم تكسب على طول من غير أي تجميع عيلة.
+         * "بوكسر ١٥٠" (اسم مكنة حرفي في الداتابيز) كان بيرجّع ٣ نتايج
+         * - بوكسر ١٥٠ وبلسر ١٥٠ ووينج ١٥٠ - لأن familyMatches بتجمّع على
+         * الرقم ١٥٠. والنتيجة إن العميل كان بيتسأل "تحب تقدم على أنهي
+         * موديل؟" وهو مسمّي الموديل بالحرف.
+         */
+        $exact = $this->exactNameMatch($queryNorm);
+
         $family = $this->familyMatches($queryNorm, $queryCode, $queryTokens);
+
+        /*
+         * لو الاستعلام اسم مكنة حرفي، بنضيّق العيلة على الفاريانتس
+         * الحقيقية بتاعتها بس - يعني الأسماء اللي بتبدأ بنفس الاسم
+         * ("دايو ٤" و"دايو ٤ اصلي"). كده "سعر دايو ٤" لسه بيعرض
+         * الاتنين زي ما المفروض، بينما "بوكسر ١٥٠" مبقاش بيجرّ معاه
+         * "بلسر ١٥٠" و"وينج ١٥٠" - دول موديلات تانية خالص، وتجميعهم
+         * كان بيخلي البوت يسأل "أنهي موديل؟" والعميل مسمّيه بالحرف.
+         */
+        if ($exact && $family->count() > 1) {
+            $variants = $family
+                ->filter(function (Machine $machine) use ($queryNorm) {
+                    $name = $this->normalizeSearchText((string) $machine->name);
+
+                    return $name === $queryNorm || str_starts_with($name, $queryNorm . ' ');
+                })
+                ->values();
+
+            $family = $variants->isNotEmpty() ? $variants : collect([$exact]);
+        }
 
 if ($family->isNotEmpty()) {
     return $family->take($limit)->values();
@@ -48,6 +77,30 @@ if ($family->isNotEmpty()) {
         }
 
         return collect([$ranked->first()['machine']]);
+    }
+
+    /**
+     * مكنة اسمها (أو اسمها مع البراند) مطابق حرفيًا للاستعلام بعد
+     * التطبيع. بيرجّع null لو مفيش مطابقة تامة، أو لو فيه أكتر من مكنة
+     * بنفس الاسم بالظبط (ساعتها التوضيح مطلوب فعلاً).
+     */
+    private function exactNameMatch(string $queryNorm): ?Machine
+    {
+        if ($queryNorm === '') {
+            return null;
+        }
+
+        $matches = Machine::query()
+            ->orderBy('id')
+            ->get()
+            ->filter(function (Machine $machine) use ($queryNorm) {
+                $name = $this->normalizeSearchText((string) $machine->name);
+
+                return $name !== '' && $name === $queryNorm;
+            })
+            ->values();
+
+        return $matches->count() === 1 ? $matches->first() : null;
     }
 
     public function findBest(string $message): ?Machine
@@ -359,7 +412,6 @@ private function allBrandTokens(): array
         'benelli',
         'هوجن',
         'هاوجن',
-        'دايون',
         'دايو',
         'dayun',
     ]);
@@ -652,10 +704,21 @@ private function loadMemoryAliasesMap(): array
             'الهوجان' => 'هوجن',
             'الهوجن' => 'هوجن',
 
+            /*
+             * ملحوظة مهمة:
+             * التحويلات دي كانت بتتعمل بـ str_replace من غير حدود كلمات،
+             * فـ "Dayung" (موديل حقيقي id=56) كان بيبقى "دايونg" - كلمة
+             * نص عربي نص إنجليزي مش بتطابق أي حاجة. النتيجة إن "دايونج"
+             * كان بيرجّع صفر نتايج والـ LLM يخمّن "دايو".
+             * التحويل دلوقتي بقى بحدود كلمات (انظر applyWordBoundaryMap
+             * تحت) و"dayung" له مدخل خاص بيه قبل "dayun".
+             */
+            'dayung' => 'دايونج',
+            'دايونغ' => 'دايونج',
+            'daewoo' => 'دايو',
             'dayun' => 'دايون',
             'daion' => 'دايون',
             'ديوان' => 'دايون',
-            'الدايون' => 'دايون',
 
             'تي في اس' => 'tvs',
             'تي فى اس' => 'tvs',
@@ -706,13 +769,37 @@ private function loadMemoryAliasesMap(): array
 
         uksort($replace, fn ($a, $b) => mb_strlen($b) <=> mb_strlen($a));
 
-        $text = str_replace(array_keys($replace), array_values($replace), $text);
+        $text = $this->applyWordBoundaryMap($text, $replace);
 $text = preg_replace('/\b(\d+)\s*cc\b/i', '$1', $text);
 $text = preg_replace('/\b(\d+)\s*سي\s*سي\b/u', '$1', $text);
         $text = preg_replace('/[^\p{Arabic}a-zA-Z0-9\s]/u', ' ', $text);
         $text = preg_replace('/\s+/u', ' ', $text);
 
         return trim($text);
+    }
+
+    /**
+     * تطبيق خريطة المرادفات بحدود كلمات بدل str_replace الأعمى.
+     *
+     * str_replace كان بيضرب جوه الكلمات: "Dayung" -> "دايونg"، و"هوجانى"
+     * -> "هوجنى". الحدود هنا مش \b العادية لأنها مش شغالة صح مع العربي في
+     * PCRE، فبنستخدم lookaround على "حرف كلمة" معرّف يدويًا (عربي أو
+     * لاتيني أو رقم).
+     */
+    private function applyWordBoundaryMap(string $text, array $map): string
+    {
+        $wordChar = '[\p{Arabic}a-zA-Z0-9]';
+
+        foreach ($map as $from => $to) {
+            $pattern = '/(?<!' . $wordChar . ')' . preg_quote($from, '/') . '(?!' . $wordChar . ')/u';
+            $replaced = preg_replace($pattern, $to, $text);
+
+            if ($replaced !== null) {
+                $text = $replaced;
+            }
+        }
+
+        return $text;
     }
 
     public function normalizeModelCode(string $text): string

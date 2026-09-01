@@ -88,11 +88,52 @@ class ApplicantDataVerifier
             }
         }
 
+        $ageIssue = $this->ageContradiction($application);
+
+        if ($ageIssue !== null) {
+            $issues['stated_age'] = $ageIssue;
+        }
+
         return [
             'application' => $application,
             'issues' => $issues,
             'blocking_message' => null,
         ];
+    }
+
+    /**
+     * العميل قال سنه بصوته، والرقم القومي بيقول سن تاني.
+     *
+     * في اختبار حقيقي العميل كتب "سني ٢٨" وبعدين بعت رقم قومي بيطلع منه
+     * سن ٤١، والطلب عدّى عادي من غير ما حد يعلّق. الفرق ده إما رقم قومي
+     * مكتوب غلط (رقم واحد ناقص أو مقلوب) أو رقم مش بتاعه - والاتنين
+     * لازم يتسألوا دلوقتي، مش بعد ما الورق كله يترفع ويترفض يدوي.
+     *
+     * هامش سنتين مقصود: العميل بيقرّب سنه في الكلام العادي، ومش هنوقف
+     * طلب عشان "٢٩" و"٣٠".
+     */
+    private function ageContradiction(array $application): ?string
+    {
+        $stated = $application['stated_age'] ?? null;
+        $derived = $application['age'] ?? null;
+
+        if (! is_numeric($stated) || ! is_numeric($derived)) {
+            return null;
+        }
+
+        $stated = (int) $stated;
+        $derived = (int) $derived;
+
+        if ($stated < 15 || $stated > 90 || $derived <= 0) {
+            return null;
+        }
+
+        if (abs($stated - $derived) <= 2) {
+            return null;
+        }
+
+        return "حضرتك قلت سنك {$stated} سنة، بس الرقم القومي اللي بعتهولي طالع منه {$derived} سنة."
+            . "\nممكن تتأكد من الرقم القومي وتبعتهولي تاني؟";
     }
 
     /**

@@ -141,7 +141,7 @@ public static function form(Form $form): Form
                             'المفاتيح المدعومة: banned_professions (مهن ممنوعة) · job_category (اسم فئة شغل) · '
                             . 'job_keywords (كلمات بتدل على الفئة) · required_documents (المستندات المطلوبة للفئة: '
                             . 'id_card_front, id_card_back, salary_slip, pension_statement, activity_photo, '
-                            . 'bank_statement, driver_license, trips_screenshot, vehicle_license). سيبها فاضية '
+                            . 'bank_statement, driver_license, vehicle_license, work_app_screens - سكرينات تطبيق الشغل: تاريخ التعيين والملف التعريفي ودخل آخر 3 شهور). سيبها فاضية '
                             . 'لو الميموري للقراءة بس.'
                         ),
 

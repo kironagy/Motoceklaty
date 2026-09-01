@@ -36,7 +36,7 @@ class DeliveryVehicleDocumentsTest extends TestCase
             'work_vehicle' => 'bicycle',
         ]);
 
-        $this->assertContains('trips_screenshot', $documents);
+        $this->assertContains('work_app_screens', $documents);
         $this->assertNotContains('driver_license', $documents);
         // The ID card is required of everyone.
         $this->assertContains('id_card_front', $documents);
@@ -49,11 +49,11 @@ class DeliveryVehicleDocumentsTest extends TestCase
             'work_vehicle' => 'motorcycle',
         ]);
 
-        $this->assertContains('trips_screenshot', $documents);
+        $this->assertContains('work_app_screens', $documents);
         $this->assertContains('driver_license', $documents);
     }
 
-    public function test_uber_driver_needs_id_screenshot_and_licence(): void
+    public function test_uber_driver_needs_id_screenshots_and_licence(): void
     {
         $documents = $this->requiredDocuments([
             'job_type' => 'شغال اوبر',
@@ -62,7 +62,7 @@ class DeliveryVehicleDocumentsTest extends TestCase
 
         $this->assertContains('id_card_front', $documents);
         $this->assertContains('id_card_back', $documents);
-        $this->assertContains('trips_screenshot', $documents);
+        $this->assertContains('work_app_screens', $documents);
         $this->assertContains('driver_license', $documents);
     }
 
@@ -148,5 +148,178 @@ class DeliveryVehicleDocumentsTest extends TestCase
         $application = $service->refreshAddressComponents($application);
 
         $this->assertSame([], $service->missingFields($application, false, false));
+    }
+
+    /**
+     * محادثة حقيقية: الطلب اتصنّف "تاكسي" (من كلمة في رسالة قديمة) فطلب
+     * رخصة قيادة، والعميل رد "انا شغال علي عجله مش معايا رخصه". العجلة
+     * مالهاش رخصة - أيًا كانت الفئة - فالطلب كان بيقف على مستند مستحيل.
+     */
+    public function test_a_bicycle_never_needs_a_licence_whatever_the_category_says(): void
+    {
+        $documents = $this->requiredDocuments([
+            'job_type' => 'سواق تاكسي',
+            'work_vehicle' => 'bicycle',
+        ]);
+
+        $this->assertNotContains('driver_license', $documents);
+        $this->assertNotContains('vehicle_license', $documents);
+        $this->assertContains('id_card_front', $documents);
+    }
+
+    /**
+     * محادثة حقيقية (رقم 01200268302): documents_required اتسجّل بـ
+     * driver_license من قبل ما work_vehicle يتحدد صح، فالعميل - وهو على
+     * عجلة، خلّص البطاقة وش وضهر - اتطلب منه رخصة قيادة. الحارس ده
+     * بيصحّح القايمة في **أول** كل دور في مرحلة المستندات، مش بس لما
+     * العميل يكتب "أنا على عجلة" صراحة في نفس الرسالة.
+     */
+    public function test_stale_licence_requirement_is_dropped_before_the_next_document_prompt(): void
+    {
+        $method = new \ReflectionMethod(ApplicationHandler::class, 'enforceBicycleHasNoLicence');
+        $method->setAccessible(true);
+
+        $payload = [
+            'application' => ['work_vehicle' => 'bicycle'],
+            'documents_required' => ['id_card_front', 'id_card_back', 'driver_license', 'work_app_screens'],
+            'documents_index' => 2,
+            'documents_collected' => [
+                'id_card_front' => ['path' => 'a.jpg', 'fields' => []],
+                'id_card_back' => ['path' => 'b.jpg', 'fields' => []],
+            ],
+        ];
+
+        $conversation = new \App\Models\WhatsappConversation();
+
+        $changed = $method->invokeArgs($this->handler(), [$conversation, &$payload]);
+
+        $this->assertTrue($changed);
+        $this->assertSame(['id_card_front', 'id_card_back', 'work_app_screens'], $payload['documents_required']);
+        $this->assertSame(2, $payload['documents_index']);
+    }
+
+    public function test_the_guard_does_nothing_when_the_list_is_already_correct(): void
+    {
+        $method = new \ReflectionMethod(ApplicationHandler::class, 'enforceBicycleHasNoLicence');
+        $method->setAccessible(true);
+
+        $payload = [
+            'application' => ['work_vehicle' => 'motorcycle'],
+            'documents_required' => ['id_card_front', 'id_card_back', 'work_app_screens', 'driver_license'],
+            'documents_index' => 2,
+            'documents_collected' => [],
+        ];
+
+        $conversation = new \App\Models\WhatsappConversation();
+
+        $changed = $method->invokeArgs($this->handler(), [$conversation, &$payload]);
+
+        $this->assertFalse($changed);
+        $this->assertSame(['id_card_front', 'id_card_back', 'work_app_screens', 'driver_license'], $payload['documents_required']);
+    }
+
+    private function guard(array $application, array $extracted, string $message): array
+    {
+        $method = new \ReflectionMethod(ApplicationHandler::class, 'guardStoredWorkVehicle');
+        $method->setAccessible(true);
+
+        return $method->invoke($this->handler(), $application, $extracted, $message);
+    }
+
+    /**
+     * محادثة العجلة: العميل قال "شغال طلبات على عجلة" فاتسجلت bicycle،
+     * وبعدين بعت اسمه وعنوانه - والاستخراج رجّع motorcycle من سياق
+     * المحادثة (اسم المكنة اللي بيشتريها). لو الدمج قبلها، قايمة
+     * المستندات كانت بتتبني وفيها رخصة قيادة مستحيل توصل.
+     */
+    public function test_extraction_cannot_overwrite_a_stored_vehicle_the_customer_did_not_restate(): void
+    {
+        $extracted = $this->guard(
+            ['work_vehicle' => 'bicycle'],
+            ['work_vehicle' => 'motorcycle', 'full_name' => 'احمد سيد حسين علي'],
+            'احمد سيد حسين علي 29011260101839 ٦ اكتوبر شارع محمد عماره ١٢'
+        );
+
+        $this->assertArrayNotHasKey('work_vehicle', $extracted);
+        $this->assertSame('احمد سيد حسين علي', $extracted['full_name']);
+    }
+
+    public function test_customer_can_still_correct_their_vehicle_explicitly(): void
+    {
+        $extracted = $this->guard(
+            ['work_vehicle' => 'bicycle'],
+            ['work_vehicle' => 'motorcycle'],
+            'انا بقيت شغال على موتوسيكل دلوقتي'
+        );
+
+        $this->assertSame('motorcycle', $extracted['work_vehicle']);
+    }
+
+    public function test_first_vehicle_answer_is_still_taken_from_extraction(): void
+    {
+        $extracted = $this->guard(
+            [],
+            ['work_vehicle' => 'motorcycle'],
+            'شغال دليفري'
+        );
+
+        $this->assertSame('motorcycle', $extracted['work_vehicle']);
+    }
+
+    public function test_a_repeat_of_the_same_vehicle_passes_through(): void
+    {
+        $extracted = $this->guard(
+            ['work_vehicle' => 'bicycle'],
+            ['work_vehicle' => 'عجلة'],
+            'اه على عجله'
+        );
+
+        $this->assertSame('عجلة', $extracted['work_vehicle']);
+    }
+
+    private function contradicts(array $payload, string $reply): bool
+    {
+        $method = new \ReflectionMethod(ApplicationHandler::class, 'replyContradictsPendingDocument');
+        $method->setAccessible(true);
+
+        return $method->invoke($this->handler(), $payload, $reply);
+    }
+
+    /**
+     * الرسالة اللي بتناقض نفسها: الرد الحر بيقول "مش محتاجين رخصة قيادة
+     * خالص" والـ prompt الثابت متلزق تحته على طول "ابعتلي رخصة القيادة".
+     */
+    public function test_a_reply_that_denies_the_licence_contradicts_a_pending_licence(): void
+    {
+        $payload = [
+            'documents_required' => ['id_card_front', 'id_card_back', 'driver_license'],
+            'documents_index' => 2,
+        ];
+
+        $this->assertTrue($this->contradicts(
+            $payload,
+            'بما إن حضرتك شغال دليفري بعجلة، محتاجين البطاقة وسكرين من التطبيق. ومش محتاجين رخصة قيادة خالص.'
+        ));
+    }
+
+    public function test_an_ordinary_answer_does_not_count_as_a_contradiction(): void
+    {
+        $payload = [
+            'documents_required' => ['id_card_front', 'driver_license'],
+            'documents_index' => 1,
+        ];
+
+        $this->assertFalse($this->contradicts($payload, 'أيوه ينفع تصورها بالموبايل عادي، المهم تكون واضحة.'));
+        $this->assertFalse($this->contradicts($payload, 'الرخصة لازم تكون سارية وباسم حضرتك.'));
+    }
+
+    public function test_no_contradiction_when_the_pending_document_is_not_a_licence(): void
+    {
+        $payload = [
+            'documents_required' => ['id_card_front', 'work_app_screens'],
+            'documents_index' => 1,
+        ];
+
+        $this->assertFalse($this->contradicts($payload, 'ومش محتاجين رخصة قيادة خالص، ابعتلي السكرين بس.'));
     }
 }

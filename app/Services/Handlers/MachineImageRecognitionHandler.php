@@ -49,6 +49,33 @@ class MachineImageRecognitionHandler
             );
         }
 
+        /*
+         * الصورة مش مركبة أصلاً.
+         *
+         * الفرع ده مكانش موجود، وكل صورة كانت بتتعامل على إنها صورة مكنة.
+         * فسكرين تطبيق طلبات كان بيرجع "مش متأكد من الموديل من الصورة دي،
+         * شفت إن فيها كتابة Account, talabat.com، ممكن تأكدلي اسم
+         * الموديل؟" - رد بيخلي العميل يحس إن محدش قارى حاجة.
+         *
+         * دلوقتي بنقول للعميل إحنا شفنا إيه، وبنسأله سؤال يخص الحاجة
+         * اللي بعتها فعلاً.
+         */
+        if (($classification['is_vehicle_photo'] ?? true) === false) {
+            $what = trim((string) ($classification['what_it_is'] ?? ''));
+            $seen = $what !== '' ? "دي {$what}" : 'الصورة دي مش صورة مكنة';
+
+            Log::info('non_vehicle_image_received', [
+                'conversation_id' => $conversation->id,
+                'what_it_is' => $what,
+            ]);
+
+            return $this->reply(
+                $conversation,
+                "شفت الصورة يا فندم، {$seen}.\nقولي محتاج إيه بالظبط عشان أقدر أساعدك - صور موديل معيّن، سعره، ولا حابب تقدّم على تقسيط؟",
+                ['vision_classification' => $classification]
+            );
+        }
+
         $matchId = $classification['match_id'];
         $confidence = $classification['confidence'];
         $machine = $matchId ? $catalog->firstWhere('id', $matchId) : null;
@@ -157,9 +184,16 @@ class MachineImageRecognitionHandler
             ->implode("\n");
 
         $prompt = <<<PROMPT
-انت خبير بيتعرف على مكن/موتوسيكلات وسكوترات من صورة. مهمتك جزئين:
+انت خبير بيتعرف على مكن/موتوسيكلات وسكوترات من صورة. مهمتك تلات أجزاء:
 
-١) وصف نوع المكنة (موتوسيكل / سكوتر / تروسيكل / غير معروف) والبراند بتاعها لو ظاهر أو معروف، حتى لو الموديل ده مش موجود في القائمة تحت.
+٠) الأول خالص: هل الصورة دي أصلاً صورة مركبة (موتوسيكل/سكوتر/تروسيكل)؟
+   لو لأ - لو دي سكرين شوت من تطبيق، أو بطاقة/رخصة/ورقة رسمية، أو صورة
+   شخص، أو أي حاجة تانية خالص - خلي is_vehicle_photo = false واكتب في
+   what_it_is وصف قصير جدًا بالعربي المصري للي في الصورة فعلًا (مثال:
+   "سكرين من تطبيق طلبات"، "بطاقة رقم قومي"، "صورة شخصية"). وسيب باقي
+   الحقول فاضية.
+
+١) لو دي فعلاً صورة مركبة: وصف نوع المكنة (موتوسيكل / سكوتر / تروسيكل / غير معروف) والبراند بتاعها لو ظاهر أو معروف، حتى لو الموديل ده مش موجود في القائمة تحت.
 
 ٢) قارن الصورة بقائمة الموديلات الحقيقية المتاحة عندنا تحت، واختار رقم (id) الموديل الأقرب للي في الصورة *بس لو متأكد بصريًا* (الشكل والتصميم والشعار متطابقين فعلاً)، ولو مش متأكد أو الصورة مش واضحة كفاية أو الموديل مش موجود في القائمة، رجع match_id: null - ممنوع تخمّن أو تختار أقرب حاجة شكلها شبه لو مش متأكد فعلاً، خصوصًا إن سكوتر وموتوسيكل حاجتين مختلفتين تمامًا حتى لو نفس البراند.
 
@@ -167,7 +201,7 @@ class MachineImageRecognitionHandler
 {$list}
 
 رد بصيغة JSON فقط بدون أي كلام زيادة، بالشكل ده بالظبط:
-{"match_id": رقم من القايمة فوق أو null, "confidence": "high أو medium أو low", "visible_text": "أي نص أو شعار ظاهر فعليًا في الصورة", "machine_type": "موتوسيكل أو سكوتر أو تروسيكل أو فاضي لو مش معروف", "brand_guess": "اسم البراند لو ظاهر أو معروف أو فاضي"}
+{"is_vehicle_photo": true أو false, "what_it_is": "وصف قصير للي في الصورة لو مش مركبة، أو فاضي", "match_id": رقم من القايمة فوق أو null, "confidence": "high أو medium أو low", "visible_text": "أي نص أو شعار ظاهر فعليًا في الصورة", "machine_type": "موتوسيكل أو سكوتر أو تروسيكل أو فاضي لو مش معروف", "brand_guess": "اسم البراند لو ظاهر أو معروف أو فاضي"}
 PROMPT;
 
         $result = app(GeminiClient::class)->generateText($prompt, 'gemini-3.1-flash-lite', [
@@ -198,6 +232,9 @@ PROMPT;
         }
 
         return [
+            'is_vehicle_photo' => ! array_key_exists('is_vehicle_photo', $decoded)
+                || (bool) $decoded['is_vehicle_photo'],
+            'what_it_is' => trim((string) ($decoded['what_it_is'] ?? '')),
             'match_id' => $matchId,
             'confidence' => in_array($decoded['confidence'] ?? null, ['high', 'medium', 'low'], true)
                 ? $decoded['confidence']

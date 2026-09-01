@@ -219,9 +219,10 @@ class ApplicationHandlerTest extends TestCase
     /**
      * When the customer sends a follow-up that adds a new component (the
      * street) to an address that already had its area known, the reply
-     * must acknowledge specifically what was just received ("حضرتك بعت
-     * اسم الشارع") before listing what's still missing - not just repeat
-     * the same missing-component list with no sign anything changed.
+     * must list what's still missing for the address - and, per an
+     * explicit product decision (AI_BOT_ISSUES_FIX_PLAN.md task T10), it
+     * must NOT enumerate what was just received ("استلمت منك اسم الشارع")
+     * - that read as a robot reciting a report back to the customer.
      */
     public function test_address_component_acknowledges_what_was_just_received(): void
     {
@@ -238,7 +239,7 @@ class ApplicationHandlerTest extends TestCase
 
         $question = $service->questionForMissing(['home_address'], $data);
 
-        $this->assertStringContainsString('استلمت منك اسم الشارع', $question);
+        $this->assertStringNotContainsString('استلمت منك', $question);
         $this->assertStringContainsString('رقم العمارة', $question);
         $this->assertStringContainsString('الدور', $question);
         $this->assertStringContainsString('رقم الشقة', $question);
