@@ -370,7 +370,7 @@ class AddressParser
      * $requireOwnership additionally requires "ملك ولا إيجار" - only
      * meaningful for the home address, not the work address.
      */
-    public function status(array $components, bool $requireOwnership = false): array
+    public function status(array $components, bool $requireOwnership = false, bool $isWorkplace = false): array
     {
         $hasAreaOrGovernorate = filled($components['area'] ?? null)
             || filled($components['governorate'] ?? null)
@@ -382,6 +382,33 @@ class AddressParser
          * صاحب فيلا معناه سؤال مالوش إجابة - والطلب بيقف عنده للأبد.
          */
         $isVilla = ($components['residence_type'] ?? null) === 'villa';
+
+        /*
+         * عنوان الشغل مش عنوان سكن.
+         *
+         * الشخص ممكن يكون شغال في شركة أو مصنع أو مول أو محل - مفيش
+         * "دور" ولا "رقم شقة" ولا "ملك ولا إيجار" في أي منهم، وطلبها منه
+         * سؤال مالوش إجابة بيوقف الطلب. اللي بيهمنا في مكان الشغل إننا
+         * نعرف نوصله: المنطقة، ومعاها اسم الشارع أو علامة مميزة.
+         */
+        if ($isWorkplace) {
+            $requiredMet = [
+                'area_or_governorate' => $hasAreaOrGovernorate,
+                'workplace_location' => filled($components['street'] ?? null)
+                    || filled($components['landmark'] ?? null)
+                    || filled($components['building'] ?? null),
+            ];
+
+            $missing = array_keys(array_filter($requiredMet, fn ($met) => ! $met));
+
+            if (empty($missing)) {
+                return ['status' => 'complete', 'missing' => []];
+            }
+
+            $anyPresent = collect($components)->filter(fn ($value) => filled($value))->isNotEmpty();
+
+            return ['status' => $anyPresent ? 'partial' : 'missing', 'missing' => $missing];
+        }
 
         $requiredMet = $isVilla
             ? [

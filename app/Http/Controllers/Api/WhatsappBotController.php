@@ -156,6 +156,14 @@ class WhatsappBotController extends Controller
         ->whereIn('status', ['pending', 'processing'])
         ->exists();
 
+    /*
+     * أكتر من فويس/صورة ورا بعض بيتجمعوا في job واحد (الـ collector في
+     * Node بيستنى 3 ثواني)، فمفيش job سابق ينتظر - ومع ذلك العميل بعت
+     * أكتر من رسالة والرد لازم يبان بيرد على أنهي واحدة. والفويس تحديدًا
+     * العميل مش شايف نصه قدامه، فالـ reply بيوضّح أكتر من رسالة عادية.
+     */
+    $quoteReply = $hasUnansweredJob || count($mediaItems) > 1;
+
     $conversation->messages()->create([
         'direction' => 'incoming',
         'wa_message_id' => $waMessageId,
@@ -184,7 +192,7 @@ class WhatsappBotController extends Controller
         $message,
         $mediaItems,
         $request,
-        $hasUnansweredJob
+        $quoteReply
     );
 
     return response()->json([

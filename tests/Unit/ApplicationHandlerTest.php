@@ -345,8 +345,17 @@ class ApplicationHandlerTest extends TestCase
         $question = $service->questionForMissing($missing, $application, []);
 
         $this->assertStringContainsString('عنوان الشغل', $question);
-        $this->assertStringContainsString('رقم العمارة', $question);
+        $this->assertStringContainsString('استلمت منك المنطقة', $question);
         $this->assertStringContainsString('عنوان السكن بالتفصيل', $question);
+
+        /*
+         * مكان الشغل ممكن يكون شركة أو مصنع أو مول - مفيش فيه دور ولا
+         * رقم شقة ولا "ملك ولا إيجار"، وطلبها كان بيوقف الطلب على سؤال
+         * مالوش إجابة. المطلوب منه اللي يوصّلنا للمكان بس.
+         */
+        foreach (['الدور', 'رقم الشقة', 'ملكك ولا إيجار', 'رقم العمارة'] as $homeOnly) {
+            $this->assertStringNotContainsString($homeOnly, $question, $homeOnly);
+        }
     }
 
     /**

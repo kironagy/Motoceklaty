@@ -54,6 +54,11 @@ class ApplicationStateService
         'apartment' => 'رقم الشقة',
         'landmark' => 'علامة مميزة قريبة من العنوان',
         'ownership' => 'السكن ده ملكك ولا إيجار',
+        /*
+         * مكوّن خاص بعنوان الشغل - مكان الشغل نفسه بأي وصف يوصّلنا له
+         * (اسم الشركة/المصنع/المول، أو الشارع، أو علامة مميزة).
+         */
+        'workplace_location' => 'اسم المكان اللي بتشتغل فيه أو الشارع أو علامة مميزة قريبة',
     ];
 
     public function __construct(private readonly AddressParser $addressParser)
@@ -146,7 +151,11 @@ class ApplicationStateService
              * "ملك ولا إيجار" مطلوب لعنوان السكن بس - مش ليه علاقة
              * بمكان الشغل.
              */
-            $status = $this->addressParser->status($merged, $field === 'home_address');
+            $status = $this->addressParser->status(
+                $merged,
+                $field === 'home_address',
+                $field === 'work_address'
+            );
 
             $application[$componentsKey] = $merged;
             $application["{$field}_status"] = $status['status'] === 'complete' ? 'complete' : 'incomplete';
@@ -610,7 +619,9 @@ class ApplicationStateService
         'phone' => 'رقم الموبايل',
         'job_type' => 'طبيعة شغلك',
         'income_proof' => 'إثبات دخل (مفردات مرتب أو غيرها لو متاح)',
-        'work_address' => 'عنوان الشغل بالتفصيل',
+        // مكان الشغل ممكن يكون شركة أو مصنع أو مول أو محل - بنطلب اللي
+        // يوصّلنا للمكان، مش تفاصيل سكن (دور/شقة/ملك ولا إيجار).
+        'work_address' => 'عنوان الشغل (اسم المكان والمنطقة وعلامة مميزة قريبة)',
         'home_address' => 'عنوان السكن بالتفصيل',
         'installment_months' => 'مدة التقسيط اللي تحبها',
         'work_vehicle' => 'بتشتغل على إيه دلوقتي: عجلة ولا موتوسيكل ولا عربية',

@@ -72,6 +72,16 @@ class WhatsappIntentRouter
 
         $result = $this->handleInternal($conversation, $message, $mediaItems);
 
+        /*
+         * الترحيب مرة واحدة في المحادثة وخلاص.
+         *
+         * العميل بيسأل عن سعر فيلاقي "أهلاً بيك يا فندم" قبل الإجابة في
+         * كل رسالة - ده بيخلي كل رد يبان كأنه بداية محادثة جديدة مع حد
+         * منتبهش للي قبله. بنشيل التحية من أول الرد لو إحنا رحّبنا خلاص،
+         * إلا لو العميل نفسه بيحيّي (وساعتها الرد على التحية أدب).
+         */
+        $result = $this->dropRepeatGreeting($conversation, $result, $message, $lastOutgoingIdBefore);
+
         $conversation->refresh();
 
         $result = $this->guardAgainstLoop(
@@ -2223,6 +2233,74 @@ $folder = $this->safeFolderName($machine->name);
         }
 
         return false;
+    }
+
+    /**
+     * بيشيل التحية من بداية الرد لو دي مش أول رسالة في المحادثة.
+     *
+     * @param  array<string, mixed>  $result
+     * @return array<string, mixed>
+     */
+    private function dropRepeatGreeting(
+        WhatsappConversation $conversation,
+        array $result,
+        string $incomingMessage,
+        int $lastOutgoingIdBefore
+    ): array {
+        $reply = trim((string) ($result['reply'] ?? ''));
+
+        // أول رد في المحادثة - الترحيب هنا في محله.
+        if ($reply === '' || $lastOutgoingIdBefore <= 0) {
+            return $result;
+        }
+
+        // العميل نفسه بيسلّم؟ نرد على سلامه عادي.
+        if ($this->messageIsGreeting($incomingMessage)) {
+            return $result;
+        }
+
+        $stripped = $this->withoutLeadingGreeting($reply);
+
+        if ($stripped !== '' && $stripped !== $reply) {
+            $result['reply'] = $stripped;
+        }
+
+        return $result;
+    }
+
+    private function messageIsGreeting(string $message): bool
+    {
+        $text = $this->normalizeText($message);
+
+        return $this->containsAny($text, [
+            'سلام عليكم', 'السلام عليكم', 'صباح الخير', 'مساء الخير', 'صباح النور',
+            'مساء النور', 'ازيك', 'ازيكم', 'اهلا', 'مرحبا', 'هاي', 'hi', 'hello',
+        ]);
+    }
+
+    /**
+     * بيشيل جملة التحية الأولى بس، وبيسيب باقي الرد زي ما هو.
+     */
+    private function withoutLeadingGreeting(string $reply): string
+    {
+        $pattern = '/^\s*(؟?)('
+            . 'أهلاً?\s*(و\s*سهلاً?)?|اهلاً?\s*(و\s*سهلاً?)?|مرحباً?|منوّ?ر(نا)?|نوّ?رت(نا)?'
+            . ')'
+            . '(\s*(بيك|بك|بحضرتك|يا\s*فندم|يا\s*باشا|يا\s*ريس|في\s*[^،.\n]{0,30}))*'
+            . '\s*[،,.!؟]+\s*/u';
+
+        $stripped = preg_replace($pattern, '', $reply, 1) ?? $reply;
+        $stripped = trim($stripped);
+
+        if ($stripped === '') {
+            return $reply;
+        }
+
+        /*
+         * ltrim() بتشتغل بالبايت مش بالحرف، والفاصلة العربية "،" حرفين
+         * بايت - فكانت بتقطع أول بايت من أول كلمة عربية وتبوّظ النص.
+         */
+        return (string) preg_replace('/^[،,\s]+/u', '', $stripped);
     }
 
     /**

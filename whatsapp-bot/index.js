@@ -446,6 +446,19 @@ async function handleIncomingMessage(sock, botId, msg) {
         mediaCollectors[collectorKey].mediaItems.push(media);
         mediaCollectors[collectorKey].waMessageId = messageId;
 
+        /*
+         * Voice notes and images have to be quotable too. This cache was
+         * only ever filled on the text path below, so when Laravel asked
+         * us to quote a voice note - the customer sent three in a row -
+         * the lookup missed and the answer went out as a plain message
+         * with no indication of which recording it answered.
+         */
+        recentRawMessages.set(messageId, msg);
+
+        if (recentRawMessages.size > 2000) {
+            recentRawMessages.clear();
+        }
+
         if (cleanText) {
             mediaCollectors[collectorKey].message = cleanText;
         }
