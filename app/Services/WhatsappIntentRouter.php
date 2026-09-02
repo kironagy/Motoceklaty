@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\InstallmentSystem;
 use App\Models\Machine;
 use App\Models\WhatsappConversation;
+use App\Models\WhatsappMessage;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
@@ -609,6 +610,36 @@ private function handleInternal(
             return $this->handleWhileAwaitingAgent($conversation, $message, $mediaItems);
         }
 
+        /*
+         * "." و"؟؟" و"..." مش أسئلة جديدة - دي استعجال على رد لسه
+         * بيتكتب. في محادثة الإعلان العميل بعت "طب هو سعرو كام" وبعدها
+         * "." و"؟؟"، فطلعوا **تلات ردود** ورا بعض: السعر، ونفس السعر
+         * حرفيًا بمقدمة "معلش يمكن سؤالي مكانش واضح"، وتالت رد عام.
+         * النقطة اتصنّفت "سؤال عن سعر" أصلاً.
+         *
+         * والشكر برضه مش سؤال: "تمام" + "شكرا" ورا بعض كانوا بياخدوا
+         * رسالتين شكر متطابقتين.
+         */
+        if ($message !== '' && ! count($mediaItems) && $this->isFillerFollowUp($conversation, $message)) {
+            return ['reply' => null, 'images' => []];
+        }
+
+        /*
+         * العميل بيشتم = المحادثة خرجت عن مسارها، والبوت مش هيصلحها.
+         * في محادثة الإعلان العميل رد "الرقم القومي عند امك" و"انطر
+         * يعرص"، والبوت رد "لسه مستنى منك الرقم القومي" وفضل يطلب
+         * البطاقة - وده اللي فجّر المحادثة لـ 20 رسالة شتيمة. التحويل
+         * لموظف بشري في أول إهانة هو الرد الوحيد المحترم.
+         */
+        if ($message !== '' && $this->messageIsAbusive($message)) {
+            Log::info('ai_abuse_handoff', [
+                'conversation_id' => $conversation->id,
+                'message' => mb_substr($message, 0, 120),
+            ]);
+
+            return $this->handoffToAgent($conversation, $message, 'abusive_message');
+        }
+
         if (count($mediaItems) && $this->allMediaAreVoice($mediaItems)) {
             /*
              * بنحاول نفرّغ الفويس لنص ونكمّل المحادثة عادي بدل ما نقول
@@ -943,6 +974,24 @@ private function handleInternal(
                 )
             )
         ) {
+            /*
+             * التقديم بيجمع 8 بيانات شخصية - مينفعش يبدأ والعميل لسه
+             * مش مختار مكنة. في محادثة الإعلان العميل كتب "قسط" وهو
+             * أصلاً بيسأل عن مكنة كهربائية مش عندنا، فالبوت بدأ يطلب
+             * منه "الاسم بالكامل (وفاضل 7 بيانات)" وهو بيقول "مش عارف
+             * انهي موديل" و"طيب متاحه ولا لا" - والرد: "لسه مستنى منك
+             * الاسم بالكامل".
+             *
+             * أول مرة بس هي اللي بتتفحص: طلب شغال بالفعل بيكمّل عادي.
+             */
+            if (! $applicationIsPending && ! $this->hasChosenMachine($conversation, $lastMachines)) {
+                return $this->textReply(
+                    $conversation,
+                    'تمام يا فندم، قبل ما نبدأ إجراءات التقديم محتاج أعرف حضرتك عاوز تقسّط أنهي موتوسيكل؟'
+                        . ' قوللي اسم الموديل وأنا أقولك القسط والمطلوب.'
+                );
+            }
+
             $intent = 'application';
             $plan['intent'] = 'application';
             $plan['target'] = 'single_previous_machine';
@@ -1344,6 +1393,19 @@ private function handleInternal(
          * نسأل نتأكد من الاسم الأول بدل ما نديله سعر غلط.
          */
         if ($intent === 'price' && $machines->isEmpty()) {
+            /*
+             * فرق مهم: "مش فاهم اسم الموديل" غير "الموديل ده مش عندنا".
+             * عميل في محادثة الإعلان سأل على مكنة كهربائية اسمها Pluto -
+             * وإحنا مفيش عندنا ولا مكنة كهربائية أصلاً - فالبوت فضل
+             * يقوله "تقصد أنهي موديل؟" وهو رد "مش عارف انهي موديل"،
+             * وانتهت المحادثة من غير ما حد يقوله إن ده مش متوفر.
+             */
+            $unavailable = $this->unavailableCategoryReply($message);
+
+            if ($unavailable !== null) {
+                return $this->textReply($conversation, $unavailable);
+            }
+
             return $this->textReply(
                 $conversation,
                 'تقصد سعر أنهي موديل بالظبط يا فندم؟ أقولك السعر الدقيق أول ما تأكدلي الاسم.'
@@ -2024,6 +2086,204 @@ $folder = $this->safeFolderName($machine->name);
         $path = ltrim($path, '/');
 
         return url(Storage::url($path));
+    }
+
+    /**
+     * العميل بيعترض على الحسبة نفسها (بيحسب بنفسه أو بيقول الرقم غلط).
+     *
+     * بيرجّع الشرح الصريح لفرق سعر الكاش وسعر التقسيط، أو null لو
+     * الرسالة مش اعتراض - وساعتها الحسبة بتكمل عادي.
+     *
+     * @param  \Illuminate\Support\Collection<int, Machine>  $machines
+     */
+    private function priceObjectionReply(WhatsappConversation $conversation, Collection $machines, string $message): ?string
+    {
+        if ($machines->isEmpty()) {
+            return null;
+        }
+
+        $text = $this->normalizeText($message);
+
+        $questionsTheNumber = $this->containsAny($text, [
+            'ليه', 'ازاي', 'مش مظبوط', 'مش مضبوط', 'غلط', 'الحسبه', 'الحسابه',
+            'المفروض يكون', 'يبقي', 'يعني كل شهر', 'مش كده', 'بحسبها',
+        ]);
+
+        // لازم يكون معاه أرقام - ده اللي بيفرّق الاعتراض عن السؤال العام.
+        $hasNumbers = preg_match_all('/\d{3,}/u', $this->normalizeDigitsForCompare($message)) >= 1;
+
+        if (! $questionsTheNumber || ! $hasNumbers) {
+            return null;
+        }
+
+        $machine = $machines->first();
+        $cash = (float) ($machine->cash_price ?? 0);
+        $installmentBase = (float) ($machine->installment_price ?? 0);
+
+        if ($cash <= 0 || $installmentBase <= 0 || $installmentBase <= $cash) {
+            return null;
+        }
+
+        $difference = $installmentBase - $cash;
+
+        return "معاك حق تراجع الأرقام يا فندم، وده تفصيلها بالظبط:\n"
+            . "• سعر {$machine->name} كاش: " . number_format($cash) . " جنيه.\n"
+            . '• سعر نفس المكنة بالتقسيط: ' . number_format($installmentBase) . " جنيه.\n"
+            . 'القسط الشهري بيتحسب على سعر التقسيط (' . number_format($installmentBase) . ' جنيه) مش على سعر الكاش، '
+            . 'والفرق بينهم ' . number_format($difference) . " جنيه هو تكلفة التقسيط نفسه.\n"
+            . 'عشان كده الرقم اللي حسبته حضرتك طلع أقل. تحب أحسبهالك على مدة تانية؟';
+    }
+
+    /** أرقام عربية/هندية -> إنجليزية، عشان المقارنة تشوف الرقم زي ما هو. */
+    private function normalizeDigitsForCompare(string $text): string
+    {
+        return str_replace(
+            ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩', '،', ','],
+            ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '', ''],
+            $text
+        );
+    }
+
+    /**
+     * شتيمة أو إهانة صريحة في رسالة العميل.
+     *
+     * الليستة مقصود تكون للألفاظ اللي مالهاش استخدام تاني في سياق البيع،
+     * عشان "زفت" في "الجو زفت" ما تتحسبش إهانة للبوت. المقارنة بتحصل
+     * على النص بعد التوحيد (بتشيل التشكيل وبتوحّد الألف والياء).
+     */
+    private function messageIsAbusive(string $message): bool
+    {
+        $text = $this->normalizeText($message);
+
+        $insults = [
+            'يعرص', 'عرص', 'خول', 'متناك', 'كس ام', 'كسم', 'كسمك', 'ابن الوسخه',
+            'ابن المتناكه', 'شرموط', 'شرموطه', 'قحبه', 'زبي', 'طيز', 'يا حيوان',
+            'يا حمار', 'يا كلب', 'ابن الكلب', 'انت هلس', 'يهلس', 'يبايظ', 'اتنيل',
+            'الرقم القومي عند امك', 'عند امك', 'في امك',
+        ];
+
+        foreach ($insults as $insult) {
+            if (str_contains($text, $insult)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * فيه مكنة متحددة في المحادثة نقدّم عليها؟
+     *
+     * @param  \Illuminate\Support\Collection<int, Machine>  $lastMachines
+     */
+    private function hasChosenMachine(WhatsappConversation $conversation, $lastMachines): bool
+    {
+        if ($lastMachines instanceof Collection && $lastMachines->isNotEmpty()) {
+            return true;
+        }
+
+        if (! empty($conversation->last_machine_ids)) {
+            return true;
+        }
+
+        $payload = $conversation->context_payload ?? [];
+
+        return ! empty($payload['application']['machine_id'])
+            || ! empty($payload['last_calc_machine_ids']);
+    }
+
+    /**
+     * العميل بيسأل على نوع مكنة إحنا مش بنبيعه أصلاً؟
+     *
+     * بيتقري من الكتالوج الحقيقي مش من ليستة ثابتة: لو الكلمة اللي
+     * العميل قالها (كهربائي مثلاً) مفيش ليها ولا مكنة واحدة في
+     * الداتابيز، الرد الصح "مفيش عندنا" + البديل - مش "تقصد أنهي موديل؟"
+     * اللي بتلف بيه في دايرة.
+     */
+    private function unavailableCategoryReply(string $message): ?string
+    {
+        $text = $this->normalizeText($message);
+
+        $categories = [
+            'كهرب' => 'موتوسيكلات كهربائية',
+            'electric' => 'موتوسيكلات كهربائية',
+            'سكوتر كهرب' => 'سكوترات كهربائية',
+            'دراجه كهرب' => 'دراجات كهربائية',
+        ];
+
+        foreach ($categories as $needle => $label) {
+            if (! str_contains($text, $needle)) {
+                continue;
+            }
+
+            $exists = Machine::query()
+                ->where(function ($q) use ($needle) {
+                    $q->where('name', 'like', "%{$needle}%")
+                        ->orWhere('aliases', 'like', "%{$needle}%");
+                })
+                ->exists();
+
+            if ($exists) {
+                return null;
+            }
+
+            $available = Machine::query()->inRandomOrder()->limit(3)->pluck('name')->implode('، ');
+
+            return "معلش يا فندم، إحنا معندناش {$label} خالص - كل اللي عندنا بنزين."
+                . ($available !== '' ? " من اللي متوفر عندنا: {$available}." : '')
+                . ' تحب أرشحلك موديل يناسب استخدامك؟';
+        }
+
+        return null;
+    }
+
+    /**
+     * رسالة مالهاش محتوى جديد وجاية ورا رد بعتناه للتو.
+     *
+     * نوعين:
+     *  - علامات ترقيم بس (. .. ؟؟ ...) = استعجال، مبيتردش عليها.
+     *  - شكر/تأكيد قصير بعد ما شكرناه خلاص = رد تاني عليه بيبقى تكرار.
+     */
+    private function isFillerFollowUp(WhatsappConversation $conversation, string $message): bool
+    {
+        $text = trim($message);
+
+        $lastOutgoing = WhatsappMessage::query()
+            ->where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')
+            ->latest('id')
+            ->first();
+
+        if (! $lastOutgoing) {
+            return false;
+        }
+
+        $secondsSinceReply = now()->diffInSeconds($lastOutgoing->created_at, true);
+
+        // علامات ترقيم أو حروف مد بس - مفيش فيها أي طلب.
+        if (preg_match('/^[\s\.\?؟!،,ـ_\-]+$/u', $text) === 1) {
+            return $secondsSinceReply <= 600;
+        }
+
+        $normalized = $this->normalizeText($text);
+
+        $isThanks = in_array($normalized, [
+            'شكرا', 'شكرا جدا', 'متشكر', 'متشكر جدا', 'تسلم', 'تسلمي', 'تسلم ايدك',
+            'ربنا يكرمك', 'جزاك الله خير', 'تمام', 'تمام شكرا', 'ماشي', 'اوك', 'ok', 'تمام تسلم',
+        ], true);
+
+        if (! $isThanks || $secondsSinceReply > 300) {
+            return false;
+        }
+
+        /*
+         * أول شكر بياخد رد. اللي بعده في نفس اللحظة (العميل بيبعت "تمام"
+         * وبعدها "شكرا") مش محتاج رسالة تانية بنفس الكلام.
+         */
+        $repliedToThanks = str_contains((string) $lastOutgoing->message, 'العفو')
+            || str_contains((string) $lastOutgoing->message, 'تحت أمرك');
+
+        return $repliedToThanks;
     }
 
     private function normalizeText(string $text): string
@@ -3541,6 +3801,26 @@ private function handleInstallmentSystem(
 
     if ($focused !== null) {
         $reply = $focused;
+    } elseif ($this->systemBlockAlreadySent($conversation)) {
+        /*
+         * البلوك ده اتبعت خلاص في المحادثة دي. إعادته على سؤال محدد
+         * تاني هي اللي خلت عميل في محادثة الإعلان ياخده أربع مرات
+         * ("فايده كام على السنة"، "قسط مباشر ولا أبلكيشن"، "مطلوب إيه
+         * أجيبه معايا") من غير ما يلاقي إجابة سؤاله ولا مرة.
+         *
+         * لو مقدرناش نطلّع إجابة مركّزة، الصح إننا نقول إننا هنتأكد -
+         * مش نبعت نفس اتناشر سطر تاني.
+         */
+        \Illuminate\Support\Facades\Log::info('ai_missing_policy_answer', [
+            'conversation_id' => $conversation->id,
+            'question' => mb_substr($message, 0, 200),
+            'missing' => 'repeat_of_installment_block',
+        ]);
+
+        $reply = 'سؤال حضرتك ده محتاج إجابة محددة مش موجودة في اللي بعتهولك فوق. '
+            . 'هتأكد من زميلي وأرد على حضرتك حالًا - ولو تحب أوصلك بيه على طول قولي "عايز أكلم حد".';
+    } else {
+        $this->markSystemBlockSent($conversation);
     }
 
     $this->saveOutgoing($conversation, $reply, [
@@ -3565,6 +3845,27 @@ $this->updateConversationState($conversation, 'installment_system', null, [
  * الأصلي - نفس ضمانة AiReplyPhraser بالظبط، عشان اختصار الرسالة عمره
  * ما يتحوّل لاختراع شرط أو نسبة.
  */
+/**
+ * هل بلوك نظام التقسيط الكامل اتبعت قبل كده في المحادثة دي؟
+ *
+ * البلوك ده إجابة سؤال عام واحد؛ تكراره على أسئلة محددة بيغرق العميل
+ * في نفس النص من غير ما يلاقي إجابته.
+ */
+private function systemBlockAlreadySent(WhatsappConversation $conversation): bool
+{
+    $payload = $conversation->context_payload ?? [];
+
+    return ! empty($payload['installment_block_sent']);
+}
+
+private function markSystemBlockSent(WhatsappConversation $conversation): void
+{
+    $payload = $conversation->context_payload ?? [];
+    $payload['installment_block_sent'] = true;
+
+    $conversation->forceFill(['context_payload' => $payload])->save();
+}
+
 private function focusedAnswerFrom(string $block, string $question, ?WhatsappConversation $conversation = null): ?string
 {
     $question = trim($question);
@@ -3587,9 +3888,12 @@ private function focusedAnswerFrom(string $block, string $question, ?WhatsappCon
     {"answer": "..." أو null, "unanswered": "..." أو null}
 
     - answer: لو السؤال بيسأل عن **جزء محدد** من المعلومات اللي فوق
-      (نسبة، مصاريف، مدد، مين ينفع يقسط، السن، المستندات)، اكتب الإجابة
-      على السؤال ده بس في سطرين بحد أقصى. لو السؤال عام وعايز يعرف
-      النظام كله، خلي answer = null.
+      (نسبة، فايدة، مصاريف، مدد، مين ينفع يقسط، السن، المستندات، مواعيد
+      السداد)، اكتب الإجابة على السؤال ده بس في سطرين بحد أقصى.
+      خلي answer = null **بس** لو العميل طالب النظام كله من الأول
+      (زي "قوللي عن التقسيط" أو "إيه أنظمتكم").
+    - أي سؤال بصيغة سؤال محدد لازم يطلع في answer أو في unanswered -
+      ممنوع يطلع الاتنين null.
     - unanswered: لو العميل سأل سؤال محدد **إجابته مش موجودة خالص** في
       المعلومات فوق (زي "ينفع من غير مقدم؟" أو "معنديش رخصة ينفع؟")،
       اكتب السؤال ده في جملة قصيرة جدًا بصيغة "من غير مقدم" أو "من غير
@@ -3820,6 +4124,19 @@ private function handleInstallmentCalc(
         if ($last->isNotEmpty()) {
             $machines = $last;
         }
+    }
+
+    /*
+     * العميل بيراجع حسبتنا بنفسه ("لو 67000 يبقى النسبة 13400 يعني على
+     * 18 شهر 4460 تقريبًا ليه 5200؟") - ده اعتراض على رقم، مش طلب حسبة
+     * جديدة. الرد القديم كان إعادة نفس بلوك القسط حرفيًا، والعميل يخرج
+     * حاسس إن فيه لعب في الأرقام. الإجابة موجودة في الداتا نفسها:
+     * القسط محسوب على سعر التقسيط مش سعر الكاش.
+     */
+    $objection = $this->priceObjectionReply($conversation, $machines, $message);
+
+    if ($objection !== null) {
+        return $this->textReply($conversation, $objection);
     }
 
     if ($machines->isEmpty()) {
