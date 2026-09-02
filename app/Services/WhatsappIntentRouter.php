@@ -407,7 +407,17 @@ private function appendExtraSteps(WhatsappConversation $conversation, string $me
         }
 
         if (! empty($stepResult['reply'])) {
-            $extraReplies[] = trim($stepResult['reply']);
+            $stepReply = trim($stepResult['reply']);
+
+            /*
+             * الرد الأساسي بقى بيغطي كل الموديلات اللي العميل ذكرها في
+             * رسالة واحدة (شوف machinesFromEachSegment)، فخطوة إضافية
+             * عن نفس الموديل بترجّع نفس السعر تاني في نفس الرسالة -
+             * وده بالظبط شكل "البوت بيرد مرتين" اللي بيضايق العميل.
+             */
+            if (! $this->replySaysTheSameThing($result['reply'] ?? '', $stepReply)) {
+                $extraReplies[] = $stepReply;
+            }
         }
 
         $extraImages = array_merge($extraImages, $stepResult['images'] ?? []);
@@ -1153,7 +1163,24 @@ private function handleInternal(
             }
         }
 
-        $brandFiltered = $this->filterMachinesByRequestedBrand($machines, $message);
+        /*
+         * "عايز دايون 4 و وينج 200" - موديلين من براندين في رسالة واحدة.
+         * البحث كان بيرجّع واحد بس، وفلتر البراند بيشوف إن الموديل اللي
+         * رجع (وينج) مش من البراند اللي العميل ذكره (دايو) فيرد
+         * "الموديل ده مش متوفر من دايو" - والاتنين موجودين فعلاً!
+         *
+         * فبنجرّب كل جزء من الرسالة لوحده، ولو طلع أكتر من مكنة يبقى
+         * الطلب على أكتر من موديل: نرد عليهم كلهم ومنفلترش على براند
+         * واحد.
+         */
+        $multiModel = $this->machinesFromEachSegment($message);
+
+        if ($multiModel->count() > 1) {
+            $machines = $multiModel;
+            $brandFiltered = ['machines' => $multiModel, 'brand_requested' => false];
+        } else {
+            $brandFiltered = $this->filterMachinesByRequestedBrand($machines, $message);
+        }
 
         if (
             ($brandFiltered['brand_requested'] ?? false)
@@ -2104,15 +2131,36 @@ $folder = $this->safeFolderName($machine->name);
 
         $text = $this->normalizeText($message);
 
+        /*
+         * طلب حسبة ≠ اعتراض على حسبة. الشرط ده اتكسر في الإنتاج:
+         * containsAny() بتعمل normalize للكلمة المفتاحية كمان، فـ"الحسبه"
+         * بقت "حسبه" - و"احسبهالي ع سنتين الوينج ٢٠٠" جواها "حسبه"!
+         * فطلب حسبة عادي رجعله رد اعتراض على السعر بدل القسط.
+         *
+         * فأي رسالة فيها طلب حسبة صريح مبتتحسبش اعتراض أبدًا.
+         */
+        if ($this->containsAny($text, ['احسب', 'اخسب', 'حسبهالي', 'حسبها لي', 'عايز اقسط', 'عاوز اقسط', 'قسطهالي'])) {
+            return null;
+        }
+
+        /*
+         * الاعتراض لازم يبان صريح: العميل بيقول إن الرقم غلط أو بيسأل
+         * "ليه". الكلمات دي متقاسة بعد normalize، فمكتوبة من غير "ال".
+         */
         $questionsTheNumber = $this->containsAny($text, [
-            'ليه', 'ازاي', 'مش مظبوط', 'مش مضبوط', 'غلط', 'الحسبه', 'الحسابه',
-            'المفروض يكون', 'يبقي', 'يعني كل شهر', 'مش كده', 'بحسبها',
+            'ليه كده', 'ليه الرقم', 'ليه القسط', 'مش مظبوط', 'مش مضبوط',
+            'حسابكم غلط', 'حسبتكم غلط', 'رقم غلط', 'مفروض يكون', 'مفروض يطلع',
+            'انت قلت', 'مش كده', 'ازاي بقي',
         ]);
 
         // لازم يكون معاه أرقام - ده اللي بيفرّق الاعتراض عن السؤال العام.
         $hasNumbers = preg_match_all('/\d{3,}/u', $this->normalizeDigitsForCompare($message)) >= 1;
 
-        if (! $questionsTheNumber || ! $hasNumbers) {
+        // ولازم نكون فعلاً قلنا له قسط قبل كده - من غير كده مفيش حاجة يعترض عليها.
+        $quotedBefore = ($conversation->last_topic ?? null) === 'installment_calc'
+            || ! empty(($conversation->context_payload ?? [])['last_months']);
+
+        if (! $questionsTheNumber || ! $hasNumbers || ! $quotedBefore) {
             return null;
         }
 
@@ -2175,6 +2223,78 @@ $folder = $this->safeFolderName($machine->name);
         }
 
         return false;
+    }
+
+    /**
+     * الرد الإضافي بيقول نفس اللي الرد الأساسي قاله؟
+     *
+     * المقارنة بالأرقام: لو كل الأرقام اللي في الخطوة الإضافية موجودة
+     * أصلاً في الرد الأساسي، يبقى مفيش معلومة جديدة فيها.
+     */
+    private function replySaysTheSameThing(string $primary, string $extra): bool
+    {
+        $primary = trim($primary);
+
+        if ($primary === '' || $extra === '') {
+            return false;
+        }
+
+        preg_match_all('/\d[\d,]{2,}/u', $extra, $extraNumbers);
+
+        $extraNumbers = array_values(array_unique($extraNumbers[0] ?? []));
+
+        if ($extraNumbers === []) {
+            return false;
+        }
+
+        foreach ($extraNumbers as $number) {
+            if (! str_contains($primary, $number)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * المكن اللي اتذكر في الرسالة لما نقرا كل جزء فيها لوحده.
+     *
+     * "دايون 4 و وينج 200" -> [دايو ٤، وينج ٢٠٠]. البحث على الرسالة
+     * كاملة بيرجّع واحد بس، فالعميل بيسأل على اتنين وياخد رد على واحد.
+     *
+     * @return Collection<int, Machine>
+     */
+    private function machinesFromEachSegment(string $message): Collection
+    {
+        $segments = preg_split('/\s+و\s+|\s*[،,+]\s*|\s+&\s+/u', trim($message), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        if (count($segments) < 2) {
+            return collect();
+        }
+
+        $search = app(MachineSearchService::class);
+        $found = collect();
+
+        foreach ($segments as $segment) {
+            $segment = trim($segment);
+
+            // جزء قصير جدًا ("و"، "ب") مالوش لازمة ومش هيطابق موديل.
+            if (mb_strlen($segment) < 3) {
+                continue;
+            }
+
+            /*
+             * أقرب مكنة لكل جزء بس - العميل ذكر موديلين، فالرد يبقى على
+             * الاتنين مش على مطابقات تقريبية زيادة.
+             */
+            foreach ($search->search($segment, 1) as $machine) {
+                if (! $found->contains(fn (Machine $m) => $m->id === $machine->id)) {
+                    $found->push($machine);
+                }
+            }
+        }
+
+        return $found;
     }
 
     /**
