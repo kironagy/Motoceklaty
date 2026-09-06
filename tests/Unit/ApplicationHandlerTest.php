@@ -426,4 +426,40 @@ class ApplicationHandlerTest extends TestCase
         $this->assertSame('012033333', $service->resolveConflicts($conflicts, 'آخر واحد')['phone']);
         $this->assertSame('01200268302', $service->resolveConflicts($conflicts, 'الاول')['phone']);
     }
+
+    /**
+     * Regression: the bot was asking for national ID again even after the
+     * customer sent it, because the LLM sometimes returns null when the
+     * message contains surrounding text ("ده الرقم القومي اهو 30410012208373").
+     * The deterministic regex fallback in ApplicationHandler must catch this.
+     *
+     * We test the underlying normalizeDigits + regex logic directly since
+     * the handler requires a full Laravel app container.
+     */
+    public function test_national_id_regex_fallback_extracts_from_mixed_message(): void
+    {
+        $nationalId = new \App\Support\EgyptianNationalId();
+
+        $messages = [
+            '30410012208373',                          // رقم لوحده
+            'ده الرقم القومي اهو 30410012208373',      // رقم مصحوب بنص
+            '30410012208373 ده رقمي',                  // رقم في الأول
+            "الرقم:\n30410012208373",                  // رقم في سطر تاني
+            '٣٠٤١٠٠١٢٢٠٨٣٧٣',                        // أرقام عربية
+        ];
+
+        foreach ($messages as $msg) {
+            $normalized = $nationalId->normalizeDigits($msg);
+            $found = preg_match('/(?<!\d)(\d{14})(?!\d)/', $normalized, $m) === 1;
+            $candidate = $m[1] ?? null;
+
+            $this->assertTrue($found, "Should find 14-digit sequence in: {$msg}");
+            $this->assertSame('30410012208373', $candidate);
+            $this->assertFalse(str_starts_with($candidate, '01'), 'Should not be treated as mobile');
+
+            // Verify the number itself actually parses as valid
+            $parsed = $nationalId->parse($candidate);
+            $this->assertTrue($parsed['valid'], "Number should be structurally valid: {$candidate}");
+        }
+    }
 }

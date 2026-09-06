@@ -198,6 +198,29 @@ class ApplicationHandler
             }
         }
 
+        /*
+         * نفس فكرة recoverNameAnswer بالظبط للرقم القومي: الـ LLM بيفوّت
+         * الرقم أحيانًا لما تيجي رسالة فيها نص مصاحب زي "ده الرقم القومي
+         * اهو 30410012208373" أو لما العميل يبعت الرقم مرة تانية بعد سؤال.
+         * بنعمل regex scan على نص الرسالة الخام: أي تسلسل 14 رقم متتالي
+         * مش بادئ بـ01 (ده رقم موبايل) يتحسب رقم قومي محتمل ويتسند للـ
+         * extracted لو الـ AI سابه فاضي.
+         *
+         * بنستخدم normalizeDigits لتحويل الأرقام العربية قبل البحث.
+         */
+        if (empty($extracted['national_id']) && empty($application['national_id'])) {
+            $nationalIdSupport = app(\App\Support\EgyptianNationalId::class);
+            $normalizedMsg    = $nationalIdSupport->normalizeDigits($message);
+
+            if (preg_match('/(?<!\d)(\d{14})(?!\d)/', $normalizedMsg, $m)) {
+                $candidate = $m[1];
+
+                if (! str_starts_with($candidate, '01')) {
+                    $extracted['national_id'] = $candidate;
+                }
+            }
+        }
+
         $extracted = $stateService->reconcileAddressAssignment($application, $extracted);
         $conflicts = $stateService->detectConflicts($application, $extracted);
 
