@@ -48,7 +48,13 @@ class StartApplicationTool implements Tool
         return (bool) preg_match('/موظف|وظيف|حكوم|شرك|قطاع|مرتب|راتب|تامين|متامن|معاش|متقاعد|حر|شغال|بشتغل|اشتغل|شغلي|شغلانه|صنايعي|حرفي|'
             .'سواق|سايق|دليفري|ديليفري|توصيل|طيار|مندوب|اوبر|طلبات|كريم|اندرايف|تطبيق|ابلكيشن|تاجر|تجاره|محل|ورشه|معرض|مصنع|مقاول|فلاح|'
             .'مزارع|نجار|سباك|كهربائي|نقاش|حداد|ميكانيكي|سمكري|ترزي|حلاق|بياع|عامل|فني|مهندس|دكتور|مدرس|محاسب|ممرض|عسكري|جيش|شرطه|'
-            .'employee|freelanc|driver|delivery|uber|job|work/u', $text);
+            .'صاحب|بملك|مطعم|كافيه|كافتيري|قهوه|سوبر ?ماركت|بقال|فرن|مخبز|حلواني|جزار|فكهاني|خضري|مكتب|عقار|صيدل|محامي|مبيض|محاره|'
+            .'عربيه فول|كشك|سوق|بضاعه|صنعه|صنعتي|'
+            .'employee|freelanc|driver|delivery|uber|job|work/u', $text)
+            // "انا مبيض محارة": the customer describing himself names his
+            // work even when the job is not in the list above - a whitelist
+            // of jobs never ends, and "صاحب مطعم" was sent back to be asked again.
+            || (bool) preg_match('/^\s*انا\s+(?!عايز|عاوز|عايزه|عاوزه|محتاج|موافق|تمام|جاهز|هقدم|مش|كنت|بسال|عارف|فاهم|معاك|هنا|اسف|شاكر|متشكر|سالت|قلت)\S{3,}/u', $text);
     }
 
     public function inputSchema(): array
@@ -89,11 +95,11 @@ class StartApplicationTool implements Tool
         // "عايز اقسط هوجن ٤ على سنة" was passed as the quote and the customer
         // was opened as عامل حر without ever saying what he works.
         if ($typeEvidence !== null && ! self::talksAboutWork((string) $args['customer_type_quote'])) {
-            return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote says nothing about his work. Ask him in one short question whether he is an employee, self-employed or retired.');
+            return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote says nothing about his work. Ask him only "حضرتك بتشتغل إيه؟ ولا على المعاش؟" - never list types like موظف/عامل حر.');
         }
 
         if ($typeEvidence === null) {
-            return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote is not in the customer\'s messages. Ask the customer about their work situation (employee / self-employed / pension) and wait for their answer.');
+            return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote is not in the customer\'s messages. Ask him only "حضرتك بتشتغل إيه؟ ولا على المعاش؟" (never list types like موظف/عامل حر) and wait for their answer.');
         }
 
         $machine = null;

@@ -17,8 +17,8 @@ use Illuminate\Support\Facades\DB;
 /**
  * T14 §1: finalizes an application into the legacy `installment_requests`
  * table staff already work with (DEC-21). Only the columns DEC-21
- * explicitly resolved are populated - guarantor/document/work-type fields
- * stay null here (a document-image mapping was never decided; see T15).
+ * resolved are set here; the customer/guarantor/work/document columns come
+ * from LegacyRequestProjector, and the row is marked request_type=bot.
  *
  * Submission is two-phase and enforced here, not in the prompt:
  *  1. the customer is shown a summary built from the stored data (never
@@ -34,6 +34,7 @@ class SubmissionService
         private readonly SnapshotService $snapshots,
         private readonly ApplicationStateMachine $stateMachine,
         private readonly InstallmentCalculator $calculator,
+        private readonly LegacyRequestProjector $projector,
     ) {
     }
 
@@ -114,20 +115,21 @@ class SubmissionService
                 );
             }
 
-            $installmentRequest = InstallmentRequest::create([
-                'application_id' => $application->id,
-                'machine_id' => $application->machine_id,
-                'whatsapp_conversation_id' => $application->origin_conversation_id,
-                'installment_type' => $application->installmentPlan->installmentSystem->name,
-                'months' => $application->installmentPlan->months,
-                'machine_installment_price' => $application->machine->installment_price,
-                'deposit' => $application->down_payment,
-                'applicant_name' => $this->fieldValue($application, 'full_name') ?? '',
-                'applicant_phone' => $application->customer->phone,
-                'applicant_national_id' => $this->fieldValue($application, 'national_id'),
-                'work_status' => $legacyWorkStatus,
-                'status' => 'new',
-            ]);
+            // Customer, guarantor, work and document columns - the bot tab
+            // of the deliveries table shows these like any manual request.
+            $installmentRequest = InstallmentRequest::create(array_merge(
+                $this->projector->attributes($application, $legacyWorkStatus),
+                [
+                    'application_id' => $application->id,
+                    'machine_id' => $application->machine_id,
+                    'whatsapp_conversation_id' => $application->origin_conversation_id,
+                    'installment_type' => $application->installmentPlan->installmentSystem->name,
+                    'months' => $application->installmentPlan->months,
+                    'machine_installment_price' => $application->machine->installment_price,
+                    'deposit' => $application->down_payment,
+                    'status' => 'new',
+                ],
+            ));
 
             $this->stateMachine->transition($application, 'submitted', 'submitted', 'ai', [
                 'installment_request_id' => $installmentRequest->id,
@@ -249,18 +251,5 @@ class SubmissionService
     private function reference(Application $application): array
     {
         return ['installment_request_id' => $application->installment_request_id];
-    }
-
-    /** Applicant-party field value, application-scope first, customer-scope fallback. */
-    private function fieldValue(Application $application, string $key): ?string
-    {
-        $value = ApplicationData::where('application_id', $application->id)
-            ->where('party', 'applicant')
-            ->where('field_key', $key)
-            ->value('value');
-
-        return $value ?? CustomerAttribute::where('customer_id', $application->customer_id)
-            ->where('field_key', $key)
-            ->value('value');
     }
 }

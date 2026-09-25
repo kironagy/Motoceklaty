@@ -62,6 +62,7 @@ return [
         \App\Agent\Tools\GetBusinessKnowledgeTool::class,
         \App\Agent\Tools\SearchMotorcyclesTool::class,
         \App\Agent\Tools\GetMotorcycleDetailsTool::class,
+        \App\Agent\Tools\LookupMotorcycleSpecsOnlineTool::class,
         \App\Agent\Tools\SendMotorcycleImagesTool::class,
         \App\Agent\Tools\IdentifyMotorcycleFromImageTool::class,
         \App\Agent\Tools\GetBranchInformationTool::class,
@@ -101,6 +102,11 @@ return [
     // DEC-19: factual catalog data, not a business rule - implementer
     // lists it, owner reviews. Free text elsewhere is validated against
     // this list, never invented by the AI or accepted as arbitrary text.
+    'installments' => [
+        // The first installment falls due this many days after pickup.
+        'first_payment_after_days' => (int) env('AGENT_FIRST_INSTALLMENT_AFTER_DAYS', 45),
+    ],
+
     'catalog' => [
         'categories' => [
             'sport' => 'رياضية',
@@ -243,6 +249,7 @@ return [
         'matches_application_field' => \App\Domain\Documents\DocumentRules\MatchesApplicationFieldEvaluator::class,
         'not_expired' => \App\Domain\Documents\DocumentRules\NotExpiredEvaluator::class,
         'not_past' => \App\Domain\Documents\DocumentRules\NotPastEvaluator::class,
+        'min_days_since' => \App\Domain\Documents\DocumentRules\MinDaysSinceEvaluator::class,
         'period_coverage' => \App\Domain\Documents\DocumentRules\PeriodCoverageEvaluator::class,
     ],
 

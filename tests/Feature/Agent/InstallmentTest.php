@@ -390,6 +390,74 @@ class InstallmentTest extends TestCase
         $this->assertEquals(3850, $result->data['offers'][1]['cash_due_upfront']);
     }
 
+    public function test_admin_fees_are_quoted_as_fees_at_pickup_not_as_a_down_payment(): void
+    {
+        $aman = $this->standardSystem();
+        $machine = $this->machine(['installment_systems' => [$aman->id]]);
+
+        $offer = $this->offerTool(['motorcycle_id' => $machine->id, 'months' => 12])->data['offers'][0];
+
+        // 55000 * 7% = 3850 fees, (55000 * 1.2) / 12 = 5500 a month
+        $this->assertEquals(3850, $offer['admin_fee_at_pickup']);
+        $this->assertStringContainsString('من غير مقدم', $offer['say']);
+        $this->assertStringContainsString('مصاريف إدارية 3,850', $offer['say']);
+        $this->assertStringContainsString('5,500', $offer['say']);
+        $this->assertStringNotContainsString('مقدم 3,850', $offer['say']);
+    }
+
+    public function test_the_first_installment_date_is_part_of_the_offer(): void
+    {
+        $machine = $this->machine(['installment_systems' => [$this->standardSystem()->id]]);
+
+        $result = $this->offerTool(['motorcycle_id' => $machine->id]);
+
+        $this->assertSame(45, $result->data['first_payment_after_days']);
+        $this->assertStringContainsString('45 يوم', $result->data['how_to_present']);
+    }
+
+    public function test_the_no_upfront_system_is_offered_only_when_the_customer_insists(): void
+    {
+        $aman = $this->standardSystem();
+        $noUpfront = InstallmentSystem::create(['name' => 'امان بدون مصاريف', 'pricing_mode' => 'standard', 'administrative_fees' => 0,
+            'no_upfront_only' => true, 'plans' => [['months' => 12, 'interest' => 30], ['months' => 24, 'interest' => 60]]]);
+        $machine = $this->machine(['installment_systems' => [$aman->id, $noUpfront->id]]);
+
+        $normal = $this->offerTool(['motorcycle_id' => $machine->id]);
+        $this->assertSame(['أمان', 'أمان'], array_column($normal->data['offers'], 'installment_system'));
+
+        $insists = $this->offerTool(['motorcycle_id' => $machine->id, 'no_upfront' => true]);
+        $this->assertSame(['امان بدون مصاريف', 'امان بدون مصاريف'], array_column($insists->data['offers'], 'installment_system'));
+        $this->assertEquals(0, $insists->data['offers'][0]['cash_due_upfront']);
+        // 55000 * 1.3 / 12
+        $this->assertEquals(5958, $insists->data['offers'][0]['monthly_payment']);
+        $this->assertStringContainsString('من غير مقدم ومن غير أي مصاريف', $insists->data['offers'][0]['say']);
+    }
+
+    public function test_no_upfront_with_no_such_system_says_so(): void
+    {
+        $machine = $this->machine(['installment_systems' => [$this->standardSystem()->id]]);
+
+        $result = $this->offerTool(['motorcycle_id' => $machine->id, 'no_upfront' => true]);
+
+        $this->assertSame('NO_ZERO_UPFRONT_PLAN', $result->error['code']);
+    }
+
+    public function test_the_offer_sticks_to_the_duration_already_chosen_on_the_application(): void
+    {
+        $aman = $this->standardSystem();
+        $machine = $this->machine(['installment_systems' => [$aman->id]]);
+        $ctx = $this->ctx();
+        $conversation = WhatsappConversation::find($ctx->conversationId);
+        $customer = \App\Models\Customer::create(['whatsapp_bot_id' => $conversation->whatsapp_bot_id, 'jid' => '2099@s.whatsapp.net', 'phone' => '2099']);
+        $application = \App\Models\Application::create(['customer_id' => $customer->id, 'origin_conversation_id' => $conversation->id, 'status' => 'collecting',
+            'customer_type_id' => CustomerType::create(['key' => 'self_employed', 'label' => 'عامل حر'])->id,
+            'machine_id' => $machine->id, 'installment_plan_id' => $aman->installmentPlans()->where('months', 24)->value('id')]);
+
+        $result = app(\App\Agent\Tools\GetInstallmentOfferTool::class)->execute(['motorcycle_id' => $machine->id], $ctx->withActiveApplication($application->id));
+
+        $this->assertSame([24], array_column($result->data['offers'], 'months'));
+    }
+
     public function test_the_offer_skips_systems_whose_conditions_the_customer_does_not_meet(): void
     {
         $type = CustomerType::create(['key' => 'pension', 'label' => 'معاش']);

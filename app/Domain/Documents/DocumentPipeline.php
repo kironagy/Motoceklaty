@@ -66,9 +66,10 @@ class DocumentPipeline
             // failure is never invisible again (this masked a Gemini schema
             // bug in classify() below for a long time).
             Log::warning('Document OCR failed', ['media_id' => $media->id, 'error' => $e->getMessage()]);
-            $document = $this->recordDocument($application, $media, null, $expectedTypeKey, 'failed', null, null, [], [['code' => 'OCR_UNAVAILABLE']]);
 
-            return $this->result($media->id, $document->id, null, false, 'failed', [['code' => 'OCR_UNAVAILABLE']], []);
+            // The model reads the image itself; the OCR text only helps it.
+            // A Vision outage used to fail every document the customer sent.
+            $ocrText = '';
         }
 
         $classification = $this->classify($media, $ocrText, $activeTypes);
@@ -187,8 +188,10 @@ class DocumentPipeline
         // back empty and every document failed with MISSING_DATA regardless
         // of what the customer actually sent.
         $typeList = $activeTypes->map(function (DocumentType $t) {
-            $fields = (array) ($t->extraction_fields ?? []);
-            $fieldsNote = $fields !== [] ? ' - extract fields: '.implode(', ', $fields) : '';
+            $required = (array) ($t->extraction_fields ?? []);
+            $optional = array_diff((array) ($t->optional_fields ?? []), $required);
+            $fieldsNote = ($required !== [] ? ' - extract fields: '.implode(', ', $required) : '')
+                .($optional !== [] ? ' - also extract when printed: '.implode(', ', $optional) : '');
 
             return "{$t->key}: {$t->description_for_ai}{$fieldsNote}";
         })->implode("\n");
@@ -202,9 +205,9 @@ class DocumentPipeline
         // is the union across every active document type's extraction_fields
         // - small and bounded, not per-type (the type isn't known until this
         // same call classifies it).
-        $fieldProperties = $activeTypes->flatMap(fn (DocumentType $t) => (array) ($t->extraction_fields ?? []))
+        $fieldProperties = $activeTypes->flatMap(fn (DocumentType $t) => $t->allFields())
             ->unique()
-            ->mapWithKeys(fn ($key) => [$key => self::fieldSchema($key)])
+            ->mapWithKeys(fn ($key) => [$key => DocumentFields::schema($key)])
             ->all();
 
         try {
@@ -267,7 +270,11 @@ class DocumentPipeline
         $fields = $this->withoutEmptyValues(is_array($parsed['fields'] ?? null) ? $parsed['fields'] : []);
 
         if ($detectedTypeKey !== null) {
-            $fields = $this->fillMissingFields($media, $ocrText, $activeTypes->firstWhere('key', $detectedTypeKey), $fields);
+            $type = $activeTypes->firstWhere('key', $detectedTypeKey);
+            // The schema is the union over every type: a salary slip came
+            // back with an app_name, which is not this document's to carry.
+            $fields = array_intersect_key($fields, array_flip($type->allFields()));
+            $fields = $this->fillMissingFields($media, $ocrText, $type, $fields);
         }
 
         return [
@@ -280,27 +287,27 @@ class DocumentPipeline
 
     /**
      * The one generic classify call reliably returns the fields every ID
-     * carries (name, national_id) but skipped type-specific ones: a clearly
-     * printed driving license end date ("نهاية الترخيص") came back empty and
-     * the license was rejected with MISSING_DATA. One focused, typed call for
-     * just the missing fields, only when some are missing.
+     * carries (name, national_id) but skips or misreads type-specific ones:
+     * a clearly printed driving license end date ("نهاية الترخيص") came back
+     * empty, and a salary slip gave its name only - no hire date, no
+     * employer, and "٦٬٧٧٥" read as 6075. Once the type is known, one
+     * focused, typed call reads all of its fields; its values win.
      */
     private function fillMissingFields(MessageMedia $media, string $ocrText, DocumentType $type, array $fields): array
     {
-        $missing = array_values(array_filter(
-            (array) ($type->extraction_fields ?? []),
-            fn ($key) => ! isset($fields[$key]) || $fields[$key] === '' || $fields[$key] === null
-        ));
+        $all = $type->allFields();
 
-        if ($missing === []) {
+        if ($all === []) {
             return $fields;
         }
 
         try {
             $response = $this->ai->chat(new AiRequest(
                 system: "This document is: {$type->label} - {$type->description_for_ai}\n\n"
-                    .'Extract exactly these fields: '.implode(', ', $missing).'. Convert Arabic-Indic digits to 0-9 and '
-                    .'dates to YYYY-MM-DD. Today is '.now()->toDateString().' - resolve relative periods against it. '
+                    .'Extract these fields: '.implode(', ', $all).'. Copy every number digit by digit exactly as printed '
+                    .'(check it against the OCR text), converting Arabic-Indic digits to 0-9; an amount is the one the field '
+                    .'description names (e.g. net = صافي), without currency or thousands separators. Dates as YYYY-MM-DD. '
+                    .'Today is '.now()->toDateString().' - resolve relative periods against it. '
                     .'Use an empty string only if the value is truly not on the document.'."\n\n"
                     ."OCR text:\n{$ocrText}",
                 contents: [
@@ -314,19 +321,19 @@ class DocumentPipeline
                 thinkingBudget: 0,
                 responseSchema: [
                     'type' => 'object',
-                    'properties' => collect($missing)->mapWithKeys(fn ($key) => [$key => self::fieldSchema($key)])->all(),
-                    'required' => $missing,
+                    'properties' => collect($all)->mapWithKeys(fn ($key) => [$key => DocumentFields::schema($key)])->all(),
+                    'required' => array_values((array) ($type->extraction_fields ?? [])),
                 ],
             ));
         } catch (AiProviderException $e) {
-            Log::warning('Document field extraction retry failed', ['media_id' => $media->id, 'error' => $e->getMessage()]);
+            Log::warning('Document field extraction failed', ['media_id' => $media->id, 'error' => $e->getMessage()]);
 
             return $fields;
         }
 
-        $extra = json_decode(implode('', $response->textParts), true) ?? [];
+        $focused = json_decode(implode('', $response->textParts), true) ?? [];
 
-        foreach ($this->withoutEmptyValues(array_intersect_key($extra, array_flip($missing))) as $key => $value) {
+        foreach ($this->withoutEmptyValues(array_intersect_key(is_array($focused) ? $focused : [], array_flip($all))) as $key => $value) {
             $fields[$key] = $value;
         }
 
@@ -346,19 +353,6 @@ class DocumentPipeline
             array_map(fn ($v) => is_scalar($v) ? trim((string) $v) : null, $fields),
             fn ($v) => $v !== null && ! in_array(mb_strtolower($v), $empty, true)
         );
-    }
-
-    /**
-     * Date-like fields say "one date": asked for a period over a weekly list,
-     * the model once repeated week dates into period_start until it hit the
-     * token limit, the JSON was cut off, and a clear earnings screenshot was
-     * reported as an unsupported document.
-     */
-    private static function fieldSchema(string $key): array
-    {
-        return str_contains($key, 'date') || str_starts_with($key, 'period_')
-            ? ['type' => 'string', 'description' => 'One single date only, YYYY-MM-DD. Never a list.']
-            : ['type' => 'string'];
     }
 
     /**
@@ -439,6 +433,12 @@ class DocumentPipeline
             $result = $this->validators->for($field->data_type)?->validate((string) $value, $field);
 
             if (! $result || ! $result->valid) {
+                // An optional value that does not read cleanly is left out
+                // (normalizeFields), never a reason to reject the document.
+                if (! in_array($fieldKey, (array) ($documentType->extraction_fields ?? []), true)) {
+                    continue;
+                }
+
                 $issues[] = ['code' => 'INVALID_FORMAT', 'field' => $fieldKey];
 
                 continue;
@@ -468,13 +468,20 @@ class DocumentPipeline
     {
         $normalized = [];
 
-        foreach ((array) ($documentType->extraction_fields ?? []) as $fieldKey) {
+        $required = (array) ($documentType->extraction_fields ?? []);
+
+        foreach ($documentType->allFields() as $fieldKey) {
             if (! array_key_exists($fieldKey, $extractedFields)) {
                 continue;
             }
 
             $field = RequirementField::where('key', $fieldKey)->where('is_active', true)->first();
             $result = $field ? $this->validators->for($field->data_type)?->validate((string) $extractedFields[$fieldKey], $field) : null;
+
+            if ($field && ! $result?->valid && ! in_array($fieldKey, $required, true)) {
+                continue;
+            }
+
             $normalized[$fieldKey] = $result?->valid ? $result->normalized : $extractedFields[$fieldKey];
         }
 

@@ -62,6 +62,13 @@ public static function form(Form $form): Form
                             ->numeric()
                             ->minValue(0),
 
+                        Forms\Components\TextInput::make('model_year')
+                            ->label('سنة الموديل')
+                            ->helperText('بيتستخدم مع الـ cc عشان لو مفيش مواصفات هنا، يدوّر على مواصفات نفس الإصدار بالظبط من النت')
+                            ->numeric()
+                            ->minValue(1990)
+                            ->maxValue(2100),
+
                         Forms\Components\Select::make('category')
                             ->label('الفئة')
                             ->options(config('agent.catalog.categories', []))

@@ -118,23 +118,14 @@ class InstallmentCalculatorResource extends Resource
                     })
                     ->required()
                     ->live(),
-Forms\Components\TextInput::make('machine_installment_price')
+// Display only: the value itself is stored by the Hidden field below - a
+// second input on the same state rendered the field twice.
+Forms\Components\Placeholder::make('machine_installment_price_display')
     ->label('سعر التقسيط')
-    ->numeric()
-    ->prefix('جنيه')
-    ->disabled()
-    ->dehydrated(false)
-    ->default(0)
-    ->formatStateUsing(function (Forms\Get $get) {
-        $machineId = $get('machine_id');
+    ->content(function (Forms\Get $get) {
+        $price = $get('machine_id') ? \App\Models\Machine::find($get('machine_id'))?->installment_price : null;
 
-        if (!$machineId) {
-            return 0;
-        }
-
-        $machine = \App\Models\Machine::find($machineId);
-
-        return $machine?->installment_price ?? 0;
+        return number_format((float) ($price ?? 0)).' جنيه';
     }),
                 Forms\Components\TextInput::make('down_payment')
                     ->label('المقدم')

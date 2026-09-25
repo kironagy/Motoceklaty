@@ -60,6 +60,36 @@ class ApplicationFlowTest extends TestCase
         $this->assertArrayNotHasKey('remaining', $snapshot['progress']);
     }
 
+    public function test_the_id_photo_step_does_not_tell_him_what_is_read_from_it(): void
+    {
+        [$application] = $this->application();
+
+        $why = app(SnapshotService::class)->for($application)['next_step']['why'];
+
+        $this->assertStringContainsString('do not tell him what will be read from it', $why);
+    }
+
+    public function test_the_missing_parts_of_an_address_are_asked_together(): void
+    {
+        [$application] = $this->application();
+        $type = $application->customerType;
+        ApplicationRequirement::where('requirement_type', 'document')->delete();
+
+        foreach (['address_building_no' => 'رقم العقار (السكن)', 'address_floor' => 'الدور (السكن)', 'residence_ownership' => 'السكن إيجار ولا تمليك'] as $key => $label) {
+            $field = RequirementField::create(['key' => $key, 'label' => $label, 'data_type' => 'string', 'scope' => 'application', 'is_sensitive' => false, 'is_active' => true]);
+            ApplicationRequirement::create(['customer_type_id' => $type->id, 'requirement_type' => 'field', 'requirement_field_id' => $field->id, 'is_required' => true]);
+        }
+
+        foreach (['full_name' => 'احمد علي', 'national_id' => '29001011234567', 'work_type' => 'other', 'phone' => '01012345678'] as $key => $value) {
+            \App\Models\ApplicationData::create(['application_id' => $application->id, 'party' => 'applicant', 'field_key' => $key, 'value' => $value, 'source' => 'customer_stated', 'status' => 'valid']);
+        }
+
+        $step = app(SnapshotService::class)->for($application)['next_step'];
+
+        $this->assertSame('address', $step['key']);
+        $this->assertSame(['عنوان السكن', 'رقم العقار (السكن)', 'الدور (السكن)', 'السكن إيجار ولا تمليك'], $step['ask_together']);
+    }
+
     private function botSaid(WhatsappConversation $conversation, string $text, \DateTimeInterface $at): void
     {
         $message = WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'outgoing', 'sender_type' => 'bot', 'type' => 'text', 'text' => $text]);
@@ -99,6 +129,28 @@ class ApplicationFlowTest extends TestCase
         $this->travel(1)->hours();
         $this->assertSame(0, app(ApplicationNudgeService::class)->nudgeStalled());
     }
+    public function test_no_reminder_after_a_handoff_until_he_writes_again(): void
+    {
+        config(['agent.enabled' => true, 'agent.applications.nudge_after_minutes' => 45, 'agent.applications.nudge_quiet_from' => 0, 'agent.applications.nudge_quiet_to' => 0]);
+        Http::fake(['*' => fn () => Http::response(['ok' => true, 'wa_message_id' => uniqid('wa', true)])]);
+        [, $conversation] = $this->application();
+
+        $asked = WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'زميلك هيرد عليا؟']);
+        $asked->forceFill(['created_at' => now()->subHours(3)])->save();
+        \App\Models\Handoff::create(['conversation_id' => $conversation->id, 'reason' => 'document_unresolvable', 'note' => 'x', 'source' => 'ai',
+            'opened_at' => now()->subHours(3)->subMinute(), 'closed_at' => now()->subHour()]);
+        $this->botSaid($conversation, 'زميلي من المعرض هيرد عليك', now()->subHours(3));
+
+        // returned to the bot, but he was promised a colleague - no "لسه معايا؟"
+        $this->assertSame(0, app(ApplicationNudgeService::class)->nudgeStalled());
+
+        $again = WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'تمام']);
+        $again->forceFill(['created_at' => now()->subMinutes(50)])->save();
+        $this->botSaid($conversation, 'ابعتلي صورة وش البطاقة', now()->subMinutes(49));
+
+        $this->assertSame(1, app(ApplicationNudgeService::class)->nudgeStalled());
+    }
+
     public function test_after_two_unanswered_asks_the_next_thing_is_asked_instead(): void
     {
         [$application, $conversation] = $this->application();

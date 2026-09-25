@@ -60,6 +60,11 @@ class InstallmentSystemResource extends Resource
                         ->label('النظام شغال')
                         ->default(true),
 
+                    Forms\Components\Toggle::make('no_upfront_only')
+                        ->label('نظام "من غير ولا مليم وقت الاستلام"')
+                        ->helperText('من غير مقدم ولا مصاريف. البوت مش بيعرضه في العرض العادي - بس للعميل اللي مصمم ما يدفعش أي حاجة وقت الاستلام')
+                        ->default(false),
+
                     Forms\Components\TextInput::make('priority')
                         ->label('الأولوية لو التكلفة متساوية (الأكبر يتقدم)')
                         ->numeric()

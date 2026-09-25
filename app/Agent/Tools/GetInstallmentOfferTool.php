@@ -25,10 +25,11 @@ class GetInstallmentOfferTool implements Tool
     public function description(): string
     {
         return 'THE tool for any installment question ("القسط كام", "على سنة", "أقل مقدم", "ينفع أقسط"). The best system for '
-            .'this customer is picked automatically; you get, per duration, the cash he pays up front (cash_due_upfront, '
-            .'admin fees included) and the monthly payment. Give him those two numbers per duration - do NOT name the '
+            .'this customer is picked automatically; you get, per duration, the down payment (usually none), the admin fee paid '
+            .'at pickup, and the exact monthly payment - the `say` line has them worded correctly. Do NOT name the '
             .'system/company unless he asks who finances it. Pass months when he named a duration, down_payment when he '
-            .'named an amount. Use get_installment_options only when he asks to compare systems/companies.';
+            .'named an amount, no_upfront=true only when he insists on paying nothing at all at pickup (not even the fees). '
+            .'Use get_installment_options only when he asks to compare systems/companies.';
     }
 
     public function inputSchema(): array
@@ -40,6 +41,7 @@ class GetInstallmentOfferTool implements Tool
                 'motorcycle_id' => ['type' => 'integer'],
                 'months' => ['type' => 'integer', 'minimum' => 1],
                 'down_payment' => ['type' => 'number', 'minimum' => 0],
+                'no_upfront' => ['type' => 'boolean', 'description' => 'true only when the customer insists on paying nothing at pickup - no down payment and no admin fees.'],
                 'customer_type' => ['type' => 'string', 'description' => 'Only a type the customer stated (or the open application\'s). Omit when unknown.'],
                 'governorate' => ['type' => 'string', 'description' => 'Governorate key (cairo, giza, ...) only if the customer said where he lives.'],
             ],
@@ -78,13 +80,26 @@ class GetInstallmentOfferTool implements Tool
         }
 
         $months = isset($args['months']) ? (int) $args['months'] : null;
+
+        // He already chose a duration: a freelancer's financing cap then
+        // listed three durations again and asked him to pick. He gets the
+        // numbers for the duration he chose.
+        if ($months === null && $ctx->activeApplicationId) {
+            $months = Application::whereKey($ctx->activeApplicationId)->first()?->installmentPlan?->months;
+        }
         $downPayment = isset($args['down_payment']) ? (float) $args['down_payment'] : null;
         $governorate = $args['governorate'] ?? null;
+        $noUpfront = ($args['no_upfront'] ?? false) === true;
 
-        $offers = $this->offers->offers($machine, $customerTypeId, $governorate, $months, $downPayment);
+        $offers = $this->offers->offers($machine, $customerTypeId, $governorate, $months, $downPayment, $noUpfront);
+
+        if ($offers === [] && $noUpfront) {
+            return ToolResult::error('NO_ZERO_UPFRONT_PLAN', 'No plan without any payment at pickup for this motorcycle. '
+                .'Tell him the admin fees are the only thing paid at pickup (no down payment) and quote the normal offer.');
+        }
 
         if ($offers === [] && $months !== null) {
-            $available = array_column($this->offers->offers($machine, $customerTypeId, $governorate, null, $downPayment), 'months');
+            $available = array_column($this->offers->offers($machine, $customerTypeId, $governorate, null, $downPayment, $noUpfront), 'months');
 
             return ToolResult::error('DURATION_NOT_AVAILABLE', 'No plan for '.$months.' months. Available durations: '
                 .implode(', ', $available).' - offer the closest ones.');
@@ -111,21 +126,47 @@ class GetInstallmentOfferTool implements Tool
                 'months' => $o['months'],
                 'cash_due_upfront' => $o['cash_due_upfront'],
                 'monthly_payment' => $o['monthly_payment'],
+                'admin_fee_at_pickup' => $o['admin_fee'],
                 'say' => $this->line($o),
                 // internal: pass these to update_application_selection when he picks this offer - never say them
                 'installment_system' => $o['system'],
                 'down_payment' => $o['down_payment'],
             ], $shown),
-            'how_to_present' => 'Send the `say` lines as they are (one per line, you may reword lightly). No system/company names, '
-                .'no word "نظام"/"أنظمة".'.($others !== [] ? ' Say other durations exist ('.implode('/', array_map(fn ($m) => $this->duration($m), $others)).').' : ''),
+            'first_payment_after_days' => $this->firstPaymentAfterDays(),
+            'how_to_present' => 'Send the `say` lines as they are (one per line, you may reword lightly, but keep every number and '
+                .'keep saying whether there are admin fees). Admin fees are NOT a down payment - never call them "مقدم". '
+                .'Add once: "'.$this->firstPaymentLine().'". No system/company names, no word "نظام"/"أنظمة".'.($others !== [] ? ' Say other durations exist ('.implode('/', array_map(fn ($m) => $this->duration($m), $others)).').' : ''),
         ] + ($capped ? ['explain_to_customer' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : []));
     }
 
+    /**
+     * "مقدم 1,750" was the admin fee: the customer said he would not pay a
+     * down payment and was told the plan needs one. The showroom takes none -
+     * the fee is paid at pickup and is named as such.
+     */
     private function line(array $offer): string
     {
-        $upfront = $offer['cash_due_upfront'] > 0 ? 'مقدم '.number_format($offer['cash_due_upfront']) : 'من غير مقدم';
+        $down = (float) $offer['down_payment'];
+        $fee = (float) $offer['admin_fee'];
 
-        return $this->duration($offer['months']).': '.$upfront.' والقسط '.number_format($offer['monthly_payment']).' في الشهر';
+        $upfront = match (true) {
+            $down > 0 && $fee > 0 => 'مقدم '.number_format($down).' + مصاريف إدارية '.number_format($fee).' وقت الاستلام',
+            $down > 0 => 'مقدم '.number_format($down).' ومن غير مصاريف إدارية',
+            $fee > 0 => 'من غير مقدم، بس فيه مصاريف إدارية '.number_format($fee).' بتدفعها وقت الاستلام',
+            default => 'من غير مقدم ومن غير أي مصاريف',
+        };
+
+        return $this->duration($offer['months']).': '.$upfront.'، والقسط '.number_format($offer['monthly_payment']).' جنيه في الشهر';
+    }
+
+    private function firstPaymentAfterDays(): int
+    {
+        return (int) config('agent.installments.first_payment_after_days', 45);
+    }
+
+    private function firstPaymentLine(): string
+    {
+        return 'أول قسط بيبدأ بعد '.$this->firstPaymentAfterDays().' يوم من الاستلام';
     }
 
     private function duration(int $months): string

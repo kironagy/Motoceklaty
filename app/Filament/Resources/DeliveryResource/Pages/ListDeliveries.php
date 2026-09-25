@@ -53,6 +53,21 @@ class ListDeliveries extends ListRecords
                 fn (Builder $query): Builder =>
                     $query->where('request_type', 'fake')
             ),
+
+        /*
+        |--------------------------------------------------------------------------
+        | طلبات البوت - اللي اتقدمت من بوت الواتساب
+        |--------------------------------------------------------------------------
+        */
+        'bot' => Tab::make('طلبات بوت')
+            ->icon('heroicon-o-chat-bubble-left-right')
+            ->badge(
+                fn (): int => $this->getRequestTypeCount('bot')
+            )
+            ->modifyQueryUsing(
+                fn (Builder $query): Builder =>
+                    $query->where('request_type', 'bot')
+            ),
     ];
 
     /*
@@ -132,6 +147,9 @@ protected function getDeletedRequestsCount(): int
         return [
 
             Actions\Action::make('new_installment_request')
+
+                // طلبات البوت بتتعمل من البوت نفسه بس
+                ->hidden(fn (): bool => $this->activeTab === 'bot')
 
                 /*
                 |--------------------------------------------------------------------------

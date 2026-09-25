@@ -139,6 +139,11 @@ class GeminiClient
                     $payload['generationConfig']['responseSchema'] = $options['responseSchema'];
                 }
 
+                // Built-in tools, e.g. [['google_search' => new \stdClass]].
+                if (! empty($options['tools'])) {
+                    $payload['tools'] = $options['tools'];
+                }
+
                 $response = Http::timeout($options['timeout'] ?? 25)
                     ->post(
                         "https://generativelanguage.googleapis.com/v1beta/models/{$modelRow->model_code}:generateContent?key={$modelRow->apiKey->api_key}",
@@ -170,6 +175,12 @@ class GeminiClient
                     return [
                         'ok' => true,
                         'reply' => $reply,
+                        // A grounded answer arrives split over several parts.
+                        'text' => collect(data_get($json, 'candidates.0.content.parts', []))
+                            ->reject(fn ($part) => $part['thought'] ?? false)
+                            ->pluck('text')->filter()->implode(''),
+                        'sources' => collect(data_get($json, 'candidates.0.groundingMetadata.groundingChunks', []))
+                            ->pluck('web.uri')->filter()->unique()->values()->all(),
                         'truncated' => $finishReason === 'MAX_TOKENS',
                         'key_id' => $modelRow->gemini_api_key_id,
                         'model_id' => $modelRow->id,
@@ -228,6 +239,15 @@ class GeminiClient
                 }
 
                 if ($status === 429 || $this->isQuotaError($body)) {
+                    // A quota that only this call's feature hits (Google
+                    // Search grounding is 0 on free keys) must not put the
+                    // key on cooldown for the customer reply path.
+                    if (! empty($options['quotaIsolated'])) {
+                        $manager->refundReservation($modelRow);
+
+                        continue;
+                    }
+
                     $rateLimit = app(GeminiRateLimitParser::class)->analyze(
                         $body,
                         $response->header('Retry-After')

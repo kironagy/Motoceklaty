@@ -19,7 +19,9 @@ class GetMotorcycleDetailsTool implements Tool
     public function description(): string
     {
         return 'Authoritative details and prices for 1-3 motorcycles. Use before stating any price, spec, '
-            .'color or offer, or when comparing models. Do not use when you only need to know that a model exists.';
+            .'color or offer, or when comparing models - call it again in every turn the customer asks about a spec, even if an earlier turn called it. '
+            .'`specifications` is the showroom\'s own spec sheet (key: value) and wins over any other source. '
+            .'Do not use when you only need to know that a model exists.';
     }
 
     public function inputSchema(): array

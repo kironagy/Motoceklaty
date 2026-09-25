@@ -2,6 +2,7 @@
 
 namespace App\Domain\Documents\DocumentRules;
 
+use App\Domain\Applications\NameTokens;
 use App\Models\Application;
 use App\Models\ApplicationData;
 use App\Models\CustomerAttribute;
@@ -35,9 +36,16 @@ class MatchesApplicationFieldEvaluator implements DocumentRuleEvaluator
         $normalizedExtracted = $this->normalize((string) $extractedValue);
         $normalizedStored = $this->normalize((string) $storedValue);
 
-        $matches = $threshold === null
-            ? $normalizedExtracted === $normalizedStored
-            : $this->similarity($normalizedExtracted, $normalizedStored) >= (float) $threshold;
+        $matches = match (true) {
+            // A shop sign reads "مطعم الأمل" where the tax card says "مطعم
+            // الامل للمأكولات": the same business, one name inside the other.
+            ($params['match'] ?? null) === 'contains' => $this->containsEither($normalizedExtracted, $normalizedStored),
+            // A salary slip prints "محمد احمد علي" for the ID's "محمد احمد
+            // علي حسن": the same person, fewer names - not a mismatch.
+            ($params['match'] ?? null) === 'name_tokens' => $this->sameOrShorterName((string) $extractedValue, (string) $storedValue),
+            $threshold === null => $normalizedExtracted === $normalizedStored,
+            default => $this->similarity($normalizedExtracted, $normalizedStored) >= (float) $threshold,
+        };
 
         if ($matches) {
             return null;
@@ -61,6 +69,23 @@ class MatchesApplicationFieldEvaluator implements DocumentRuleEvaluator
     private function normalize(string $value): string
     {
         return trim(preg_replace('/\s+/', ' ', mb_strtolower($value)));
+    }
+
+    private function containsEither(string $a, string $b): bool
+    {
+        $a = \App\Support\ArabicTextNormalizer::normalize($a);
+        $b = \App\Support\ArabicTextNormalizer::normalize($b);
+
+        return $a !== '' && $b !== '' && (str_contains($a, $b) || str_contains($b, $a));
+    }
+
+    private function sameOrShorterName(string $a, string $b): bool
+    {
+        $tokensA = NameTokens::of($a);
+
+        return $tokensA !== [] && ($tokensA === NameTokens::of($b)
+            || NameTokens::isStrictSubset($a, $b)
+            || NameTokens::isStrictSubset($b, $a));
     }
 
     /** 0.0-1.0, not similar_text()'s native 0-100 percent - the threshold is a fraction. */

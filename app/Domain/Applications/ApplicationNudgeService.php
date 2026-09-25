@@ -4,6 +4,7 @@ namespace App\Domain\Applications;
 
 use App\Domain\Conversations\DeliveryService;
 use App\Models\Application;
+use App\Models\Handoff;
 use App\Models\WhatsappConversation;
 use App\Models\WhatsappMessage;
 use Illuminate\Support\Carbon;
@@ -70,6 +71,16 @@ class ApplicationNudgeService
         $nudges = $state['application_nudges'] ?? [];
         $lastCustomerAt = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
             ->where('direction', 'incoming')->max('created_at');
+
+        // He was told "زميلي هيرد عليك": the silence is ours, not his. A
+        // customer handed off over his ID got "ابعتلي نوع الشغل" 14 hours
+        // later, right after staff returned the conversation.
+        // Nudging starts again only once he has written after the handoff ended.
+        $handoff = Handoff::where('conversation_id', $conversation->id)->latest('opened_at')->first();
+
+        if ($handoff && (! $lastCustomerAt || Carbon::parse($lastCustomerAt)->lte($handoff->closed_at ?? $handoff->opened_at))) {
+            return false;
+        }
 
         // A reply from the customer starts a new silence.
         if (($nudges['application_id'] ?? null) !== $application->id

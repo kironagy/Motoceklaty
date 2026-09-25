@@ -5,7 +5,9 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\AiTraceResource\Pages;
 use App\Filament\Resources\AiTraceResource\RelationManagers\StepsRelationManager;
 use App\Models\AiTrace;
-use Filament\Infolists\Components\KeyValueEntry;
+use App\Support\DashboardLabels;
+use Filament\Infolists\Components\RepeatableEntry;
+use Filament\Infolists\Components\Section;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
@@ -55,7 +57,9 @@ class AiTraceResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('id')->label('#'),
                 Tables\Columns\TextColumn::make('conversation.phone')->label('العميل'),
-                Tables\Columns\TextColumn::make('status')->label('الحالة')->badge(),
+                Tables\Columns\TextColumn::make('status')->label('الحالة')->badge()
+                    ->formatStateUsing(fn ($state) => DashboardLabels::get(DashboardLabels::TRACE_STATUS, $state))
+                    ->color(fn ($state) => DashboardLabels::color(DashboardLabels::TRACE_STATUS_COLOR, $state)),
                 Tables\Columns\TextColumn::make('model')->label('الموديل'),
                 Tables\Columns\TextColumn::make('input_tokens')->label('توكنز الدخول'),
                 Tables\Columns\TextColumn::make('output_tokens')->label('توكنز الخروج'),
@@ -72,19 +76,51 @@ class AiTraceResource extends Resource
     public static function infolist(Infolist $infolist): Infolist
     {
         return $infolist->schema([
-            TextEntry::make('id')->label('#'),
-            TextEntry::make('conversation.phone')->label('العميل'),
-            TextEntry::make('status')->label('الحالة'),
-            TextEntry::make('prompt_version')->label('نسخة التعليمات'),
-            TextEntry::make('provider')->label('المزوّد'),
-            TextEntry::make('model')->label('الموديل'),
-            TextEntry::make('error_code')->label('كود الخطأ'),
-            TextEntry::make('input_tokens')->label('توكنز الدخول'),
-            TextEntry::make('output_tokens')->label('توكنز الخروج'),
-            TextEntry::make('latency_ms')->label('الزمن (ms)'),
-            KeyValueEntry::make('context_manifest')->label('ملخص السياق'),
-            KeyValueEntry::make('guard_events')->label('أحداث الحراسة'),
+            Section::make('ملخص')
+                ->columns(['default' => 1, 'sm' => 2, 'lg' => 4])
+                ->schema([
+                    TextEntry::make('id')->label('#'),
+                    TextEntry::make('conversation.phone')->label('العميل')->default('-'),
+                    TextEntry::make('status')->label('الحالة')->badge()
+                        ->formatStateUsing(fn ($state) => DashboardLabels::get(DashboardLabels::TRACE_STATUS, $state))
+                        ->color(fn ($state) => DashboardLabels::color(DashboardLabels::TRACE_STATUS_COLOR, $state)),
+                    TextEntry::make('created_at')->label('التاريخ')->dateTime('Y-m-d H:i:s'),
+                    TextEntry::make('model')->label('الموديل')->default('-'),
+                    TextEntry::make('prompt_version')->label('نسخة التعليمات')->default('-'),
+                    TextEntry::make('latency_ms')->label('الزمن')->suffix(' ms')->placeholder('-'),
+                    TextEntry::make('error_code')->label('الخطأ')->default('-')->color('danger'),
+                ]),
+            Section::make('الاستهلاك')
+                ->columns(['default' => 2, 'lg' => 4])
+                ->schema([
+                    TextEntry::make('usage_calls')->label('عدد مرات النداء للموديل')
+                        ->state(fn (AiTrace $record) => self::usage($record, 'model_calls')),
+                    TextEntry::make('input_tokens')->label('توكنز داخل')->numeric()->placeholder('-'),
+                    TextEntry::make('output_tokens')->label('توكنز خارج')->numeric()->placeholder('-'),
+                    TextEntry::make('usage_cached')->label('توكنز متخزنة (cache)')
+                        ->state(fn (AiTrace $record) => self::usage($record, 'cached_tokens')),
+                ]),
+            Section::make('ردود الحراسة وقفتها')
+                ->description('ردود البوت كتبها واتمنعت قبل ما توصل للعميل، وسبب المنع.')
+                ->visible(fn (AiTrace $record) => ! empty($record->guard_events))
+                ->schema([
+                    RepeatableEntry::make('guard_events')->label('ردود اتمنعت')->hiddenLabel()->contained(false)
+                        ->schema([
+                            TextEntry::make('code')->label('السبب')->hiddenLabel()->badge()->color('danger')
+                                ->formatStateUsing(fn ($state) => DashboardLabels::get(DashboardLabels::GUARD_CODE, $state)),
+                            TextEntry::make('args.messages')->label('الرد اللي اتمنع')->hiddenLabel()->listWithLineBreaks()
+                                ->formatStateUsing(fn ($state) => is_scalar($state) ? (string) $state : json_encode($state, JSON_UNESCAPED_UNICODE))
+                                ->placeholder('-'),
+                        ]),
+                ]),
         ]);
+    }
+
+    private static function usage(AiTrace $record, string $key): string
+    {
+        $value = data_get($record->context_manifest, 'usage.'.$key);
+
+        return is_numeric($value) ? number_format((float) $value) : '-';
     }
 
     public static function getRelations(): array

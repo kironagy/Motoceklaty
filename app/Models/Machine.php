@@ -25,6 +25,7 @@ class Machine extends Model
         'is_active',
         'availability',
         'cc',
+        'model_year',
         'category',
         'description',
         'specifications',

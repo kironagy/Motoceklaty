@@ -129,6 +129,7 @@ class CalculateInstallmentTool implements Tool
             'monthly_payment' => $result->monthlyInstallment,
             'admin_fee' => $result->administrativeFees,
             'cash_due_upfront' => round($result->downPayment + $result->administrativeFees),
+            'first_payment_after_days' => (int) config('agent.installments.first_payment_after_days', 45),
             'warnings' => $warnings,
         ] + ($downPayment > $requestedDownPayment ? ['financing_cap' => [
             'max_financed_amount' => $cap,

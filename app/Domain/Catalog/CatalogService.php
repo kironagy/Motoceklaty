@@ -163,6 +163,7 @@ class CatalogService
                 'availability' => $m->availability,
                 'installment_system_ids' => $m->installmentSystemIds(),
                 'cc' => $m->cc,
+                'model_year' => $m->model_year,
                 'description' => $m->description,
                 'specifications' => $m->specifications,
             ];

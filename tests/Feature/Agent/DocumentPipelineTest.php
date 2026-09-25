@@ -123,7 +123,7 @@ class DocumentPipelineTest extends TestCase
 
         app(ProcessDocumentTool::class)->execute(['media_ids' => [$media->id]], $ctx);
 
-        $schema = $fake->lastRequest()->responseSchema;
+        $schema = $fake->requests()[0]->responseSchema;
 
         $this->assertSame(
             ['type' => 'object', 'properties' => ['national_id' => ['type' => 'string'], 'full_name' => ['type' => 'string']]],
@@ -359,6 +359,8 @@ class DocumentPipelineTest extends TestCase
 
         foreach ($payloads as $data) {
             $fake->queue(new AiResponse(textParts: [json_encode($data)], toolCalls: [], finishReason: 'STOP', usage: [], model: 'gemini-test', keyId: null, latencyMs: 1));
+            // the focused read of the classified type's fields
+            $fake->queue(new AiResponse(textParts: [json_encode($data['fields'] ?? [])], toolCalls: [], finishReason: 'STOP', usage: [], model: 'gemini-test', keyId: null, latencyMs: 1));
         }
 
         $this->app->instance(AiProvider::class, $fake);
@@ -390,7 +392,7 @@ class DocumentPipelineTest extends TestCase
         $this->assertContains('NAME_MISMATCH', array_column($item['issues'], 'code'));
     }
 
-    public function test_ocr_failure_is_retryable_and_leaves_the_application_unchanged(): void
+    public function test_ocr_and_reading_both_down_is_retryable_and_leaves_the_application_unchanged(): void
     {
         $this->fields();
         $this->nationalIdDocumentType();
@@ -399,6 +401,11 @@ class DocumentPipelineTest extends TestCase
         $ocr = Mockery::mock(OcrProvider::class);
         $ocr->shouldReceive('extractText')->andThrow(new OcrException('down'));
         $this->app->instance(OcrProvider::class, $ocr);
+        // OCR alone no longer fails a document - the model reads the image;
+        // only when that fails too is there nothing to go on.
+        $ai = Mockery::mock(AiProvider::class);
+        $ai->shouldReceive('chat')->andThrow(new \App\Agent\Providers\AiProviderException('down'));
+        $this->app->instance(AiProvider::class, $ai);
 
         $result = app(ProcessDocumentTool::class)->execute(['media_ids' => [$media->id]], $ctx);
 
@@ -483,10 +490,12 @@ class DocumentPipelineTest extends TestCase
 
         $fake = new FakeAiProvider();
         foreach ([['2026-09-01', '2026-09-23'], ['2026-07-01', '2026-08-31']] as [$from, $to]) {
+            $fields = ['app_name' => 'Uber', 'period_start' => $from, 'period_end' => $to];
             $fake->queue(new AiResponse(textParts: [json_encode([
                 'document_type_key' => 'delivery_app_earnings', 'legibility' => 'good', 'confidence' => 0.9,
-                'fields' => ['app_name' => 'Uber', 'period_start' => $from, 'period_end' => $to],
+                'fields' => $fields,
             ])], toolCalls: [], finishReason: 'STOP', usage: [], model: 'gemini-test', keyId: null, latencyMs: 1));
+            $fake->queue(new AiResponse(textParts: [json_encode($fields)], toolCalls: [], finishReason: 'STOP', usage: [], model: 'gemini-test', keyId: null, latencyMs: 1));
         }
         $this->app->instance(AiProvider::class, $fake);
 

@@ -9,6 +9,9 @@ use App\Domain\Applications\SubmissionService;
 use App\Models\AiTrace;
 use App\Models\Application;
 use App\Models\ApplicationData;
+use App\Models\ApplicationDocument;
+use App\Models\DocumentType;
+use App\Models\MessageMedia;
 use App\Models\ApplicationRequirement;
 use App\Models\Brand;
 use App\Models\Customer;
@@ -24,6 +27,7 @@ use App\Models\WhatsappConversation;
 use App\Models\WhatsappMessage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class SubmissionTest extends TestCase
@@ -184,12 +188,98 @@ class SubmissionTest extends TestCase
         $this->assertNotNull($application->installment_request_id);
 
         $ir = InstallmentRequest::find($application->installment_request_id);
+        $this->assertSame('bot', $ir->request_type);
         $this->assertSame('employee', $ir->work_status);
         $this->assertSame('Mohamed Ali', $ir->applicant_name);
         $this->assertSame('01012345678', $ir->applicant_phone);
         $this->assertSame(12, $ir->months);
         $this->assertSame('new', $ir->status);
         $this->assertSame($application->id, $ir->application_id);
+    }
+
+    public function test_submitted_request_lands_in_the_bot_tab_with_all_customer_data(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        [$application, $conversation] = $this->completeApplication();
+
+        foreach ([
+            ['applicant', 'national_id', '29501151234567'],
+            ['applicant', 'address', 'شارع التحرير - الدقي'],
+            ['applicant', 'address_building_no', '12'],
+            ['applicant', 'address_floor', '3'],
+            ['applicant', 'monthly_income', '8000'],
+            ['applicant', 'work_address', 'شارع الهرم'],
+            ['guarantor', 'guarantor_name', 'Ahmed Hassan'],
+            ['guarantor', 'guarantor_phone', '01122223333'],
+            ['guarantor', 'guarantor_national_id', '30001011234567'],
+        ] as [$party, $key, $value]) {
+            ApplicationData::create([
+                'application_id' => $application->id, 'party' => $party, 'field_key' => $key,
+                'value' => $value, 'source' => 'customer_stated', 'status' => 'valid',
+            ]);
+        }
+
+        Storage::disk('local')->put('whatsapp-media/id.jpg', 'id-bytes');
+        Storage::disk('local')->put('whatsapp-media/slip.jpg', 'slip-bytes');
+        $message = WhatsappMessage::create([
+            'whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'image',
+        ]);
+        foreach (['national_id_front' => 'id.jpg', 'salary_slip' => 'slip.jpg'] as $typeKey => $file) {
+            $type = DocumentType::create(['key' => $typeKey, 'label' => $typeKey, 'is_active' => true]);
+            $media = MessageMedia::create([
+                'message_id' => $message->id, 'media_type' => 'image', 'mime' => 'image/jpeg',
+                'disk' => 'local', 'path' => 'whatsapp-media/'.$file, 'size' => 5,
+            ]);
+            ApplicationDocument::create([
+                'application_id' => $application->id, 'document_type_id' => $type->id, 'media_id' => $media->id,
+                'party' => 'applicant', 'status' => 'accepted',
+            ]);
+        }
+
+        $this->assertTrue($this->submitConfirmed($conversation, $application)->ok);
+
+        $ir = InstallmentRequest::find($application->refresh()->installment_request_id);
+        $this->assertSame('bot', $ir->request_type);
+        $this->assertSame('29501151234567', $ir->applicant_national_id);
+        $this->assertSame('1995-01-15', $ir->applicant_birthdate->toDateString());
+        $this->assertTrue($ir->applicant_age_ok);  // 31 years
+        $this->assertTrue($ir->guarantor_age_ok);  // 26 years
+        $this->assertSame('12', $ir->applicant_building_number);
+        $this->assertStringContainsString('شارع التحرير', $ir->applicant_address);
+        $this->assertSame(8000, (int) $ir->salary_amount);
+        $this->assertSame('شارع الهرم', $ir->work_address);
+        $this->assertSame('Ahmed Hassan', $ir->guarantor_name);
+        $this->assertSame('01122223333', $ir->guarantor_phone);
+        $this->assertSame('30001011234567', $ir->guarantor_national_id);
+        $this->assertStringContainsString('بوت', $ir->notes);
+
+        $this->assertNotNull($ir->applicant_id_image);
+        Storage::disk('public')->assertExists($ir->applicant_id_image);
+        $this->assertSame('id-bytes', Storage::disk('public')->get($ir->applicant_id_image));
+        Storage::disk('public')->assertExists($ir->salary_slip_file);
+    }
+
+    public function test_age_ok_is_true_only_between_21_and_62(): void
+    {
+        [$application] = $this->completeApplication();
+        $projector = app(\App\Domain\Applications\LegacyRequestProjector::class);
+        $row = ApplicationData::create([
+            'application_id' => $application->id, 'party' => 'applicant', 'field_key' => 'national_id',
+            'value' => '', 'source' => 'customer_stated', 'status' => 'valid',
+        ]);
+
+        $nationalIdAged = function (int $years, int $extraDays = 0): string {
+            $d = now()->subYears($years)->subDays($extraDays);
+
+            return ($d->year >= 2000 ? '3' : '2').$d->format('ymd').'0101234';
+        };
+
+        foreach ([[20, false], [21, true], [62, true], [63, false]] as [$years, $expected]) {
+            $row->update(['value' => $nationalIdAged($years, 1)]);
+            $this->assertSame($expected, $projector->attributes($application, 'employee')['applicant_age_ok'], "age {$years}");
+        }
     }
 
     public function test_second_submit_is_idempotent(): void

@@ -138,16 +138,18 @@ class SnapshotService
 
         if ($idMissing) {
             $steps[] = ['type' => 'document', 'key' => 'national_id_front', 'label' => $documentLabels['national_id_front'] ?? 'صورة البطاقة',
-                'why' => 'the photo fills full_name and national_id by itself - do not ask him to type them'];
+                'why' => 'the photo fills full_name and national_id by itself - do not ask him to type them. '
+                    .'Just ask for the photo; do not tell him what will be read from it.'];
         }
 
-        $order = ['work_type', 'phone', 'address', 'work_address'];
+        $order = ['work_type', 'phone', ...self::HOME_ADDRESS, ...self::WORK_ADDRESS];
         $fields = array_values(array_diff($missingFields, $readFromId, array_column($invalid, 'key')));
         usort($fields, fn ($a, $b) => (array_search($a, $order, true) === false ? 99 : array_search($a, $order, true))
             <=> (array_search($b, $order, true) === false ? 99 : array_search($b, $order, true)));
 
         foreach ($fields as $key) {
-            $steps[] = ['type' => 'field', 'key' => $key, 'label' => $fieldLabels[$key] ?? $key];
+            $steps[] = ['type' => 'field', 'key' => $key, 'label' => $fieldLabels[$key] ?? $key]
+                + $this->askAddressTogether($key, $fields, $fieldLabels);
         }
 
         foreach (array_diff($documents['missing'], ['national_id_front']) as $key) {
@@ -190,6 +192,33 @@ class SnapshotService
                 'remaining' => count($steps) <= 3 ? count($steps) : null,
             ], fn ($v) => $v !== null),
         ];
+    }
+
+    /** Home address parts, asked in this order. */
+    private const HOME_ADDRESS = ['address', 'address_building_no', 'address_floor', 'address_landmark', 'residence_ownership'];
+
+    /** Work address parts - no floor, no rented/owned. */
+    private const WORK_ADDRESS = ['work_address', 'work_building_no', 'work_landmark'];
+
+    /**
+     * Asking street, then number, then floor one message at a time is five
+     * round trips. The customer is asked for everything still missing of
+     * that address at once; whatever he leaves out comes back as the next step.
+     */
+    private function askAddressTogether(string $key, array $missing, $labels): array
+    {
+        foreach ([self::HOME_ADDRESS, self::WORK_ADDRESS] as $group) {
+            if (in_array($key, $group, true)) {
+                $parts = array_values(array_intersect($group, $missing));
+
+                return count($parts) > 1 ? [
+                    'ask_together' => array_map(fn ($k) => $labels[$k] ?? $k, $parts),
+                    'why' => 'ask for all of ask_together in one short message, then record every part he gives with record_customer_data',
+                ] : [];
+            }
+        }
+
+        return [];
     }
 
     private function askedTwiceWithoutAnswer(Application $application, array $step): bool

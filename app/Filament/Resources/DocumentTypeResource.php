@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Domain\Documents\DocumentFields;
 use App\Filament\Resources\DocumentTypeResource\Pages;
 use App\Models\DocumentType;
 use App\Models\RequirementField;
@@ -35,24 +36,21 @@ class DocumentTypeResource extends Resource
         'matches_application_field' => 'البيانات لازم تطابق اللي العميل قاله (اسم / رقم قومي)',
         'not_past' => 'التاريخ ما يكونش فات (رخصة منتهية مثلاً)',
         'not_expired' => 'المستند ما يكونش أقدم من عدد أيام',
+        'min_days_since' => 'لازم يكون فات على التاريخ ده عدد أيام (مدة خدمة مثلاً)',
         'period_coverage' => 'السكرينات لازم تغطي فترة كفاية (أرباح التطبيقات)',
     ];
 
     public const ISSUE_CODES = [
         'NAME_MISMATCH' => 'الاسم مش مطابق',
+        'BUSINESS_NAME_MISMATCH' => 'اسم النشاط مش مطابق',
         'ID_MISMATCH' => 'الرقم القومي مش مطابق',
         'EXPIRED_DOCUMENT' => 'المستند قديم / منتهي',
         'LICENSE_EXPIRED' => 'الرخصة منتهية',
+        'EMPLOYMENT_TOO_RECENT' => 'مدة الخدمة أقل من المطلوب',
     ];
 
     /** Fields read off documents that are not application fields. */
-    public const DOCUMENT_ONLY_FIELDS = [
-        'app_name' => 'اسم التطبيق',
-        'period_start' => 'بداية الفترة',
-        'period_end' => 'نهاية الفترة',
-        'license_expiry_date' => 'تاريخ انتهاء الرخصة',
-        'issue_date' => 'تاريخ الإصدار',
-    ];
+    public const DOCUMENT_ONLY_FIELDS = DocumentFields::LABELS;
 
     public const MIMES = [
         'image/jpeg' => 'صورة JPG',
@@ -66,7 +64,9 @@ class DocumentTypeResource extends Resource
     {
         $options = RequirementField::pluck('label', 'key')->all() + self::DOCUMENT_ONLY_FIELDS;
 
-        foreach (DocumentType::pluck('extraction_fields')->flatten()->filter()->unique() as $key) {
+        $used = DocumentType::get(['extraction_fields', 'optional_fields'])->flatMap(fn (DocumentType $t) => $t->allFields());
+
+        foreach ($used->filter()->unique() as $key) {
             $options[$key] ??= $key;
         }
 
@@ -115,7 +115,12 @@ class DocumentTypeResource extends Resource
                     ->label('الحقول')
                     ->multiple()
                     ->options(fn () => self::fieldOptions())
-                    ->helperText('البوت بيقرا الحقول دي من صورة المستند. الحقول اللي ليها قاعدة تحت لازم تكون هنا.'),
+                    ->helperText('لازم تكون مكتوبة في المستند - لو واحدة مش باينة المستند بيترفض. الحقول اللي ليها قاعدة تحت لازم تكون هنا أو في اللي تحت.'),
+                Select::make('optional_fields')
+                    ->label('حقول بتتقري لو موجودة')
+                    ->multiple()
+                    ->options(fn () => self::fieldOptions())
+                    ->helperText('البوت بيقراها لو مكتوبة (زي تاريخ التعيين في المفردات) - ولو مش موجودة المستند ما يترفضش. بتظهر للموظف في الطلب.'),
                 CheckboxList::make('accepted_mimes')
                     ->label('أنواع الملفات المقبولة')
                     ->options(self::MIMES)
@@ -157,20 +162,33 @@ class DocumentTypeResource extends Resource
                 ->options(fn () => self::fieldOptions())->required()->visible($is('matches_application_field')),
             Select::make('stored_field')->label('يطابق الحقل ده في الطلب')
                 ->options(fn () => RequirementField::pluck('label', 'key'))->required()->visible($is('matches_application_field')),
+            // Not in the form before: saving a document type from here dropped
+            // "contains" and the shop-sign name check became an exact match.
+            Select::make('match')->label('طريقة المطابقة')
+                ->options([
+                    'name_tokens' => 'اسم شخص: نفس الاسم أو أقصر منه (تلاتي قدام رباعي)',
+                    'contains' => 'واحد جوه التاني (اسم محل / يافطة)',
+                ])
+                ->placeholder('مطابقة كاملة')
+                ->visible($is('matches_application_field'))
+                ->helperText('المطابقة الكاملة بترفض اسم تلاتي قدام رباعي - للأسماء استخدم "اسم شخص".'),
             Select::make('date_field')->label('حقل التاريخ')
-                ->options(fn () => self::fieldOptions())->required()->visible($is('not_past', 'not_expired')),
+                ->options(fn () => self::fieldOptions())->required()->visible($is('not_past', 'not_expired', 'min_days_since')),
             Select::make('start_field')->label('حقل بداية الفترة')
                 ->options(fn () => self::fieldOptions())->required()->visible($is('period_coverage')),
             Select::make('end_field')->label('حقل نهاية الفترة')
                 ->options(fn () => self::fieldOptions())->required()->visible($is('period_coverage')),
-            TextInput::make('min_days')->label('أقل عدد أيام لازم يتغطى')->numeric()->minValue(1)
-                ->required()->dehydrateStateUsing($int)->visible($is('period_coverage'))
-                ->helperText('مثال: 80 يوم تقريبًا = ٣ شهور.'),
-            TextInput::make('max_age_days')->label('آخر سكرين ما يكونش أقدم من (يوم)')->numeric()->minValue(1)
+            TextInput::make('min_days')
+                ->label(fn (Get $get) => $get('../rule_type') === 'min_days_since' ? 'أقل عدد أيام من التاريخ لحد النهارده' : 'أقل عدد أيام لازم يتغطى')
+                ->numeric()->minValue(1)
+                ->required()->dehydrateStateUsing($int)->visible($is('period_coverage', 'min_days_since'))
+                ->helperText(fn (Get $get) => $get('../rule_type') === 'min_days_since' ? 'مثال: 180 = ٦ شهور خدمة على الأقل.' : 'مثال: 80 يوم تقريبًا = ٣ شهور.'),
+            TextInput::make('max_age_days')
+                ->label(fn (Get $get) => $get('../rule_type') === 'not_expired' ? 'المستند ما يكونش أقدم من (يوم)' : 'آخر سكرين ما يكونش أقدم من (يوم)')->numeric()->minValue(1)
                 ->dehydrateStateUsing($int)->visible($is('period_coverage', 'not_expired'))
                 ->required(fn (Get $get) => $get('../rule_type') === 'not_expired'),
             Select::make('issue_code')->label('المشكلة اللي تتسجل')
-                ->options(self::ISSUE_CODES)->visible($is('matches_application_field', 'not_past'))
+                ->options(self::ISSUE_CODES)->visible($is('matches_application_field', 'not_past', 'not_expired', 'min_days_since'))
                 ->helperText('البوت بيقول للعميل المشكلة بناءً على ده.'),
         ];
     }
@@ -187,6 +205,12 @@ class DocumentTypeResource extends Resource
                 Tables\Columns\TextColumn::make('extraction_fields')
                     ->label('بيتقرا منه')
                     ->badge()
+                    ->formatStateUsing(fn ($state) => RequirementField::where('key', $state)->value('label') ?? self::DOCUMENT_ONLY_FIELDS[$state] ?? $state),
+                Tables\Columns\TextColumn::make('optional_fields')
+                    ->label('ولو موجود')
+                    ->badge()
+                    ->color('gray')
+                    ->toggleable()
                     ->formatStateUsing(fn ($state) => RequirementField::where('key', $state)->value('label') ?? self::DOCUMENT_ONLY_FIELDS[$state] ?? $state),
                 Tables\Columns\TextColumn::make('rules_count')
                     ->label('قواعد')

@@ -12,6 +12,11 @@ use App\Models\Machine;
  * linked to the motorcycle whose conditions the customer meets (dashboard:
  * active, customer types, governorates, caps), the one that costs him least
  * in total (cash up front + all installments). Priority breaks ties.
+ *
+ * The showroom takes no down payment by default, only admin fees at pickup.
+ * $noUpfront is for a customer who insists on paying nothing at all: only
+ * the systems marked no_upfront_only are used then (the dearer 30%-a-year
+ * one), and they never appear in a normal quote.
  */
 class BestOfferService
 {
@@ -26,12 +31,17 @@ class BestOfferService
      *                          cash_due_upfront: float, monthly_payment: float, total_cost: float, cap: ?float}>
      *                          best offer per duration, shortest first
      */
-    public function offers(Machine $machine, ?int $customerTypeId, ?string $governorate = null, ?int $months = null, ?float $downPayment = null): array
+    public function offers(Machine $machine, ?int $customerTypeId, ?string $governorate = null, ?int $months = null, ?float $downPayment = null, bool $noUpfront = false): array
     {
         $systems = $machine->installmentSystems()
             ->with(['installmentPlans' => fn ($q) => $q->where('is_active', true)])
             ->get()
-            ->filter(fn ($system) => $system->acceptsCustomer($customerTypeId, $governorate));
+            ->filter(fn ($system) => $system->acceptsCustomer($customerTypeId, $governorate))
+            ->filter(fn ($system) => (bool) $system->no_upfront_only === $noUpfront);
+
+        if ($noUpfront) {
+            $downPayment = 0.0;
+        }
 
         $best = [];
 
@@ -55,12 +65,16 @@ class BestOfferService
                 }
 
                 $upfront = round($down + $result->administrativeFees);
+
+                if ($noUpfront && $upfront > 0) {
+                    continue;
+                }
                 $offer = [
                     'months' => $plan->months,
                     'plan_id' => $plan->id,
                     'system' => trim((string) $system->name),
                     'down_payment' => $down,
-                    'admin_fee' => $result->administrativeFees,
+                    'admin_fee' => round($result->administrativeFees),
                     'cash_due_upfront' => $upfront,
                     'monthly_payment' => $result->monthlyInstallment,
                     'total_cost' => $upfront + $result->monthlyInstallment * $plan->months,

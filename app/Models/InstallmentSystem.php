@@ -16,6 +16,7 @@ class InstallmentSystem extends Model
         'administrative_fees', // ✅ أضفنا العمود الجديد هنا
         'minimum_down_payment',
         'is_active',
+        'no_upfront_only',
         'priority',
         'customer_type_ids',
         'governorates',
@@ -26,6 +27,7 @@ class InstallmentSystem extends Model
         'plans' => 'array',
         'minimum_down_payment' => 'float',
         'is_active' => 'boolean',
+        'no_upfront_only' => 'boolean',
         'priority' => 'integer',
         'customer_type_ids' => 'array',
         'governorates' => 'array',

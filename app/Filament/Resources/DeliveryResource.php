@@ -300,8 +300,8 @@ protected static function isHitler(): bool
 
             $requestType = $get('request_type');
 
-            $requestType = $requestType === 'fake'
-                ? 'fake'
+            $requestType = in_array($requestType, ['fake', 'bot'], true)
+                ? $requestType
                 : 'normal';
 
             /*
@@ -1330,10 +1330,8 @@ Forms\Components\TextInput::make('work_apartment')
                         ->visible(fn($get) => $get('work_status') === 'no_income_proof'),
 
 
-                    Forms\Components\Textarea::make('work_address')
-                        ->label('عنوان العمل')
-                        ->rows(2)
-                        ->visible(fn($get) => in_array($get('work_status'), ['employee', 'self_employed'])),
+                    // عنوان العمل بيتجمع تلقائي في قسم "عنوان العمل" - نسخة تانية
+                    // من نفس الحقل هنا كانت بتكتب على نفس القيمة.
 
 
                     // ================================
