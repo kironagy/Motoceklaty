@@ -136,6 +136,23 @@ class DeliveryServiceTest extends TestCase
         $this->assertSame('sent', WhatsappMessage::where('turn_id', $turn->id)->value('delivery_status'));
     }
 
+    public function test_photos_arrive_before_the_text_that_talks_about_them(): void
+    {
+        $endpoints = [];
+        Http::fake(function ($request) use (&$endpoints) {
+            $endpoints[] = parse_url($request->url(), PHP_URL_PATH);
+
+            return Http::response(['ok' => true, 'wa_message_id' => 'w'.count($endpoints)]);
+        });
+
+        app(DeliveryService::class)->deliver($this->turn(), [
+            'messages' => ['دي صور اللون الأحمر 👌', 'إيه رأيك؟'],
+            'media' => [['type' => 'image', 'url' => 'http://x/red.jpg']],
+        ]);
+
+        $this->assertSame(['/send-media-items', '/send-message', '/send-message'], $endpoints);
+    }
+
     public function test_media_is_remembered_as_sent_only_after_delivery(): void
     {
         Http::fake(fn () => Http::response(['ok' => true, 'wa_message_ids' => ['m1']]));

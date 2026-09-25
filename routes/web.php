@@ -11,7 +11,7 @@ use Google\Cloud\Vision\V1\Client\ImageAnnotatorClient as ClientImageAnnotatorCl
 use Illuminate\Support\Facades\Route;
 //notifecation
 use App\Http\Controllers\PushSubscriptionController;
-
+use Illuminate\Support\Facades\Schedule;
 Route::post('/push-subscriptions', [PushSubscriptionController::class, 'store'])
     ->name('push-subscriptions.store');
 
@@ -30,7 +30,6 @@ Route::get('/brands', [BrandController::class, 'index'])->name('brands.index');
 Route::get('/brands/{id}', [BrandController::class, 'show'])->name('brands.show');
 
 Route::get('/about', [AboutController::class, 'index'])->name('about.index');
-Route::get('/machines/{machine}', [InstallmentRequestController::class, 'show'])->name('machines.show');
 Route::post('/installments', [InstallmentRequestController::class, 'store'])->name('installments.store');
 
 Route::get('/apply-installment', [ApplyInstallmentController::class, 'index'])
@@ -92,6 +91,11 @@ Route::get('/ocr-test', function () {
     $annotation = $response->getFullTextAnnotation();
     dd($annotation?->getText());
 });
+
+
+
+Schedule::command('requests:transfer-expired-paused')
+    ->everyFiveMinutes();
 
 
 

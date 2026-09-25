@@ -19,6 +19,31 @@ class EditDelivery extends EditRecord
     {
         return 'Edit Installment Request #' . $this->record->id;
     }
+  protected function getHeaderActions(): array
+{
+    return [
+
+        Actions\DeleteAction::make()
+            ->label('إرسال للحذف')
+            ->modalHeading('إرسال الطلب إلى الطلبات المحذوفة')
+            ->modalDescription(
+                'الطلب لن يتم حذفه نهائيًا. سيتم نقله إلى الطلبات المحذوفة لمراجعة من هتلر.'
+            )
+            ->modalSubmitActionLabel('تأكيد الحذف')
+            ->before(function ($record, Actions\DeleteAction $action) {
+
+                // ممنوع أي حد يعمل حذف نهائي من هنا
+                if ($record->trashed()) {
+                    $action->halt();
+                    return;
+                }
+
+                // تسجيل الشخص الذي طلب الحذف
+                $record->deleted_by = Auth::id();
+                $record->save();
+            }),
+    ];
+}
 
     private function normalizeSingleFile($value): ?string
     {
@@ -66,12 +91,7 @@ class EditDelivery extends EditRecord
         $this->dispatch('refresh-bell');
     }
 
-    protected function getHeaderActions(): array
-    {
-        return [
-            Actions\DeleteAction::make(),
-        ];
-    }
+
 
     /**
      * بعض الطلبات القديمة (وطلبات الواتساب) متسجل فيها أرقام بصيغة غير نظيفة
@@ -79,6 +99,7 @@ class EditDelivery extends EditRecord
      * أي حفظ — حتى لو تغيير الحالة بس — بيفشل في الـ validation.
      * فبننضّفها وإحنا بنملأ الفورم.
      */
+
     protected function mutateFormDataBeforeFill(array $data): array
     {
         $rawPhone = $data['applicant_phone'] ?? null;
@@ -155,6 +176,20 @@ class EditDelivery extends EditRecord
             }
         }
 
+        if (
+            array_key_exists('staff_id', $data) &&
+            $data['staff_id'] != $record->staff_id &&
+            ! $record->canBeReassignedBy($user)
+        ) {
+            $data['staff_id'] = $record->staff_id;
+
+            \Filament\Notifications\Notification::make()
+                ->title('ممنوع التحويل')
+                ->body('ده طلب هتلر، محدش يقدر يسحبه غير هتلر. باقي التعديلات اتحفظت.')
+                ->danger()
+                ->send();
+        }
+
         // لو أدمن (مش سوبر أدمن) غيّر الموظف، يبعت طلب تحويل للمسؤولين فقط.
         if (
             $user->is_admin &&
@@ -206,6 +241,18 @@ class EditDelivery extends EditRecord
                 ->info()
                 ->send();
         }
+    unset($data['request_type']);
+    // Requests from the website form or the bot store the address as free text only,
+    // so an empty structured build must not wipe it.
+    $fullAddress = DeliveryResource::buildFullAddressFromData($data);
+    if ($fullAddress !== '') {
+        $data['applicant_address'] = $fullAddress;
+    }
+
+    $workAddress = DeliveryResource::buildWorkAddressFromData($data);
+    if ($workAddress !== '') {
+        $data['work_address'] = $workAddress;
+    }
 
         return $data;
     }

@@ -80,6 +80,16 @@ class Notifications extends Page
                 return;
             }
 
+            if ($request->pending_staff_id && ! $request->canBeReassignedBy(InstallmentRequest::currentActor())) {
+                \Filament\Notifications\Notification::make()
+                    ->title('ممنوع التحويل')
+                    ->body('ده طلب هتلر، محدش يقدر يسحبه غير هتلر.')
+                    ->danger()
+                    ->send();
+
+                return;
+            }
+
             if ($request->pending_staff_id) {
                 $request->update([
                     'staff_id' => $request->pending_staff_id,

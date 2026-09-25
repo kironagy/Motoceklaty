@@ -272,7 +272,7 @@ class ContextBuilderTest extends TestCase
         $trace = AiTrace::where('conversation_id', $conversation->id)->where('turn_id', $turn->id)->first();
 
         $this->assertNotNull($trace);
-        $this->assertSame('v2.1.0', $trace->prompt_version);
+        $this->assertSame('v2.2.0', $trace->prompt_version);
         $this->assertIsArray($trace->context_manifest);
         $this->assertArrayHasKey('total_input_tokens_estimate', $trace->context_manifest);
     }

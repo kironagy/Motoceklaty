@@ -198,7 +198,10 @@ HTML
 
         $total = InstallmentRequest::query()->count();
 
-        $new = InstallmentRequest::query()->where('status', 'new')->count();
+$new = InstallmentRequest::query()
+    ->where('status', 'new')
+    ->where('request_type', 'normal')
+    ->count();
         $newRequest = InstallmentRequest::query()->where('status', 'new_request')->count();
         $pending = InstallmentRequest::query()->where('status', 'pending')->count();
         $workCheck = InstallmentRequest::query()->where('status', 'work_check')->count();

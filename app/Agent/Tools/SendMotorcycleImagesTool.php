@@ -20,7 +20,8 @@ class SendMotorcycleImagesTool implements Tool
 
     public function description(): string
     {
-        return 'Queue real catalog images of one motorcycle for delivery after the reply text. '
+        return 'Queue real catalog images of one motorcycle. They are delivered BEFORE the reply text, '
+            .'so write the text as a follow-up to photos the customer is already looking at. '
             .'Use when the customer asks for photos, or showing photos clearly helps. Do not use when the '
             .'same images were sent recently.';
     }

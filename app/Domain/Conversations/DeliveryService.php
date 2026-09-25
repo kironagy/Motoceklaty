@@ -61,20 +61,21 @@ class DeliveryService
         $mediaItems = $result['media'] ?? [];
         $focusMotorcycleIds = $result['focus_motorcycle_ids'] ?? [];
 
-        foreach ($messages as $index => $text) {
-            if ($this->superseded($turn)) {
-                return;
-            }
-
-            $this->deliverText($turn, $index, (string) $text, $quoteWaMessageId, $senderType, $focusMotorcycleIds);
-        }
-
+        // Photos go first: the text usually talks about them ("دي صور الأحمر، إيه رأيك؟").
         foreach ($mediaItems as $index => $item) {
             if ($this->superseded($turn)) {
                 return;
             }
 
             $this->deliverMedia($turn, $index, $item, $senderType);
+        }
+
+        foreach ($messages as $index => $text) {
+            if ($this->superseded($turn)) {
+                return;
+            }
+
+            $this->deliverText($turn, $index, (string) $text, $quoteWaMessageId, $senderType, $focusMotorcycleIds);
         }
     }
 

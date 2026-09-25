@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Hash;
 use Filament\Forms\Get;
 use App\Models\InstallmentSystem;
 use Filament\Forms\Set;
+use Filament\Notifications\Notification;
 class StaffResource extends Resource
 {
     protected static ?string $model = Staff::class;
@@ -51,13 +52,16 @@ Forms\Components\Toggle::make('is_super_admin')
     ->visible(fn () => auth()->user()?->is_super_admin)
     ->disabled(fn (?Staff $record) => $record?->id === auth()->id())
     ->helperText('لا يمكن للسوبر أدمن تعديل صلاحيات حسابه بنفسه.'),
-
+Forms\Components\Toggle::make('is_hitler')
+    ->label('هل هذا القائد المغوار الفحل العنتيل الرهيب حاتم الحاتم ابو حاتم هتلر؟')
+    ->default(false)
+    ->visible(fn () => auth()->user()?->is_hitler),
 Forms\Components\Toggle::make('is_bot')
     ->label('هل هذا الموظف بوت؟')
     ->default(false)
-    ->visible(fn () => auth()->user()?->is_super_admin)
+->visible(fn () => auth()->user()?->is_hitler)
     ->disabled(fn (?Staff $record) => $record?->id === auth()->id())
-    ->helperText('السوبر أدمن فقط يستطيع تحديد حسابات البوت.'),
+    ->helperText('السوبر أدمن أو موظف هتلر فقط يستطيع تحديد حسابات البوت.'),
 
 Forms\Components\Toggle::make('is_company_employee')
     ->label('هل موظف شركة؟')
@@ -109,7 +113,10 @@ Forms\Components\Select::make('installmentSystems')
                 Tables\Columns\IconColumn::make('is_super_admin')
                     ->boolean()
                     ->label('سوبر أدمن'),
-
+Tables\Columns\IconColumn::make('is_hitler')
+    ->boolean()
+    ->label('هتلر')
+    ->visible(fn () => auth()->user()?->is_super_admin),
                Tables\Columns\IconColumn::make('is_bot')
     ->boolean()
     ->label('بوت')
@@ -128,35 +135,81 @@ Tables\Columns\TextColumn::make('installmentSystems.name')
                     ->dateTime('d/m/Y'),
             ])
             ->defaultSort('created_at', 'desc')
-            ->actions([
-                Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make(),
-            ])
-            ->bulkActions([
-                Tables\Actions\DeleteBulkAction::make(),
-            ]);
+     ->actions([
+    Tables\Actions\EditAction::make(),
+
+    Tables\Actions\DeleteAction::make()
+        ->before(function (Staff $record, Tables\Actions\DeleteAction $action) {
+
+            if ($record->is_hitler) {
+
+                Notification::make()
+                    ->danger()
+                    ->title('')
+                    ->body('إنت بتعمل إيه؟ ده هتلر!! يحقير يعويل يذليل بتحذف رئيسك ! .')
+                    ->persistent()
+                    ->send();
+
+                $action->halt();
+            }
+        }),
+])
+->bulkActions([
+    Tables\Actions\DeleteBulkAction::make()
+        ->before(function ($records, Tables\Actions\DeleteBulkAction $action) {
+
+            if ($records->contains(fn (Staff $record) => $record->is_hitler)) {
+
+                Notification::make()
+                    ->danger()
+                    ->title('إيه يا عم؟ 😂')
+                    ->body('اسعي جااهدا انك متتشمش بكل حبايبك')
+                    ->persistent()
+                    ->send();
+
+                $action->halt();
+            }
+        }),
+]);
     }
-public static function mutateFormDataBeforeSave(array $data, ?Staff $record = null): array
-{
+public static function mutateFormDataBeforeSave(
+    array $data,
+    ?Staff $record = null
+): array {
     $user = auth()->user();
 
-    // أي شخص غير السوبر أدمن لا يمكنه إرسال أو تعديل الرولات.
+    /*
+     * أي شخص غير السوبر أدمن:
+     * ممنوع يعدل صلاحيات الأدمن والشركات.
+     */
     if (! $user?->is_super_admin) {
         unset(
             $data['is_admin'],
             $data['is_super_admin'],
-            $data['is_bot'],
             $data['is_company_employee'],
             $data['installmentSystems'],
         );
     }
 
-    // السوبر أدمن لا يغير صلاحيات حسابه الشخصي.
+    /*
+     * أي شخص مش هتلر:
+     * ممنوع يعدل هتلر أو البوت.
+     */
+    if (! $user?->is_hitler) {
+        unset(
+            $data['is_hitler'],
+            $data['is_bot'],
+        );
+    }
+
+    /*
+     * منع السوبر أدمن من تعديل صلاحيات حسابه الشخصي
+     * (مع بقاء هتلر والبوت حسب القاعدة السابقة).
+     */
     if ($record && $record->id === $user?->id) {
         unset(
             $data['is_admin'],
             $data['is_super_admin'],
-            $data['is_bot'],
             $data['is_company_employee'],
             $data['installmentSystems'],
         );

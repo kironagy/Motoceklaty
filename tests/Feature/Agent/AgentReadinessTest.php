@@ -53,7 +53,7 @@ class AgentReadinessTest extends TestCase
             'agent.session_gap_hours' => 6,
             'agent.recognition.match_threshold' => 0.8,
             'agent.recognition.similar_threshold' => 0.5,
-            'agent.instructions.approved_version' => 'v2.1.0',
+            'agent.instructions.approved_version' => 'v2.2.0',
         ]);
 
         $type = CustomerType::create(['key' => 'employee', 'label' => 'Employee', 'legacy_work_status' => 'employee', 'is_active' => true]);

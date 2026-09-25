@@ -45,4 +45,11 @@ return [
         'worker_url' => rtrim((string) env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3080'), '/'),
     ],
 
+    'storage_sync' => [
+        'host' => env('STORAGE_SYNC_HOST'),
+        'user' => env('STORAGE_SYNC_USER', 'root'),
+        'port' => (int) env('STORAGE_SYNC_PORT', 22),
+        'path' => env('STORAGE_SYNC_PATH'),
+    ],
+
 ];

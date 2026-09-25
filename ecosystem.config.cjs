@@ -13,6 +13,18 @@
 module.exports = {
   apps: [
     {
+      // Local web server only; production is served by nginx/php-fpm.
+      name: 'laravel-web',
+      cwd: __dirname,
+      script: 'artisan',
+      interpreter: 'php',
+      args: 'serve --host=127.0.0.1 --port=8000',
+      env: { PHP_CLI_SERVER_WORKERS: 8 },
+      autorestart: true,
+      max_restarts: 20,
+      restart_delay: 3000,
+    },
+    {
       name: 'whatsapp-bot',
       cwd: __dirname + '/whatsapp-bot',
       script: 'index.js',

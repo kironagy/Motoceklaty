@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\DeliveryResource\Pages;
+use Filament\Forms\Get;
 use App\Models\InstallmentRequest;
 use App\Models\InstallmentSystem;
 use Carbon\Carbon;
@@ -83,13 +84,24 @@ class DeliveryResource extends Resource
 
         return !static::isLocked($record);
     }
-    public static function canDelete($record): bool
-    {
-        if (static::isSuperAdmin())
-            return true;
+public static function canDelete($record): bool
+{
+    $user = Auth::user();
 
-        return !static::isLocked($record);
+    if ($user?->is_hitler) {
+        return true;
     }
+
+    if (static::isSuperAdmin()) {
+        return true;
+    }
+
+    return !static::isLocked($record);
+}
+protected static function isHitler(): bool
+{
+    return (bool) (Auth::user()?->is_hitler ?? false);
+}
 
     public static function getEloquentQuery(): Builder
     {
@@ -242,30 +254,78 @@ class DeliveryResource extends Resource
      * قاعدة تفرد لا تشتغل إلا لو القيمة اتغيّرت فعلاً عن المحفوظة،
      * عشان تعديل حالة الطلب ما يتعطّلش بسبب داتا قديمة مكررة.
      */
-    protected static function uniqueIfChangedRule(string $column, string $message): \Closure
-    {
-        return function (?\Illuminate\Database\Eloquent\Model $record) use ($column, $message) {
-            return function (string $attribute, $value, \Closure $fail) use ($record, $column, $message) {
-                if ($value === null || $value === '') {
-                    return;
-                }
+   protected static function uniqueIfChangedRule(
+    string $column,
+    string $message
+): \Closure {
+    return function (
+        ?\Illuminate\Database\Eloquent\Model $record,
+        \Filament\Forms\Get $get
+    ) use ($column, $message) {
 
-                if ($record && (string) $record->{$column} === (string) $value) {
-                    return;
-                }
+        return function (
+            string $attribute,
+            $value,
+            \Closure $fail
+        ) use (
+            $record,
+            $get,
+            $column,
+            $message
+        ) {
 
-                $exists = InstallmentRequest::query()
-                    ->where($column, $value)
-                    ->when($record, fn($query) => $query->whereKeyNot($record->getKey()))
-                    ->exists();
+            // القيمة فاضية → مفيش validation
+            if ($value === null || $value === '') {
+                return;
+            }
 
-                if ($exists) {
-                    $fail($message);
-                }
-            };
+            // لو بنعدل والقيمة هي نفسها القيمة القديمة
+            if (
+                $record &&
+                (string) $record->{$column} === (string) $value
+            ) {
+                return;
+            }
+
+            /*
+             |--------------------------------------------------------------------------
+             | تحديد نوع الطلب من حالة الفورم نفسها
+             |--------------------------------------------------------------------------
+             |
+             | مهم جدًا:
+             | ممنوع نعتمد على request()->query('request_type')
+             | لأن Livewire بيعمل requests جديدة أثناء الكتابة.
+             |
+             */
+
+            $requestType = $get('request_type');
+
+            $requestType = $requestType === 'fake'
+                ? 'fake'
+                : 'normal';
+
+            /*
+             |--------------------------------------------------------------------------
+             | البحث عن التكرار داخل نفس نوع الطلب
+             |--------------------------------------------------------------------------
+             */
+
+            $exists = InstallmentRequest::query()
+                ->where($column, $value)
+                ->where('request_type', $requestType)
+                ->when(
+                    $record,
+                    fn ($query) =>
+                        $query->whereKeyNot($record->getKey())
+                )
+                ->exists();
+
+            if ($exists) {
+                $fail($message);
+            }
         };
-    }
-
+    };
+}
     protected static function normalizeApplicantName(?string $value): ?string
     {
         if ($value === null)
@@ -278,17 +338,293 @@ class DeliveryResource extends Resource
     }
 
 
+/**
+ * لون الـ Section حسب اكتمال البيانات
+ */
+protected static function sectionStatusClass(bool $complete): string
+{
+    return $complete
+        ? 'ring-1 ring-success-500 border-success-500'
+        : 'ring-1 ring-danger-500 border-danger-500';
+}
+
+/**
+ * التأكد أن القيمة موجودة
+ */
+protected static function filledValue($value): bool
+{
+    if (is_array($value)) {
+        return !empty($value);
+    }
+
+    return filled($value);
+}
+
+
+
+
+/**
+ * تجميع العنوان السكني في عنوان واحد منطقي
+ */
+protected static function buildFullAddress(Get $get): string
+{
+    $building    = trim((string) $get('applicant_building_number'));
+    $street      = trim((string) $get('applicant_street'));
+    $branch      = trim((string) $get('applicant_branch_street'));
+    $governorate = trim((string) $get('applicant_governorate'));
+    $area        = trim((string) $get('applicant_area'));
+    $landmark    = trim((string) $get('applicant_landmark'));
+    $floor       = trim((string) $get('applicant_floor'));
+    $apartment   = trim((string) $get('applicant_apartment'));
+
+    $parts = [];
+
+    if ($building !== '') {
+        $parts[] = "رقم العقار {$building}";
+    }
+
+    if ($street !== '') {
+        $parts[] = "شارع {$street}";
+    }
+
+    if ($branch !== '') {
+        $parts[] = "متفرع من {$branch}";
+    }
+
+    if ($governorate !== '') {
+        $parts[] = "محافظة {$governorate}";
+    }
+
+    if ($area !== '') {
+        $parts[] = "المنطقة {$area}";
+    }
+
+    if ($landmark !== '') {
+        $parts[] = "علامة مميزة: {$landmark}";
+    }
+
+    if ($floor !== '') {
+        $parts[] = "الدور {$floor}";
+    }
+
+    if ($apartment !== '') {
+        $parts[] = "شقة {$apartment}";
+    }
+
+    return implode('، ', $parts);
+}
+
+
+/**
+ * تجميع عنوان العمل في عنوان واحد منطقي
+ */
+protected static function buildWorkAddress(Get $get): string
+{
+    $building    = trim((string) $get('work_building_number'));
+    $street      = trim((string) $get('work_street'));
+    $branch      = trim((string) $get('work_branch_street'));
+    $governorate = trim((string) $get('work_governorate'));
+    $area        = trim((string) $get('work_area'));
+    $landmark    = trim((string) $get('work_landmark'));
+    $floor       = trim((string) $get('work_floor'));
+    $apartment   = trim((string) $get('work_apartment'));
+
+    $parts = [];
+
+    if ($building !== '') {
+        $parts[] = "رقم العقار {$building}";
+    }
+
+    if ($street !== '') {
+        $parts[] = "شارع {$street}";
+    }
+
+    if ($branch !== '') {
+        $parts[] = "متفرع من {$branch}";
+    }
+
+    if ($governorate !== '') {
+        $parts[] = "محافظة {$governorate}";
+    }
+
+    if ($area !== '') {
+        $parts[] = "المنطقة {$area}";
+    }
+
+    if ($landmark !== '') {
+        $parts[] = "علامة مميزة: {$landmark}";
+    }
+
+    if ($floor !== '') {
+        $parts[] = "الدور {$floor}";
+    }
+
+    if ($apartment !== '') {
+        $parts[] = "شقة {$apartment}";
+    }
+
+    return implode('، ', $parts);
+}
+
+
+
+
+public static function buildFullAddressFromData(array $data): string{
+    $parts = [];
+
+    $building = trim((string) ($data['applicant_building_number'] ?? ''));
+    $street = trim((string) ($data['applicant_street'] ?? ''));
+    $branch = trim((string) ($data['applicant_branch_street'] ?? ''));
+    $governorate = trim((string) ($data['applicant_governorate'] ?? ''));
+    $area = trim((string) ($data['applicant_area'] ?? ''));
+    $landmark = trim((string) ($data['applicant_landmark'] ?? ''));
+    $floor = trim((string) ($data['applicant_floor'] ?? ''));
+    $apartment = trim((string) ($data['applicant_apartment'] ?? ''));
+
+    if ($building !== '') {
+        $parts[] = "رقم العقار {$building}";
+    }
+
+    if ($street !== '') {
+        $parts[] = "شارع {$street}";
+    }
+
+    if ($branch !== '') {
+        $parts[] = "متفرع من {$branch}";
+    }
+
+    if ($governorate !== '') {
+        $parts[] = "محافظة {$governorate}";
+    }
+
+    if ($area !== '') {
+        $parts[] = "المنطقة {$area}";
+    }
+
+    if ($landmark !== '') {
+        $parts[] = "علامة مميزة: {$landmark}";
+    }
+
+    if ($floor !== '') {
+        $parts[] = "الدور {$floor}";
+    }
+
+    if ($apartment !== '') {
+        $parts[] = "شقة {$apartment}";
+    }
+
+    return implode('، ', $parts);
+}
+
+
+public static function buildWorkAddressFromData(array $data): string
+{
+    $parts = [];
+
+    $building = trim((string) ($data['work_building_number'] ?? ''));
+    $street = trim((string) ($data['work_street'] ?? ''));
+    $branch = trim((string) ($data['work_branch_street'] ?? ''));
+    $governorate = trim((string) ($data['work_governorate'] ?? ''));
+    $area = trim((string) ($data['work_area'] ?? ''));
+    $landmark = trim((string) ($data['work_landmark'] ?? ''));
+    $floor = trim((string) ($data['work_floor'] ?? ''));
+    $apartment = trim((string) ($data['work_apartment'] ?? ''));
+
+    if ($building !== '') {
+        $parts[] = "رقم العقار {$building}";
+    }
+
+    if ($street !== '') {
+        $parts[] = "شارع {$street}";
+    }
+
+    if ($branch !== '') {
+        $parts[] = "متفرع من {$branch}";
+    }
+
+    if ($governorate !== '') {
+        $parts[] = "محافظة {$governorate}";
+    }
+
+    if ($area !== '') {
+        $parts[] = "المنطقة {$area}";
+    }
+
+    if ($landmark !== '') {
+        $parts[] = "علامة مميزة: {$landmark}";
+    }
+
+    if ($floor !== '') {
+        $parts[] = "الدور {$floor}";
+    }
+
+    if ($apartment !== '') {
+        $parts[] = "شقة {$apartment}";
+    }
+
+    return implode('، ', $parts);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     // ✅ نموذج الفورم الكامل
     public static function form(Form $form): Form
     {
         $isCreate = $form->getOperation() === 'create';
+$requestType = request()->query('request_type') === 'fake'
+    ? 'fake'
+    : 'normal';
 
         return $form->schema([
+     Forms\Components\Hidden::make('request_type')
+            ->default($requestType)
+            ->dehydrated(true),
+            // 🔹 بيانات النظام والمكنة
+            // 🔹 بيانات النظام والمكنة
+           Forms\Components\Section::make('بيانات النظام والمكنة')
+    ->icon('heroicon-o-cog-6-tooth')
+    ->collapsible()
+    ->collapsed(false)
+    ->extraAttributes(function (Get $get) {
 
-            // 🔹 بيانات النظام والمكنة
-            // 🔹 بيانات النظام والمكنة
-            Forms\Components\Section::make('بيانات النظام والمكنة')
-                ->schema(function () {
+        $complete =
+            filled($get('installment_type')) &&
+            filled($get('months')) &&
+            filled($get('staff_id')) &&
+            filled($get('brand_id')) &&
+            filled($get('machine_id')) &&
+            filled($get('machine_installment_price'));
+
+        return [
+            'class' => self::sectionStatusClass($complete),
+        ];
+    })
+    ->schema(function () {
                     return [
 
                         // 🟢 نوع النظام
@@ -467,14 +803,51 @@ class DeliveryResource extends Resource
             // 🔹 عرض السعر (خاص بنظام أمان)
             // 🔹 عرض السعر (خاص بنظام أمان)
             // 🔹 عرض السعر (خاص بنظام أمان)
-            Forms\Components\Section::make('عرض السعر')
-                ->schema([
+          Forms\Components\Section::make('عرض السعر')
+    ->icon('heroicon-o-document-text')
+    ->collapsible()
+    ->collapsed()
+
+    ->extraAttributes(function (Get $get) {
+
+        $installmentType = $get('installment_type');
+
+        // لو النظام مش محتاج عرض سعر
+        $needsPriceOffer = in_array($installmentType, [
+            'امان',
+            'امان (بدون مصاريف ادارية)',
+            'امان زيرو مصاريف',
+            'امان بدون مصاريف',
+            'امان - الجيزة',
+            'امان - القاهرة'
+        ]);
+
+        if (!$needsPriceOffer) {
+            return [
+                'class' => 'ring-1 ring-success-500 border-success-500',
+            ];
+        }
+
+        $complete = filled($get('price_offer_image'));
+
+        return [
+            'class' => self::sectionStatusClass($complete),
+        ];
+    })
+    ->schema([
 
                     Forms\Components\FileUpload::make('price_offer_image')
                         ->label('صورة عرض السعر')
                         ->directory('installments/price_offers')
                         ->visibility('public')
                         ->image()
+        ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
                         ->preserveFilenames()
                         ->getUploadedFileNameForStorageUsing(fn($file) => $file->getClientOriginalName())
                         ->dehydrated(true)
@@ -503,9 +876,24 @@ class DeliveryResource extends Resource
 
 
 
+Forms\Components\Section::make('بيانات العميل')
+    ->icon('heroicon-o-user')
+    ->collapsible()
+    ->collapsed()
+    ->extraAttributes(function (Get $get) {
 
-            Forms\Components\Section::make('بيانات العميل')
-                ->schema([
+$complete =
+    filled($get('applicant_name')) &&
+    filled($get('applicant_phone')) &&
+    filled($get('applicant_national_id')) &&
+    filled($get('applicant_id_image')) &&
+    filled($get('applicant_id_back_image'));
+
+        return [
+            'class' => self::sectionStatusClass($complete),
+        ];
+    })
+    ->schema([
 
                     Forms\Components\TextInput::make('applicant_name')
                         ->label('اسم العميل')
@@ -558,15 +946,18 @@ class DeliveryResource extends Resource
                         ->validationMessages([
                             'regex' => 'رقم الهاتف الثاني يجب أن يكون 11 رقمًا بالضبط.',
                         ]),
-
-                    Forms\Components\Textarea::make('applicant_address')
-                        ->label('العنوان')
-                        ->reactive()
-                        ->afterStateUpdated(function ($state, callable $set) {
-                            $set('applicant_address', self::toEnglishDigits($state));
-                        })
-                        ->dehydrateStateUsing(fn($state) => self::toEnglishDigits($state)),
-
+   // ================================
+                    // صورة البطاقة (الظهر)
+                    // ================================
+/***Forms\Components\Textarea::make('applicant_address')
+    ->label('العنوان')
+    ->reactive()
+    ->afterStateUpdated(function ($state, callable $set) {
+        $set('applicant_address', self::toEnglishDigits($state));
+    })
+    ->disabled()
+    ->dehydrateStateUsing(fn($state) => self::toEnglishDigits($state)),
+***/
                     Forms\Components\TextInput::make('applicant_national_id')
                         ->label('الرقم القومي')
                         ->default(fn() => request()->query('nid'))   // ✅ يتعبّى تلقائيًا من المودال
@@ -599,6 +990,7 @@ class DeliveryResource extends Resource
                         // عرض الصورة القديمة
                         Forms\Components\View::make('filament.custom.download')
                             ->visible(fn($record) => $record && $record->applicant_id_image)
+
                             ->viewData([
                                 'url' => fn($record) => $record?->applicant_id_image
                                     ? asset('storage/' . $record->applicant_id_image)
@@ -609,6 +1001,14 @@ class DeliveryResource extends Resource
                         // تعديل / رفع صورة جديدة
                         Forms\Components\FileUpload::make('applicant_id_image')
                             ->label('صورة البطاقة (الوجه)')
+                                ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
+    ->required()
                             ->directory('installments/applicants')
                             ->visibility('public')
                             ->image()
@@ -622,6 +1022,7 @@ class DeliveryResource extends Resource
                     Forms\Components\Group::make([
                         Forms\Components\View::make('filament.custom.download')
                             ->visible(fn($record) => $record && $record->applicant_id_back_image)
+ 
                             ->viewData([
                                 'url' => fn($record) => $record?->applicant_id_back_image
                                     ? asset('storage/' . $record->applicant_id_back_image)
@@ -631,6 +1032,14 @@ class DeliveryResource extends Resource
 
                         Forms\Components\FileUpload::make('applicant_id_back_image')
                             ->label('صورة البطاقة (الظهر)')
+    ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
+    ->required()
                             ->directory('installments/applicants')
                             ->visibility('public')
                             ->image()
@@ -665,106 +1074,124 @@ class DeliveryResource extends Resource
                             ->visible(fn($get) => $get('installment_type') === 'عبد اللطيف جميل'),
                     ]),
 
-                ])
-                ->columns(3),
+             
+               
+// =====================================================
+// 🔹 العنوان السكني
+// =====================================================
+
+Forms\Components\Placeholder::make('residential_address_separator')
+    ->label('العنوان السكني')
+    ->content('بيانات عنوان سكن العميل')
+    ->columnSpanFull(),
+
+Forms\Components\TextInput::make('applicant_building_number')
+    ->label('رقم العقار')
+    ->required(fn () => $isCreate),
+
+Forms\Components\TextInput::make('applicant_street')
+    ->label('اسم الشارع')
+    ->required(fn () => $isCreate),
+
+Forms\Components\TextInput::make('applicant_branch_street')
+    ->label('اسم الشارع المتفرع منه')
+    ->required(fn () => $isCreate),
+
+Forms\Components\TextInput::make('applicant_governorate')
+    ->label('اسم المحافظة')
+    ->required(fn () => $isCreate),
+
+Forms\Components\TextInput::make('applicant_area')
+    ->label('المنطقة')
+    ->required(fn () => $isCreate),
+
+Forms\Components\TextInput::make('applicant_landmark')
+    ->label('العلامة المميزة')
+    ->required(fn () => $isCreate),
+
+Forms\Components\TextInput::make('applicant_floor')
+    ->label('رقم الدور')
+    ->required(fn () => $isCreate),
+
+Forms\Components\TextInput::make('applicant_apartment')
+    ->label('رقم الشقة')
+    ->required(fn () => $isCreate),
+
+Forms\Components\Textarea::make('applicant_address')
+    ->label('العنوان الكامل')
+    ->rows(4)
+    ->columnSpanFull()
+    ->readOnly()
+    ->dehydrated(true)
+    ->afterStateHydrated(function (callable $set, Get $get) {
+        $set(
+            'applicant_address',
+            self::buildFullAddress($get)
+        );
+    })
+    ->extraAttributes([
+        'class' => 'cursor-pointer select-all',
+        'x-on:click' => '$el.select()',
+    ])
+    ->helperText(
+        'العنوان يتم تجميعه تلقائيًا — اضغط داخل الخانة لتحديده ونسخه.'
+    ),
+
+])
+->columns(3),
 
 
+
+    
             // 🔹 بيانات الضامن
-            Forms\Components\Section::make('بيانات الضامن')
-                ->schema([
-
-                    // — لو النظام "حالا" → نظهر Repeater (عدة ضمـان)
-                    Forms\Components\Repeater::make('guarantors')
-                        ->label('الضامنون (خاص بنظام حالا)')
-                        ->schema([
-                            Forms\Components\TextInput::make('name')->label('اسم الضامن')->required(),
-                            Forms\Components\TextInput::make('phone')->label('رقم هاتف الضامن')->required(),
-                            Forms\Components\TextInput::make('address')->label('العنوان')->placeholder('عنوان الضامن'),
-
-                            // رفع صورة وجه البطاقة داخل الـ Repeater
-                            Forms\Components\FileUpload::make('guarantor_id_image')
-                                ->label('بطاقة الضامن (الوجه)')
-                                ->directory('installments/guarantors')
-                                ->visibility('public')
-                                ->image()
-                                ->nullable()
-                                ->visible(fn($get) => $get('installment_type') !== 'حالا')
-                                ->dehydrated(fn($state) => filled($state)),
-
-                            Forms\Components\FileUpload::make('guarantor_id_back_image')
-                                ->label('بطاقة الضامن (الظهر)')
-                                ->directory('installments/guarantors')
-                                ->visibility('public')
-                                ->image()
-                                ->nullable()
-                                ->visible(fn($get) => $get('installment_type') !== 'حالا')
-                                ->dehydrated(fn($state) => filled($state)),
-                        ])
-                        ->visible(fn($get) => $get('installment_type') === 'حالا') // شرط الظهور
-                        ->createItemButtonLabel('أضف ضامن')
-                        ->collapsible()
-                        ->columnSpan('full'),
-
-                    // — الحقول التقليدية (لأي نظام آخر) — تبقى كما هي
-                    Forms\Components\TextInput::make('guarantor_name')
-                        ->label('اسم الضامن')
-                        ->visible(fn($get) => $get('installment_type') !== 'حالا'),
-
-                    Forms\Components\TextInput::make('guarantor_phone')
-                        ->label('رقم هاتف الضامن')
-                        ->visible(fn($get) => $get('installment_type') !== 'حالا'),
-
-                    Forms\Components\View::make('filament.custom.download')
-                        ->dehydrated(false)
-                        ->viewData([
-                            'url' => fn($record) => $record?->guarantor_id_image
-                                ? asset('storage/' . $record->guarantor_id_image)
-                                : null,
-                            'label' => 'تحميل وجه البطاقة الحالي',
-                        ])
-                        ->visible(
-                            fn($record, $get) =>
-                            $record &&
-                            $record->guarantor_id_image &&
-                            $get('installment_type') !== 'حالا'
-                        ),
-
-                    Forms\Components\FileUpload::make('guarantor_id_image')
-                        ->label('بطاقة الضامن (الوجه)')
-                        ->directory('installments/guarantors')
-                        ->visibility('public')
-                        ->image()
-                        ->nullable()
-                        ->visible(fn($get) => $get('installment_type') !== 'حالا'),
-
-                    Forms\Components\View::make('filament.custom.download')
-                        ->dehydrated(false)
-                        ->viewData([
-                            'url' => fn($record) => $record?->guarantor_id_back_image
-                                ? asset('storage/' . $record->guarantor_id_back_image)
-                                : null,
-                            'label' => 'تحميل ظهر البطاقة الحالي',
-                        ])
-                        ->visible(
-                            fn($record, $get) =>
-                            $record &&
-                            $record->guarantor_id_back_image &&
-                            $get('installment_type') !== 'حالا'
-                        ),
-
-                    Forms\Components\FileUpload::make('guarantor_id_back_image')
-                        ->label('بطاقة الضامن (الظهر)')
-                        ->directory('installments/guarantors')
-                        ->visibility('public')
-                        ->image()
-                        ->nullable()
-                        ->visible(fn($get) => $get('installment_type') !== 'حالا'),
-                ])
-                ->columns(3),
-
+ 
             // 🔹 الحالة الوظيفية
-            Forms\Components\Section::make('الحالة الوظيفية')
-                ->schema([
+        Forms\Components\Section::make('الحالة الوظيفية')
+    ->icon('heroicon-o-briefcase')
+    ->collapsible()
+    ->collapsed()
+    ->extraAttributes(function (Get $get) {
+
+        $workStatus = $get('work_status');
+
+        $complete = filled($workStatus);
+
+        if ($workStatus === 'employee') {
+
+            $complete =
+                filled($get('work_address')) &&
+                filled($get('salary_slip_file'));
+
+        } elseif ($workStatus === 'self_employed') {
+
+            $complete =
+                filled($get('work_address')) &&
+                filled($get('commercial_reg_file')) &&
+                filled($get('tax_card_file')) &&
+                filled($get('place_video'));
+
+        } elseif ($workStatus === 'pension') {
+
+            $complete =
+                filled($get('pension_statement_file'));
+
+        } elseif ($workStatus === 'no_income_proof') {
+
+            $complete =
+                filled($get('free_work_name')) &&
+                filled($get('free_work_address')) &&
+                filled($get('free_income_proof_images'));
+
+        } else {
+
+            $complete = false;
+        }
+
+        return [
+            'class' => self::sectionStatusClass($complete),
+        ];
+    })
+    ->schema([
 
                     // الحالة الوظيفية
                     Forms\Components\Select::make('work_status')
@@ -776,7 +1203,120 @@ class DeliveryResource extends Resource
                             'no_income_proof' => 'دخل حر',
                         ])
                         ->reactive(),
+// =====================================================
+// 🔹 عنوان العمل
+// =====================================================
 
+
+
+Forms\Components\Section::make('عنوان العمل')
+    ->icon('heroicon-o-building-office-2')
+    ->collapsible()
+    ->collapsed()
+    ->visible(fn($get) => in_array($get('work_status'), [
+        'employee',
+        'self_employed',
+        'no_income_proof',
+    ]))
+    ->extraAttributes(function (Get $get) {
+
+        $complete =
+            filled($get('work_building_number')) &&
+            filled($get('work_street')) &&
+            filled($get('work_branch_street')) &&
+            filled($get('work_governorate')) &&
+            filled($get('work_area')) &&
+            filled($get('work_landmark')) &&
+            filled($get('work_floor')) &&
+            filled($get('work_apartment'));
+
+        return [
+            'class' => self::sectionStatusClass($complete),
+        ];
+    })
+    ->schema([
+
+Forms\Components\TextInput::make('work_building_number')
+    ->label('رقم العقار')
+    ->required(fn (Get $get) => $isCreate && in_array($get('work_status'), [
+        'employee',
+        'self_employed',
+    ])),
+
+Forms\Components\TextInput::make('work_street')
+    ->label('اسم الشارع')
+    ->required(fn (Get $get) => $isCreate && in_array($get('work_status'), [
+        'employee',
+        'self_employed',
+    ])),
+
+Forms\Components\TextInput::make('work_branch_street')
+    ->label('اسم الشارع المتفرع منه')
+    ->required(fn (Get $get) => $isCreate && in_array($get('work_status'), [
+        'employee',
+        'self_employed',
+    ])),
+
+Forms\Components\TextInput::make('work_governorate')
+    ->label('اسم المحافظة')
+    ->required(fn (Get $get) => $isCreate && in_array($get('work_status'), [
+        'employee',
+        'self_employed',
+    ])),
+
+Forms\Components\TextInput::make('work_area')
+    ->label('المنطقة')
+    ->required(fn (Get $get) => $isCreate && in_array($get('work_status'), [
+        'employee',
+        'self_employed',
+    ])),
+
+Forms\Components\TextInput::make('work_landmark')
+    ->label('العلامة المميزة')
+    ->required(fn (Get $get) => $isCreate && in_array($get('work_status'), [
+        'employee',
+        'self_employed',
+    ])),
+
+Forms\Components\TextInput::make('work_floor')
+    ->label('رقم الدور')
+    ->required(fn (Get $get) => $isCreate && in_array($get('work_status'), [
+        'employee',
+        'self_employed',
+    ])),
+
+Forms\Components\TextInput::make('work_apartment')
+    ->label('رقم الشقة')
+    ->required(fn (Get $get) => $isCreate && in_array($get('work_status'), [
+        'employee',
+        'self_employed',
+    ])),
+        // =====================================================
+        // 🔥 العنوان الكامل للعمل
+        // =====================================================
+
+        Forms\Components\Textarea::make('work_address')
+            ->label('العنوان الكامل للعمل')
+            ->rows(4)
+            ->columnSpanFull()
+            ->readOnly()
+            ->dehydrated(true)
+            ->afterStateHydrated(function (callable $set, Get $get) {
+                $set(
+                    'work_address',
+                    self::buildWorkAddress($get)
+                );
+            })
+            ->extraAttributes([
+                'class' => 'cursor-pointer select-all',
+                'x-on:click' => '$el.select()',
+            ])
+            ->helperText(
+                'العنوان يتم تجميعه تلقائيًا — اضغط داخل الخانة لتحديده ونسخه.'
+            ),
+
+    ])
+    ->columns(3),
                     Forms\Components\TextInput::make('free_work_name')
                         ->label('اسم العمل')
                         ->required()
@@ -786,6 +1326,7 @@ class DeliveryResource extends Resource
                         ->label('عنوان مكان العمل')
                         ->rows(2)
                         ->columnSpan('full')
+                        ->disabled()
                         ->visible(fn($get) => $get('work_status') === 'no_income_proof'),
 
 
@@ -802,6 +1343,7 @@ class DeliveryResource extends Resource
                         // عرض الصور القديمة بشكل كبير + زر تحميل
                         Forms\Components\View::make('filament.custom.free-income-download-grid')
                             ->dehydrated(false)
+
                             ->visible(
                                 fn($record, $get) =>
                                 $get('work_status') === 'no_income_proof'
@@ -817,6 +1359,13 @@ class DeliveryResource extends Resource
                         // الرفع (هيفضل زي ما هو)
                         Forms\Components\FileUpload::make('free_income_proof_images')
                             ->label('صور إثبات (دخل حر)')
+       ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
                             ->disk('public')
                             ->directory('installments/free_income_proofs')
                             ->visibility('public')
@@ -843,6 +1392,7 @@ class DeliveryResource extends Resource
                                 $record->salary_slip_file &&
                                 $record->work_status === 'employee'
                             )
+ 
                             ->viewData([
                                 'url' => fn($record) => asset('storage/' . $record->salary_slip_file),
                                 'label' => 'تحميل مفردات المرتب',
@@ -852,6 +1402,13 @@ class DeliveryResource extends Resource
                             ->label('مفردات المرتب')
                             ->directory('installments/salary_slips')
                             ->visibility('public')
+    ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
                             ->image()
                             ->nullable()
                             ->visible(fn($get) => $get('work_status') === 'employee'),
@@ -870,6 +1427,7 @@ class DeliveryResource extends Resource
                                 $record->commercial_reg_file &&
                                 $record->work_status === 'self_employed'
                             )
+
                             ->viewData([
                                 'url' => fn($record) => asset('storage/' . $record->commercial_reg_file),
                                 'label' => 'تحميل السجل التجاري',
@@ -877,6 +1435,13 @@ class DeliveryResource extends Resource
 
                         Forms\Components\FileUpload::make('commercial_reg_file')
                             ->label('السجل التجاري')
+    ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
                             ->directory('installments/business')
                             ->visibility('public')
                             ->image()
@@ -897,6 +1462,7 @@ class DeliveryResource extends Resource
                                 $record->tax_card_file &&
                                 $record->work_status === 'self_employed'
                             )
+
                             ->viewData([
                                 'url' => fn($record) => asset('storage/' . $record->tax_card_file),
                                 'label' => 'تحميل البطاقة الضريبية',
@@ -907,6 +1473,13 @@ class DeliveryResource extends Resource
                             ->directory('installments/business')
                             ->visibility('public')
                             ->image()
+    ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
                             ->nullable()
                             ->visible(fn($get) => $get('work_status') === 'self_employed'),
                     ]),
@@ -958,6 +1531,13 @@ class DeliveryResource extends Resource
                                 ->directory('installments/business')
                                 ->visibility('public')
                                 ->multiple()
+    ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+   
                                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/webm'])
                                 ->nullable()
                                 ->columnSpan('full')
@@ -978,6 +1558,7 @@ class DeliveryResource extends Resource
                                 $record->pension_statement_file &&
                                 $record->work_status === 'pension'
                             )
+
                             ->viewData([
                                 'url' => fn($record) => asset('storage/' . $record->pension_statement_file),
                                 'label' => 'تحميل بيان المعاش',
@@ -987,6 +1568,13 @@ class DeliveryResource extends Resource
                             ->label('صورة بيان المعاش')
                             ->directory('installments/pension')
                             ->visibility('public')
+                                ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
                             ->image()
                             ->nullable()
                             ->visible(fn($get) => $get('work_status') === 'pension'),
@@ -994,15 +1582,202 @@ class DeliveryResource extends Resource
 
                 ])
                 ->columns(2),
-            Forms\Components\Section::make('الملاحظات')
-                ->schema([
-                    Forms\Components\Textarea::make('notes')
-                        ->label('ملاحظات')
-                        ->rows(6)
-                        ->columnSpan('full')
-                        ->nullable(),
+                          Forms\Components\Section::make('بيانات الضامن')
+    ->icon('heroicon-o-user-group')
+    ->collapsible()
+    ->collapsed()
+     ->visible(fn (Get $get) => $get('work_status') === 'pension')
+
+    ->extraAttributes(function (Get $get) {
+
+        $installmentType = $get('installment_type');
+
+        // نظام حالا
+        if ($installmentType === 'حالا') {
+
+           $guarantors = $get('guarantors') ?? [];
+
+// لو البيانات جاية String JSON من قاعدة البيانات
+if (is_string($guarantors)) {
+    $guarantors = json_decode($guarantors, true) ?? [];
+}
+
+// تأكيد إنها Array
+if (!is_array($guarantors)) {
+    $guarantors = [];
+}
+
+$complete = !empty($guarantors);
+
+if ($complete) {
+    foreach ($guarantors as $guarantor) {
+
+        // حماية إضافية لو عنصر الضامن نفسه مش Array
+        if (!is_array($guarantor)) {
+            $complete = false;
+            break;
+        }
+
+        if (
+            blank($guarantor['name'] ?? null) ||
+            blank($guarantor['phone'] ?? null) ||
+            blank($guarantor['address'] ?? null)
+        ) {
+            $complete = false;
+            break;
+        }
+    }
+}
+            return [
+                'class' => self::sectionStatusClass($complete),
+            ];
+        }
+
+        // باقي الأنظمة
+        $complete =
+            filled($get('guarantor_name')) &&
+            filled($get('guarantor_phone'));
+
+        return [
+            'class' => self::sectionStatusClass($complete),
+        ];
+    })
+    ->schema([
+
+                    // — لو النظام "حالا" → نظهر Repeater (عدة ضمـان)
+                    Forms\Components\Repeater::make('guarantors')
+                        ->label('الضامنون (خاص بنظام حالا)')
+                        ->schema([
+                            Forms\Components\TextInput::make('name')->label('اسم الضامن')->required(),
+                            Forms\Components\TextInput::make('phone')->label('رقم هاتف الضامن')->required(),
+                            Forms\Components\TextInput::make('address')->label('العنوان')->placeholder('عنوان الضامن'),
+
+                            // رفع صورة وجه البطاقة داخل الـ Repeater
+                            Forms\Components\FileUpload::make('guarantor_id_image')
+                                ->label('بطاقة الضامن (الوجه)')
+    ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
+                                ->directory('installments/guarantors')
+                                ->visibility('public')
+                                ->image()
+                                ->nullable()
+                                ->visible(fn($get) => $get('installment_type') !== 'حالا')
+                                ->dehydrated(fn($state) => filled($state)),
+
+                            Forms\Components\FileUpload::make('guarantor_id_back_image')
+                                ->label('بطاقة الضامن (الظهر)')
+    ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
+                                ->directory('installments/guarantors')
+                                ->visibility('public')
+                                ->image()
+                                ->nullable()
+                                ->visible(fn($get) => $get('installment_type') !== 'حالا')
+                                ->dehydrated(fn($state) => filled($state)),
+                        ])
+                        ->visible(fn($get) => $get('installment_type') === 'حالا') // شرط الظهور
+                        ->createItemButtonLabel('أضف ضامن')
+                        ->collapsible()
+                        ->columnSpan('full'),
+
+                    // — الحقول التقليدية (لأي نظام آخر) — تبقى كما هي
+                    Forms\Components\TextInput::make('guarantor_name')
+                        ->label('اسم الضامن')
+                        ->visible(fn($get) => $get('installment_type') !== 'حالا'),
+
+                    Forms\Components\TextInput::make('guarantor_phone')
+                        ->label('رقم هاتف الضامن')
+                        ->visible(fn($get) => $get('installment_type') !== 'حالا'),
+
+                    Forms\Components\View::make('filament.custom.download')
+                        ->dehydrated(false)
+
+                        ->viewData([
+                            'url' => fn($record) => $record?->guarantor_id_image
+                                ? asset('storage/' . $record->guarantor_id_image)
+                                : null,
+                            'label' => 'تحميل وجه البطاقة الحالي',
+                        ])
+                        ->visible(
+                            fn($record, $get) =>
+                            $record &&
+                            $record->guarantor_id_image &&
+                            $get('installment_type') !== 'حالا'
+                        ),
+
+                    Forms\Components\FileUpload::make('guarantor_id_image')
+                        ->label('بطاقة الضامن (الوجه)')
+    ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
+                        ->directory('installments/guarantors')
+                        ->visibility('public')
+                        ->image()
+                        ->nullable()
+                        ->visible(fn($get) => $get('installment_type') !== 'حالا'),
+
+                    Forms\Components\View::make('filament.custom.download')
+                        ->dehydrated(false)
+
+                        ->viewData([
+                            'url' => fn($record) => $record?->guarantor_id_back_image
+                                ? asset('storage/' . $record->guarantor_id_back_image)
+                                : null,
+                            'label' => 'تحميل ظهر البطاقة الحالي',
+                        ])
+                        ->visible(
+                            fn($record, $get) =>
+                            $record &&
+                            $record->guarantor_id_back_image &&
+                            $get('installment_type') !== 'حالا'
+                        ),
+
+                    Forms\Components\FileUpload::make('guarantor_id_back_image')
+                        ->label('بطاقة الضامن (الظهر)')
+                        ->directory('installments/guarantors')
+    ->orientImagesFromExif()
+    ->imageEditor()
+    ->imageEditorAspectRatios([
+        '3:4',
+        '4:5',
+    ])
+    ->maxSize(1024)
+                        ->visibility('public')
+                        ->image()
+                        ->nullable()
+                        ->visible(fn($get) => $get('installment_type') !== 'حالا'),
                 ])
-                ->columns(1),
+                ->columns(3),
+
+Forms\Components\Section::make('الملاحظات')
+    ->icon('heroicon-o-chat-bubble-left-right')
+    ->collapsible()
+    ->collapsed(false)
+    ->extraAttributes([
+        'class' => 'ring-1 ring-success-500 border-success-500',
+    ])
+    ->schema([
+        Forms\Components\Textarea::make('notes')
+            ->label('ملاحظات')
+            ->rows(6)
+            ->columnSpanFull()
+            ->nullable(),
+    ])
+    ->columns(1),
 
             // 🔹 مراجعة الطلب
             // 🔹 مراجعة الطلب
@@ -1083,6 +1858,30 @@ class DeliveryResource extends Resource
                     ->label('اسم الموظف')
                     ->sortable()
                     ->searchable(),
+               
+
+Tables\Columns\TextColumn::make('deletedBy.name')
+    ->label('محذوف بواسطة')
+    ->badge()
+    ->color('danger')
+    ->placeholder('غير محدد')
+    ->sortable()
+    ->searchable()
+    ->visible(
+        fn ($livewire): bool =>
+            $livewire->activeTab === 'deleted'
+    ),
+
+Tables\Columns\TextColumn::make('deleted_at')
+    ->label('اتحذف بتاريخ')
+    ->dateTime('d/m/Y H:i')
+    ->placeholder('غير محدد')
+    ->sortable()
+    ->visible(
+        fn ($livewire): bool =>
+            $livewire->activeTab === 'deleted'
+    ),
+
                 Tables\Columns\TextColumn::make('status')
                     ->label('الحالة')
                     ->badge()
@@ -1148,7 +1947,7 @@ class DeliveryResource extends Resource
                             ->toArray();
                     }),
 
-                Tables\Filters\SelectFilter::make('staff_id')
+ Tables\Filters\SelectFilter::make('staff_id')
                     ->label('اسم الموظف')
                     ->options(fn() => [
                         '__without_staff__' => 'بدون اسم',
@@ -1167,7 +1966,6 @@ class DeliveryResource extends Resource
 
                         return $query->where('staff_id', $staffId);
                     }),
-
                 Tables\Filters\SelectFilter::make('status')
                     ->label('حالة الطلب')
                     ->options([
@@ -1208,65 +2006,154 @@ class DeliveryResource extends Resource
             ->actions([
                 Tables\Actions\ViewAction::make(),
 
-                Tables\Actions\Action::make('request_transfer')
-                    ->label('تحويل الطلب')
-                    ->icon('heroicon-o-arrow-path')
-                    ->visible(fn() => Auth::user()->is_admin || Auth::user()->is_super_admin)
+Tables\Actions\Action::make('force_delete')
+    ->label('حذف نهائي')
+    ->icon('heroicon-o-trash')
+    ->color('danger')
+    ->visible(
+        fn ($record, $livewire): bool =>
+            static::isHitler()
+            && $livewire->activeTab === 'deleted'
+            && $record->trashed()
+    )
+    ->requiresConfirmation()
+    ->modalHeading('حذف الطلب نهائيًا')
+    ->modalDescription(
+        fn ($record) =>
+            "تحذير: الطلب رقم #{$record->id} سيتم حذفه نهائيًا ولن يمكن استرجاعه."
+    )
+    ->modalSubmitActionLabel('حذف نهائي')
+    ->action(function ($record): void {
 
-                    ->form([
-                        Forms\Components\Select::make('new_staff_id')
-                            ->label('تحويل إلى')
-                            ->options(Staff::pluck('name', 'id'))
-                            ->required(),
-                    ])
+        abort_unless(
+            static::isHitler(),
+            403
+        );
 
-                    ->action(function ($record, array $data) {
+        abort_unless(
+            $record->trashed(),
+            403
+        );
 
-                        $user = Auth::user();
-                        // ✅ لو سوبر أدمن → تحويل مباشر
-                        if ($user->is_super_admin) {
+        $record->forceDelete();
 
-                            $record->update([
-                                'staff_id' => $data['new_staff_id'],
-                            ]);
+        Notification::make()
+            ->title('تم الحذف النهائي')
+            ->body(
+                "تم حذف الطلب رقم #{$record->id} نهائيًا."
+            )
+            ->success()
+            ->send();
+    }),
+    
+   Tables\Actions\Action::make('restore')
+    ->label('استرجاع')
+    ->icon('heroicon-o-arrow-uturn-left')
+    ->color('success')
+    ->visible(
+        fn ($record, $livewire): bool =>
+            static::isHitler()
+            && $livewire->activeTab === 'deleted'
+            && $record->trashed()
+    )
+    ->requiresConfirmation()
+    ->modalHeading('استرجاع الطلب')
+    ->modalDescription(
+        fn ($record) =>
+            "هل تريد استرجاع الطلب رقم #{$record->id}؟"
+    )
+    ->modalSubmitActionLabel('استرجاع')
+    ->action(function ($record): void {
 
-                            \Filament\Notifications\Notification::make()
-                                ->title('تم التحويل بنجاح')
-                                ->success()
-                                ->send();
+        abort_unless(
+            static::isHitler(),
+            403
+        );
 
-                            return;
-                        }
+        abort_unless(
+            $record->trashed(),
+            403
+        );
 
-                        // 🔒 لو أدمن → يسجل طلب موافقة
-                        $record->update([
-                            'pending_staff_id' => $data['new_staff_id'],
-                            'transfer_requested_by' => $user->id,
-                            'transfer_requested_at' => now(),
-                        ]);
+        $record->restore();
 
-                        $newStaff = Staff::find($data['new_staff_id']);
-                        $superAdmins = Staff::where('is_super_admin', 1)->get();
+        $record->update([
+            'deleted_by' => null,
+        ]);
 
-                        foreach ($superAdmins as $admin) {
-                            \App\Models\Notification::create([
-                                'user_id' => $admin->id,
-                                'title' => 'طلب تحويل جديد',
-                                'message' => "{$user->name} عايز يحول الطلب رقم {$record->id} من {$record->staff->name} إلى {$newStaff->name}",
-                                'type' => 'transfer_request',
-                                'data' => json_encode([
-                                    'request_id' => $record->id,
-                                ]),
-                                'is_read' => false,
-                            ]);
-                        }
+        Notification::make()
+            ->title('تم استرجاع الطلب')
+            ->body(
+                "تم استرجاع الطلب رقم #{$record->id} بنجاح."
+            )
+            ->success()
+            ->send();
+    }),
+              Tables\Actions\Action::make('request_transfer')
+    ->label('تحويل الطلب')
+    ->icon('heroicon-o-arrow-path')
+    ->visible(fn() => Auth::user()->is_admin || Auth::user()->is_super_admin)
 
-                        \Filament\Notifications\Notification::make()
-                            ->title('تم إرسال الطلب للتيم ليدر')
-                            ->info()
-                            ->send();
-                    }),
+    ->form([
+        Forms\Components\Select::make('new_staff_id')
+            ->label('تحويل إلى')
+            ->options(
+                fn() => Staff::query()
+                    ->pluck('name', 'id')
+                    ->toArray()
+            )
+            ->searchable()
+            ->preload()
+            ->required(),
+    ])
 
+    ->requiresConfirmation()
+    ->modalHeading('تحويل الطلب')
+    ->modalDescription('سيتم تحويل الطلب مباشرة إلى الموظف المحدد.')
+    ->modalSubmitActionLabel('تأكيد التحويل')
+
+    ->action(function ($record, array $data) {
+
+        $user = Auth::user();
+
+        // حماية إضافية
+        abort_unless(
+            $user && ($user->is_admin || $user->is_super_admin),
+            403
+        );
+
+        if (! $record->canBeReassignedBy($user)) {
+            Notification::make()
+                ->title('ممنوع التحويل')
+                ->body('ده طلب هتلر، محدش يقدر يسحبه غير هتلر.')
+                ->danger()
+                ->send();
+
+            return;
+        }
+
+        $newStaff = Staff::findOrFail($data['new_staff_id']);
+
+        $oldStaffName = $record->staff?->name ?? 'غير محدد';
+
+        // ✅ تحويل مباشر للأدمن والسوبر أدمن
+        $record->update([
+            'staff_id' => $newStaff->id,
+
+            // تصفير أي طلب تحويل قديم
+            'pending_staff_id' => null,
+            'transfer_requested_by' => null,
+            'transfer_requested_at' => null,
+        ]);
+
+        Notification::make()
+            ->title('تم تحويل الطلب بنجاح')
+            ->body(
+                "تم تحويل الطلب رقم {$record->id} من {$oldStaffName} إلى {$newStaff->name}"
+            )
+            ->success()
+            ->send();
+    }),
                 Tables\Actions\Action::make('edit_guarded')
                     ->label('تعديل')
                     ->icon('heroicon-o-pencil-square')
@@ -1296,91 +2183,132 @@ class DeliveryResource extends Resource
 
             ->bulkActions([
                 Tables\Actions\BulkAction::make('bulk_request_transfer')
-                    ->label('تحويل الطلبات المحددة')
-                    ->icon('heroicon-o-arrow-path')
-                    ->color('warning')
-                    ->visible(fn() => Auth::user()->is_admin || Auth::user()->is_super_admin)
-                    ->form([
-                        Forms\Components\Select::make('new_staff_id')
-                            ->label('تحويل إلى')
-                            ->options(fn() => Staff::query()->pluck('name', 'id'))
-                            ->searchable()
-                            ->preload()
-                            ->required(),
-                    ])
-                    ->requiresConfirmation()
-                    ->modalHeading('تحويل الطلبات المحددة')
-                    ->modalDescription('سيتم تطبيق التحويل على كل الطلبات التي قمت بتحديدها.')
-                    ->modalSubmitActionLabel('تأكيد التحويل')
-                    ->action(function ($records, array $data): void {
-                        $user = Auth::user();
+    ->label('تحويل الطلبات المحددة')
+    ->icon('heroicon-o-arrow-path')
+    ->color('warning')
+    ->visible(
+        fn() =>
+        Auth::user()->is_admin ||
+        Auth::user()->is_super_admin
+    )
 
-                        // حماية إضافية: لا نعتمد على إخفاء الزر فقط.
-                        abort_unless(
-                            $user && ($user->is_admin || $user->is_super_admin),
-                            403
-                        );
+    ->form([
+        Forms\Components\Select::make('new_staff_id')
+            ->label('تحويل إلى')
+            ->options(
+                fn() => Staff::query()
+                    ->pluck('name', 'id')
+                    ->toArray()
+            )
+            ->searchable()
+            ->preload()
+            ->required(),
+    ])
 
-                        $newStaff = Staff::findOrFail($data['new_staff_id']);
-                        $recordsCount = $records->count();
+    ->requiresConfirmation()
+    ->modalHeading('تحويل الطلبات المحددة')
+    ->modalDescription(
+        'سيتم تحويل جميع الطلبات المحددة مباشرة إلى الموظف المختار.'
+    )
+    ->modalSubmitActionLabel('تأكيد التحويل')
 
-                        \Illuminate\Support\Facades\DB::transaction(function () use ($records, $user, $newStaff): void {
-                            // السوبر أدمن يحول الطلبات مباشرة.
-                            if ($user->is_super_admin) {
-                                foreach ($records as $record) {
-                                    $record->update([
-                                        'staff_id' => $newStaff->id,
-                                    ]);
-                                }
+    ->action(function ($records, array $data): void {
 
-                                return;
-                            }
+        $user = Auth::user();
 
-                            // الأدمن يرسل طلب موافقة منفصل لكل طلب محدد.
-                            $superAdmins = Staff::where('is_super_admin', 1)->get();
+        // حماية إضافية
+        abort_unless(
+            $user &&
+            (
+                $user->is_admin ||
+                $user->is_super_admin
+            ),
+            403
+        );
 
-                            foreach ($records as $record) {
-                                $oldStaffName = $record->staff?->name ?? 'غير محدد';
+        $newStaff = Staff::findOrFail($data['new_staff_id']);
 
-                                $record->update([
-                                    'pending_staff_id' => $newStaff->id,
-                                    'transfer_requested_by' => $user->id,
-                                    'transfer_requested_at' => now(),
-                                ]);
+        $blocked = $records->reject(fn ($record) => $record->canBeReassignedBy($user));
+        $records = $records->diff($blocked);
 
-                                foreach ($superAdmins as $admin) {
-                                    \App\Models\Notification::create([
-                                        'user_id' => $admin->id,
-                                        'title' => 'طلب تحويل جديد',
-                                        'message' => "{$user->name} عايز يحول الطلب رقم {$record->id} من {$oldStaffName} إلى {$newStaff->name}",
-                                        'type' => 'transfer_request',
-                                        'data' => json_encode([
-                                            'request_id' => $record->id,
-                                        ]),
-                                        'is_read' => false,
-                                    ]);
-                                }
-                            }
-                        });
+        if ($blocked->isNotEmpty()) {
+            Notification::make()
+                ->title("تم استبعاد {$blocked->count()} طلب")
+                ->body('دي طلبات هتلر، محدش يقدر يسحبها غير هتلر.')
+                ->warning()
+                ->send();
+        }
 
-                        $notification = Notification::make()
-                            ->title(
-                                $user->is_super_admin
-                                ? "تم تحويل {$recordsCount} طلب بنجاح"
-                                : "تم إرسال {$recordsCount} طلب تحويل للتيم ليدر"
-                            );
+        $recordsCount = $records->count();
 
-                        if ($user->is_super_admin) {
-                            $notification->success();
-                        } else {
-                            $notification->info();
-                        }
+        if ($recordsCount === 0) {
+            return;
+        }
 
-                        $notification->send();
-                    })
-                    ->deselectRecordsAfterCompletion(),
+        \Illuminate\Support\Facades\DB::transaction(
+            function () use ($records, $newStaff): void {
 
-                Tables\Actions\DeleteBulkAction::make(),
+                foreach ($records as $record) {
+
+                    $record->update([
+                        'staff_id' => $newStaff->id,
+
+                        // تنظيف أي تحويل معلق قديم
+                        'pending_staff_id' => null,
+                        'transfer_requested_by' => null,
+                        'transfer_requested_at' => null,
+                    ]);
+                }
+            }
+        );
+
+        Notification::make()
+            ->title("تم تحويل {$recordsCount} طلب بنجاح")
+            ->body(
+                "تم تحويل الطلبات مباشرة إلى {$newStaff->name}"
+            )
+            ->success()
+            ->send();
+    })
+
+    ->deselectRecordsAfterCompletion(),
+
+               Tables\Actions\BulkAction::make('send_to_deleted')
+    ->label('إرسال للمحذوفات')
+    ->icon('heroicon-o-trash')
+    ->color('danger')
+    ->requiresConfirmation()
+    ->modalHeading('إرسال الطلبات للمحذوفات')
+    ->modalDescription(
+        'سيتم نقل الطلبات المحددة إلى الطلبات المحذوفة لمراجعتها.'
+    )
+    ->modalSubmitActionLabel('تأكيد')
+    ->action(function ($records): void {
+
+        $user = Auth::user();
+
+        foreach ($records as $record) {
+
+            if ($record->trashed()) {
+                continue;
+            }
+
+            $record->update([
+                'deleted_by' => $user->id,
+            ]);
+
+            $record->delete();
+        }
+
+        Notification::make()
+            ->title('تم نقل الطلبات للمحذوفات')
+            ->body(
+                "تم نقل {$records->count()} طلب إلى قائمة المحذوفات."
+            )
+            ->success()
+            ->send();
+    })
+    ->deselectRecordsAfterCompletion(),
             ]);
     }
 

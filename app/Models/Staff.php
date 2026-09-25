@@ -25,6 +25,7 @@ class Staff extends Authenticatable
             'is_bot',
 'is_company_employee',
 'installment_system_id',
+'is_hitler',
         'attendance_rules',
         'lat',
 'lng',

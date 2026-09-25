@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "laravel",
+      "runtimeExecutable": "env",
+      "runtimeArgs": ["PHP_CLI_SERVER_WORKERS=8", "php", "artisan", "serve", "--host=127.0.0.1", "--port=8000"],
+      "port": 8000
+    }
+  ]
+}
