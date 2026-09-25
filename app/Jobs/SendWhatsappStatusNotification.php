@@ -2,13 +2,13 @@
 
 namespace App\Jobs;
 
+use App\Domain\Conversations\DeliveryService;
 use App\Models\InstallmentRequest;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class SendWhatsappStatusNotification implements ShouldQueue
@@ -22,7 +22,7 @@ class SendWhatsappStatusNotification implements ShouldQueue
     ) {
     }
 
-    public function handle(): void
+    public function handle(DeliveryService $delivery): void
     {
         $request = InstallmentRequest::with('whatsappConversation')->find($this->installmentRequestId);
 
@@ -53,34 +53,25 @@ class SendWhatsappStatusNotification implements ShouldQueue
             return;
         }
 
-        $url = config('services.whatsapp.worker_url') . '/send-message';
-
-        $response = Http::connectTimeout(10)
-            ->timeout(60)
-            ->withHeaders([
-                'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
-                'Accept' => 'application/json',
-            ])
-            ->post($url, [
-                'bot_id' => (string) $conversation->whatsapp_bot_id,
-                'jid' => $jid,
-                'message' => $message,
-            ]);
+        // T14: routed through DeliveryService so this is persisted as a
+        // real (system) outbound whatsapp_messages row, same as every
+        // other outbound message - but not gated on agent.enabled, since
+        // this notification predates the agent and must keep firing
+        // regardless of that master switch.
+        $delivery->deliverForConversation(
+            $conversation,
+            ['messages' => [$message]],
+            'system',
+            $jid,
+            requireAgentEnabled: false,
+        );
 
         Log::info('WHATSAPP STATUS NOTIFICATION SENT', [
             'installment_request_id' => $request->id,
             'status' => $this->status,
             'jid' => $jid,
             'conversation_phone' => $conversation->phone,
-            'response_status' => $response->status(),
-            'response_ok' => $response->json('ok'),
         ]);
-
-        if (! $response->successful() || ! $response->json('ok')) {
-            throw new \RuntimeException(
-                'WhatsApp status notification failed: ' . $response->status() . ' - ' . $response->body()
-            );
-        }
     }
 
     private function recipientJid(InstallmentRequest $request, object $conversation): ?string

@@ -47,7 +47,7 @@
                             @php
                                 $mime = strtolower($item['mime'] ?? '');
                                 $type = strtolower($item['type'] ?? '');
-                                $url = $this->mediaUrl($item['path'] ?? '');
+                                $url = $this->mediaUrl($item);
                             @endphp
 
                             <div class="mc-media">

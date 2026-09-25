@@ -17,3 +17,16 @@ Schedule::call(fn () => app(\App\Services\GeminiAlertService::class)->repeatOpen
     ->name('gemini-alerts-repeat')
     ->withoutOverlapping();
 
+
+// Handoffs no staff member answered in time go back to the bot.
+Schedule::call(fn () => app(\App\Domain\Handoff\HandoffService::class)->returnUnansweredToAgent())
+    ->everyMinute()
+    ->name('handoff-return-unanswered')
+    ->withoutOverlapping();
+
+// Reminds a customer who went quiet half way through an application (off
+// until AGENT_APPLICATION_NUDGE_AFTER_MINUTES is set).
+Schedule::call(fn () => app(\App\Domain\Applications\ApplicationNudgeService::class)->nudgeStalled())
+    ->everyFiveMinutes()
+    ->name('application-nudges')
+    ->withoutOverlapping();

@@ -2,10 +2,10 @@
 
 namespace App\Console\Commands;
 
-use App\Http\Controllers\Api\WhatsappBotController;
+use App\Agent\Runtime\TurnProcessor;
+use App\Domain\Conversations\DeliveryService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class ProcessWhatsappMessageJobs extends Command
@@ -35,10 +35,23 @@ class ProcessWhatsappMessageJobs extends Command
         $this->info("WhatsApp queue worker started (slot {$this->slot}/{$workers})");
 
         while (true) {
+            // dashboard settings (bot on/off, model, limits) take effect
+            // without restarting this long-running worker
+            \App\Domain\Settings\AgentSettings::apply();
+
+            if (! config('agent.enabled')) {
+                sleep((int) $this->option('sleep'));
+                continue;
+            }
+
             $job = $this->claimNextJob();
 
             if (!$job) {
                 sleep((int) $this->option('sleep'));
+                continue;
+            }
+
+            if ($job->status !== 'generated' && ($this->supersedeIfStale($job) || $this->deferForTranscription($job))) {
                 continue;
             }
 
@@ -73,42 +86,68 @@ class ProcessWhatsappMessageJobs extends Command
                         $job->message ?: '[media]'
                     ));
 
-                    $controller = app(WhatsappBotController::class);
-
-                    $result = $controller->processQueuedWhatsappJob($job);
+                    $result = app(TurnProcessor::class)->process($job);
 
                     if (!is_array($result)) {
                         $result = [];
                     }
 
                     $this->line(sprintf(
-                        '[%s] AI result for job #%d: reply=%s images=%d',
+                        '[%s] AI result for job #%d: messages=%d media=%d',
                         now()->toDateTimeString(),
                         $job->id,
-                        !empty(trim((string) ($result['reply'] ?? ''))) ? 'yes' : 'no',
-                        count($result['image_items'] ?? $result['images'] ?? [])
+                        count($result['messages'] ?? []),
+                        count($result['media'] ?? [])
                     ));
 
                     /*
-                     * Persist BEFORE attempting delivery. If sendWhatsappResult()
+                     * Persist BEFORE attempting delivery. If deliver()
                      * throws below, the catch block leaves this job at
                      * status='generated' (not 'pending') so a retry skips
                      * straight to resending this exact result.
                      */
-                    DB::table('whatsapp_message_jobs')
+                    /*
+                     * The linearization point for DEC-07: new messages that
+                     * arrived while this turn was generating flipped it to
+                     * 'superseded', and an unconditional write here used to
+                     * flip it straight back - the stale reply (a 12-month
+                     * quote after the customer had asked for 18) went out.
+                     * Only a turn still 'processing' may become 'generated';
+                     * a superseded one keeps its result for observability
+                     * and is never delivered.
+                     */
+                    $claimedForDelivery = DB::table('whatsapp_message_jobs')
                         ->where('id', $job->id)
+                        ->where('status', 'processing')
+                        ->whereNull('superseded_by')
                         ->update([
                             'status' => 'generated',
                             'result' => json_encode($result, JSON_UNESCAPED_UNICODE),
                             'updated_at' => now(),
                         ]);
+
+                    if ($claimedForDelivery === 0) {
+                        DB::table('whatsapp_message_jobs')->where('id', $job->id)->update([
+                            'status' => 'superseded',
+                            'result' => json_encode($result, JSON_UNESCAPED_UNICODE),
+                            'locked_at' => null,
+                            'processed_at' => now(),
+                            'updated_at' => now(),
+                        ]);
+
+                        $this->line(sprintf('[%s] Job #%d superseded while generating - reply not delivered', now()->toDateTimeString(), $job->id));
+
+                        continue;
+                    }
+
                     $generationSucceeded = true;
                 }
 
-                $this->sendWhatsappResult($job, $result);
+                app(DeliveryService::class)->deliver($job, $result);
 
                 DB::table('whatsapp_message_jobs')
                     ->where('id', $job->id)
+                    ->whereIn('status', ['processing', 'generated'])
                     ->update([
                         'status' => 'done',
                         'processed_at' => now(),
@@ -140,9 +179,31 @@ class ProcessWhatsappMessageJobs extends Command
                  * 'pending' - so the retry resends the same stored result
                  * instead of running the whole pipeline again.
                  */
-                $failureStatus = ((int) $job->attempts >= 3)
+                $failureStatus = ((int) $job->attempts >= (int) config('agent.delivery.max_attempts'))
                     ? 'failed'
                     : ($generationSucceeded ? 'generated' : 'pending');
+
+                $processAfter = null;
+
+                if (! $generationSucceeded && $e instanceof \App\Exceptions\TransientAiFailure) {
+                    [$failureStatus, $processAfter] = $this->scheduleTransientRetry($job);
+                }
+
+                // A delivery failure (WhatsApp disconnected) was retried three
+                // times inside ten seconds and gave up; back off instead, and
+                // make a final give-up loud.
+                if ($generationSucceeded && $failureStatus === 'generated') {
+                    $processAfter = now()->addSeconds(15 * max(1, (int) $job->attempts));
+                }
+
+                if ($failureStatus === 'failed') {
+                    Log::error('WhatsApp turn permanently failed', [
+                        'job_id' => $job->id,
+                        'conversation_id' => $job->whatsapp_conversation_id,
+                        'stage' => $generationSucceeded ? 'delivery' : 'generation',
+                        'error' => mb_substr($e->getMessage(), 0, 300),
+                    ]);
+                }
 
                 DB::table('whatsapp_message_jobs')
                     ->where('id', $job->id)
@@ -151,7 +212,7 @@ class ProcessWhatsappMessageJobs extends Command
                         'locked_at' => null,
                         'error' => $e->getMessage(),
                         'updated_at' => now(),
-                    ]);
+                    ] + ($processAfter ? ['process_after' => $processAfter] : []));
 
                 /*
                  * A transient AI failure (rate limit, a key mid-cooldown,
@@ -161,8 +222,140 @@ class ProcessWhatsappMessageJobs extends Command
                  * customer has before the turn goes to a human. Give the
                  * provider a few seconds to come back first.
                  */
-                sleep($e instanceof \App\Exceptions\TransientAiFailure ? 5 : 1);
+                sleep(1);
             }
+        }
+    }
+
+    /**
+     * A turn retrying after an AI outage must not answer after a newer turn
+     * of the same conversation: "شغال نجار" came back minutes later, after
+     * the customer had already switched to cash and been answered. Its
+     * messages are already in the newer turn's history.
+     */
+    private function supersedeIfStale(object $job): bool
+    {
+        if ((int) $job->attempts <= 1 || ! $job->whatsapp_conversation_id) {
+            return false;
+        }
+
+        // Only a real customer turn counts - the busy notice and staff
+        // replies also create job rows, and treating the notice as "newer"
+        // superseded the very turn it was apologising for.
+        $newer = DB::table('whatsapp_message_jobs')
+            ->where('whatsapp_conversation_id', $job->whatsapp_conversation_id)
+            ->where('id', '>', $job->id)
+            ->whereNotIn('status', ['superseded'])
+            ->whereExists(fn ($q) => $q->from('whatsapp_messages')
+                ->whereColumn('whatsapp_messages.turn_id', 'whatsapp_message_jobs.id')
+                ->where('whatsapp_messages.direction', 'incoming'))
+            ->min('id');
+
+        if ($newer === null) {
+            return false;
+        }
+
+        DB::table('whatsapp_message_jobs')->where('id', $job->id)->update([
+            'status' => 'superseded',
+            'superseded_by' => $newer,
+            'locked_at' => null,
+            'updated_at' => now(),
+        ]);
+
+        return true;
+    }
+
+    /**
+     * DEC-08's transcript wait was configured but never applied: a voice
+     * note's turn ran before its transcription finished, the model saw no
+     * message at all and sent an empty reply - the customer's details,
+     * spoken in the voice note, got no answer. Put the turn back for a
+     * couple of seconds while a transcription in this turn is still
+     * pending, up to agent.turns.transcript_wait_seconds.
+     */
+    private function deferForTranscription(object $job): bool
+    {
+        $pending = \App\Models\WhatsappMessage::where('turn_id', $job->id)
+            ->where('transcription_status', 'pending')
+            ->min('created_at');
+
+        if ($pending === null
+            || now()->diffInSeconds(\Illuminate\Support\Carbon::parse($pending)) >= (int) config('agent.turns.transcript_wait_seconds')) {
+            return false;
+        }
+
+        DB::table('whatsapp_message_jobs')->where('id', $job->id)->update([
+            'status' => 'pending',
+            'locked_at' => null,
+            'attempts' => DB::raw('GREATEST(attempts - 1, 0)'),
+            'process_after' => now()->addSeconds(2),
+            'updated_at' => now(),
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Gemini rate-limited on every key: three immediate retries 5s apart
+     * all failed inside a minute and the customer's "سلام" got no answer at
+     * all. Retries now back off through process_after (the worker is free
+     * meanwhile); when the normal attempts run out the customer is told once
+     * that we're busy and the turn keeps retrying for a few more minutes
+     * before it finally fails and goes to staff.
+     *
+     * @return array{0: string, 1: ?\Illuminate\Support\Carbon}
+     */
+    private function scheduleTransientRetry(object $job): array
+    {
+        $attempts = (int) $job->attempts;
+        $max = (int) config('agent.delivery.max_attempts');
+        $lateRetries = 4;
+
+        if ($attempts < $max) {
+            return ['pending', now()->addSeconds(10 * $attempts)];
+        }
+
+        if ($attempts === $max) {
+            $this->tellCustomerWeAreBusy($job);
+        }
+
+        if ($attempts < $max + $lateRetries) {
+            return ['pending', now()->addSeconds(60)];
+        }
+
+        $conversation = \App\Models\WhatsappConversation::find($job->whatsapp_conversation_id);
+
+        if ($conversation && $conversation->status !== 'awaiting_agent') {
+            app(\App\Domain\Handoff\HandoffService::class)->handOffForFailures($conversation, 'AI_UNAVAILABLE');
+        }
+
+        return ['failed', null];
+    }
+
+    private function tellCustomerWeAreBusy(object $job): void
+    {
+        $message = config('agent.fallback.message');
+        $conversation = \App\Models\WhatsappConversation::find($job->whatsapp_conversation_id);
+
+        if (blank($message) || ! $conversation) {
+            return;
+        }
+
+        // One notice per outage, not one per stuck turn.
+        $recentlyTold = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('sender_type', 'system')
+            ->where('text', $message)
+            ->where('created_at', '>=', now()->subMinutes(10))
+            ->exists();
+
+        if ($recentlyTold) {
+            return;
+        }
+
+        try {
+            app(DeliveryService::class)->deliverForConversation($conversation, ['messages' => [$message]], senderType: 'system');
+        } catch (\Throwable $e) {
+            Log::warning('Busy notice failed', ['job_id' => $job->id, 'error' => $e->getMessage()]);
         }
     }
 
@@ -227,6 +420,24 @@ class ProcessWhatsappMessageJobs extends Command
         return $this->withClaimLock(fn () => DB::transaction(function () {
             $staleBefore = now()->subMinutes(10);
 
+            // A worker that died mid-turn left its job 'processing' forever
+            // (job 419). Past the attempt budget it is failed loudly;
+            // otherwise it becomes claimable again below - re-running is
+            // safe because tool calls are idempotent per turn.
+            $abandoned = DB::table('whatsapp_message_jobs')
+                ->where('status', 'processing')
+                ->whereNotNull('locked_at')
+                ->where('locked_at', '<', $staleBefore)
+                ->where('attempts', '>=', (int) config('agent.delivery.max_attempts'))
+                ->pluck('id');
+
+            if ($abandoned->isNotEmpty()) {
+                DB::table('whatsapp_message_jobs')->whereIn('id', $abandoned)->update([
+                    'status' => 'failed', 'locked_at' => null, 'error' => 'ABANDONED_WHILE_PROCESSING', 'updated_at' => now(),
+                ]);
+                Log::error('WhatsApp turns abandoned while processing', ['job_ids' => $abandoned->all()]);
+            }
+
             /*
              * Messages from the same customer must still be answered in the
              * order they arrived, so a conversation that another worker is
@@ -249,7 +460,18 @@ class ProcessWhatsappMessageJobs extends Command
                  * resends the already-generated result instead of running
                  * the whole pipeline again (see the split in handle()).
                  */
-                ->whereIn('status', ['pending', 'generated'])
+                ->where(function ($q) use ($staleBefore) {
+                    $q->whereIn('status', ['pending', 'generated'])
+                        ->orWhere(fn ($q) => $q->where('status', 'processing')
+                            ->whereNotNull('locked_at')
+                            ->where('locked_at', '<', $staleBefore));
+                })
+                // Both the debounce (pending) and the delivery-retry backoff
+                // (generated) are expressed through process_after.
+                ->where(function ($q) {
+                    $q->whereNull('process_after')
+                        ->orWhere('process_after', '<=', now());
+                })
                 ->where(function ($q) use ($staleBefore) {
                     $q->whereNull('locked_at')
                         ->orWhere('locked_at', '<', $staleBefore);
@@ -287,174 +509,6 @@ class ProcessWhatsappMessageJobs extends Command
 
             return $job;
         }));
-    }
-
-    private function sendWhatsappResult(object $job, array $result): void
-    {
-        foreach ($this->textMessagesFromResult($result) as $index => $text) {
-            /*
-             * A human answering two questions sends two messages, with a
-             * beat in between - not one block. The pause also keeps WhatsApp
-             * from reordering messages sent back-to-back.
-             */
-            if ($index > 0) {
-                usleep(1_200_000);
-            }
-
-            $this->sendWhatsappText($job, $text);
-        }
-
-        $mediaItems = $this->extractMediaItemsFromResult($result);
-
-        if (!empty($mediaItems)) {
-            $this->sendWhatsappMediaItems($job, $mediaItems);
-        }
-    }
-
-    /**
-     * One entry per WhatsApp message to send. 'replies' is set only when the
-     * customer asked for more than one thing in the same message; everything
-     * else still sends the single 'reply'.
-     */
-    private function textMessagesFromResult(array $result): array
-    {
-        $replies = $result['replies'] ?? null;
-
-        if (is_array($replies) && ! empty($replies)) {
-            $texts = array_values(array_filter(
-                array_map(fn ($reply) => trim((string) $reply), $replies),
-                fn (string $reply) => $reply !== ''
-            ));
-
-            if (! empty($texts)) {
-                return $texts;
-            }
-        }
-
-        $reply = trim((string) ($result['reply'] ?? ''));
-
-        return $reply === '' ? [] : [$reply];
-    }
-
-    private function extractMediaItemsFromResult(array $result): array
-    {
-        if (!empty($result['image_items']) && is_array($result['image_items'])) {
-            return array_values(array_filter($result['image_items'], function ($item) {
-                return is_array($item) && !empty($item['url']);
-            }));
-        }
-
-        if (!empty($result['images']) && is_array($result['images'])) {
-            return collect($result['images'])
-                ->filter()
-                ->unique()
-                ->map(fn ($url) => [
-                    'type' => 'image',
-                    'url' => $url,
-                    'caption' => '',
-                ])
-                ->values()
-                ->all();
-        }
-
-        if (!empty($result['image'])) {
-            return [[
-                'type' => 'image',
-                'url' => $result['image'],
-                'caption' => '',
-            ]];
-        }
-
-        return [];
-    }
-
-    private function sendWhatsappText(object $job, string $reply): void
-    {
-        $url = config('services.whatsapp.worker_url') . '/send-message';
-
-        $payload = $this->decodeJobPayload($job);
-
-        /*
-         * "رد بـ reply مش رسالة عادية" لما الرسالة دي جت في نص burst
-         * (فيه Job تاني من نفس المحادثة كان لسه منتظر/بيتعالج وقت ما
-         * الرسالة دي وصلت - علّمها incomingMessage() بـ quote_reply).
-         * الـ wa_message_id بتاع نفس الرسالة دي هو اللي المفروض نعمله
-         * quote، مش أي حاجة تانية - Node بيحتفظ بالرسالة الخام دي في
-         * الذاكرة ويقدر يبنيها quoted كاملة منها.
-         */
-        $quotedMessage = (! empty($payload['quote_reply']) && ! empty($payload['wa_message_id']))
-            ? $payload['wa_message_id']
-            : null;
-
-        $response = Http::connectTimeout(10)
-            ->timeout(60)
-            ->withHeaders([
-                'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
-                'Accept' => 'application/json',
-            ])
-            ->post($url, [
-                'bot_id' => (string) $job->whatsapp_bot_id,
-                'jid' => $job->reply_jid ?: $job->from,
-                'message' => $reply,
-                'quoted_message' => $quotedMessage,
-            ]);
-
-        Log::info('WHATSAPP SEND TEXT RESPONSE', [
-            'job_id' => $job->id,
-            'url' => $url,
-            'bot_id' => $job->whatsapp_bot_id,
-            'jid' => $job->reply_jid ?: $job->from,
-            'status' => $response->status(),
-            'body' => $response->body(),
-        ]);
-
-        if (!$response->successful() || !$response->json('ok')) {
-            throw new \RuntimeException(
-                'WhatsApp text send failed: ' . $response->status() . ' - ' . $response->body()
-            );
-        }
-    }
-
-    private function sendWhatsappMediaItems(object $job, array $mediaItems): void
-    {
-        $url = config('services.whatsapp.worker_url') . '/send-media-items';
-
-        $response = Http::connectTimeout(10)
-            ->timeout(120)
-            ->withHeaders([
-                'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
-                'Accept' => 'application/json',
-            ])
-            ->post($url, [
-                'bot_id' => (string) $job->whatsapp_bot_id,
-                'jid' => $job->reply_jid ?: $job->from,
-                'media_items' => $mediaItems,
-            ]);
-
-        Log::info('WHATSAPP SEND MEDIA RESPONSE', [
-            'job_id' => $job->id,
-            'url' => $url,
-            'bot_id' => $job->whatsapp_bot_id,
-            'jid' => $job->reply_jid ?: $job->from,
-            'count' => count($mediaItems),
-            'status' => $response->status(),
-            'body' => $response->body(),
-        ]);
-
-        if (!$response->successful() || !$response->json('ok')) {
-            throw new \RuntimeException(
-                'WhatsApp media send failed: ' . $response->status() . ' - ' . $response->body()
-            );
-        }
-    }
-
-    private function decodeJobPayload(object $job): array
-    {
-        $payload = is_string($job->payload ?? null)
-            ? json_decode($job->payload, true)
-            : ($job->payload ?? []);
-
-        return is_array($payload) ? $payload : [];
     }
 
     private function decodeJobResult(object $job): array

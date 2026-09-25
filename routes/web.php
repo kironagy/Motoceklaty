@@ -102,6 +102,10 @@ Route::get('/ocr-test', function () {
 
 Route::view('/contact', 'contact');
 
+Route::get('/staff/media/{messageMedia}', [\App\Http\Controllers\MessageMediaController::class, 'show'])
+    ->middleware('auth:filament')
+    ->name('staff.media.show');
+
 
 
 

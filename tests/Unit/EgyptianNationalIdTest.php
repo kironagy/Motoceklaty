@@ -7,10 +7,12 @@ use Carbon\Carbon;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The national ID carries the birth date inside it, so the flow can know
- * the applicant's age the moment they type the number - instead of
- * collecting every document first and only discovering at review time
- * that the applicant is 17.
+ * The national ID carries the birth date inside it, so eligibility can
+ * know the applicant's age the moment they type the number. Restored from
+ * `HEAD:tests/Unit/EgyptianNationalIdTest.php` with the age-window
+ * (`age_ok`/`problemMessage`) assertions removed - that judgment now
+ * belongs to T11's `age_range` eligibility rule evaluator (DEC-02), not
+ * this structural parser.
  */
 class EgyptianNationalIdTest extends TestCase
 {
@@ -18,7 +20,6 @@ class EgyptianNationalIdTest extends TestCase
     {
         parent::setUp();
 
-        // Age assertions have to be stable regardless of when the suite runs.
         Carbon::setTestNow(Carbon::create(2026, 8, 26));
     }
 
@@ -44,7 +45,6 @@ class EgyptianNationalIdTest extends TestCase
         $this->assertSame('الجيزة', $parsed['governorate']);
         $this->assertSame('male', $parsed['gender']);
         $this->assertSame(36, $parsed['age']);
-        $this->assertTrue($parsed['age_ok']);
     }
 
     public function test_arabic_indic_digits_and_spacing_are_accepted(): void
@@ -53,32 +53,6 @@ class EgyptianNationalIdTest extends TestCase
 
         $this->assertTrue($parsed['valid']);
         $this->assertSame('29005132101234', $parsed['digits']);
-    }
-
-    public function test_applicant_under_twenty_one_is_flagged(): void
-    {
-        // Born 2010 -> 16 years old in 2026.
-        $parsed = $this->parser()->parse('31003152101234');
-
-        $this->assertTrue($parsed['valid']);
-        $this->assertFalse($parsed['age_ok']);
-        $this->assertStringContainsString('16', $this->parser()->problemMessage($parsed));
-    }
-
-    public function test_applicant_over_sixty_two_is_flagged(): void
-    {
-        // Born 1950 -> 76 years old in 2026.
-        $parsed = $this->parser()->parse('25003152101234');
-
-        $this->assertTrue($parsed['valid']);
-        $this->assertFalse($parsed['age_ok']);
-    }
-
-    public function test_age_inside_the_window_has_no_problem_message(): void
-    {
-        $parsed = $this->parser()->parse('29005132101234');
-
-        $this->assertNull($this->parser()->problemMessage($parsed));
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\GeminiApiKey;
 use App\Models\GeminiApiKeyModel;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class GeminiKeyManager
@@ -184,9 +185,12 @@ class GeminiKeyManager
 
     public function markDailyLimitFinished(GeminiApiKeyModel $model): void
     {
+        $resetTimezone = config('gemini.rate_limits.daily_reset_timezone', config('app.timezone'));
+        $resetAt = Carbon::now($resetTimezone)->addDay()->startOfDay();
+
         $model->update([
             'requests_today' => $model->rpd_limit,
-            'cooldown_until' => now()->endOfDay(),
+            'cooldown_until' => $resetAt,
             'last_error' => 'Daily request limit reached.',
         ]);
 

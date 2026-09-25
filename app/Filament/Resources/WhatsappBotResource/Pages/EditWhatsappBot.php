@@ -13,7 +13,10 @@ class EditWhatsappBot extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            Actions\DeleteAction::make(),
+            // Deactivate (is_active) instead: deleting a bot with customers
+            // would cascade to all their applications and documents.
+            Actions\DeleteAction::make()
+                ->hidden(fn () => $this->record->hasCustomerData()),
         ];
     }
 }

@@ -24,5 +24,27 @@ class WhatsappBot extends Model
     {
         return $this->belongsTo(Staff::class);
     }
+
+    /**
+     * A bot owns its customers: deleting it cascades to customers ->
+     * applications -> their data and documents. It once failed only because
+     * one installment request happened to reference an application; without
+     * that, every customer's data would have gone. A bot with customer data
+     * is deactivated, never deleted.
+     */
+    public function hasCustomerData(): bool
+    {
+        return Customer::where('whatsapp_bot_id', $this->id)->exists()
+            || WhatsappConversation::where('whatsapp_bot_id', $this->id)->exists();
+    }
+
+    protected static function booted(): void
+    {
+        static::deleting(function (self $bot) {
+            if ($bot->hasCustomerData()) {
+                throw new \App\Exceptions\BotHasCustomerDataException($bot->id);
+            }
+        });
+    }
 }
 

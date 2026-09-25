@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\UtcDateTimeCast;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -34,7 +35,7 @@ class GeminiApiKeyModel extends Model
         'minute_window_started_at' => 'datetime',
         'second_window_started_at' => 'datetime',
         'last_used_at' => 'datetime',
-        'cooldown_until' => 'datetime',
+        'cooldown_until' => UtcDateTimeCast::class,
     ];
 
     public function apiKey(): BelongsTo

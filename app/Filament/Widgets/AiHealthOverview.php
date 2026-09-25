@@ -2,9 +2,6 @@
 
 namespace App\Filament\Widgets;
 
-use App\Models\AiMemory;
-use App\Models\AiMemoryRetrievalLog;
-use App\Models\CustomerProfile;
 use App\Models\GeminiApiKey;
 use App\Models\GeminiApiKeyModel;
 use App\Models\InstallmentRequest;
@@ -53,8 +50,6 @@ class AiHealthOverview extends BaseWidget
             $this->keysStat(),
             $this->escalationsStat(),
             $this->trafficStat(),
-            $this->memoryRetrievalStat(),
-            $this->memoryCoverageStat(),
         ];
     }
 
@@ -171,32 +166,4 @@ class AiHealthOverview extends BaseWidget
             ->descriptionIcon('heroicon-m-chat-bubble-left-right');
     }
 
-    private function memoryRetrievalStat(): Stat
-    {
-        $today = AiMemoryRetrievalLog::query()->whereDate('created_at', today());
-        $total = (clone $today)->count();
-        $fullSet = (clone $today)->where('retrieval_method', 'full_set')->count();
-
-        return Stat::make('استرجاع الميموري', $total > 0 ? "{$fullSet} / {$total} كامل" : 'مفيش استرجاع النهاردة')
-            ->description(
-                $total > 0 && $fullSet < $total
-                    ? ($total - $fullSet) . ' مرة اترشّحت بالتقييم (الميموري كبرت عن البرومبت)'
-                    : 'كل الميموري بتوصل للموديل'
-            )
-            ->descriptionIcon('heroicon-m-circle-stack')
-            ->color($total === 0 || $fullSet === $total ? 'success' : 'warning');
-    }
-
-    private function memoryCoverageStat(): Stat
-    {
-        $active = AiMemory::query()->where('is_active', true)->count();
-        $tagged = AiMemory::query()->where('is_active', true)
-            ->whereNotNull('keywords')->where('keywords', '!=', '[]')->count();
-        $profiles = CustomerProfile::query()->count();
-
-        return Stat::make('الميموري', "{$active} نشطة")
-            ->description("{$tagged} منهم بكلمات مفتاحية · {$profiles} ملف عميل محفوظ")
-            ->descriptionIcon('heroicon-m-book-open')
-            ->color($active > 0 && $tagged >= $active * 0.8 ? 'success' : 'warning');
-    }
 }

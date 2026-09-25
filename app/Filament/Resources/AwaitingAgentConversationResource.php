@@ -2,9 +2,10 @@
 
 namespace App\Filament\Resources;
 
+use App\Domain\Conversations\DeliveryService;
+use App\Domain\Handoff\HandoffService;
 use App\Filament\Resources\AwaitingAgentConversationResource\Pages;
 use App\Models\WhatsappConversation;
-use App\Services\WhatsappIntentRouter;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
@@ -80,91 +81,18 @@ class AwaitingAgentConversationResource extends Resource
                     ->requiresConfirmation()
                     ->modalDescription('هيرجع الـ AI يرد على العميل تاني بشكل عادي.')
                     ->action(function (WhatsappConversation $record): void {
-                        $record->forceFill(['status' => 'open'])->save();
+                        $result = app(HandoffService::class)->close($record, auth()->user());
                         static::setArchived($record, false);
 
-                        $answered = static::answerPendingIncomingMessage($record);
-
                         Notification::make()
-                            ->title($answered
-                                ? 'اتقفل التحويل، الـ AI رد على آخر رسالة وسابها'
+                            ->title($result['turn_created']
+                                ? 'اتقفل التحويل، الـ AI هيرد على آخر رسايل العميل دلوقتي'
                                 : 'اتقفل التحويل، الـ AI هيرد على أي رسالة جديدة من العميل')
                             ->success()
                             ->send();
                     }),
             ])
             ->emptyStateHeading('مفيش محادثات منتظرة الرد دلوقتي');
-    }
-
-    /**
-     * قفل التحويل لوحده بيغيّر الـ status بس - العميل يمكن يكون بعت
-     * رسايل وقت ما كانت المحادثة awaiting_agent واتسجلت من غير رد
-     * (الـ AI كان ساكت عمدًا). لو مفيش رد بعدها من الموظف نفسه، بنشغّل
-     * الراوتر دلوقتي على آخر رسالة عشان العميل ياخد رد بدل ما يفضل مستني
-     * لحد ما يبعت حاجة جديدة بنفسه.
-     */
-    public static function answerPendingIncomingMessage(WhatsappConversation $record): bool
-    {
-        $last = $record->messages()->latest('id')->first();
-
-        if (! $last || $last->direction !== 'incoming') {
-            return false;
-        }
-
-        $mediaItems = data_get($last->payload, 'saved_media_items', []);
-
-        try {
-            $result = app(WhatsappIntentRouter::class)->handle(
-                $record->refresh(),
-                (string) $last->message,
-                is_array($mediaItems) ? $mediaItems : []
-            );
-        } catch (\Throwable) {
-            return false;
-        }
-
-        $reply = trim((string) ($result['reply'] ?? ''));
-
-        if ($reply === '') {
-            return false;
-        }
-
-        return static::deliverText($record, $reply);
-    }
-
-    public static function deliverText(WhatsappConversation $record, string $message): bool
-    {
-        $lastIncoming = $record->messages()
-            ->where('direction', 'incoming')
-            ->latest('id')
-            ->first();
-
-        $botId = data_get($lastIncoming?->payload, 'bot_id') ?: $record->whatsapp_bot_id;
-        $jid = data_get($lastIncoming?->payload, 'reply_jid')
-            ?: data_get($lastIncoming?->payload, 'from')
-            ?: ($record->phone ? $record->phone . '@s.whatsapp.net' : null);
-
-        if (! $botId || ! $jid) {
-            return false;
-        }
-
-        try {
-            $response = Http::connectTimeout(5)
-                ->timeout(15)
-                ->withHeaders([
-                    'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
-                    'Accept' => 'application/json',
-                ])
-                ->post(config('gemini.alerts.whatsapp_url'), [
-                    'bot_id' => (string) $botId,
-                    'jid' => (string) $jid,
-                    'message' => $message,
-                ]);
-
-            return $response->successful() && ($response->json('ok') ?? false);
-        } catch (\Throwable) {
-            return false;
-        }
     }
 
     public static function setArchived(WhatsappConversation $record, bool $archive): void
@@ -207,44 +135,8 @@ class AwaitingAgentConversationResource extends Resource
             return false;
         }
 
-        $lastIncoming = $record->messages()
-            ->where('direction', 'incoming')
-            ->latest('id')
-            ->first();
-
-        $botId = data_get($lastIncoming?->payload, 'bot_id') ?: $record->whatsapp_bot_id;
-        $jid = data_get($lastIncoming?->payload, 'reply_jid')
-            ?: data_get($lastIncoming?->payload, 'from')
-            ?: ($record->phone ? $record->phone . '@s.whatsapp.net' : null);
-
-        if (! $botId || ! $jid) {
-            return false;
-        }
-
         try {
-            $url = (string) config('gemini.alerts.whatsapp_url');
-
-            $response = Http::connectTimeout(5)
-                ->timeout(15)
-                ->withHeaders([
-                    'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
-                    'Accept' => 'application/json',
-                ])
-                ->post($url, [
-                    'bot_id' => (string) $botId,
-                    'jid' => (string) $jid,
-                    'message' => $message,
-                ]);
-
-            if (! ($response->successful() && ($response->json('ok') ?? false))) {
-                return false;
-            }
-
-            $record->messages()->create([
-                'direction' => 'outgoing',
-                'message' => $message,
-                'payload' => ['source' => 'agent_dashboard_reply'],
-            ]);
+            app(DeliveryService::class)->deliverForConversation($record, ['messages' => [$message]]);
 
             return true;
         } catch (\Throwable) {
@@ -264,20 +156,6 @@ class AwaitingAgentConversationResource extends Resource
         ?string $filename = null,
         string $caption = ''
     ): bool {
-        $lastIncoming = $record->messages()
-            ->where('direction', 'incoming')
-            ->latest('id')
-            ->first();
-
-        $botId = data_get($lastIncoming?->payload, 'bot_id') ?: $record->whatsapp_bot_id;
-        $jid = data_get($lastIncoming?->payload, 'reply_jid')
-            ?: data_get($lastIncoming?->payload, 'from')
-            ?: ($record->phone ? $record->phone . '@s.whatsapp.net' : null);
-
-        if (! $botId || ! $jid) {
-            return false;
-        }
-
         $mime = strtolower($mime);
         $type = str_starts_with($mime, 'video/')
             ? 'video'
@@ -294,42 +172,14 @@ class AwaitingAgentConversationResource extends Resource
         $url = asset('storage/' . ltrim($path, '/'));
 
         try {
-            $response = Http::connectTimeout(5)
-                ->timeout(30)
-                ->withHeaders([
-                    'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
-                    'Accept' => 'application/json',
-                ])
-                ->post(config('services.whatsapp.worker_url') . '/send-media-items', [
-                    'bot_id' => (string) $botId,
-                    'jid' => (string) $jid,
-                    'media_items' => [[
-                        'url' => $url,
-                        'type' => $type,
-                        'mime' => $mime,
-                        'filename' => $filename,
-                        'caption' => $caption,
-                    ]],
-                ]);
-
-            if (! ($response->successful() && ($response->json('ok') ?? false))) {
-                return false;
-            }
-
-            $record->messages()->create([
-                'direction' => 'outgoing',
-                'message' => $caption !== '' ? $caption : '[مرفق]',
-                'payload' => [
-                    'source' => 'agent_dashboard_reply',
-                    'saved_media_items' => [[
-                        'type' => $type,
-                        'mime' => $mime,
-                        'filename' => $filename,
-                        'path' => $path,
-                        'url' => $url,
-                    ]],
-                ],
-            ]);
+            app(DeliveryService::class)->deliverForConversation($record, ['media' => [[
+                'url' => $url,
+                'type' => $type,
+                'mime' => $mime,
+                'filename' => $filename,
+                'path' => $path,
+                'caption' => $caption,
+            ]]]);
 
             return true;
         } catch (\Throwable) {

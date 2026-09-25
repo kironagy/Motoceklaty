@@ -364,10 +364,28 @@ class WhatsappBotResource extends Resource
                     }),
 
                 Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make(),
+                // A bot with customers can only be deactivated: deleting it
+                // cascades to every customer, application and document.
+                Tables\Actions\DeleteAction::make()
+                    ->hidden(fn (WhatsappBot $record) => $record->hasCustomerData()),
             ])
             ->bulkActions([
-                Tables\Actions\DeleteBulkAction::make(),
+                Tables\Actions\BulkAction::make('delete_empty_bots')
+                    ->label('حذف البوتات اللي مفيهاش عملاء')
+                    ->icon('heroicon-o-trash')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->deselectRecordsAfterCompletion()
+                    ->action(function (\Illuminate\Support\Collection $records) {
+                        [$kept, $deletable] = $records->partition(fn (WhatsappBot $bot) => $bot->hasCustomerData());
+                        $deletable->each->delete();
+
+                        Notification::make()
+                            ->title("اتحذف {$deletable->count()} بوت")
+                            ->body($kept->isEmpty() ? null : 'ما اتحذفش: '.$kept->pluck('name')->implode('، ').' - عليهم عملاء ومحادثات، اقفلهم (غير نشط) بدل الحذف.')
+                            ->success()
+                            ->send();
+                    }),
             ])
             ->defaultSort('created_at', 'desc');
     }

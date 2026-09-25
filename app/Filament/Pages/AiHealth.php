@@ -18,6 +18,8 @@ class AiHealth extends Page
 
     protected static ?string $navigationLabel = 'صحة الـ AI';
 
+    protected static ?string $navigationGroup = 'البوت الذكي';
+
     protected static ?string $title = 'صحة الـ AI';
 
     protected static ?int $navigationSort = 90;

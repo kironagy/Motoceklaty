@@ -64,9 +64,13 @@ class ChatAwaitingAgentConversation extends Page
      * السيرفر الشغّال، أو العكس) الرابط القديم يبقى غلط. بنبني الرابط
      * من مسار الملف مباشرة كل مرة، فبيتظبط لوحده مع أي دومين بتتصفح منه.
      */
-    public function mediaUrl(string $path): string
+    public function mediaUrl(array $item): string
     {
-        return asset('storage/' . ltrim($path, '/'));
+        if (! empty($item['media_id'])) {
+            return route('staff.media.show', $item['media_id']);
+        }
+
+        return asset('storage/' . ltrim((string) ($item['path'] ?? ''), '/'));
     }
 
     public function sendMessage(): void
@@ -113,14 +117,12 @@ class ChatAwaitingAgentConversation extends Page
 
     public function closeHandoff(): void
     {
-        $this->record->forceFill(['status' => 'open'])->save();
+        $result = app(\App\Domain\Handoff\HandoffService::class)->close($this->record, auth()->user());
         AwaitingAgentConversationResource::setArchived($this->record, false);
 
-        $answered = AwaitingAgentConversationResource::answerPendingIncomingMessage($this->record);
-
         Notification::make()
-            ->title($answered
-                ? 'اتقفل التحويل، الـ AI رد على آخر رسالة وسابها'
+            ->title($result['turn_created']
+                ? 'اتقفل التحويل، الـ AI هيرد على آخر رسايل العميل دلوقتي'
                 : 'اتقفل التحويل، الـ AI هيرد على أي رسالة جديدة من العميل')
             ->success()
             ->send();

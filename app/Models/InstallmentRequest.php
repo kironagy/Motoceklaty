@@ -35,6 +35,7 @@ class InstallmentRequest extends Model
  
  
     protected $fillable = [
+        'application_id',
         'machine_id',
         'whatsapp_conversation_id',
         'installment_type',
@@ -128,6 +129,12 @@ class InstallmentRequest extends Model
     public function whatsappConversation()
     {
         return $this->belongsTo(WhatsappConversation::class);
+    }
+
+    /** T14: the Application this legacy request was projected from, if any. */
+    public function application()
+    {
+        return $this->belongsTo(Application::class);
     }
 
     public function staff()

@@ -4,6 +4,8 @@ const {
     DisconnectReason,
     fetchLatestBaileysVersion,
     downloadMediaMessage,
+    generateMessageIDV2,
+    Browsers,
 } = require('@whiskeysockets/baileys');
 
 const pino = require('pino');
@@ -23,7 +25,6 @@ const latestQr = {};
 const statuses = {};
 const starting = {};
 const handledMessages = new Set();
-const mediaCollectors = {};
 const chatQueues = {};
 
 /*
@@ -35,9 +36,37 @@ const chatQueues = {};
  */
 const recentRawMessages = new Map();
 
+/*
+ * Ids of messages this process sent itself. Baileys echoes every own send
+ * back through messages.upsert as fromMe - the same shape as staff typing
+ * on the phone (DEC-17) - and the echo can reach Laravel before the
+ * /send-message caller has recorded the id, so Laravel stored bot photos
+ * as "[staff] [media]" and then hit a duplicate-key error. The id is
+ * generated before the send, so the echo is always recognisable.
+ */
+const botSentIds = new Set();
+
 const PORT = process.env.PORT || 3080;
 const LARAVEL_TIMEOUT = Number(process.env.LARAVEL_TIMEOUT || 30000);
 const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
+
+/*
+ * Anti-ban pacing. WhatsApp restricted the number for bursts of replies:
+ * twenty customers writing at once got twenty replies in the same second,
+ * each after exactly one second of "typing". Every send on a number now
+ * waits its turn behind a randomised gap and a per-minute cap, and the
+ * typing time follows the length of the reply.
+ */
+const SEND_MAX_PER_MINUTE = Number(process.env.SEND_MAX_PER_MINUTE || 20);
+const SEND_MIN_GAP_MS = Number(process.env.SEND_MIN_GAP_MS || 1500);
+const SEND_MAX_GAP_MS = Number(process.env.SEND_MAX_GAP_MS || 4000);
+const TYPING_MS_PER_CHAR = Number(process.env.TYPING_MS_PER_CHAR || 45);
+const TYPING_MIN_MS = Number(process.env.TYPING_MIN_MS || 1500);
+const TYPING_MAX_MS = Number(process.env.TYPING_MAX_MS || 7000);
+const READ_DELAY_MIN_MS = Number(process.env.READ_DELAY_MIN_MS || 1000);
+const READ_DELAY_MAX_MS = Number(process.env.READ_DELAY_MAX_MS || 4000);
+
+const sendLimiters = {};
 
 async function fetchLatestActiveBotId() {
     try {
@@ -51,15 +80,91 @@ async function fetchLatestActiveBotId() {
             timeout: LARAVEL_TIMEOUT,
         });
 
-        return response.data?.bot_id ? String(response.data.bot_id) : null;
+        return {
+            latest: response.data?.bot_id ? String(response.data.bot_id) : null,
+            active: (response.data?.active_bot_ids || []).map(String),
+        };
     } catch (error) {
         console.error('fetch latest active bot id error:', error?.message || error);
-        return null;
+        return { latest: null, active: [] };
+    }
+}
+
+/*
+ * A restart used to start only the newest active bot - bot 86, never
+ * linked, sat on a QR while the linked bot 85 stayed down and customers got
+ * no replies. A bot counts as linked when its saved creds carry `me`.
+ */
+function isLinkedSession(botId) {
+    try {
+        const creds = JSON.parse(fs.readFileSync(path.join(__dirname, 'sessions', botId, 'creds.json'), 'utf8'));
+        return Boolean(creds?.me?.id);
+    } catch {
+        return false;
     }
 }
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function randomBetween(min, max) {
+    return min + Math.random() * Math.max(0, max - min);
+}
+
+async function waitForSendSlot(limiter) {
+    const gap = randomBetween(SEND_MIN_GAP_MS, SEND_MAX_GAP_MS);
+    const sinceLast = Date.now() - limiter.lastAt;
+
+    if (sinceLast < gap) {
+        await sleep(gap - sinceLast);
+    }
+
+    for (;;) {
+        const windowStart = Date.now() - 60000;
+        limiter.sentAt = limiter.sentAt.filter(t => t > windowStart);
+
+        if (limiter.sentAt.length < SEND_MAX_PER_MINUTE) return;
+
+        await sleep(limiter.sentAt[0] - windowStart + 50);
+    }
+}
+
+/**
+ * Runs `send` once this number's pacing allows it. Sends on one number
+ * go out one at a time, whichever chat they are for.
+ */
+function throttleSend(botId, send) {
+    const limiter = sendLimiters[botId] ||= { chain: Promise.resolve(), sentAt: [], lastAt: 0 };
+
+    const run = limiter.chain.then(async () => {
+        await waitForSendSlot(limiter);
+
+        try {
+            return await send();
+        } finally {
+            limiter.lastAt = Date.now();
+            limiter.sentAt.push(limiter.lastAt);
+        }
+    });
+
+    limiter.chain = run.catch(() => {});
+
+    return run;
+}
+
+/**
+ * True once the HTTP caller has hung up. Laravel retries a send it gave
+ * up on, so a queued send whose caller left must not go out as well.
+ */
+function callerGone(res) {
+    let gone = false;
+
+    res.on('close', () => {
+        if (!res.writableFinished) gone = true;
+    });
+
+    return () => gone;
 }
 
 const LOCK_FILE = path.join(__dirname, 'whatsapp-bot.lock');
@@ -114,10 +219,6 @@ function normalizeBotId(botId) {
     return String(botId || '').replace(/[^a-zA-Z0-9_-]/g, '');
 }
 
-function normalizeJid(jid) {
-    return jid || null;
-}
-
 /**
  * الشات بتاع بعض العملاء بيستخدم @lid (معرّف داخلي من واتساب للخصوصية)
  * بدل رقم الموبايل الحقيقي في remoteJid. بنحاول نلاقي الرقم الحقيقي
@@ -156,28 +257,6 @@ function getMessageText(msg) {
     ).trim();
 }
 
-/**
- * لو العميل عمل reply/quote على رسالة سابقة (زي "انت قولتلي ٥٨٥٠٠ عايز
- * اعرف ده سعر ايه")، بيانات الرسالة المقتبسة بتيجي من واتساب في
- * contextInfo.quotedMessage - من غير ما نجيبها، النظام مش بيعرف "ده"
- * بتشاور على إيه ومبيفهمش السؤال. بنستخرج النص بس عشان نديه كـ سياق.
- */
-function getQuotedText(msg) {
-    const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
-        || msg.message?.imageMessage?.contextInfo?.quotedMessage
-        || msg.message?.videoMessage?.contextInfo?.quotedMessage;
-
-    if (!quoted) return '';
-
-    return (
-        quoted.conversation
-        || quoted.extendedTextMessage?.text
-        || quoted.imageMessage?.caption
-        || quoted.videoMessage?.caption
-        || ''
-    ).trim();
-}
-
 function getMediaInfo(msg) {
     if (msg.message?.imageMessage) {
         return {
@@ -212,7 +291,75 @@ function getMediaInfo(msg) {
         };
     }
 
+    if (msg.message?.stickerMessage) {
+        return {
+            type: 'sticker',
+            mime: msg.message.stickerMessage.mimetype || 'image/webp',
+            fileName: null,
+        };
+    }
+
     return null;
+}
+
+/**
+ * Message "type" for the v2 ingestion payload (plan T04 §1). Distinct from
+ * getMediaInfo()'s media_type: a location message has no media at all.
+ */
+function getMessageType(msg) {
+    if (msg.message?.conversation || msg.message?.extendedTextMessage) return 'text';
+    if (msg.message?.imageMessage) return 'image';
+    if (msg.message?.videoMessage) return 'video';
+    if (msg.message?.documentMessage) return 'document';
+    if (msg.message?.audioMessage) return 'audio';
+    if (msg.message?.stickerMessage) return 'sticker';
+    if (msg.message?.locationMessage) return 'location';
+
+    return 'unknown';
+}
+
+function getLocationInfo(msg) {
+    const loc = msg.message?.locationMessage;
+
+    if (!loc) return null;
+
+    return {
+        latitude: loc.degreesLatitude ?? null,
+        longitude: loc.degreesLongitude ?? null,
+        name: loc.name || null,
+        address: loc.address || null,
+    };
+}
+
+/**
+ * Quoted message reference for the v2 payload: the wa_message_id convention
+ * is "<botId>_<stanzaId>", matching how we build our own ids on ingestion.
+ */
+function getQuotedInfo(msg, botId) {
+    const contextInfo = msg.message?.extendedTextMessage?.contextInfo
+        || msg.message?.imageMessage?.contextInfo
+        || msg.message?.videoMessage?.contextInfo
+        || msg.message?.documentMessage?.contextInfo
+        || msg.message?.audioMessage?.contextInfo;
+
+    const stanzaId = contextInfo?.stanzaId;
+
+    if (!stanzaId) return null;
+
+    const quotedMessage = contextInfo.quotedMessage || {};
+    const type = quotedMessage.conversation || quotedMessage.extendedTextMessage
+        ? 'text'
+        : quotedMessage.imageMessage ? 'image'
+        : quotedMessage.videoMessage ? 'video'
+        : quotedMessage.documentMessage ? 'document'
+        : quotedMessage.audioMessage ? 'audio'
+        : 'unknown';
+
+    return {
+        wa_message_id: `${botId}_${stanzaId}`,
+        type,
+        text: (quotedMessage.conversation || quotedMessage.extendedTextMessage?.text || '').trim() || null,
+    };
 }
 
 async function extractMediaBase64(msg) {
@@ -232,10 +379,10 @@ async function extractMediaBase64(msg) {
 
         return {
             media_type: mediaInfo.type,
-            media_mime: mediaInfo.mime,
-            media_filename: mediaInfo.fileName,
-            media_base64: buffer.toString('base64'),
-            media_size: buffer.length,
+            mime: mediaInfo.mime,
+            filename: mediaInfo.fileName,
+            base64: buffer.toString('base64'),
+            size: buffer.length,
         };
     } catch (error) {
         console.error('download media error:', error?.message || error);
@@ -243,11 +390,18 @@ async function extractMediaBase64(msg) {
     }
 }
 
-async function showTyping(sock, jid, seconds = 1) {
+function typingMs(text) {
+    const base = Math.min(TYPING_MAX_MS, Math.max(TYPING_MIN_MS, text.length * TYPING_MS_PER_CHAR));
+
+    return base * randomBetween(0.8, 1.2);
+}
+
+// No 'paused' afterwards: the message itself ends the typing indicator,
+// and the send may still wait in the pacing queue.
+async function showTyping(sock, jid, ms) {
     try {
         await sock.sendPresenceUpdate('composing', jid);
-        await sleep(seconds * 1000);
-        await sock.sendPresenceUpdate('paused', jid);
+        await sleep(ms);
     } catch {}
 }
 
@@ -257,42 +411,48 @@ function cleanReplyText(text) {
         .trim();
 }
 
-async function sendTextSafely(sock, jid, text, quotedMsg = null) {
+/**
+ * Returns the sent Baileys message (so callers can read its WhatsApp id
+ * and cache it for later quoting), or null on failure.
+ */
+async function sendTextSafely(sock, jid, text, quotedMsg = null, isCancelled = () => false) {
     try {
         const cleanText = cleanReplyText(text);
 
-        if (!cleanText) return false;
+        if (!cleanText) return null;
 
         console.log(`📨 Sending WhatsApp reply to ${jid}: ${cleanText}`);
 
-        await showTyping(sock, jid, 1);
+        await showTyping(sock, jid, typingMs(cleanText));
 
         try {
-            await sock.sendMessage(
+            const sent = await sock.sendMessage(
                 jid,
                 { text: cleanText },
-                quotedMsg ? { quoted: quotedMsg } : {}
+                quotedMsg ? { quoted: quotedMsg, isCancelled } : { isCancelled }
             );
 
             console.log(`✅ WhatsApp reply sent with quote to ${jid}`);
-            return true;
+            return sent;
         } catch (quoteError) {
             console.error('⚠️ send with quote failed, retry without quote:', quoteError?.message || quoteError);
 
-            await sock.sendMessage(jid, { text: cleanText });
+            if (isCancelled()) throw quoteError;
+
+            const sent = await sock.sendMessage(jid, { text: cleanText }, { isCancelled });
 
             console.log(`✅ WhatsApp reply sent without quote to ${jid}`);
-            return true;
+            return sent;
         }
     } catch (error) {
         console.error('❌ sendTextSafely failed:', error?.message || error);
-        return false;
+        return null;
     }
 }
 
 async function sendImageSafely(sock, jid, image, caption = '', quotedMsg = null) {
     try {
-        await sock.sendMessage(
+        const sent = await sock.sendMessage(
             jid,
             {
                 image: { url: image },
@@ -301,10 +461,10 @@ async function sendImageSafely(sock, jid, image, caption = '', quotedMsg = null)
             quotedMsg ? { quoted: quotedMsg } : {}
         );
 
-        return true;
+        return sent;
     } catch (error) {
         console.error('sendImageSafely:', error?.message || error);
-        return false;
+        return null;
     }
 }
 
@@ -321,6 +481,9 @@ function enqueueChat(chatKey, job) {
 
     return chatQueues[chatKey];
 }
+
+const LARAVEL_RETRY_ATTEMPTS = Number(process.env.LARAVEL_RETRY_ATTEMPTS || 3);
+const LARAVEL_RETRY_BASE_MS = Number(process.env.LARAVEL_RETRY_BASE_MS || 1000);
 
 async function postToLaravel(payload) {
     return axios.post(
@@ -339,81 +502,50 @@ async function postToLaravel(payload) {
     );
 }
 
-async function handleLaravelResponse(sock, replyJid, data, quotedMsg = null) {
-console.log('📨 handleLaravelResponse', data);
-    const reply = data?.reply || null;
+/**
+ * Laravel's response is only ever {ok, duplicate} now - it never carries a
+ * reply (T04: replies come only through /send-message and
+ * /send-media-items). A network error or 5xx here is retried with
+ * exponential backoff so a message isn't silently lost.
+ */
+async function postToLaravelWithRetry(payload) {
+    let lastError = null;
 
-    const imageItems = Array.isArray(data?.image_items) ? data.image_items : [];
-    const images = Array.isArray(data?.images) ? data.images : [];
+    for (let attempt = 1; attempt <= LARAVEL_RETRY_ATTEMPTS; attempt++) {
+        try {
+            return await postToLaravel(payload);
+        } catch (error) {
+            lastError = error;
+            const status = error?.response?.status;
+            const isRetryable = !status || status >= 500;
 
-    if (reply) {
-        await sendTextSafely(sock, replyJid, reply, quotedMsg);
-    }
-
-    if (imageItems.length) {
-        for (const item of imageItems) {
-            const caption = item.caption || item.machine_name || '';
-
-            if (caption) {
-                await sendTextSafely(sock, replyJid, `📌 ${caption}`, quotedMsg);
+            if (!isRetryable || attempt === LARAVEL_RETRY_ATTEMPTS) {
+                break;
             }
 
-            await sendImageSafely(sock, replyJid, item.url, '', quotedMsg);
-            await sleep(500);
-        }
-
-        return;
-    }
-
-    if (images.length) {
-        for (const image of images) {
-            await sendImageSafely(sock, replyJid, image, '', quotedMsg);
-            await sleep(500);
+            await sleep(LARAVEL_RETRY_BASE_MS * (2 ** (attempt - 1)));
         }
     }
-}
 
-async function flushMediaCollector(sock, botId, originalFrom, replyJid, collector, quotedMsg, customerJid = null) {
-    try {
-        const payload = {
-            bot_id: botId,
-            from: originalFrom,
-            reply_jid: replyJid,
-            customer_jid: customerJid,
-            message: collector.message || '',
-            quoted_text: collector.quotedText || '',
-            direction: 'incoming',
-            media_items: collector.mediaItems,
-            wa_message_id: collector.waMessageId || null,
-        };
-
-        console.log(`📤 Sending ${collector.mediaItems.length} media items to Laravel`);
-
-        const response = await postToLaravel(payload);
-
-        await handleLaravelResponse(sock, replyJid, response.data, quotedMsg);
-    } catch (error) {
-        console.error('flushMediaCollector error:', error?.response?.data || error?.message || error);
-    }
+    throw lastError;
 }
 
 async function handleIncomingMessage(sock, botId, msg) {
     const originalFrom = msg.key.remoteJid;
-    const replyJid = normalizeJid(originalFrom);
 
-    if (
-        !originalFrom ||
-        originalFrom === 'status@broadcast' ||
-        originalFrom.endsWith('@g.us') ||
-        msg.key.fromMe
-    ) {
+    if (!originalFrom || originalFrom === 'status@broadcast' || originalFrom.endsWith('@g.us')) {
         return;
     }
 
+    const isFromMe = Boolean(msg.key.fromMe);
+
+    if (isFromMe && botSentIds.has(msg.key.id)) return;
     const cleanText = getMessageText(msg);
     const media = await extractMediaBase64(msg);
+    const type = getMessageType(msg);
+    const location = getLocationInfo(msg);
 
-    if (!cleanText && !media) return;
+    if (!cleanText && !media && !location) return;
 
     const messageId = `${botId}_${msg.key.id}`;
 
@@ -425,94 +557,63 @@ async function handleIncomingMessage(sock, botId, msg) {
         handledMessages.clear();
     }
 
-    console.log(`📩 ${originalFrom}: ${cleanText || '[MEDIA]'}`);
+    console.log(`📩 ${isFromMe ? '[fromMe] ' : ''}${originalFrom}: ${cleanText || `[${type}]`}`);
 
-    try {
-        await sock.readMessages([msg.key]);
-    } catch {}
+    // A read receipt in the same instant the message lands is a bot tell.
+    if (!isFromMe) {
+        setTimeout(() => {
+            sock.readMessages([msg.key]).catch(() => {});
+        }, randomBetween(READ_DELAY_MIN_MS, READ_DELAY_MAX_MS));
+    }
 
-    const collectorKey = `${botId}_${originalFrom}`;
+    recentRawMessages.set(messageId, msg);
 
-    if (media) {
-        if (!mediaCollectors[collectorKey]) {
-            mediaCollectors[collectorKey] = {
-                mediaItems: [],
-                message: cleanText || '',
-                waMessageId: null,
-                timer: null,
-            };
-        }
-
-        mediaCollectors[collectorKey].mediaItems.push(media);
-        mediaCollectors[collectorKey].waMessageId = messageId;
-
-        /*
-         * Voice notes and images have to be quotable too. This cache was
-         * only ever filled on the text path below, so when Laravel asked
-         * us to quote a voice note - the customer sent three in a row -
-         * the lookup missed and the answer went out as a plain message
-         * with no indication of which recording it answered.
-         */
-        recentRawMessages.set(messageId, msg);
-
-        if (recentRawMessages.size > 2000) {
-            recentRawMessages.clear();
-        }
-
-        if (cleanText) {
-            mediaCollectors[collectorKey].message = cleanText;
-        }
-
-        clearTimeout(mediaCollectors[collectorKey].timer);
-
-        mediaCollectors[collectorKey].timer = setTimeout(async () => {
-            const collector = mediaCollectors[collectorKey];
-
-            delete mediaCollectors[collectorKey];
-
-            const customerJid = await resolveCustomerJid(sock, originalFrom, msg);
-            collector.quotedText = getQuotedText(msg);
-
-            await flushMediaCollector(
-                sock,
-                botId,
-                originalFrom,
-                replyJid,
-                collector,
-                msg,
-                customerJid
-            );
-        }, 3000);
-
-        return;
+    if (recentRawMessages.size > 2000) {
+        recentRawMessages.clear();
     }
 
     try {
-        const customerJid = await resolveCustomerJid(sock, originalFrom, msg);
-        const quotedText = getQuotedText(msg);
-
-        recentRawMessages.set(messageId, msg);
-
-        if (recentRawMessages.size > 2000) {
-            recentRawMessages.clear();
-        }
+        const customerJid = isFromMe ? null : await resolveCustomerJid(sock, originalFrom, msg);
 
         const payload = {
             bot_id: botId,
-            from: originalFrom,
-            reply_jid: replyJid,
-            customer_jid: customerJid,
-            message: cleanText,
-            quoted_text: quotedText,
-            direction: 'incoming',
             wa_message_id: messageId,
+            chat_jid: originalFrom,
+            customer_jid: customerJid,
+            push_name: msg.pushName || null,
+            timestamp: Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000),
+            type,
+            text: cleanText || null,
+            media: media ? [media] : [],
+            location,
+            quoted: getQuotedInfo(msg, botId),
+            // DEC-17: staff replying from the phone itself, not the bot.
+            direction: isFromMe ? 'outgoing' : 'incoming',
         };
-console.log('📤 Sending to Laravel:', cleanText);
-        const response = await postToLaravel(payload);
-console.log('📥 Laravel Response:', JSON.stringify(response.data));
-        await handleLaravelResponse(sock, replyJid, response.data, msg);
+
+        console.log(`📤 Sending to Laravel (${type}):`, cleanText || `[${type}]`);
+
+        const response = await postToLaravelWithRetry(payload);
+
+        console.log('📥 Laravel Response:', JSON.stringify(response.data));
     } catch (error) {
         console.error('Laravel Error:', error?.response?.data || error?.message || error);
+    }
+}
+
+function archiveLoggedOutSession(botId) {
+    const dir = path.join(__dirname, 'sessions', String(botId));
+
+    if (!fs.existsSync(dir)) return;
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const target = path.join(__dirname, 'sessions', `${botId}.loggedout-${stamp}`);
+
+    try {
+        fs.renameSync(dir, target);
+        console.warn(`Session ${botId} was logged out - credentials moved to ${target}. Start the session again to get a new QR.`);
+    } catch (error) {
+        console.error(`Could not archive logged-out session ${botId}:`, error?.message || error);
     }
 }
 
@@ -538,10 +639,34 @@ async function startSession(botId) {
         auth: state,
         logger: pino({ level: LOG_LEVEL }),
         printQRInTerminal: false,
-        browser: [`Motocyklaty ${botId}`, 'Chrome', '1.0.0'],
+        // An ordinary desktop Chrome fingerprint; a custom OS name marks the
+        // device as unofficial. Only read when a QR is scanned, so already
+        // linked sessions are unaffected until they re-link.
+        browser: Browsers.macOS('Chrome'),
         syncFullHistory: false,
         markOnlineOnConnect: false,
     });
+
+    const rawSendMessage = sock.sendMessage.bind(sock);
+    sock.sendMessage = (jid, content, options = {}) => {
+        const { isCancelled, ...sendOptions } = options;
+
+        return throttleSend(botId, () => {
+            if (isCancelled?.()) {
+                throw new Error('send cancelled: caller stopped waiting');
+            }
+
+            const messageId = sendOptions.messageId || generateMessageIDV2(sock.user?.id);
+
+            botSentIds.add(messageId);
+
+            if (botSentIds.size > 5000) {
+                botSentIds.delete(botSentIds.values().next().value);
+            }
+
+            return rawSendMessage(jid, content, { ...sendOptions, messageId });
+        });
+    };
 
     sessions[botId] = sock;
 
@@ -579,6 +704,15 @@ async function startSession(botId) {
             delete sessions[botId];
 
             statuses[botId] = shouldReconnect ? 'disconnected' : 'logged_out';
+
+            // Logged out = these credentials are dead. Kept as they were,
+            // every restart reused them, was logged out again and never
+            // showed a QR - the only visible way out was deleting the bot,
+            // which cascades to every customer and application. Move them
+            // aside (never deleted) so the next start asks for a new QR.
+            if (!shouldReconnect) {
+                archiveLoggedOutSession(botId);
+            }
 
             if (shouldReconnect) {
                 setTimeout(() => {
@@ -716,12 +850,18 @@ app.post('/send-message', checkToken, async (req, res) => {
             ? recentRawMessages.get(req.body.quoted_message) || null
             : null;
 
-        const sent = await sendTextSafely(sock, jid, text, quotedMsg);
+        const sent = await sendTextSafely(sock, jid, text, quotedMsg, callerGone(res));
+        const waMessageId = sent?.key?.id ? `${botId}_${sent.key.id}` : null;
+
+        if (sent && waMessageId) {
+            recentRawMessages.set(waMessageId, sent);
+        }
 
         return res.json({
-            ok: sent,
+            ok: Boolean(sent),
             bot_id: botId,
             jid,
+            wa_message_id: waMessageId,
         });
     } catch (error) {
         console.error('SEND MESSAGE ENDPOINT ERROR:', error?.message || error);
@@ -749,6 +889,7 @@ app.post('/send-media-items', checkToken, async (req, res) => {
         }
 
         const results = [];
+        const isCancelled = callerGone(res);
 
         for (const item of mediaItems) {
             const url = item.url || item.media_url || item.image || item.path;
@@ -780,19 +921,26 @@ app.post('/send-media-items', checkToken, async (req, res) => {
             }
 
             try {
-                await sock.sendMessage(jid, payload);
-                results.push({ ok: true, url, type, filename });
+                const sent = await sock.sendMessage(jid, payload, { isCancelled });
+                const waMessageId = sent?.key?.id ? `${botId}_${sent.key.id}` : null;
+
+                if (sent && waMessageId) {
+                    recentRawMessages.set(waMessageId, sent);
+                }
+
+                results.push({ ok: true, url, type, filename, wa_message_id: waMessageId });
             } catch (e) {
                 results.push({ ok: false, url, error: e?.message || String(e) });
             }
 
-            await sleep(700);
+            // The gap between photos comes from the per-number pacing.
         }
 
         return res.json({
             ok: results.some(r => r.ok),
             sent_count: results.filter(r => r.ok).length,
             total: results.length,
+            wa_message_ids: results.filter(r => r.ok).map(r => r.wa_message_id),
             results,
         });
     } catch (error) {
@@ -805,16 +953,21 @@ app.post('/send-media-items', checkToken, async (req, res) => {
 app.listen(PORT, () => {
     console.log(`🚀 WhatsApp Worker Running ${PORT}`);
 
-    fetchLatestActiveBotId().then(botId => {
-        if (!botId) {
+    fetchLatestActiveBotId().then(({ latest, active }) => {
+        const linked = active.filter(isLinkedSession);
+        const toStart = linked.length ? linked : (latest ? [latest] : []);
+
+        if (!toStart.length) {
             console.log('⚠️ No active WhatsApp bot found to auto-start.');
             return;
         }
 
-        console.log(`🔄 Auto-starting latest active bot: ${botId}`);
+        for (const botId of toStart) {
+            console.log(`🔄 Auto-starting ${linked.length ? 'linked' : 'latest active'} bot: ${botId}`);
 
-        startSession(botId).catch(error => {
-            console.error('AUTO START WHATSAPP SESSION ERROR:', error?.stack || error);
-        });
+            startSession(botId).catch(error => {
+                console.error('AUTO START WHATSAPP SESSION ERROR:', error?.stack || error);
+            });
+        }
     });
 });

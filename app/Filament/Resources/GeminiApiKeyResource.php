@@ -23,7 +23,7 @@ class GeminiApiKeyResource extends Resource
 
     protected static ?string $pluralModelLabel = 'AI API Keys';
 
-    protected static ?string $navigationGroup = 'AI Settings';
+    protected static ?string $navigationGroup = 'البوت الذكي';
 
     protected static ?int $navigationSort = 10;
 

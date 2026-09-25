@@ -5,10 +5,6 @@
             إجمالي الرصيد: كل رد بيتصرف منه، وأول ما يخلص البوت بيبطّل يرد خالص —
             مفيش موديل احتياطي وراه.
         </p>
-        <p>
-            لمراجعة أسبوعية كاملة (عناوين ميموري مكسورة، صياغات اترفضت، تحويلات):
-            <code>php artisan ai:weekly-review</code>
-        </p>
     </div>
 
     <x-filament::section collapsible :collapsed="false" style="direction: rtl;">

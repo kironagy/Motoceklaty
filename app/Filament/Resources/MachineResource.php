@@ -50,6 +50,49 @@ public static function form(Form $form): Form
                             ->reactive(), // 🔹 يخلي الفورم يتفاعل لحظيًا مع التغيير
                     ]),
 
+                Forms\Components\TagsInput::make('aliases')
+                    ->label('أسماء بديلة (للبحث)')
+                    ->helperText('أسماء أو تهجئات تانية للموديل، عشان الذكاء الاصطناعي يلاقيه لو العميل كتبه بشكل مختلف')
+                    ->columnSpanFull(),
+
+                Forms\Components\Grid::make(3)
+                    ->schema([
+                        Forms\Components\TextInput::make('cc')
+                            ->label('سعة الموتور (cc)')
+                            ->numeric()
+                            ->minValue(0),
+
+                        Forms\Components\Select::make('category')
+                            ->label('الفئة')
+                            ->options(config('agent.catalog.categories', []))
+                            ->searchable(),
+
+                        Forms\Components\Select::make('availability')
+                            ->label('التوفر')
+                            ->options([
+                                'in_stock' => 'متوفرة',
+                                'out_of_stock' => 'غير متوفرة',
+                                'on_order' => 'تحت الطلب',
+                            ])
+                            ->default('in_stock')
+                            ->required(),
+                    ]),
+
+                Forms\Components\Toggle::make('is_active')
+                    ->label('نشطة (تظهر للذكاء الاصطناعي والعملاء)')
+                    ->default(true),
+
+                Forms\Components\Textarea::make('description')
+                    ->label('وصف عام')
+                    ->rows(3)
+                    ->columnSpanFull(),
+
+                Forms\Components\KeyValue::make('specifications')
+                    ->label('مواصفات تفصيلية')
+                    ->keyLabel('الخاصية')
+                    ->valueLabel('القيمة')
+                    ->columnSpanFull(),
+
                 Forms\Components\FileUpload::make('display_image')
                     ->label('صورة العرض العامة')
                     ->image()
@@ -87,6 +130,15 @@ public static function form(Form $form): Form
         Forms\Components\ColorPicker::make('color')
             ->label('اللون')
             ->required(),
+
+        // The bot names a color from the picked hex; a light grey picked for
+        // a white scooter made it tell a customer "only grey" while he was
+        // looking at the white one. When set, this name wins for the bot.
+        Forms\Components\Select::make('color_name')
+            ->label('اسم اللون (اللي البوت هيقوله للعميل)')
+            ->helperText('اختياري - لو سيبته فاضي البوت هيستنتج الاسم من اللون اللي فوق.')
+            ->options(fn () => array_combine(\App\Support\ColorNamer::names(), \App\Support\ColorNamer::names()))
+            ->nullable(),
 
         Forms\Components\Grid::make(2)
             ->schema([

@@ -27,6 +27,17 @@ class InstallmentSystemResource extends Resource
                 ->required()
                 ->columnSpanFull(),
 
+            // DEC-01: يحدد المعادلة اللي هتستخدم فعليًا - مش اسم النظام.
+            Forms\Components\Select::make('pricing_mode')
+                ->label('طريقة الحساب')
+                ->options([
+                    'standard' => 'عادي (سعر التقسيط)',
+                    'zero_fees' => 'زيرو مصاريف (سعر الكاش + 7.5%)',
+                ])
+                ->default('standard')
+                ->required()
+                ->columnSpanFull(),
+
             // 🟢 المصاريف الإدارية
             Forms\Components\TextInput::make('administrative_fees')
                 ->label('المصاريف الإدارية (%)')
@@ -34,6 +45,42 @@ class InstallmentSystemResource extends Resource
                 ->suffix('%')
                 ->default(0)
                 ->required()
+                ->columnSpanFull(),
+
+            Forms\Components\TextInput::make('minimum_down_payment')
+                ->label('أقل مقدم (اختياري)')
+                ->numeric()
+                ->suffix('جنيه')
+                ->columnSpanFull(),
+
+            // البوت بيختار للعميل أوفر نظام تلقائيًا من الأنظمة اللي شروطها تنطبق عليه
+            Forms\Components\Section::make('شروط النظام (البوت بيختار أوفر نظام للعميل من الأنظمة اللي تنطبق عليه)')
+                ->schema([
+                    Forms\Components\Toggle::make('is_active')
+                        ->label('النظام شغال')
+                        ->default(true),
+
+                    Forms\Components\TextInput::make('priority')
+                        ->label('الأولوية لو التكلفة متساوية (الأكبر يتقدم)')
+                        ->numeric()
+                        ->default(0),
+
+                    Forms\Components\Select::make('customer_type_ids')
+                        ->label('متاح لأنواع العملاء دي بس (فاضي = الكل)')
+                        ->multiple()
+                        ->options(fn () => \App\Models\CustomerType::where('is_active', true)->pluck('label', 'id')->all()),
+
+                    Forms\Components\Select::make('governorates')
+                        ->label('متاح في المحافظات دي بس (فاضي = الكل)')
+                        ->multiple()
+                        ->options(config('agent.governorates')),
+
+                    Forms\Components\TextInput::make('max_financed_amount')
+                        ->label('أقصى مبلغ يتقسط في النظام ده (اختياري)')
+                        ->numeric()
+                        ->suffix('جنيه'),
+                ])
+                ->columns(2)
                 ->columnSpanFull(),
 
             // 🔵 الخطط
@@ -64,6 +111,11 @@ class InstallmentSystemResource extends Resource
                 Tables\Columns\TextColumn::make('name')
                     ->label('اسم النظام')
                     ->searchable(),
+
+                Tables\Columns\TextColumn::make('pricing_mode')
+                    ->label('طريقة الحساب')
+                    ->formatStateUsing(fn (string $state) => $state === 'zero_fees' ? 'زيرو مصاريف' : 'عادي')
+                    ->badge(),
 
                 // 🟡 عرض المصاريف الإدارية
                 Tables\Columns\TextColumn::make('administrative_fees')
