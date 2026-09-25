@@ -406,27 +406,29 @@ class WhatsappBotResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return auth()->user()?->is_super_admin ?? false;
+        $user = auth()->user();
+
+        return $user && ((bool) $user->is_bot || (bool) $user->is_hitler);
     }
 
     public static function canCreate(): bool
     {
-        return auth()->user()?->is_super_admin ?? false;
+        return static::canViewAny();
     }
 
     public static function canEdit($record): bool
     {
-        return auth()->user()?->is_super_admin ?? false;
+        return static::canViewAny();
     }
 
     public static function canDelete($record): bool
     {
-        return auth()->user()?->is_super_admin ?? false;
+        return static::canViewAny();
     }
 
     public static function shouldRegisterNavigation(): bool
     {
-        return auth()->user()?->is_super_admin ?? false;
+        return static::canViewAny();
     }
 }
 

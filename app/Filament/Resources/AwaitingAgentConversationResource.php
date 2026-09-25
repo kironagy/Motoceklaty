@@ -33,10 +33,15 @@ class AwaitingAgentConversationResource extends Resource
     {
         $user = auth()->user();
 
-        return $user && ($user->is_admin || $user->is_super_admin);
+        return $user && ((bool) $user->is_bot || (bool) $user->is_hitler);
     }
 
     public static function canAccess(): bool
+    {
+        return static::canViewAny();
+    }
+
+    public static function shouldRegisterNavigation(): bool
     {
         return static::canViewAny();
     }
