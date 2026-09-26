@@ -120,7 +120,14 @@ class CustomerStatements
     private function containsTokens(string $haystack, string $value): bool
     {
         $compactHaystack = $this->compact($haystack);
-        $tokens = array_filter(explode(' ', $this->normalize($value)), fn ($t) => mb_strlen($t) >= 2);
+        $normalizedValue = $this->normalize($value);
+        $tokens = array_filter(explode(' ', $normalizedValue), fn ($t) => mb_strlen($t) >= 2);
+
+        // "رقم 7": a one-digit building number or floor has no 2-letter
+        // token, so it was reported as never said. It counts as a whole number.
+        if ($tokens === [] && preg_match('/^\d+$/', $normalizedValue)) {
+            return (bool) preg_match('/(?<!\d)'.$normalizedValue.'(?!\d)/u', $this->normalize($haystack));
+        }
 
         if ($tokens === []) {
             return false;

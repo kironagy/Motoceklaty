@@ -110,7 +110,7 @@ class AgentRunner
 
                         if ($violation !== null) {
                             $guardEvents[] = ['code' => $violation, 'args' => $toolCall['args']];
-                            $numberGuardViolations += $violation === 'UNVERIFIED_NUMBER' ? 1 : 0;
+                            $numberGuardViolations += in_array($violation, self::NEEDS_TOOL_FIRST, true) ? 1 : 0;
 
                             // Handing off is the last resort (owner: the bot closes ~90%
                             // itself): two misses used to end the turn with a colleague.
@@ -199,7 +199,7 @@ class AgentRunner
      * after a claim guard made the model call *something* - six motorcycle
      * photos were queued for a customer who had just said goodbye.
      */
-    private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER'];
+    private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER', 'BRANCH_NOT_SOURCED', 'TOTAL_NOT_SOURCED'];
 
     private const GUARD_HINTS = [
         'EMPTY_REPLY' => 'Not sent: the reply is empty. Write the actual message to the customer.',
@@ -215,6 +215,9 @@ class AgentRunner
         'INTERNAL_KEY_IN_REPLY' => 'Not sent: the reply contains an internal key (snake_case like delivery_app). Use the plain Arabic wording instead.',
         'PLACEHOLDER_IN_REPLY' => 'Not sent: the reply contains a history placeholder like [media]. Photos are only sent by calling send_motorcycle_images; write plain text only.',
         'IMAGES_CLAIMED_NOT_SENT' => 'Not sent: the reply says photos are attached but send_motorcycle_images did not succeed this turn. Call it if the customer wants photos, otherwise rewrite without mentioning photos.',
+        'TOTAL_NOT_SOURCED' => 'Not sent: the reply states a total that no tool result of this turn contains (a number the customer wrote is not a total). Call get_installment_offer for this motorcycle and duration and quote total_paid, cash_price and installment_price exactly as returned.',
+        'UNSOURCED_REASON' => 'Not sent: the reply gives a reason for the fees or for the installment/cash difference ("مقابل الإجراءات/الورق/التمويل/الخدمات", "تمويل خارجي") that is not recorded anywhere. Do not explain why - give only the numbers from get_installment_offer (cash_price, installment_price, admin fee, monthly payment, total_paid).',
+        'BRANCH_NOT_SOURCED' => 'Not sent: the reply states a branch, an address or opening hours that no get_branch_information result this turn contains. Call get_branch_information (governorate of the customer if he said it) and use only the branches it returns - if his governorate has none, say so and give the nearest ones it returned. Never name a branch or area that is not in the result.',
         'UNVERIFIED_NUMBER' => 'Not sent: the reply contains a number (a price, or a measured value like km/litre, hp, months, %) that no tool result or structured state contains. Prices must come from a tool call in THIS turn (the catalog index is for names only) - call get_motorcycle_details / calculate_installment first, or leave the number out. Never state specifications that are not in a tool result.',
     ];
 

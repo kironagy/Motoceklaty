@@ -45,7 +45,8 @@ class RecordCustomerDataTool implements Tool
                         'type' => 'object',
                         'required' => ['key', 'value'],
                         'properties' => [
-                            'key' => ['type' => 'string'],
+                            // "phone_number" was sent for phone and the number was lost.
+                            'key' => ['type' => 'string', 'enum' => $this->fieldKeys()],
                             // Gemini's function-calling schema (unlike JSON Schema) has no union
                             // types - a numeric answer arrives as a numeral string, which every
                             // field validator already expects (CustomerDataService casts to string).
@@ -58,6 +59,18 @@ class RecordCustomerDataTool implements Tool
         ];
     }
 
+    /** @return string[] */
+    private function fieldKeys(): array
+    {
+        try {
+            $keys = \App\Models\RequirementField::where('is_active', true)->orderBy('id')->pluck('key')->all();
+        } catch (\Throwable) {
+            $keys = [];
+        }
+
+        return $keys !== [] ? $keys : ['full_name'];
+    }
+
     public function permission(): string
     {
         return 'WRITE';
@@ -68,7 +81,11 @@ class RecordCustomerDataTool implements Tool
         $customer = Customer::findOrFail($ctx->customerId);
         $application = $ctx->activeApplicationId ? Application::find($ctx->activeApplicationId) : null;
 
-        $result = $this->customerData->record($customer, $application, $args['fields'], $ctx->conversationId);
+        // "work_landmark: قدام البنك الاهلي" - the key pasted into the value
+        // made it look like something the customer never wrote.
+        $fields = array_map(fn (array $f) => ['value' => preg_replace('/^\s*'.preg_quote((string) $f['key'], '/').'\s*[:=]\s*/u', '', (string) $f['value'])] + $f, $args['fields']);
+
+        $result = $this->customerData->record($customer, $application, $fields, $ctx->conversationId);
 
         $data = [
             'saved' => $result['saved'],

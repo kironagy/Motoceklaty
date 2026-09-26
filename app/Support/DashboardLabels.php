@@ -133,6 +133,9 @@ class DashboardLabels
         'PLACEHOLDER_IN_REPLY' => 'فيه علامة داخلية زي [media] في الرد',
         'IMAGES_CLAIMED_NOT_SENT' => 'قال إنه بعت صور وهو ما بعتش',
         'UNVERIFIED_NUMBER' => 'فيه رقم مش موجود في بيانات السيستم',
+        'TOTAL_NOT_SOURCED' => 'قال إجمالي مش من حسبة السيستم',
+        'UNSOURCED_REASON' => 'ألّف سبب للمصاريف أو لفرق السعر',
+        'BRANCH_NOT_SOURCED' => 'ذكر فرع أو عنوان أو مواعيد مش من جدول الفروع',
     ];
 
     public const BLOCKER_TYPE = [

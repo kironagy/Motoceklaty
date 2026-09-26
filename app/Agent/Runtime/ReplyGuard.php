@@ -26,7 +26,8 @@ class ReplyGuard
      * must be sourced whatever its size - the min-value threshold only
      * exists to let small everyday numbers through, not invented specs.
      */
-    private const UNIT_PATTERN = '(?:كيلو|كم|km|لتر|حصان|hp|سي\s?سي|cc|٪|%|في\s?المي[ةه]|بالمي[ةه]|شهر|شهور|أشهر|اشهر|سنة|سنه|سنين|سنوات)';
+    private const UNIT_PATTERN = '(?:كيلو|كم|km|لتر|حصان|hp|سي\s?سي|cc|٪|%|في\s?المي[ةه]|بالمي[ةه]|شهر|شهور|أشهر|اشهر|سنة|سنه|سنين|سنوات'
+        .'|غيار|سرعات|يوم|أيام|ايام|ساع[ةه]|ساعات|الصبح|صباح|صباحا|صباحًا|صباحاً|الضهر|الظهر|العصر|المغرب|مساء|مساءً|مساءا|بالليل|الليل)';
 
     /**
      * @param  array<int, array{name: string, ok: bool, data: array}>  $outcomes  every tool call of this turn, in order
@@ -107,6 +108,26 @@ class ReplyGuard
             return 'WORK_TYPE_NOT_RECORDED';
         }
 
+        // "لينا فرع في المنصورة، شارع الجيش، من 10 الصبح" with no lookup:
+        // there is no Mansoura branch. Branch facts come from the branch
+        // table only, looked up this turn.
+        if ($this->claimsUnsourcedBranch($replyText, $outcomes)) {
+            return 'BRANCH_NOT_SOURCED';
+        }
+
+        // "الـ46 ألف ده إجمالي اللي هتدفعه" - the customer's own number
+        // relabelled as the total; the real total was 67,612. A total is
+        // only stated from a tool result of this turn.
+        if ($this->statesUnsourcedTotal($replyText, $toolResultsBlob)) {
+            return 'TOTAL_NOT_SOURCED';
+        }
+
+        // "المصاريف دي مقابل إجراءات التقسيط والورق" / "تمويل خارجي":
+        // reasons nobody recorded. The numbers are the answer.
+        if (preg_match('/مقابل\s+(?:ال)?(?:إجراءات|اجراءات|ورق|تمويل|خدمات|تكلف[ةه]|تسهيلات|فتح ملف|دراس[ةه])|تمويل خارجي|تكلف[ةه] (?:ال)?تمويل|(?:ال)?خدمات اللي بتتقدم|تكلف[ةه] (?:ال)?إجراءات/u', $assertions)) {
+            return 'UNSOURCED_REASON';
+        }
+
         // "مع مين التقسيط؟" got "أمان وفاليو وكونتكت" - two companies we do
         // not work with, named from general knowledge.
         if ($this->namesUnsourcedFinanceCompany($replyText, $toolResultsBlob)) {
@@ -127,6 +148,78 @@ class ReplyGuard
         }
 
         return null;
+    }
+
+    private function statesUnsourcedTotal(string $replyText, string $toolResultsBlob): bool
+    {
+        if (! preg_match('/إجمالي|اجمالي|الإجمالي|مجموع|هتدفعه كله|هتدفعه في الآخر|في الآخر هتدفع|في الاخر هتدفع/u', $replyText)) {
+            return false;
+        }
+
+        $sourced = $this->extractNumbers($toolResultsBlob);
+        $minValue = (float) (config('agent.guard.number_min_value') ?? 0);
+
+        foreach ($this->extractNumbers($replyText) as $number) {
+            if ($number >= $minValue && ! in_array($number, $sourced, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** A branch, its address or its opening hours, stated as fact. */
+    private const BRANCH_FACT = '/(?:فرع|فروع|فرعنا|فروعنا)\s+(?:في|ف|فى|بـ?)\s+(?!أي|اي|أى|اى|وقت|الوقت|أقرب|اقرب)\S+|(?:فرع|فروع|فرعنا)\s+(?!الـ?معرض)(?:ال)?[\p{Arabic}]{3,}\s*[:،,-]|'
+        // the customer's own address ("سجلت العنوان") is not a branch fact
+        .'(?:عنوان (?:ال)?(?:فرع|معرض)|عنوانّا|عنوانا|عنوان فرعنا|مكاننا|مكان (?:ال)?(?:فرع|معرض)|لوكيشن (?:ال)?(?:فرع|معرض)|maps\.app)|(?:مواعيد\S*|بنفتح|بنقفل|فاتحين|شغالين)\s+(?:\S+\s+){0,4}?(?:من|لـ?|ل|لحد)\s*(?:ال)?(?:ساع[ةه]\s*)?\d/u';
+
+    /** Words after "فرع" that name a place rather than being a place. */
+    private const BRANCH_FILLER = ['في', 'ف', 'فى', 'الفرع', 'فرع', 'اقرب', 'أقرب', 'الأقرب', 'الاقرب', 'لينا', 'عندنا', 'احنا', 'إحنا', 'تقدر', 'ليك', 'ليكي',
+        'تانية', 'تاني', 'تانيين', 'المتاحة', 'متاحة', 'المتاح', 'متاح', 'قريب', 'قريبة', 'القريب', 'جديد', 'جديدة', 'كتير', 'واحد', 'واحدة', 'كذا',
+        'بتاعنا', 'بتاعتنا', 'كلها', 'كلهم', 'موجود', 'موجودة', 'الموجودة', 'الرئيسي', 'التانية', 'التاني', 'دي', 'ده', 'اللي', 'مفتوح', 'مفتوحة',
+        'محافظة', 'منطقة', 'المنطقة', 'المحافظة', 'بتاعك', 'عندك', 'قريبه', 'تانيه', 'متاحه', 'واحده', 'موجوده',
+        'هناك', 'هنا', 'مواعيده', 'مواعيدها', 'مواعيدهم', 'مواعيدنا', 'عنوانه', 'عنوانها', 'بتاعه', 'بتاعها', 'بتاعهم', 'برضه', 'كمان',
+        'بتاعكم', 'ليكم', 'جنبك', 'منك', 'دلوقتي', 'النهارده', 'بكره', 'يفتح', 'بيفتح', 'بتفتح', 'وده', 'ودي', 'وعنوانه', 'ومواعيده'];
+
+    /**
+     * Stating a branch, its address or hours needs a successful
+     * get_branch_information this turn, and every place named right after
+     * "فرع" must be in what it returned.
+     */
+    private function claimsUnsourcedBranch(string $replyText, array $outcomes): bool
+    {
+        if (! preg_match(self::BRANCH_FACT, $replyText)) {
+            return false;
+        }
+
+        $lookups = array_filter($outcomes, fn ($o) => $o['name'] === 'get_branch_information' && $o['ok']);
+
+        if ($lookups === []) {
+            return true;
+        }
+
+        $source = \App\Support\ArabicTextNormalizer::normalize(json_encode(array_column($lookups, 'data'), JSON_UNESCAPED_UNICODE) ?: '');
+        // "مفيش فرع في المنصورة" is the truthful answer, not a claim.
+        $affirmed = preg_replace('/(?:مفيش|مافيش|مفيهاش|معندناش|ماعندناش|ما عندناش|ملناش|مالناش|مش عندنا|للأسف مفيش)\s+[^.،,!؟?\n]*/u', ' ', $replyText);
+        preg_match_all('/(?:فرع|فروع|فرعنا)\s+(?:(?:في|ف|فى|بـ?)\s+)?(?!أي|اي|وقت|الوقت)((?:ال)?[\p{Arabic}]{3,})/u', $affirmed, $named);
+
+        foreach ($named[1] as $place) {
+            $place = preg_replace('/[^\p{L}]/u', '', $place);
+            $bare = \App\Support\ArabicTextNormalizer::normalize(preg_replace('/^ب?ال/u', '', $place));
+
+            if (in_array(\App\Support\ArabicTextNormalizer::normalize($place), array_map([\App\Support\ArabicTextNormalizer::class, 'normalize'], self::BRANCH_FILLER), true)) {
+                continue;
+            }
+
+            $place = $bare;
+
+            if (mb_strlen($place) >= 3 && ! in_array($place, array_map([\App\Support\ArabicTextNormalizer::class, 'normalize'], self::BRANCH_FILLER), true)
+                && ! str_contains($source, $place)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Egyptian consumer-finance brands the model knows from outside our data. */
@@ -464,7 +557,11 @@ class ReplyGuard
     /** @return float[] */
     private function extractNumbers(string $text): array
     {
-        preg_match_all('/\d[\d,]*(?:\.\d+)?/', $this->westernDigits($text), $matches);
+        // "46 ألف" is 46,000: read as 46 it slipped under the minimum and a
+        // wrong total went out.
+        $text = preg_replace_callback('/(\d[\d,]*(?:\.\d+)?)\s*(?:ألف|الف|آلاف|الاف)/u',
+            fn ($m) => (string) ((float) str_replace(',', '', $m[1]) * 1000), $this->westernDigits($text));
+        preg_match_all('/\d[\d,]*(?:\.\d+)?/', $text, $matches);
 
         return array_map(fn ($n) => (float) str_replace(',', '', $n), $matches[0]);
     }

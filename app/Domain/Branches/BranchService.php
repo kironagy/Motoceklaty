@@ -23,19 +23,23 @@ class BranchService
 
         $branches = $query->orderBy('sort')->get();
 
-        if ($branches->isEmpty() && $governorate !== null) {
+        // "انا في المنصورة" with no branch there got an invented Mansoura
+        // branch. The customer gets every real branch to choose the nearest.
+        if ($branches->isEmpty() && ($governorate !== null || $city !== null)) {
             return [
-                'branches' => [],
-                'all_governorates_with_branches' => Branch::where('is_active', true)
-                    ->distinct()
-                    ->pluck('governorate')
-                    ->values()
-                    ->all(),
+                'branches' => $this->present(Branch::where('is_active', true)->orderBy('sort')->get()),
+                'no_branch_in_requested_area' => true,
+                'note' => 'We have NO branch in '.($governorate ? (config('agent.governorates')[$governorate] ?? $governorate) : $city)
+                    .'. Say so plainly, then give the branches listed here (the nearest to him first). Never name any other branch or area.',
             ];
         }
 
-        return [
-            'branches' => $branches->map(fn (Branch $b) => [
+        return ['branches' => $this->present($branches)];
+    }
+
+    private function present($branches): array
+    {
+        return $branches->map(fn (Branch $b) => [
                 'name' => $b->name,
                 'governorate' => $b->governorate,
                 'city' => $b->city,
@@ -44,7 +48,7 @@ class BranchService
                 'phones' => $b->phones ?? [],
                 'working_hours' => $b->working_hours ?? [],
                 'services' => $b->services ?? [],
-            ])->values()->all(),
-        ];
+                'governorate_name' => config('agent.governorates')[$b->governorate] ?? $b->governorate,
+            ])->values()->all();
     }
 }

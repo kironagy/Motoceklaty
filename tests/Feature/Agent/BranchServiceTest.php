@@ -41,14 +41,14 @@ class BranchServiceTest extends TestCase
         $this->assertSame([], $result['branches']);
     }
 
-    public function test_empty_governorate_returns_list_of_governorates_with_branches(): void
+    public function test_a_governorate_without_a_branch_gets_every_real_branch(): void
     {
         Branch::create(['name' => 'فرع', 'governorate' => 'alexandria', 'city' => 'x', 'address' => 'x', 'is_active' => true]);
 
         $result = app(BranchService::class)->find('cairo', null);
 
-        $this->assertSame([], $result['branches']);
-        $this->assertSame(['alexandria'], $result['all_governorates_with_branches']);
+        $this->assertTrue($result['no_branch_in_requested_area']);
+        $this->assertSame(['alexandria'], array_column($result['branches'], 'governorate'));
     }
 
     public function test_tool_returns_branches(): void

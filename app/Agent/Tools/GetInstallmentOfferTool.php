@@ -122,11 +122,15 @@ class GetInstallmentOfferTool implements Tool
 
         return ToolResult::ok([
             'cash_price' => (float) $machine->cash_price,
+            'installment_price' => (float) ($machine->installment_price ?: $machine->cash_price),
             'offers' => array_map(fn (array $o) => [
                 'months' => $o['months'],
                 'cash_due_upfront' => $o['cash_due_upfront'],
                 'monthly_payment' => $o['monthly_payment'],
                 'admin_fee_at_pickup' => $o['admin_fee'],
+                // what he pays in all: fees/down payment + every installment
+                'total_paid' => round($o['cash_due_upfront'] + $o['monthly_payment'] * $o['months']),
+                'breakdown' => $this->breakdown($machine, $o),
                 'say' => $this->line($o),
                 // internal: pass these to update_application_selection when he picks this offer - never say them
                 'installment_system' => $o['system'],
@@ -135,6 +139,8 @@ class GetInstallmentOfferTool implements Tool
             'first_payment_after_days' => $this->firstPaymentAfterDays(),
             'how_to_present' => 'Send the `say` lines as they are (one per line, you may reword lightly, but keep every number and '
                 .'keep saying whether there are admin fees). Admin fees are NOT a down payment - never call them "مقدم". '
+                .'If he asks why installments cost more than cash or what he pays in the end, send the offer\'s `breakdown` as it is - '
+                .'installment_price is the price the installment is calculated on, never the total he pays. '
                 .'Add once: "'.$this->firstPaymentLine().'". No system/company names, no word "نظام"/"أنظمة".'.($others !== [] ? ' Say other durations exist ('.implode('/', array_map(fn ($m) => $this->duration($m), $others)).').' : ''),
         ] + ($capped ? ['explain_to_customer' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : []));
     }
@@ -157,6 +163,23 @@ class GetInstallmentOfferTool implements Tool
         };
 
         return $this->duration($offer['months']).': '.$upfront.'، والقسط '.number_format($offer['monthly_payment']).' جنيه في الشهر';
+    }
+
+    /**
+     * "الـ46 ألف ده إجمالي اللي بتدفعه" - the installment price was sold as
+     * the total. When he asks why it costs more or what he pays in the end,
+     * this sentence is the answer, built from the same numbers.
+     */
+    private function breakdown(Machine $machine, array $offer): string
+    {
+        $installmentPrice = (float) ($machine->installment_price ?: $machine->cash_price);
+        $upfront = (float) $offer['cash_due_upfront'];
+
+        return 'سعرها كاش '.number_format((float) $machine->cash_price).' جنيه، وسعرها بالتقسيط '.number_format($installmentPrice)
+            .' جنيه وده السعر اللي القسط بيتحسب عليه. على '.$this->duration($offer['months']).': '
+            .($upfront > 0 ? number_format($upfront).' جنيه وقت الاستلام + ' : '')
+            .$offer['months'].' قسط × '.number_format($offer['monthly_payment']).' جنيه = '
+            .number_format(round($upfront + $offer['monthly_payment'] * $offer['months'])).' جنيه في الآخر.';
     }
 
     private function firstPaymentAfterDays(): int
