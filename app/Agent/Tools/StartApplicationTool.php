@@ -45,12 +45,16 @@ class StartApplicationTool implements Tool
     {
         $text = \App\Support\ArabicTextNormalizer::normalize($quote);
 
-        return (bool) preg_match('/موظف|وظيف|حكوم|شرك|قطاع|مرتب|راتب|تامين|متامن|معاش|متقاعد|حر|شغال|بشتغل|اشتغل|شغلي|شغلانه|صنايعي|حرفي|'
+        // The pattern is normalized like the text: "كهربائي" became
+        // "كهربايي" in the text only, and an electrician was asked his work
+        // four times.
+        return (bool) preg_match(\App\Support\ArabicTextNormalizer::normalize('/موظف|وظيف|حكوم|شرك|قطاع|مرتب|راتب|تامين|متامن|معاش|متقاعد|حر|شغال|بشتغل|اشتغل|شغلي|شغلانه|صنايعي|حرفي|'
             .'سواق|سايق|دليفري|ديليفري|توصيل|طيار|مندوب|اوبر|طلبات|كريم|اندرايف|تطبيق|ابلكيشن|تاجر|تجاره|محل|ورشه|معرض|مصنع|مقاول|فلاح|'
             .'مزارع|نجار|سباك|كهربائي|نقاش|حداد|ميكانيكي|سمكري|ترزي|حلاق|بياع|عامل|فني|مهندس|دكتور|مدرس|محاسب|ممرض|عسكري|جيش|شرطه|'
             .'صاحب|بملك|مطعم|كافيه|كافتيري|قهوه|سوبر ?ماركت|بقال|فرن|مخبز|حلواني|جزار|فكهاني|خضري|مكتب|عقار|صيدل|محامي|مبيض|محاره|'
-            .'عربيه فول|كشك|سوق|بضاعه|صنعه|صنعتي|'
-            .'employee|freelanc|driver|delivery|uber|job|work/u', $text)
+            .'عربيه فول|كشك|سوق|بضاعه|صنعه|صنعتي|ظابط|ضابط|امين شرطه|مطار|شحن|نقل|جبس|بورد|سباكه|كهربا|نقاشه|دهان|مباني|سيراميك|الوميتال|'
+            .'مصنع|مخزن|امن|حارس|بواب|خدمه|نضافه|فندق|مستشفي|مدرسه|جامعه|طالب|يوميه|يوميات|اجري|'
+            .'employee|freelanc|driver|delivery|uber|job|work/u'), $text)
             // "انا مبيض محارة": the customer describing himself names his
             // work even when the job is not in the list above - a whitelist
             // of jobs never ends, and "صاحب مطعم" was sent back to be asked again.

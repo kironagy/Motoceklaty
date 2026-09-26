@@ -28,6 +28,14 @@ class TurnScheduler implements TurnSchedulerHook
             return;
         }
 
+        // A colleague is writing to this customer from the phone: the bot
+        // answering in the same minute contradicted him (the customer got
+        // two different questions at once). The customer's messages stay
+        // in the history for the bot once the pause is over.
+        if (self::staffActive($conversation)) {
+            return;
+        }
+
         $debounceSeconds = $message->type === 'text'
             ? (int) config('agent.turns.debounce_seconds')
             : (int) config('agent.turns.media_debounce_seconds');
@@ -74,6 +82,32 @@ class TurnScheduler implements TurnSchedulerHook
         // superseded/skipped): start a fresh one.
         $turnId = $this->createTurn($message, $debounceSeconds);
         $message->update(['turn_id' => $turnId]);
+    }
+
+    /** Staff wrote from the phone: the bot stays quiet for a while and drops what it was about to say. */
+    public function staffTookOver(\App\Models\WhatsappConversation $conversation): void
+    {
+        $minutes = (int) config('agent.handoff.staff_pause_minutes', 60);
+
+        if ($minutes <= 0) {
+            return;
+        }
+
+        $conversation->state = array_merge($conversation->state ?? [], [
+            'staff_active_until' => now()->addMinutes($minutes)->toIso8601String(),
+        ]);
+
+        DB::table('whatsapp_message_jobs')
+            ->where('whatsapp_conversation_id', $conversation->id)
+            ->whereIn('status', ['pending', 'processing'])
+            ->update(['status' => 'skipped', 'error' => 'STAFF_TOOK_OVER', 'locked_at' => null, 'updated_at' => now()]);
+    }
+
+    public static function staffActive(\App\Models\WhatsappConversation $conversation): bool
+    {
+        $until = $conversation->state['staff_active_until'] ?? null;
+
+        return $until !== null && \Illuminate\Support\Carbon::parse($until)->isFuture();
     }
 
     /**

@@ -71,6 +71,15 @@ class CustomerStatements
             }
         }
 
+        // "بشتغل ظابط حركة ف مطار القاهرة" quoted as "بشتغل ظابط حركة في
+        // مطار القاهرة": one letter off and the customer was asked his work
+        // four times. The quote only has to be his words, not a byte copy.
+        foreach ($this->messages($conversationId) as $message) {
+            if ($this->containsTokens($message['text'], $quote)) {
+                return $message['id'];
+            }
+        }
+
         return null;
     }
 

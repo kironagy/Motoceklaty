@@ -196,6 +196,11 @@ return [
         // conversation goes back to the bot (and any waiting messages are
         // answered). Unset = handoffs stay open until staff close them.
         'return_to_agent_after_minutes' => env('AGENT_HANDOFF_RETURN_TO_AGENT_AFTER_MINUTES'),
+
+        // A staff message from the phone silences the bot in that chat for
+        // this long (0 = never). The bot and a colleague used to answer the
+        // same customer in the same minute.
+        'staff_pause_minutes' => env('AGENT_STAFF_PAUSE_MINUTES', 60),
     ],
 
     // T17: agent loop limits, all DEC-23 (still OPEN) - no defaults.

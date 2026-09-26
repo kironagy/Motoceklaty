@@ -33,7 +33,11 @@ class CatalogService
         }
 
         if (! empty($filters['brand'])) {
-            $query->whereHas('brand', fn ($q) => $q->where('name', 'like', '%'.$filters['brand'].'%'));
+            // "هوجن" never found the brand stored as "هوجان", and "سكوتر" found nothing.
+            $brandIds = \App\Domain\Conversations\MentionedMotorcycle::brandIdsFor((string) $filters['brand']);
+            $brandIds !== []
+                ? $query->whereIn('brand_id', $brandIds)
+                : $query->whereHas('brand', fn ($q) => $q->where('name', 'like', '%'.$filters['brand'].'%'));
         }
 
         if (isset($filters['cc_min'])) {
@@ -95,6 +99,14 @@ class CatalogService
 
         if ($normalizedQuery === '') {
             return $machines;
+        }
+
+        // A brand or category word alone ("سكوتر", "كهربا", "بينيلي") names
+        // no model: it is every model of that brand.
+        $brandIds = \App\Domain\Conversations\MentionedMotorcycle::brandIdsFor($nameQuery);
+
+        if ($brandIds !== []) {
+            return $machines->filter(fn (Machine $m) => in_array((int) $m->brand_id, $brandIds, true))->values();
         }
 
         return $machines->filter(function (Machine $machine) use ($normalizedQuery) {
@@ -234,7 +246,6 @@ class CatalogService
                         $m->cc ? "{$m->cc}cc" : null,
                         $m->cash_price !== null ? number_format((float) $m->cash_price).' كاش' : null,
                         $m->installment_price !== null ? number_format((float) $m->installment_price).' قسط' : null,
-                        $m->type === 'offer' ? 'عرض' : null,
                     ]);
 
                     return implode(' · ', $parts);

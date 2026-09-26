@@ -63,7 +63,20 @@ class ApplicationNudgeService
         $last = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->latest('id')->first();
 
         // Only when the ball is in the customer's court: our message was last.
-        if (! $last || $last->direction !== 'outgoing' || $last->created_at->gt(now()->subMinutes($afterMinutes))) {
+        // A colleague's own message from the phone is his conversation now.
+        if (! $last || $last->direction !== 'outgoing' || $last->sender_type === 'human_phone'
+            || $last->created_at->gt(now()->subMinutes($afterMinutes))
+            || \App\Domain\Conversations\TurnScheduler::staffActive($conversation)) {
+            return false;
+        }
+
+        // "لسه معايا؟ طلبك ماشي" went to a customer refused for his age and
+        // to one who had just said "اقفل الطلب".
+        $lastCustomerText = \App\Support\ArabicTextNormalizer::normalize((string) WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'incoming')->latest('id')->value('text'));
+
+        if (preg_match('/اقفل|اقفلو|الغي|الغيه|لغيه|مش عايز|مش عاوز|مش محتاج|مش هقدر|مش هكمل|خلاص مش|بلاش|كنسل|cancel/u', $lastCustomerText)
+            || ($this->snapshots->for($application)['eligibility']['status'] ?? null) === 'not_eligible') {
             return false;
         }
 

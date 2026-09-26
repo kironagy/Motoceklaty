@@ -128,6 +128,8 @@ class IngestionService
 
             if ($isIncoming) {
                 $conversation->last_inbound_at = now();
+            } else {
+                $this->turnScheduler->staffTookOver($conversation);
             }
 
             $conversation->save();

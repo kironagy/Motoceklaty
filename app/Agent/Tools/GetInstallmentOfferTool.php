@@ -159,8 +159,32 @@ class GetInstallmentOfferTool implements Tool
                 .'If he asks why installments cost more than cash, explain it in your own short words from price_difference_policy (never copied word for word, never adding reasons it does not give), '
                 .'then offer the cash price. If he asks what he pays in the end, send the offer\'s `breakdown` as it is - '
                 .'installment_price is the price the installment is calculated on, never the total he pays. '
-                .'Add once: "'.$this->firstPaymentLine().'". No system/company names, no word "نظام"/"أنظمة".'.($others !== [] ? ' Say other durations exist ('.implode('/', array_map(fn ($m) => $this->duration($m), $others)).').' : ''),
-        ] + ($capped ? ['explain_to_customer' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : []));
+                .'Add once: "'.$this->firstPaymentLine().'". If must_add_line is present his work is not known yet: add it as is, never say "من غير مقدم" without it, and ask what he works. No system/company names, no word "نظام"/"أنظمة".'.($others !== [] ? ' Say other durations exist ('.implode('/', array_map(fn ($m) => $this->duration($m), $others)).').' : ''),
+        ] + ($capped ? ['explain_to_customer' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : [])
+          + (($caveat = $customerTypeId === null ? $this->unknownWorkCaveat($machine) : null) ? ['must_add_line' => $caveat] : []));
+    }
+
+    /**
+     * A plasterer was quoted "من غير مقدم" and, once his application was
+     * opened as عامل حر, got a 15,000 down payment. While his work is not
+     * known, an offer above a work-type cap carries that condition.
+     */
+    private function unknownWorkCaveat(Machine $machine): ?string
+    {
+        $price = (float) ($machine->installment_price ?: $machine->cash_price);
+        $capped = \App\Models\EligibilityRule::where('is_active', true)->where('rule_type', 'financing_cap')->whereNotNull('customer_type_id')->get()
+            ->map(fn ($r) => ['cap' => (float) ($r->params['max_amount'] ?? 0), 'type' => $r->customer_type_id])
+            ->filter(fn ($c) => $c['cap'] > 0 && $c['cap'] < $price);
+
+        if ($capped->isEmpty()) {
+            return null;
+        }
+
+        $labels = \App\Models\CustomerType::whereIn('id', $capped->pluck('type'))->pluck('label')->implode(' أو ');
+        $cap = $capped->min('cap');
+
+        return 'العرض ده لو شغلك بإثبات دخل. لو شغلك '.$labels.'، أقصى مبلغ بيتقسط '.number_format($cap)
+            .' جنيه، فالفرق عن سعر المكنة (حوالي '.number_format($price - $cap).' جنيه) بيتدفع مقدم وقت الاستلام.';
     }
 
     /**

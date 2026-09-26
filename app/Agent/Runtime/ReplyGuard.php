@@ -56,7 +56,7 @@ class ReplyGuard
 
         // "سجلت البيانات" with no write this turn: the customer's phone and
         // address were lost while they were told they had been saved.
-        if (preg_match('/(?:^|\s)(?:سجلت|سجّلت|سجلتها|سجلتهم|اتسجل|اتسجلت|تم تسجيل|حفظت|ثبت|ثبّت|غيرت|غيّرت|عدلت|عدّلت|حدثت|حدّثت|اتغيرت|اتعدلت)(?:\s|$|[،.!])/u', $assertions)
+        if (preg_match('/(?:^|\s)و?(?:سجلت|سجّلت|سجلتها|سجلتهم|اتسجل|اتسجلت|تم تسجيل|حفظت|ثبت|ثبّت|غيرت|غيّرت|عدلت|عدّلت|حدثت|حدّثت|اتغيرت|اتعدلت)(?:\s|$|[،.!])/u', $assertions)
             && array_intersect($succeeded, self::WRITE_TOOLS) === []) {
             return 'DATA_CLAIMED_NOT_SAVED';
         }
@@ -81,8 +81,49 @@ class ReplyGuard
         }
 
         // Placeholders from the history rendering, never customer-facing text.
-        if (preg_match('/\[(media|staff)\]|\(اتبعت للعميل|\(تم إرسال الصور\)/u', $replyText)) {
+        // "[سيظهر ملخص الطلب هنا]" went to two customers as it was.
+        if (preg_match('/\[(media|staff)\]|\(اتبعت للعميل|\(تم إرسال الصور\)|\[[^\]]*\p{Arabic}[^\]]*\]/u', $replyText)) {
             return 'PLACEHOLDER_IN_REPLY';
+        }
+
+        // "البطاقة وصلت واتسجلت" while the photo had been rejected or never
+        // processed: the customer stopped sending and the file stalled.
+        if ($this->claimsDocumentReceived($assertions) && ! $this->documentAccepted($outcomes)) {
+            return 'DOCUMENT_CLAIMED_NOT_ACCEPTED';
+        }
+
+        // "اقفل الطلب" got "قفلتلك الطلب" with nothing withdrawn, then a
+        // "لسه معايا؟ طلبك ماشي" reminder.
+        if ($this->claimsWithdrawal($assertions) && ! in_array('withdraw_application', $succeeded, true)) {
+            return 'WITHDRAWAL_CLAIMED_NOT_DONE';
+        }
+
+        if ($this->claimsOpenedApplication($assertions) && ! in_array('start_application', $succeeded, true)
+            && ! Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->exists()) {
+            return 'APPLICATION_CLAIMED_NOT_OPENED';
+        }
+
+        // "المكنة محجوزة باسمك", "بتخلص في نفس اليوم", "بضمان المعرض":
+        // nothing reserves a motorcycle, and no time or warranty is recorded.
+        if ($this->makesUnrecordedPromise($replyText, $toolResultsBlob)) {
+            return 'UNRECORDED_PROMISE';
+        }
+
+        // "مفيش فوايد" - the customer did the sum and found 30-50% more.
+        if ($this->deniesInterest($replyText)) {
+            return 'INTEREST_DENIED';
+        }
+
+        // "قولي \"أنا شغال دليفري\" عشان أقدر أسجلك": the customer is never
+        // asked to repeat a sentence for the system.
+        if ($this->asksForScriptedPhrase($replyText)) {
+            return 'SCRIPTED_PHRASE_REQUEST';
+        }
+
+        // The owner: the bot never gives itself a name, and never "أهلاً بك"
+        // or "حقك عليا".
+        if (preg_match('/(?:معاك|أنا|انا|اسمي)\s+(?:ال)?حاوي|أهلاً بك|أهلا بك|اهلاً بك|اهلا بك|حقك عليا|حقك عليّا/u', $replyText)) {
+            return 'BANNED_WORDING';
         }
 
         // "دي صورها" with no successful send_motorcycle_images this turn left
@@ -454,9 +495,70 @@ class ReplyGuard
             '/(?:الطلب|طلبك|الملف)\s+(?:\S+\s+){0,2}?(?:اتبعت|اتقدم|اتقدّم|اترفع|اتأكد|وصل|راح|اتحول)'
             .'|(?:تم|اتم)\s+(?:إرسال|ارسال|تقديم|رفع|تأكيد|تاكيد)\s+(?:ال)?(?:طلب|ملف)'
             .'|(?:أكدت|اكدت|بعت|بعتت|قدمت|قدّمت|رفعت)\s+(?:\S+\s+)?(?:ال)?(?:طلب|ملف)'
-            .'|(?:أكدت|اكدت)\s+(?:إرسال|ارسال|تقديم)/u',
+            .'|(?:أكدت|اكدت)\s+(?:إرسال|ارسال|تقديم)'
+            // "الطلب في مرحلة المراجعة" said to a customer whose file was never sent
+            .'|(?:الطلب|طلبك|الملف)\s+(?:\S+\s+){0,2}?(?:في|فى|ف|تحت)\s+(?:مرحل[ةه]\s+)?(?:ال)?مراجع[ةه]|(?:الطلب|طلبك)\s+(?:\S+\s+)?بيتراجع/u',
             $assertions
         );
+    }
+
+    private function claimsDocumentReceived(string $assertions): bool
+    {
+        return (bool) preg_match('/(?:البطاق[ةه]|الصور[ةه]?|صورة البطاق[ةه]|المستند|الورق[ةه]?|الإيصال|الايصال|الفاتور[ةه]|الرخص[ةه]|وش البطاق[ةه]|ضهر البطاق[ةه]|ظهر البطاق[ةه])\s+(?:\S+\s+){0,2}?و?(?:وصلت|وصلتني|وصلني|اتسجلت|اتقبلت|اتحفظت|اتقرت)'
+            .'|(?:^|\s)و?(?:وصلتني|وصلني|استلمت|اتقبلت)\s+(?:\S+\s+)?(?:ال)?(?:بطاق[ةه]|صور|ورق|مستند)/u', $assertions);
+    }
+
+    private function documentAccepted(array $outcomes): bool
+    {
+        foreach ($outcomes as $outcome) {
+            if ($outcome['name'] === 'process_document' && $outcome['ok'] && $this->changedSomething($outcome)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function claimsWithdrawal(string $assertions): bool
+    {
+        return (bool) preg_match('/(?:^|\s)و?(?:قفلت|قفلتلك|قفلتهولك|لغيت|لغيتلك|ألغيت|الغيت|الغيتلك|سحبت|سحبتلك|كنسلت|كنسلتلك)(?:\s|$|[،.!])'
+            .'|(?:الطلب|طلبك)\s+(?:\S+\s+)?(?:اتقفل|اتلغى|اتلغي|اتسحب|اتكنسل)|(?:تم|اتم)\s+(?:إلغاء|الغاء|قفل|سحب)\s+(?:ال)?طلب/u', $assertions);
+    }
+
+    private function claimsOpenedApplication(string $assertions): bool
+    {
+        return (bool) preg_match('/(?:^|\s)و?(?:فتحت|فتحتلك|فتحنالك|عملتلك)\s+(?:\S+\s+)?(?:ال)?طلب|(?:الطلب|طلبك)\s+(?:\S+\s+)?اتفتح|(?:تم|اتم)\s+فتح\s+(?:ال)?طلب/u', $assertions);
+    }
+
+    /** A promise no record backs: a reservation, a time frame, a warranty or a guarantor. */
+    private function makesUnrecordedPromise(string $replyText, string $sources): bool
+    {
+        if (preg_match('/(?<!مش )محجوز[ةه]?|(?:[نهأا]|ن|هن)?حجز(?:ت)?(?:لك|هالك|هولك|ها لك)|نلحق\s+(?:\S+\s+)?نحجز|في نفس اليوم|فى نفس اليوم|نفس اليوم|خلال\s+\S+\s+(?:يوم|ايام|أيام|ساع[ةه]|ساعات)|من\s+(?:يوم|يومين|\d+)\s+(?:لـ?|ل|إلى|الى)\s*\S+\s+(?:يوم|ايام|أيام)|أول ما يجيلي رد|اول ما يجيلي رد|المصنع بيدينا/u', $replyText)) {
+            return true;
+        }
+
+        $normalizedSources = \App\Support\ArabicTextNormalizer::normalize($sources);
+
+        // "الضمان بيوضحهولك الزميل في الفرع" is the right answer; "بضمان
+        // المعرض" / "محتاج ضامن" are claims that need a source.
+        foreach (['ضمان' => '/بضمان|(?:عليها|عليه|فيها|ليها|معاها|و)\s*ضمان|ضمان\s+(?:سن[ةه]|سنتين|\d|المعرض|الوكيل|شامل|لمد[ةه])/u',
+            'ضامن' => '/(?:محتاج|لازم|يجيب|تجيب|هتحتاج|بيحتاج|محتاجين|نحتاج)\s+(?:\S+\s+)?ضامن/u'] as $word => $pattern) {
+            if (preg_match($pattern, $replyText) && ! str_contains($normalizedSources, $word)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function deniesInterest(string $replyText): bool
+    {
+        return (bool) preg_match('/(?:مفيش|مافيش|من غير|بدون|بلا|مش بنحسب\S*|ملهاش|مالهاش|معندناش|مفيهاش)\s+(?:\S+\s+){0,2}?(?:فوايد|فوائد|فايد[ةه]|فائد[ةه])/u', $replyText);
+    }
+
+    private function asksForScriptedPhrase(string $replyText): bool
+    {
+        return (bool) preg_match('/(?:قولي|قولّي|قول لي|اكتبلي|اكتب لي|ابعتلي|رد علي[اّ]?|ردلي)\s*(?:بس\s*)?(?:كلم[ةه]\s*)?[«"“\']|(?:قولي|اكتبلي)\s+(?:بس\s+)?(?:أنا|انا)\s+\S+\s+(?:\S+\s+)?(?:عشان|علشان)\s+(?:أقدر|اقدر)/u', $replyText);
     }
 
     private function submissionHappened(WhatsappConversation $conversation, array $outcomes): bool

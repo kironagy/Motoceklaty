@@ -12,4 +12,6 @@ use App\Models\WhatsappMessage;
 interface TurnSchedulerHook
 {
     public function onMessageIngested(WhatsappMessage $message): void;
+
+    public function staffTookOver(\App\Models\WhatsappConversation $conversation): void;
 }

@@ -154,6 +154,24 @@ class DocumentPipeline
 
         $result = $this->result($media->id, $document->id, $detectedTypeKey, $status === 'accepted', $status, $issues, $appliedFields);
 
+        // "البطاقه في ظهرها بدون عمل" got "عادي مفيش مشكلة" and an application
+        // as a shop owner. The profession printed on the ID is compared with
+        // the work he stated, and "بدون عمل" goes on the file for staff.
+        if (filled($extractedFields['occupation'] ?? null)) {
+            $result['occupation_on_id'] = (string) $extractedFields['occupation'];
+            $result['occupation_check'] = 'Compare with the work he said. If it says بدون عمل / لا يعمل / طالب or a different job, do not say it is fine: tell him kindly it needs proof of his work and do not change his type without an accepted proof document.';
+
+            if (preg_match('/بدون عمل|بدون|لا يعمل|لايعمل|عاطل/u', (string) $extractedFields['occupation'])) {
+                \App\Models\ApplicationEvent::create([
+                    'application_id' => $application->id,
+                    'type' => 'id_without_occupation',
+                    'actor' => 'system',
+                    'data' => ['occupation' => $extractedFields['occupation']],
+                    'created_at' => now(),
+                ]);
+            }
+        }
+
         if (($differs ?? []) !== []) {
             // Not a rejection - an app screen shows the name in English, the
             // ID in Arabic. The agent asks the customer whether it's theirs.

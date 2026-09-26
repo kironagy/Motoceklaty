@@ -389,7 +389,7 @@ class AgentRunnerTest extends TestCase
         $trace = \App\Models\AiTrace::where('turn_id', $turn->id)->first();
         $this->assertSame('done', $trace->status);
         $this->assertSame(5, $trace->output_tokens);
-        $this->assertSame('v2.2.0', $trace->prompt_version);
+        $this->assertSame('v2.3.0', $trace->prompt_version);
     }
 
     public function test_tools_called_together_after_start_application_see_the_new_application(): void
