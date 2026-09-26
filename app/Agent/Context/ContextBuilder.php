@@ -37,6 +37,7 @@ class ContextBuilder
         private readonly ApplicationService $applications,
         private readonly SnapshotService $snapshots,
         private readonly \App\Domain\Settings\AgentInstructions $instructions,
+        private readonly \App\Domain\Teaching\LessonBook $lessons,
     ) {
     }
 
@@ -48,6 +49,7 @@ class ContextBuilder
         $snapshot = $application ? $this->snapshots->for($application) : null;
 
         $l0 = $this->buildL0();
+        $l0b = $this->lessons->forPrompt($snapshot['customer_type'] ?? null);
         $l1 = $this->buildL1();
         $l2 = $this->buildL2();
         $l3 = $this->buildL3();
@@ -59,7 +61,7 @@ class ContextBuilder
         $l8 = $this->buildL8($conversation, $turn);
 
         $system = implode("\n\n", array_values(array_filter([
-            $l0['text'], $l1['text'], $l2['text'], $l3['text'], $l3b['text'], $l4['text'], $l5['text'], $l6['text'],
+            $l0['text'], $l0b['text'], $l1['text'], $l2['text'], $l3['text'], $l3b['text'], $l4['text'], $l5['text'], $l6['text'],
         ], fn ($block) => $block !== null && trim($block) !== '')));
 
         $request = new AiRequest(
@@ -70,6 +72,7 @@ class ContextBuilder
         $manifest = [
             'prompt_version' => $l0['version'],
             'l0_tokens' => TokenEstimator::estimate($l0['text']),
+            'l0b_count' => $l0b['count'],
             'l1_count' => $l1['count'],
             'l2_count' => $l2['count'],
             'l3_count' => $l3['count'],

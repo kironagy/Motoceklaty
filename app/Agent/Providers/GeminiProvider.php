@@ -63,7 +63,7 @@ class GeminiProvider implements AiProvider
         $estimatedTokens = $this->estimateTokens($request);
         $payload = $this->buildPayload($request);
 
-        if ($isFallback) {
+        if ($isFallback && $request->thinkingLevel === null) {
             // The fallback (gemini-3.5-flash-lite) rejects thinkingBudget and
             // takes 13-17s with its default thinking; "minimal" measured 3-9s.
             $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => (string) config('agent.fallback_thinking_level', 'minimal')];
@@ -227,7 +227,9 @@ class GeminiProvider implements AiProvider
             ],
         ];
 
-        if ($request->thinkingBudget !== null) {
+        if ($request->thinkingLevel !== null) {
+            $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $request->thinkingLevel];
+        } elseif ($request->thinkingBudget !== null) {
             $payload['generationConfig']['thinkingConfig'] = ['thinkingBudget' => $request->thinkingBudget];
         }
 

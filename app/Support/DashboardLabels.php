@@ -52,6 +52,7 @@ class DashboardLabels
     public const DOCUMENT_ISSUE = [
         'NAME_MISMATCH' => 'الاسم مش مطابق',
         'ID_MISMATCH' => 'الرقم القومي مش مطابق',
+        'FIELD_MISMATCH' => 'بيان في المستند مش مطابق لكلام العميل',
         'BUSINESS_NAME_MISMATCH' => 'اسم النشاط مش مطابق للبطاقة الضريبية',
         'MISSING_DATA' => 'بيانات ناقصة في المستند',
         'BLURRY_DOCUMENT' => 'الصورة مش واضحة',

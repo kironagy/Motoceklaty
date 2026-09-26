@@ -29,8 +29,37 @@ class ConversationSimulator
 {
     public const BOT_KEY = 'dashboard-simulator';
 
+    public const CHECK_BOT_KEY = 'dashboard-teaching-check';
+
     public function __construct(private readonly DeliveryService $delivery)
     {
+    }
+
+    /** Separate bot for teach-mode replays so they stay out of the simulator's list. */
+    public function checkBot(): WhatsappBot
+    {
+        $staff = Staff::firstOrCreate(
+            ['email' => 'teaching-check@local.test'],
+            ['name' => 'اختبارات التعليم', 'password' => Str::random(32)]
+        );
+
+        return WhatsappBot::firstOrCreate(
+            ['whatsapp_phone_number_id' => self::CHECK_BOT_KEY],
+            ['staff_id' => $staff->id, 'name' => 'اختبارات التعليم', 'is_active' => false]
+        );
+    }
+
+    /** Stores earlier messages as already handled, without running the agent. */
+    public function seed(WhatsappConversation $conversation, string $direction, string $text): void
+    {
+        WhatsappMessage::create([
+            'whatsapp_conversation_id' => $conversation->id,
+            'whatsapp_bot_id' => $conversation->whatsapp_bot_id,
+            'direction' => $direction,
+            'sender_type' => $direction === 'incoming' ? 'customer' : 'bot',
+            'type' => 'text',
+            'text' => $text,
+        ]);
     }
 
     public function bot(): WhatsappBot

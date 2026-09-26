@@ -30,6 +30,18 @@
         .dark .sim-chips { background: #202c33; }
         .sim-chip { font-size: 0.8rem; padding: 0.2rem 0.6rem; border-radius: 999px; background: #fff; border: 1px solid rgb(209 213 219); color: #111b21; }
         .dark .sim-chip { background: #2a3942; border-color: transparent; color: #e9edef; }
+        .sim-teach { align-self: stretch; margin: 0.25rem 2rem; border-radius: 0.6rem; padding: 0.6rem 0.8rem; background: #fff7e6; border: 1px solid #f5c26b; color: #3b2a07; font-size: 0.9rem; line-height: 1.7; }
+        .dark .sim-teach { background: #2b2210; border-color: #7a5a1c; color: #f3e3c2; }
+        .sim-teach-owner { font-size: 0.8rem; opacity: 0.75; margin-bottom: 0.3rem; white-space: pre-wrap; }
+        .sim-card { margin-top: 0.4rem; border-radius: 0.5rem; padding: 0.45rem 0.6rem; background: rgb(255 255 255 / 0.7); border: 1px solid rgb(0 0 0 / 0.08); }
+        .dark .sim-card { background: rgb(0 0 0 / 0.25); border-color: rgb(255 255 255 / 0.08); }
+        .sim-card pre { white-space: pre-wrap; direction: ltr; font-size: 0.72rem; margin: 0.25rem 0 0; max-height: 220px; overflow: auto; }
+        .sim-badge { font-size: 0.72rem; padding: 0.05rem 0.45rem; border-radius: 999px; background: rgb(0 0 0 / 0.07); }
+        .sim-ok { color: rgb(22 163 74); } .sim-bad { color: rgb(220 38 38); }
+        .sim-correct { align-self: flex-end; font-size: 0.75rem; color: #b26b00; text-decoration: underline; }
+        .sim-correct-box { align-self: stretch; margin: 0 2rem; display: flex; flex-direction: column; gap: 0.35rem; }
+        .sim-correct-box textarea { border-radius: 0.5rem; border: 1px solid #f5c26b; padding: 0.5rem; min-height: 70px; background: #fff; color: #111b21; }
+        .dark .sim-correct-box textarea { background: #2a3942; color: #e9edef; }
         .sim-side pre { white-space: pre-wrap; direction: ltr; font-size: 0.72rem; max-height: 360px; overflow: auto; }
     </style>
 
@@ -72,6 +84,26 @@
                                 {{ $msg->text }}
                             </div>
                         </div>
+                    @endforeach
+
+
+                    @php $lastOut = $turn['out']->last(); @endphp
+                    @if ($teachMode && $lastOut)
+                        @if ($correctingMessageId === $lastOut->id)
+                            <form class="sim-correct-box" wire:submit="submitCorrection">
+                                <textarea wire:model="teachText" placeholder="إيه الغلط وإيه الصح؟ اكتب الرد الصح أو اشرح بكلامك - البوت هياخد الفكرة مش الكلام بالنص"></textarea>
+                                <div class="flex gap-2">
+                                    <x-filament::button type="submit" size="sm" color="warning" wire:loading.attr="disabled" wire:target="submitCorrection">علّمه</x-filament::button>
+                                    <x-filament::button size="sm" color="gray" wire:click="cancelCorrection">إلغاء</x-filament::button>
+                                </div>
+                            </form>
+                        @else
+                            <button type="button" class="sim-correct" wire:click="startCorrection({{ $lastOut->id }})">✏️ صحّح الرد ده</button>
+                        @endif
+                    @endif
+
+                    @foreach ($turn['teaching'] as $session)
+                        @include('filament.pages.partials.teaching-session', ['session' => $session])
                     @endforeach
 
                     @if ($showDebug && $turn['trace'])
@@ -120,6 +152,7 @@ result: {{ \Illuminate\Support\Str::limit(json_encode($step->result_redacted, JS
                 @endif
 
                 <div wire:loading.flex wire:target="send,quick" class="sim-typing">بيكتب…</div>
+                <div wire:loading.flex wire:target="submitCorrection,approveChange" class="sim-typing" style="background:#fff7e6;color:#7a5a1c">المدرّب بيفهم التصحيح ويجربه…</div>
             </div>
 
             <div class="sim-chips">
@@ -144,7 +177,7 @@ result: {{ \Illuminate\Support\Str::limit(json_encode($step->result_redacted, JS
                 <textarea
                     wire:model="message"
                     rows="1"
-                    placeholder="اكتب رسالة العميل…"
+                    placeholder="{{ $teachMode ? 'اكتب رسالة العميل… أو /علّم وبعدها أي حاجة عايز البوت يتعلمها' : 'اكتب رسالة العميل…' }}"
                     x-data
                     @keydown.enter.prevent="if (! $event.shiftKey) { $wire.send() } else { $el.value += '\n' }"
                 ></textarea>
@@ -158,6 +191,13 @@ result: {{ \Illuminate\Support\Str::limit(json_encode($step->result_redacted, JS
             <x-filament::section>
                 <div class="flex flex-col gap-2">
                     <x-filament::button wire:click="newConversation" icon="heroicon-o-plus">محادثة جديدة</x-filament::button>
+                    <label class="flex items-center gap-2 text-sm font-semibold text-warning-700 dark:text-warning-400">
+                        <input type="checkbox" wire:model.live="teachMode" class="rounded">
+                        وضع التعليم
+                    </label>
+                    @if ($teachMode)
+                        <p class="text-xs text-gray-500">تحت كل رد هتلاقي "صحّح". أو اكتب <b>/علّم</b> وبعدها أي معلومة أو طريقة. الأسلوب بيتطبق على طول بعد ما يتجرب، وأي تعديل في الأسعار أو الشروط أو التعليمات بيستنى موافقتك. <a class="underline" href="{{ \App\Filament\Resources\BotLessonResource::getUrl() }}" target="_blank">كل الدروس</a></p>
+                    @endif
                     <label class="flex items-center gap-2 text-sm">
                         <input type="checkbox" wire:model.live="showDebug" class="rounded">
                         اعرض اللي البوت عمله تحت كل رد

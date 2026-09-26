@@ -1,0 +1,174 @@
+<?php
+
+namespace App\Domain\Teaching;
+
+use App\Domain\Settings\AgentInstructions;
+use App\Domain\Settings\AgentSettings;
+use App\Models\AgentInstructionVersion;
+use App\Models\AgentSetting;
+use App\Models\BotLesson;
+use App\Models\TeachingChange;
+use Illuminate\Support\Facades\DB;
+
+class ChangeApplier
+{
+    public const LESSON_FIELDS = ['title', 'rule', 'fixed_facts', 'example_context', 'example_reply', 'scope_customer_types', 'scope_stage', 'priority'];
+
+    public function __construct(private readonly AgentInstructions $instructions)
+    {
+    }
+
+    /** Throws before touching anything when the change is invalid. */
+    public function validate(TeachingChange $change): void
+    {
+        $after = (array) $change->after;
+
+        match ($change->kind) {
+            'lesson' => trim((string) ($after['fields']['rule'] ?? '')) !== '' || throw new \InvalidArgumentException('الدرس من غير قاعدة'),
+            'instruction' => $this->locate((string) ($after['find'] ?? '')),
+            'setting' => isset(AgentSettings::definitions()[$change->target_id]) || throw new \InvalidArgumentException("الإعداد {$change->target_id} مش موجود"),
+            'data_update' => $this->castAll($change->target_type, $after) && $this->record($change),
+            'data_create' => EditableEntities::canCreate($change->target_type) && $this->castAll($change->target_type, $after)
+                || throw new \InvalidArgumentException('مينفعش أضيف '.EditableEntities::label($change->target_type).' جديد'),
+            default => throw new \InvalidArgumentException("نوع تغيير مش معروف: {$change->kind}"),
+        };
+    }
+
+    public function apply(TeachingChange $change, ?int $staffId = null): void
+    {
+        $this->validate($change);
+
+        DB::transaction(function () use ($change, $staffId) {
+            $after = (array) $change->after;
+
+            switch ($change->kind) {
+                case 'lesson':
+                    $lesson = isset($after['lesson_id']) ? BotLesson::find($after['lesson_id']) : null;
+                    $fields = array_intersect_key($after['fields'], array_flip(self::LESSON_FIELDS));
+
+                    if ($lesson) {
+                        $change->before = $lesson->only(self::LESSON_FIELDS) + ['is_active' => $lesson->is_active];
+                        $lesson->update($fields + ['revision' => $lesson->revision + 1, 'is_active' => true]);
+                    } else {
+                        $lesson = BotLesson::create($fields + [
+                            'teaching_session_id' => $change->teaching_session_id,
+                            'source_message_id' => $change->session?->target_message_id,
+                            'created_by' => $staffId,
+                        ]);
+                    }
+
+                    $change->target_id = (string) $lesson->id;
+                    break;
+
+                case 'instruction':
+                    $current = $this->instructions->current();
+                    $text = str_replace($after['find'], $after['replace'], $current['text']);
+                    $change->before = ['version_id' => $current['id']];
+                    $version = $this->instructions->publish($text,'من وضع التعليم: '.$change->summary, $staffId);
+                    $change->target_id = (string) $version->id;
+                    break;
+
+                case 'setting':
+                    $change->before = ['value' => AgentSetting::where('key', $change->target_id)->value('value')];
+                    AgentSettings::save([$change->target_id => $after['value'] ?? null], $staffId);
+                    break;
+
+                case 'data_update':
+                    $record = $this->record($change);
+                    $values = $this->castAll($change->target_type, $after);
+                    $change->before = collect(array_keys($values))->mapWithKeys(fn ($f) => [$f => $record->getAttribute($f)])->all();
+                    $record->update($values);
+                    break;
+
+                case 'data_create':
+                    $model = EditableEntities::model($change->target_type);
+                    $change->target_id = (string) $model::create($this->castAll($change->target_type, $after))->id;
+                    break;
+            }
+
+            $change->status = 'applied';
+            $change->error = null;
+            $change->applied_at = now();
+            $change->applied_by = $staffId;
+            $change->save();
+        });
+    }
+
+    public function revert(TeachingChange $change, bool $force = false): void
+    {
+        if ($change->status !== 'applied') {
+            throw new \RuntimeException('التغيير ده مش متطبق');
+        }
+
+        DB::transaction(function () use ($change, $force) {
+            $before = (array) $change->before;
+
+            switch ($change->kind) {
+                case 'lesson':
+                    $lesson = BotLesson::findOrFail($change->target_id);
+                    $before === [] ? $lesson->update(['is_active' => false]) : $lesson->update($before + ['revision' => $lesson->revision + 1]);
+                    break;
+
+                case 'instruction':
+                    $previous = isset($before['version_id']) ? AgentInstructionVersion::find($before['version_id']) : null;
+                    $previous ? $this->instructions->activate($previous) : $this->instructions->useFile();
+                    break;
+
+                case 'setting':
+                    AgentSettings::save([$change->target_id => $before['value'] ?? null]);
+                    break;
+
+                case 'data_update':
+                    $record = $this->record($change);
+                    $expected = $this->castAll($change->target_type, (array) $change->after);
+
+                    foreach ($expected as $field => $value) {
+                        if (! $force && $record->getAttribute($field) != $value) {
+                            throw new \RuntimeException("حد عدّل {$field} بعد التغيير ده، الرجوع هيمسح تعديله");
+                        }
+                    }
+
+                    $record->update($before);
+                    break;
+
+                case 'data_create':
+                    $record = $this->record($change);
+                    array_key_exists('is_active', EditableEntities::fields($change->target_type))
+                        ? $record->update(['is_active' => false])
+                        : throw new \RuntimeException('السجل ده مينفعش يتقفل، اقفله من لوحة التحكم');
+                    break;
+            }
+
+            $change->update(['status' => 'reverted']);
+        });
+    }
+
+    private function locate(string $find): bool
+    {
+        $count = $find === '' ? 0 : substr_count($this->instructions->current()['text'], $find);
+
+        return $count === 1 || throw new \InvalidArgumentException($count === 0
+            ? 'الفقرة اللي عايز أعدلها مش موجودة في التعليمات الحالية'
+            : 'الفقرة موجودة أكتر من مرة في التعليمات، محتاج جزء أوضح');
+    }
+
+    private function castAll(string $entity, array $values): array
+    {
+        if ($values === []) {
+            throw new \InvalidArgumentException('مفيش قيم');
+        }
+
+        return collect($values)->mapWithKeys(fn ($v, $f) => [$f => EditableEntities::cast($entity, $f, $v)])->all();
+    }
+
+    private function record(TeachingChange $change): \Illuminate\Database\Eloquent\Model
+    {
+        if (! isset(EditableEntities::MAP[$change->target_type])) {
+            throw new \InvalidArgumentException("مينفعش أعدّل {$change->target_type}");
+        }
+
+        $model = EditableEntities::model($change->target_type);
+
+        return $model::find($change->target_id) ?? throw new \InvalidArgumentException(EditableEntities::label($change->target_type)." رقم {$change->target_id} مش موجود");
+    }
+}

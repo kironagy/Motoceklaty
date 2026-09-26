@@ -30,6 +30,7 @@ final class AiRequest
         public readonly ?int $thinkingBudget = null,
         public readonly int $timeoutSeconds = 30,
         public readonly ?array $responseSchema = null,
+        public readonly ?string $thinkingLevel = null,
     ) {
     }
 }

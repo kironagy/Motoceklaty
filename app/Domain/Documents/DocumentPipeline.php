@@ -38,6 +38,36 @@ class DocumentPipeline
     }
 
     /**
+     * Reads a document again with the current document types and rules,
+     * recording nothing. Used by teach mode to show what changed.
+     *
+     * @return array{detected_type: ?string, fields: array, issues: array}
+     */
+    public function preview(MessageMedia $media, ?Application $application): array
+    {
+        $activeTypes = DocumentType::where('is_active', true)->get();
+
+        try {
+            $ocrText = $this->ocr($media);
+        } catch (OcrException) {
+            $ocrText = '';
+        }
+
+        $classification = $this->classify($media, $ocrText, $activeTypes);
+
+        if (! $classification) {
+            return ['detected_type' => null, 'fields' => [], 'issues' => [['code' => 'OCR_UNAVAILABLE']]];
+        }
+
+        [$typeKey, $legibility, , $fields] = $classification;
+        $issues = $application
+            ? $this->validate($application, $activeTypes->firstWhere('key', $typeKey), $typeKey, null, $legibility, $fields, $activeTypes)
+            : [];
+
+        return ['detected_type' => $typeKey, 'fields' => $fields, 'issues' => $issues];
+    }
+
+    /**
      * @return array{media_id: int, document_id: ?int, detected_type: ?string, accepted: bool, status: string, issues: array, applied_fields: string[]}
      */
     public function process(MessageMedia $media, Application $application, ?string $expectedTypeKey = null, bool $replacesPrevious = false): array

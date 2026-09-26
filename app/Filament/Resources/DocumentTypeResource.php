@@ -44,6 +44,7 @@ class DocumentTypeResource extends Resource
         'NAME_MISMATCH' => 'الاسم مش مطابق',
         'BUSINESS_NAME_MISMATCH' => 'اسم النشاط مش مطابق',
         'ID_MISMATCH' => 'الرقم القومي مش مطابق',
+        'FIELD_MISMATCH' => 'بيان في المستند مش مطابق لكلام العميل',
         'EXPIRED_DOCUMENT' => 'المستند قديم / منتهي',
         'LICENSE_EXPIRED' => 'الرخصة منتهية',
         'EMPLOYMENT_TOO_RECENT' => 'مدة الخدمة أقل من المطلوب',

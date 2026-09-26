@@ -62,6 +62,10 @@ class AgentSettings
             'installments.first_payment_after_days' => ['sales', 'أول قسط بعد كام يوم من الاستلام', 'int', null],
             'installments.price_difference_explanation' => ['sales', 'شرح فرق السعر بين الكاش والتقسيط', 'text', 'البوت بيشرح للعميل بكلامه من الكلام ده لما يسأل ليه التقسيط أغلى من الكاش - مش بينقله نسخ.'],
 
+            'teaching.coach_model' => ['teaching', 'موديل المدرّب في وضع التعليم', 'string', 'فاضي = نفس موديل البوت. الأقوى أدق في فهم التصحيح بس أبطأ.'],
+            'teaching.lessons_tokens' => ['teaching', 'أقصى حجم للدروس في كل رد (توكن)', 'int', 'الدروس بتتبعت مع كل رسالة. لو اتملت، الأمثلة بتتشال الأول.'],
+            'teaching.quick_check_cases' => ['teaching', 'عدد الحالات القديمة اللي تتجرب قبل تثبيت الدرس', 'int', 'أكتر = أأمن بس أبطأ.'],
+
             'instructions.approved_version' => ['instructions', 'نسخة التعليمات المعتمدة', 'string', null],
         ];
     }
@@ -76,6 +80,7 @@ class AgentSettings
             'memory' => 'الذاكرة والسياق',
             'documents' => 'الصور والمستندات',
             'sales' => 'البيع والتقسيط',
+            'teaching' => 'وضع التعليم',
         ];
     }
 

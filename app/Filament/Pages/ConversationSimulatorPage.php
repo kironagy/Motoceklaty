@@ -5,8 +5,11 @@ namespace App\Filament\Pages;
 use App\Domain\Applications\ApplicationService;
 use App\Domain\Applications\SnapshotService;
 use App\Domain\Simulation\ConversationSimulator;
+use App\Domain\Teaching\TeachingCoach;
 use App\Models\AiTrace;
 use App\Models\AiTraceStep;
+use App\Models\TeachingChange;
+use App\Models\TeachingSession;
 use App\Models\WhatsappConversation;
 use App\Models\WhatsappMessage;
 use Filament\Notifications\Notification;
@@ -42,6 +45,12 @@ class ConversationSimulatorPage extends Page
     public array $attachments = [];
 
     public bool $showDebug = true;
+
+    public bool $teachMode = false;
+
+    public ?int $correctingMessageId = null;
+
+    public string $teachText = '';
 
     public const QUICK_MESSAGES = [
         'السلام عليكم',
@@ -93,6 +102,13 @@ class ConversationSimulatorPage extends Page
     {
         $text = trim($this->message);
 
+        if ($this->teachMode && preg_match('/^\/(علّم|علم)\s*(.*)$/us', $text, $m)) {
+            $this->message = '';
+            $this->runTeaching(null, trim($m[2]));
+
+            return;
+        }
+
         if ($text === '' && $this->attachments === []) {
             return;
         }
@@ -124,6 +140,80 @@ class ConversationSimulatorPage extends Page
         }
 
         $this->dispatch('simulator-scrolled');
+    }
+
+    public function startCorrection(int $messageId): void
+    {
+        $this->correctingMessageId = $messageId;
+        $this->teachText = '';
+    }
+
+    public function cancelCorrection(): void
+    {
+        $this->correctingMessageId = null;
+        $this->teachText = '';
+    }
+
+    public function submitCorrection(): void
+    {
+        $text = trim($this->teachText);
+
+        if ($text === '' || ! $this->correctingMessageId) {
+            return;
+        }
+
+        $target = $this->correctingMessageId;
+        $this->cancelCorrection();
+        $this->runTeaching($target, $text);
+    }
+
+    private function runTeaching(?int $targetMessageId, string $text): void
+    {
+        if ($text === '' || ! $this->conversationId) {
+            Notification::make()->title('اكتب اللي عايز تعلّمه للبوت بعد /علّم')->warning()->send();
+
+            return;
+        }
+
+        @set_time_limit(600);
+
+        $session = app(TeachingCoach::class)->teach(
+            WhatsappConversation::findOrFail($this->conversationId), $targetMessageId, $text, auth()->id()
+        );
+
+        if ($session->status === 'error') {
+            Notification::make()->title('المدرّب ما قدرش يكمل')->body($session->understanding)->danger()->persistent()->send();
+        }
+
+        $this->dispatch('simulator-scrolled');
+    }
+
+    public function approveChange(int $id): void
+    {
+        $this->changeAction($id, fn ($coach, $change) => $coach->approve($change, auth()->id()), 'اتطبق');
+    }
+
+    public function rejectChange(int $id): void
+    {
+        $this->changeAction($id, fn ($coach, $change) => $coach->reject($change), 'اتلغى');
+    }
+
+    public function revertChange(int $id): void
+    {
+        $this->changeAction($id, fn ($coach, $change) => $coach->revert($change), 'رجعنا فيه');
+    }
+
+    private function changeAction(int $id, \Closure $action, string $done): void
+    {
+        @set_time_limit(300);
+        $change = TeachingChange::whereHas('session', fn ($q) => $q->where('conversation_id', $this->conversationId))->findOrFail($id);
+
+        try {
+            $action(app(TeachingCoach::class), $change);
+            Notification::make()->title($done)->success()->send();
+        } catch (\Throwable $e) {
+            Notification::make()->title('ما نفعش')->body($e->getMessage())->danger()->persistent()->send();
+        }
     }
 
     public function returnToBot(): void
@@ -182,16 +272,19 @@ class ConversationSimulatorPage extends Page
             ->get()
             ->groupBy('trace_id');
 
+        $sessions = TeachingSession::where('conversation_id', $this->conversationId)->with('changes')->orderBy('id')->get();
         $turns = [];
 
         foreach ($messages->groupBy(fn ($m) => $m->turn_id ?? 'm'.$m->id) as $turnId => $group) {
             $trace = $traces->get($turnId);
+            $ids = $group->pluck('id');
 
             $turns[] = [
                 'in' => $group->where('direction', 'incoming')->values(),
                 'out' => $group->where('direction', 'outgoing')->values(),
                 'trace' => $trace,
                 'tools' => $trace ? ($steps->get($trace->id) ?? collect())->where('kind', 'tool_call')->values() : collect(),
+                'teaching' => $sessions->filter(fn ($s) => $ids->contains($s->after_message_id))->values(),
             ];
         }
 
