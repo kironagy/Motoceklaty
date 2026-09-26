@@ -28,6 +28,16 @@ class LegacyRequestProjector
 {
     public const REQUEST_TYPE = 'bot';
 
+    public function __construct(private readonly AddressSplitter $addresses)
+    {
+    }
+
+    /** Stored field => the part it holds, per address. */
+    private const HOME_FIELDS = ['address' => 'street', 'address_building_no' => 'building_number', 'address_floor' => 'floor',
+        'address_apartment' => 'apartment', 'address_landmark' => 'landmark'];
+
+    private const WORK_FIELDS = ['work_address' => 'street', 'work_building_no' => 'building_number', 'work_landmark' => 'landmark'];
+
     /** شرط السن: من 21 لـ 62 سنة */
     private const MIN_AGE = 21;
 
@@ -91,11 +101,13 @@ class LegacyRequestProjector
             'applicant_street' => $applicant['address'] ?? null,
             'applicant_building_number' => $applicant['address_building_no'] ?? null,
             'applicant_floor' => $applicant['address_floor'] ?? null,
+            'applicant_apartment' => $applicant['address_apartment'] ?? null,
             'applicant_landmark' => $applicant['address_landmark'] ?? null,
             'applicant_address' => $this->joinAddress([
                 isset($applicant['address_building_no']) ? "رقم العقار {$applicant['address_building_no']}" : null,
                 $applicant['address'] ?? null,
                 isset($applicant['address_floor']) ? "الدور {$applicant['address_floor']}" : null,
+                isset($applicant['address_apartment']) ? "شقة {$applicant['address_apartment']}" : null,
                 isset($applicant['address_landmark']) ? "بجوار {$applicant['address_landmark']}" : null,
             ]),
 
@@ -134,7 +146,70 @@ class LegacyRequestProjector
             ]];
         }
 
+        $attributes = array_merge($attributes, $this->splitAddress($application, $applicant, self::HOME_FIELDS, 'applicant'));
+        $attributes = array_merge($attributes, $this->splitAddress($application, $applicant, self::WORK_FIELDS, 'work'));
+
         return array_merge($attributes, $this->documents($application));
+    }
+
+    /**
+     * One dashboard column per address part, split from the customer's own
+     * words. Falls back to the columns above when the split is unavailable.
+     *
+     * @return array<string, string>
+     */
+    private function splitAddress(Application $application, array $values, array $fields, string $prefix): array
+    {
+        $stored = array_filter(array_intersect_key($values, $fields));
+
+        if ($stored === []) {
+            return [];
+        }
+
+        $parts = $this->addresses->split($stored, $this->evidenceMessages($application, array_keys($fields)));
+
+        if ($parts === []) {
+            return [];
+        }
+
+        $columns = [];
+
+        foreach ($parts as $part => $value) {
+            $columns[$prefix.'_'.$part] = $value;
+        }
+
+        if ($prefix === 'applicant') {
+            $columns['applicant_address'] = $this->joinAddress([
+                isset($parts['building_number']) ? "رقم العقار {$parts['building_number']}" : null,
+                isset($parts['street']) ? "شارع {$parts['street']}" : null,
+                isset($parts['branch_street']) ? "متفرع من {$parts['branch_street']}" : null,
+                isset($parts['area']) ? "المنطقة {$parts['area']}" : null,
+                isset($parts['governorate']) ? "محافظة {$parts['governorate']}" : null,
+                isset($parts['floor']) ? "الدور {$parts['floor']}" : null,
+                isset($parts['apartment']) ? "شقة {$parts['apartment']}" : null,
+                isset($parts['landmark']) ? "علامة مميزة: {$parts['landmark']}" : null,
+            ]) ?? ($columns['applicant_address'] ?? null);
+        } else {
+            $columns['work_address'] = $this->joinAddress([
+                $parts['street'] ?? null, $parts['area'] ?? null, $parts['governorate'] ?? null,
+            ]) ?? ($values['work_address'] ?? null);
+        }
+
+        return array_filter($columns, fn ($v) => $v !== null && $v !== '');
+    }
+
+    /** @return string[] the customer messages these fields were taken from */
+    private function evidenceMessages(Application $application, array $keys): array
+    {
+        $ids = ApplicationData::where('application_id', $application->id)->whereIn('field_key', $keys)
+            ->where('status', 'valid')->pluck('evidence_message_id')
+            ->merge(CustomerAttribute::where('customer_id', $application->customer_id)->whereIn('field_key', $keys)
+                ->where('status', 'valid')->pluck('evidence_message_id'))
+            ->filter()->unique()->all();
+
+        return \App\Models\WhatsappMessage::whereIn('id', $ids)->orderBy('id')->get()
+            ->map(fn ($m) => trim((string) ($m->text ?: $m->transcript)))
+            ->filter()->values()->all();
     }
 
     /** Re-applies the mapping to an already projected request (backfill). */
@@ -190,8 +265,9 @@ class LegacyRequestProjector
         foreach ($documents as $document) {
             $typeKey = $document->documentType?->key ?? $document->detected_type_key ?? $document->expected_type_key;
 
-            if ($typeKey === 'national_id_front') {
-                $column = $document->party === 'guarantor' ? 'guarantor_id_image' : 'applicant_id_image';
+            if ($typeKey === 'national_id_front' || $typeKey === 'national_id_back') {
+                $side = $typeKey === 'national_id_back' ? '_back' : '';
+                $column = ($document->party === 'guarantor' ? 'guarantor_id' : 'applicant_id').$side.'_image';
                 $directory = $document->party === 'guarantor' ? 'installments/guarantors' : 'installments/applicants';
                 $isArray = false;
             } elseif (isset(self::DOCUMENT_COLUMNS[$typeKey])) {

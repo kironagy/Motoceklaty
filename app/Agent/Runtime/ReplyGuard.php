@@ -115,6 +115,18 @@ class ReplyGuard
             return 'BRANCH_NOT_SOURCED';
         }
 
+        // "عندي ٢٠ سنة" got "السن ده تمام جداً" - the minimum is 21. Whether
+        // an age qualifies is only said after the system checked it.
+        if ($this->judgesAgeUnchecked($assertions, $outcomes)) {
+            return 'AGE_NOT_CHECKED';
+        }
+
+        // "هتتوفر امتى؟" got "هي متاحة حالياً" for a model we do not carry,
+        // then "أول ما توصل هبلغك" - nothing records or sends such a notice.
+        if ($this->promisesAvailabilityNotice($replyText)) {
+            return 'AVAILABILITY_PROMISE';
+        }
+
         // "الـ46 ألف ده إجمالي اللي هتدفعه" - the customer's own number
         // relabelled as the total; the real total was 67,612. A total is
         // only stated from a tool result of this turn.
@@ -230,7 +242,23 @@ class ReplyGuard
             return true;
         }
 
-        $source = \App\Support\ArabicTextNormalizer::normalize(json_encode(array_column($lookups, 'data'), JSON_UNESCAPED_UNICODE) ?: '');
+        // Only the branch rows count - the tool's own note ("We have NO
+        // branch in المنصورة") named the very place a branch was then
+        // invented in, and let it through.
+        $branches = array_merge(...array_map(fn ($o) => $o['data']['branches'] ?? [], array_values($lookups)));
+        $source = \App\Support\ArabicTextNormalizer::normalize(json_encode($branches, JSON_UNESCAPED_UNICODE) ?: '');
+
+        // A map link is only ever one of the branches' own links.
+        preg_match_all('#https?://(?:maps\.app\.goo\.gl|goo\.gl/maps|(?:www\.)?google\.[a-z.]+/maps)\S*#i', $replyText, $links);
+        $knownLinks = array_filter(array_column($branches, 'map_url'));
+
+        foreach ($links[0] as $link) {
+            $link = rtrim($link, '.,،)');
+
+            if (! in_array($link, $knownLinks, true)) {
+                return true;
+            }
+        }
         // "مفيش فرع في المنصورة" is the truthful answer, not a claim.
         $affirmed = preg_replace('/(?:مفيش|مافيش|مفيهاش|معندناش|ماعندناش|ما عندناش|ملناش|مالناش|مش عندنا|للأسف مفيش)\s+[^.،,!؟?\n]*/u', ' ', $replyText);
         preg_match_all('/(?:فرع|فروع|فرعنا)\s+(?:(?:في|ف|فى|بـ?)\s+)?(?!أي|اي|وقت|الوقت)((?:ال)?[\p{Arabic}]{3,})/u', $affirmed, $named);
@@ -252,6 +280,36 @@ class ReplyGuard
         }
 
         return false;
+    }
+
+    private function judgesAgeUnchecked(string $assertions, array $outcomes): bool
+    {
+        if (! preg_match('/(?:السن|سنك|عمرك|سن حضرتك)\s+(?:\S+\s+){0,3}?(?:تمام|مناسب|كويس|ينفع|مفيهوش مشكل|مافيهوش مشكل|مش مشكل|يسمح)/u', $assertions)) {
+            return false;
+        }
+
+        foreach ($outcomes as $outcome) {
+            if (! $outcome['ok']) {
+                continue;
+            }
+
+            if ($outcome['name'] === 'check_eligibility') {
+                return false;
+            }
+
+            // An open application's snapshot carries its own eligibility.
+            if (isset($outcome['data']['eligibility']) || isset($outcome['data']['snapshot']['eligibility'])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function promisesAvailabilityNotice(string $replyText): bool
+    {
+        return (bool) preg_match('/(?:[أاه]بلغك|هبلغك|أعرفك|هعرفك|هكلمك|ابعتلك|هبعتلك|هقولك)\s+(?:\S+\s+){0,3}?(?:أول ما|اول ما|لما|بمجرد ما)\s+(?:\S+\s+){0,2}?(?:توصل|تتوفر|يتوفر|تنزل|تيجي|يوصل|يجي)'
+            .'|(?:أول ما|اول ما|لما|بمجرد ما)\s+(?:\S+\s+){0,2}?(?:توصل|تتوفر|يتوفر|تنزل|يوصل)\S*\s+(?:\S+\s+){0,4}?(?:[أاه]بلغك|هبلغك|هعرفك|هكلمك|هبعتلك)/u', $replyText);
     }
 
     /** Egyptian consumer-finance brands the model knows from outside our data. */

@@ -199,7 +199,7 @@ class AgentRunner
      * after a claim guard made the model call *something* - six motorcycle
      * photos were queued for a customer who had just said goodbye.
      */
-    private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER', 'BRANCH_NOT_SOURCED', 'TOTAL_NOT_SOURCED'];
+    private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER', 'BRANCH_NOT_SOURCED', 'TOTAL_NOT_SOURCED', 'AGE_NOT_CHECKED'];
 
     private const GUARD_HINTS = [
         'EMPTY_REPLY' => 'Not sent: the reply is empty. Write the actual message to the customer.',
@@ -218,6 +218,8 @@ class AgentRunner
         'TOTAL_NOT_SOURCED' => 'Not sent: the reply states a total that no tool result of this turn contains (a number the customer wrote is not a total). Call get_installment_offer for this motorcycle and duration and quote total_paid, cash_price and installment_price exactly as returned.',
         'UNSOURCED_REASON' => 'Not sent: the reply explains the fees or the installment/cash difference without the owner\'s policy. Call get_installment_offer for this motorcycle and explain the difference only from its price_difference_policy (in your own words) plus its numbers. The admin fees have no recorded reason - just say they are paid once at pickup.',
         'BRANCH_NOT_SOURCED' => 'Not sent: the reply states a branch, an address or opening hours that no get_branch_information result this turn contains. Call get_branch_information (governorate of the customer if he said it) and use only the branches it returns - if his governorate has none, say so and give the nearest ones it returned. Never name a branch or area that is not in the result.',
+        'AGE_NOT_CHECKED' => 'Not sent: the reply says his age is fine without a check. Call check_eligibility with his age (and months if a duration is known) and answer from its result - if not_eligible, tell him kindly and clearly.',
+        'AVAILABILITY_PROMISE' => 'Not sent: the reply promises to tell him when a model arrives. Nothing records or sends such a notice. Say it is not available with us right now (للأسف مش متوفرة عندنا حاليا), with no date or promise, and offer an available alternative.',
         'UNVERIFIED_NUMBER' => 'Not sent: the reply contains a number (a price, or a measured value like km/litre, hp, months, %) that no tool result or structured state contains. Prices must come from a tool call in THIS turn (the catalog index is for names only) - call get_motorcycle_details / calculate_installment first, or leave the number out. Never state specifications that are not in a tool result.',
     ];
 

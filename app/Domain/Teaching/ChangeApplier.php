@@ -25,7 +25,7 @@ class ChangeApplier
 
         match ($change->kind) {
             'lesson' => trim((string) ($after['fields']['rule'] ?? '')) !== '' || throw new \InvalidArgumentException('الدرس من غير قاعدة'),
-            'instruction' => $this->locate((string) ($after['find'] ?? '')),
+            'instruction' => $this->locate($change),
             'setting' => isset(AgentSettings::definitions()[$change->target_id]) || throw new \InvalidArgumentException("الإعداد {$change->target_id} مش موجود"),
             'data_update' => $this->castAll($change->target_type, $after) && $this->record($change),
             'data_create' => EditableEntities::canCreate($change->target_type) && $this->castAll($change->target_type, $after)
@@ -143,13 +143,68 @@ class ChangeApplier
         });
     }
 
-    private function locate(string $find): bool
+    /**
+     * The coach quotes the paragraph from memory: "الأوفر له" for the text's
+     * "الأوفر ليه" was reported as "the paragraph is not in the
+     * instructions". An exact match is used as is; otherwise the one line
+     * (or run of lines) that is clearly the same paragraph is taken, and
+     * `find` is rewritten to its exact text so the diff shown is real.
+     */
+    private function locate(TeachingChange $change): bool
     {
-        $count = $find === '' ? 0 : substr_count($this->instructions->current()['text'], $find);
+        $after = (array) $change->after;
+        $find = (string) ($after['find'] ?? '');
+        $text = $this->instructions->current()['text'];
+        $count = $find === '' ? 0 : substr_count($text, $find);
 
-        return $count === 1 || throw new \InvalidArgumentException($count === 0
-            ? 'الفقرة اللي عايز أعدلها مش موجودة في التعليمات الحالية'
-            : 'الفقرة موجودة أكتر من مرة في التعليمات، محتاج جزء أوضح');
+        if ($count > 1) {
+            throw new \InvalidArgumentException('الفقرة موجودة أكتر من مرة في التعليمات، محتاج جزء أوضح');
+        }
+
+        if ($count === 1) {
+            return true;
+        }
+
+        $exact = $find === '' ? null : $this->closestPassage($text, $find);
+
+        if ($exact === null) {
+            throw new \InvalidArgumentException('الفقرة اللي عايز أعدلها مش موجودة في التعليمات الحالية');
+        }
+
+        $change->after = ['find' => $exact] + $after;
+
+        return true;
+    }
+
+    private function closestPassage(string $text, string $find): ?string
+    {
+        $lines = explode("\n", $text);
+        $span = max(1, count(array_filter(explode("\n", trim($find)), fn ($l) => trim($l) !== '')));
+        $target = $this->comparable($find);
+        $scores = [];
+
+        for ($i = 0; $i + $span <= count($lines); $i++) {
+            $passage = implode("\n", array_slice($lines, $i, $span));
+
+            if (trim($passage) === '' || substr_count($text, $passage) !== 1) {
+                continue;
+            }
+
+            $candidate = $this->comparable($passage);
+            similar_text($target, $candidate, $percent);
+            $scores[] = [$percent, $passage];
+        }
+
+        usort($scores, fn ($a, $b) => $b[0] <=> $a[0]);
+        [$best, $second] = [$scores[0] ?? null, $scores[1] ?? null];
+
+        // Clearly the same paragraph, and not a near-tie with another one.
+        return $best && $best[0] >= 85 && (! $second || $best[0] - $second[0] >= 5) ? $best[1] : null;
+    }
+
+    private function comparable(string $value): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', preg_replace('/[^\p{L}\p{N}\s]/u', '', \App\Support\ArabicTextNormalizer::normalize($value))));
     }
 
     private function castAll(string $entity, array $values): array

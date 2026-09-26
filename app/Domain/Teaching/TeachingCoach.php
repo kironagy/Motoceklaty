@@ -295,6 +295,11 @@ class TeachingCoach
 
         try {
             $this->applier->validate($change);
+
+            // validate() pins `find` to the exact paragraph it matched.
+            if ($change->isDirty('after')) {
+                $change->save();
+            }
         } catch (\Throwable $e) {
             $change->update(['status' => 'invalid', 'error' => $e->getMessage()]);
 

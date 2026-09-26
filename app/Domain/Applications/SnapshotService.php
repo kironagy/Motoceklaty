@@ -67,9 +67,14 @@ class SnapshotService
             $invalid[] = ['key' => $key, 'code' => 'IDENTITY_IN_USE_BY_ANOTHER_CUSTOMER'];
         }
 
+        // A plan of a system the owner switched off ("مايلو") must be
+        // re-chosen before submission - it is treated as not chosen.
+        $plan = $application->installmentPlan;
+        $planUsable = $plan !== null && $plan->is_active && ($plan->installmentSystem?->is_active ?? false);
+
         $selectionMissing = array_keys(array_filter([
             'motorcycle' => $application->machine_id === null,
-            'plan' => $application->installment_plan_id === null,
+            'plan' => ! $planUsable,
             'down_payment' => $application->down_payment === null,
         ]));
 
@@ -136,10 +141,18 @@ class SnapshotService
             }
         }
 
+        $backMissing = in_array('national_id_back', $documents['missing'], true);
+
         if ($idMissing) {
             $steps[] = ['type' => 'document', 'key' => 'national_id_front', 'label' => $documentLabels['national_id_front'] ?? 'صورة البطاقة',
                 'why' => 'the photo fills full_name and national_id by itself - do not ask him to type them. '
-                    .'Just ask for the photo; do not tell him what will be read from it.'];
+                    .'Just ask for the photo; do not tell him what will be read from it.'
+                    .($backMissing ? ' Ask for BOTH sides in the same message: "صورة وش وضهر البطاقة".' : '')];
+        } elseif ($backMissing) {
+            // The back was never asked for: only the front was accepted and
+            // the back photos the customer sent were dropped as unsupported.
+            $steps[] = ['type' => 'document', 'key' => 'national_id_back', 'label' => $documentLabels['national_id_back'] ?? 'ضهر البطاقة',
+                'why' => 'the front is in - ask for a clear photo of the back of the same ID now.'];
         }
 
         $order = ['work_type', 'phone', ...self::HOME_ADDRESS, ...self::WORK_ADDRESS];
@@ -152,7 +165,7 @@ class SnapshotService
                 + $this->askAddressTogether($key, $fields, $fieldLabels);
         }
 
-        foreach (array_diff($documents['missing'], ['national_id_front']) as $key) {
+        foreach (array_diff($documents['missing'], ['national_id_front', 'national_id_back']) as $key) {
             $steps[] = ['type' => 'document', 'key' => $key, 'label' => $documentLabels[$key] ?? $key];
         }
 
@@ -195,7 +208,7 @@ class SnapshotService
     }
 
     /** Home address parts, asked in this order. */
-    private const HOME_ADDRESS = ['address', 'address_building_no', 'address_floor', 'address_landmark', 'residence_ownership'];
+    private const HOME_ADDRESS = ['address', 'address_building_no', 'address_floor', 'address_apartment', 'address_landmark', 'residence_ownership'];
 
     /** Work address parts - no floor, no rented/owned. */
     private const WORK_ADDRESS = ['work_address', 'work_building_no', 'work_landmark'];
@@ -223,7 +236,7 @@ class SnapshotService
 
     private function askedTwiceWithoutAnswer(Application $application, array $step): bool
     {
-        $word = $step['key'] === 'national_id_front' ? 'بطاق' : mb_substr(explode(' ', (string) $step['label'])[0], 0, 5);
+        $word = in_array($step['key'], ['national_id_front', 'national_id_back'], true) ? 'بطاق' : mb_substr(explode(' ', (string) $step['label'])[0], 0, 5);
 
         if ($word === '' || ! $application->origin_conversation_id) {
             return false;
@@ -434,6 +447,10 @@ class SnapshotService
             if ($result?->valid) {
                 $facts = array_merge($facts, $result->facts);
             }
+        }
+
+        if ($application->installmentPlan) {
+            $facts['months'] = $application->installmentPlan->months;
         }
 
         $facts['selection'] = [

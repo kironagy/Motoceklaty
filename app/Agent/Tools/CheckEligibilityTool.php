@@ -26,7 +26,8 @@ class CheckEligibilityTool implements Tool
     public function description(): string
     {
         return 'Hypothetical eligibility check before or outside an application (e.g. "would a 20 year-old '
-            .'qualify?"). Do not use when an application exists and you only need its status - read '
+            .'qualify?"). Call it whenever the customer states his age, before saying anything about it - with months '
+            .'when a duration is on the table (the age at the last installment is limited too). Do not use when an application exists and you only need its status - read '
             .'`eligibility` in the application snapshot instead.';
     }
 
@@ -37,6 +38,7 @@ class CheckEligibilityTool implements Tool
             'properties' => [
                 'customer_type' => ['type' => 'string'],
                 'age' => ['type' => 'integer'],
+                'months' => ['type' => 'integer', 'description' => 'Installment duration, to check the age at the last installment.'],
                 'motorcycle_id' => ['type' => 'integer'],
                 'plan_id' => ['type' => 'integer'],
                 'down_payment' => ['type' => 'number', 'minimum' => 0],
@@ -67,6 +69,10 @@ class CheckEligibilityTool implements Tool
 
         if (array_key_exists('age', $args)) {
             $facts['age'] = $args['age'];
+        }
+
+        if (isset($args['months'])) {
+            $facts['months'] = (int) $args['months'];
         }
 
         if (isset($args['motorcycle_id'])) {

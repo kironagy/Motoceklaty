@@ -83,8 +83,9 @@ class InstallmentTest extends TestCase
 
         $system->update(['plans' => [['months' => 36, 'interest' => 60]]]);
 
-        $this->assertSame(1, InstallmentPlan::where('installment_system_id', $system->id)->count());
-        $this->assertSame(36, InstallmentPlan::where('installment_system_id', $system->id)->value('months'));
+        // Dropped durations are deactivated, never deleted: applications reference plans.
+        $this->assertSame(1, InstallmentPlan::where('installment_system_id', $system->id)->where('is_active', true)->count());
+        $this->assertSame(36, InstallmentPlan::where('installment_system_id', $system->id)->where('is_active', true)->value('months'));
     }
 
     public function test_machine_observer_syncs_installment_systems_pivot_from_json(): void

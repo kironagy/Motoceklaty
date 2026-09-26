@@ -137,6 +137,8 @@ class DashboardLabels
         'TOTAL_NOT_SOURCED' => 'قال إجمالي مش من حسبة السيستم',
         'UNSOURCED_REASON' => 'ألّف سبب للمصاريف أو لفرق السعر',
         'BRANCH_NOT_SOURCED' => 'ذكر فرع أو عنوان أو مواعيد مش من جدول الفروع',
+        'AGE_NOT_CHECKED' => 'حكم على السن من غير ما يتأكد من الشروط',
+        'AVAILABILITY_PROMISE' => 'وعد يبلغ العميل لما موديل يتوفر',
     ];
 
     public const BLOCKER_TYPE = [

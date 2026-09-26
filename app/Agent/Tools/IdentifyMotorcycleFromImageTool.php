@@ -29,7 +29,10 @@ class IdentifyMotorcycleFromImageTool implements Tool
         return 'Map a customer photo to catalog candidates. Use when the customer sends a motorcycle photo '
             .'(shown as "[صورة مرفقة - media_id: N]") and asks about it. band=match: you may name the model. '
             .'band=similar: say it looks like / resembles the candidates and ask or offer them - never state it IS that model or quote its price as the photo\'s price. '
-            .'band=unknown: say you could not tell and ask for the name. Do not use for documents (use process_document).';
+            .'band=unknown: say you could not tell and ask for the name. '
+            .'band=not_in_catalog: the photo is observed.model, which we do NOT carry - say plainly what it is and "للأسف مش متوفرة عندنا حاليا", '
+            .'never call it one of our models and never guess when it will be available; you may offer the candidates as alternatives. '
+            .'Do not use for documents (use process_document).';
     }
 
     public function inputSchema(): array
@@ -61,9 +64,14 @@ class IdentifyMotorcycleFromImageTool implements Tool
             return ToolResult::error('NOT_AN_IMAGE');
         }
 
-        $catalogList = Machine::query()->where('is_active', true)->get(['id', 'name'])
-            ->map(fn (Machine $m) => "{$m->id}: {$m->name}")
+        $catalogList = Machine::query()->where('is_active', true)->with('brand')->get()
+            ->map(fn (Machine $m) => "{$m->id}: ".trim(($m->brand?->name ?? '').' '.$m->name))
             ->implode("\n");
+
+        // "Qg SRK 250" was the photo's caption and the bike's real model;
+        // it was matched to our Rk200 R and the customer was told so three
+        // times. What the customer wrote with the photo is evidence too.
+        $caption = trim((string) ($media->message?->text ?? ''));
 
         try {
             $response = $this->provider->chat(new AiRequest(
@@ -73,7 +81,12 @@ class IdentifyMotorcycleFromImageTool implements Tool
                     .'Report how you know: identified_by = "visible_name_or_logo" only if the model name or brand is actually readable on the MAIN bike itself - '
                     .'a logo on a neighbouring bike says nothing about the main one; '
                     .'"shape_only" if you are judging by shape/colour/design; "not_a_motorcycle" if the image is not a motorcycle. '
-                    .'Many models share a body - by shape alone, list every plausible candidate with honest (lower) confidence.',
+                    .'Many models share a body - by shape alone, list every plausible candidate with honest (lower) confidence. '
+                    .'Also say what the bike really is: observed.model = the exact make and model you recognise (from a readable name, the caption, '
+                    .'or its distinctive design - e.g. "QJ Motor SRK 250"), even when it is not in the catalog; empty if you cannot tell. '
+                    .'in_catalog = false when that model is not one of the catalog lines (a sibling model of the same brand is NOT the same model - '
+                    .'SRK 250 is not Rk200 R); then candidates are only look-alike alternatives with low confidence.'
+                    .($caption !== '' ? "\n\nThe customer wrote with the photo: \"{$caption}\"" : ''),
                 contents: [
                     ['role' => 'user', 'parts' => [
                         ['type' => 'inline_media', 'mime' => $media->mime, 'base64' => base64_encode(Storage::disk($media->disk)->get($media->path))],
@@ -95,11 +108,13 @@ class IdentifyMotorcycleFromImageTool implements Tool
                             ],
                         ],
                         'identified_by' => ['type' => 'string', 'enum' => ['visible_name_or_logo', 'shape_only', 'not_a_motorcycle']],
+                        'in_catalog' => ['type' => 'boolean'],
                         'vehicle_count' => ['type' => 'integer'],
                         'observed' => [
                             'type' => 'object',
                             'properties' => [
                                 'brand' => ['type' => 'string'],
+                                'model' => ['type' => 'string'],
                                 'style' => ['type' => 'string'],
                             ],
                         ],
@@ -147,6 +162,14 @@ class IdentifyMotorcycleFromImageTool implements Tool
 
         if ($band === 'match' && $vehicleCount > 1) {
             $band = 'similar';
+        }
+
+        // The model it recognised is not one we carry: never "this is our X".
+        $observedModel = trim((string) ($parsed['observed']['model'] ?? ''));
+
+        if (($parsed['in_catalog'] ?? true) === false && $observedModel !== '' && $identifiedBy !== 'not_a_motorcycle') {
+            $band = 'not_in_catalog';
+            $candidates = $candidates->map(fn ($c) => ['confidence' => min($c['confidence'], 0.4)] + $c);
         }
 
         $result = [

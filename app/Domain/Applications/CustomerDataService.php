@@ -18,6 +18,9 @@ use App\Domain\Conversations\CustomerStatements;
  */
 class CustomerDataService
 {
+    /** Fields only an accepted document may fill (shop sign / tax card). */
+    public const DOCUMENT_ONLY = ['business_name'];
+
     public function __construct(
         private readonly FieldValidatorRegistry $validators,
         private readonly CustomerStatements $statements,
@@ -41,6 +44,15 @@ class CustomerDataService
 
             if (! $field) {
                 $rejected[] = ['key' => $key, 'code' => 'UNKNOWN_FIELD'];
+
+                continue;
+            }
+
+            // Customers' words are not proof: "شركة اسكوبار" typed in the
+            // chat became the business on a submitted request with no photo
+            // or tax card behind it. These values are read off a document.
+            if (in_array($key, self::DOCUMENT_ONLY, true)) {
+                $rejected[] = ['key' => $key, 'code' => 'DOCUMENT_ONLY'];
 
                 continue;
             }

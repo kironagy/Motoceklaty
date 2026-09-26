@@ -44,6 +44,7 @@ class GetInstallmentOfferTool implements Tool
                 'no_upfront' => ['type' => 'boolean', 'description' => 'true only when the customer insists on paying nothing at pickup - no down payment and no admin fees.'],
                 'customer_type' => ['type' => 'string', 'description' => 'Only a type the customer stated (or the open application\'s). Omit when unknown.'],
                 'governorate' => ['type' => 'string', 'description' => 'Governorate key (cairo, giza, ...) only if the customer said where he lives.'],
+                'age' => ['type' => 'integer', 'description' => 'The customer\'s age if he stated it - durations that end past the age limit are left out.'],
             ],
         ];
     }
@@ -92,6 +93,20 @@ class GetInstallmentOfferTool implements Tool
         $noUpfront = ($args['no_upfront'] ?? false) === true;
 
         $offers = $this->offers->offers($machine, $customerTypeId, $governorate, $months, $downPayment, $noUpfront);
+
+        // A 62-year-old was offered 3 years; the last installment must fall
+        // by the age limit (eligibility rule max_age_at_end).
+        $maxMonths = $this->maxMonthsForAge(isset($args['age']) ? (int) $args['age'] : $this->applicantAge($ctx));
+
+        if ($maxMonths !== null) {
+            $tooLong = array_filter($offers, fn ($o) => $o['months'] > $maxMonths);
+            $offers = array_values(array_filter($offers, fn ($o) => $o['months'] <= $maxMonths));
+
+            if ($offers === [] && $tooLong !== []) {
+                return ToolResult::error('DURATION_EXCEEDS_AGE_LIMIT', 'At his age the longest allowed duration is '.$maxMonths
+                    .' months. Tell him politely; offer only durations up to that.');
+            }
+        }
 
         if ($offers === [] && $noUpfront) {
             return ToolResult::error('NO_ZERO_UPFRONT_PLAN', 'No plan without any payment at pickup for this motorcycle. '
@@ -183,6 +198,37 @@ class GetInstallmentOfferTool implements Tool
             .($upfront > 0 ? number_format($upfront).' جنيه وقت الاستلام + ' : '')
             .$offer['months'].' قسط × '.number_format($offer['monthly_payment']).' جنيه = '
             .number_format(round($upfront + $offer['monthly_payment'] * $offer['months'])).' جنيه في الآخر.';
+    }
+
+    private function maxMonthsForAge(?int $age): ?int
+    {
+        if ($age === null) {
+            return null;
+        }
+
+        $maxAtEnd = \App\Models\EligibilityRule::where('rule_type', 'age_range')->where('is_active', true)->get()
+            ->map(fn ($r) => $r->params['max_age_at_end'] ?? null)->filter()->min();
+
+        return $maxAtEnd === null ? null : max(0, ((int) $maxAtEnd - $age) * 12);
+    }
+
+    /** Age from the national ID on the open application, if read already. */
+    private function applicantAge(ToolContext $ctx): ?int
+    {
+        $application = $ctx->activeApplicationId ? Application::find($ctx->activeApplicationId) : null;
+
+        if (! $application) {
+            return null;
+        }
+
+        $nationalId = \App\Models\ApplicationData::where('application_id', $application->id)->where('party', 'applicant')
+            ->where('field_key', 'national_id')->where('status', 'valid')->value('value')
+            ?? \App\Models\CustomerAttribute::where('customer_id', $application->customer_id)
+                ->where('field_key', 'national_id')->where('status', 'valid')->value('value');
+
+        $parsed = $nationalId ? app(\App\Support\EgyptianNationalId::class)->parse((string) $nationalId) : [];
+
+        return isset($parsed['age']) ? (int) $parsed['age'] : null;
     }
 
     private function firstPaymentAfterDays(): int
