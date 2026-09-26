@@ -37,13 +37,17 @@ class EditableEntities
             'key' => 'string', 'label' => 'string', 'data_type' => 'string', 'enum_options' => 'json', 'scope' => 'string',
             'is_sensitive' => 'bool', 'description_for_ai' => 'text', 'is_active' => 'bool',
         ]],
-        'document_type' => [Models\DocumentType::class, 'نوع مستند', false, [
-            'label' => 'string', 'description_for_ai' => 'text', 'extraction_fields' => 'json', 'optional_fields' => 'json',
+        // Creatable: the owner teaches new kinds of proof ("صورة عقد الإيجار").
+        'document_type' => [Models\DocumentType::class, 'نوع مستند', true, [
+            'key' => 'string', 'label' => 'string', 'description_for_ai' => 'text', 'extraction_fields' => 'json', 'optional_fields' => 'json',
             'validation_rules' => 'json', 'accepted_mimes' => 'json', 'is_active' => 'bool',
         ]],
         'branch' => [Models\Branch::class, 'فرع', true, [
             'name' => 'string', 'governorate' => 'string', 'city' => 'string', 'address' => 'text', 'map_url' => 'string',
             'phones' => 'json', 'working_hours' => 'json', 'services' => 'json', 'is_active' => 'bool',
+        ]],
+        'customer_type' => [Models\CustomerType::class, 'نوع عميل', true, [
+            'key' => 'string', 'label' => 'string', 'legacy_work_status' => 'string', 'is_active' => 'bool', 'sort' => 'int',
         ]],
         'business_memory' => [Models\BusinessMemory::class, 'معلومة', true, [
             'key' => 'string', 'category' => 'string', 'title' => 'string', 'content' => 'text', 'priority' => 'int',

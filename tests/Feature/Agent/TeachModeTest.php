@@ -206,4 +206,35 @@ class TeachModeTest extends TestCase
         \Livewire\Livewire::test(\App\Filament\Resources\BotLessonResource\Pages\ListBotLessons::class)->assertOk();
         \Livewire\Livewire::test(\App\Filament\Resources\TeachingCaseResource\Pages\ListTeachingCases::class)->assertOk();
     }
+
+    public function test_the_coach_recovers_from_a_reply_stuck_on_blank_spaces(): void
+    {
+        Queue::fake();
+        $staff = Staff::create(['name' => 'S', 'email' => 'a'.uniqid().'@x.com', 'password' => 'secret']);
+        $bot = WhatsappBot::create(['staff_id' => $staff->id, 'name' => 'B', 'whatsapp_phone_number_id' => uniqid(), 'is_active' => false]);
+        $conversation = WhatsappConversation::create(['whatsapp_bot_id' => $bot->id, 'phone' => 'sim-3', 'status' => 'open']);
+
+        $fake = new FakeAiProvider();
+        // Live 2026-09-26: the schema-constrained reply looped on spaces.
+        $fake->queue(new AiResponse(['{"understanding": "فهمت", "expectation": "البوت يسأل'.str_repeat(' ', 500)], [], 'MAX_TOKENS', [], 'fake', null, 1));
+        $fake->queue(new AiResponse(['```json'."\n".json_encode([
+            'understanding' => 'فهمت إنه يسأل أنهي نسخة', 'question' => '', 'expectation' => 'يسأل أنهي نسخة',
+            'operations' => [['kind' => 'instruction', 'summary' => 'قاعدة جديدة', 'find' => '', 'replace' => "## النسخ\n- لو الموديل ليه أكتر من نسخة اسأله أنهي.", 'changes' => []]],
+        ], JSON_UNESCAPED_UNICODE)."\n```"], [], 'STOP', [], 'fake', null, 1));
+        $this->app->instance(AiProvider::class, $fake);
+
+        $runner = \Mockery::mock(RegressionRunner::class);
+        $runner->shouldReceive('related')->andReturn(collect());
+        $runner->shouldReceive('run')->andReturn(['pass' => true, 'reply' => 'تقصد أنهي نسخة؟', 'reason' => '']);
+        $this->app->instance(RegressionRunner::class, $runner);
+
+        $session = app(TeachingCoach::class)->teach($conversation, null, 'اسأله الأول أنهي هوجن 4', $staff->id);
+
+        $this->assertSame('فهمت إنه يسأل أنهي نسخة', $session->understanding);
+        $change = $session->changes()->first();
+        $this->assertSame('proposed', $change->status);
+
+        app(TeachingCoach::class)->approve($change, $staff->id);
+        $this->assertStringEndsWith("## النسخ\n- لو الموديل ليه أكتر من نسخة اسأله أنهي.", app(\App\Domain\Settings\AgentInstructions::class)->current()['text']);
+    }
 }

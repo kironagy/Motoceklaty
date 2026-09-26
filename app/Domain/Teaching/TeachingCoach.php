@@ -378,26 +378,69 @@ class TeachingCoach
         $system = trim((string) file_get_contents(resource_path('agent/instructions/coach.md')))
             ."\n\n".$this->context->knowledge($ownerText."\n".$transcript);
 
-        $request = new AiRequest(
-            system: $system,
-            contents: [['role' => 'user', 'parts' => [['type' => 'text', 'text' => $prompt]]]],
-            toolMode: 'none',
-            temperature: 0.2,
-            maxOutputTokens: 16384,
-            timeoutSeconds: 120,
-            responseSchema: $this->schema(),
-            thinkingLevel: config('agent.teaching.coach_thinking') ?: 'low',
-        );
+        // Live: "البوت يسأل" and then blank spaces until MAX_TOKENS, twice in
+        // a row - Gemini's schema-constrained output can get stuck repeating
+        // whitespace. Each retry changes what drives the loop: a higher
+        // temperature, then free JSON with no schema at all.
+        $attempts = [
+            ['temperature' => 0.2, 'schema' => true],
+            ['temperature' => 0.7, 'schema' => true],
+            ['temperature' => 0.4, 'schema' => false],
+        ];
+        $failure = null;
 
-        $response = $this->withCoachModel(fn () => $this->ai->chat($request));
-        $raw = trim(implode('', $response->textParts));
-        $plan = json_decode(preg_replace('/^```(?:json)?\s*|\s*```$/', '', $raw), true);
+        foreach ($attempts as $attempt) {
+            $request = new AiRequest(
+                system: $system.($attempt['schema'] ? '' : "\n\n## شكل الرد\nرد بـ JSON بس (من غير أي كلام قبله أو بعده) بالمفاتيح دي بالظبط:\n"
+                    .json_encode($this->schema(), JSON_UNESCAPED_UNICODE)),
+                contents: [['role' => 'user', 'parts' => [['type' => 'text', 'text' => $prompt]]]],
+                toolMode: 'none',
+                temperature: $attempt['temperature'],
+                // Enough for a long plan; a stuck reply fails fast instead of
+                // making the owner wait for 16k tokens of spaces.
+                maxOutputTokens: 8192,
+                timeoutSeconds: 120,
+                responseSchema: $attempt['schema'] ? $this->schema() : null,
+                thinkingLevel: config('agent.teaching.coach_thinking') ?: 'low',
+            );
 
-        if (! is_array($plan)) {
-            throw new \RuntimeException("رد المدرّب مش مفهوم ({$response->finishReason}): ".mb_substr($raw, 0, 300));
+            try {
+                $response = $this->withCoachModel(fn () => $this->ai->chat($request));
+            } catch (\App\Agent\Providers\AiProviderException $e) {
+                $failure = 'المدرّب مش متاح دلوقتي ('.$e->getMessage().')';
+
+                continue;
+            }
+
+            $plan = $this->parsePlan(implode('', $response->textParts));
+
+            if ($plan !== null) {
+                return $plan;
+            }
+
+            $failure = "رد المدرّب مش مفهوم ({$response->finishReason})";
+            \Illuminate\Support\Facades\Log::warning('Teaching coach reply unusable, retrying', [
+                'finish_reason' => $response->finishReason, 'schema' => $attempt['schema'],
+                'head' => mb_substr(implode('', $response->textParts), 0, 200),
+            ]);
         }
 
-        return $plan;
+        throw new \RuntimeException(($failure ?? 'رد المدرّب مش مفهوم').' - جرّب تبعت التصحيح تاني.');
+    }
+
+    /** The JSON plan, or null when the reply is cut off or not a plan. */
+    private function parsePlan(string $raw): ?array
+    {
+        $raw = trim(preg_replace('/^```(?:json)?\s*|\s*```$/', '', trim($raw)));
+
+        // Free-text JSON may come with a sentence around it.
+        if (! str_starts_with($raw, '{') && ($start = strpos($raw, '{')) !== false) {
+            $raw = substr($raw, $start, strrpos($raw, '}') - $start + 1);
+        }
+
+        $plan = json_decode($raw, true);
+
+        return is_array($plan) && isset($plan['understanding']) ? $plan + ['question' => '', 'expectation' => '', 'operations' => []] : null;
     }
 
     private function withCoachModel(callable $call): mixed

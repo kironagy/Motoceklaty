@@ -62,7 +62,10 @@ class ChangeApplier
 
                 case 'instruction':
                     $current = $this->instructions->current();
-                    $text = str_replace($after['find'], $after['replace'], $current['text']);
+                    // An empty `find` adds a new rule of its own at the end.
+                    $text = (string) ($after['find'] ?? '') === ''
+                        ? rtrim($current['text'])."\n\n".trim((string) $after['replace'])."\n"
+                        : str_replace($after['find'], $after['replace'], $current['text']);
                     $change->before = ['version_id' => $current['id']];
                     $version = $this->instructions->publish($text,'من وضع التعليم: '.$change->summary, $staffId);
                     $change->target_id = (string) $version->id;
@@ -155,6 +158,12 @@ class ChangeApplier
         $after = (array) $change->after;
         $find = (string) ($after['find'] ?? '');
         $text = $this->instructions->current()['text'];
+
+        // A new rule with nothing to replace: appended as it is.
+        if ($find === '') {
+            return trim((string) ($after['replace'] ?? '')) !== '' || throw new \InvalidArgumentException('التعليمة الجديدة فاضية');
+        }
+
         $count = $find === '' ? 0 : substr_count($text, $find);
 
         if ($count > 1) {
