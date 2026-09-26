@@ -4,34 +4,53 @@ namespace App\Observers;
 
 use App\Domain\Applications\ApplicationStateMachine;
 use App\Domain\Applications\ApplicationTransitionException;
+use App\Domain\Applications\StaffDecisionService;
 use App\Jobs\SendWhatsappStatusNotification;
 use App\Models\ApplicationEvent;
 use App\Models\InstallmentRequest;
 use App\Models\LegacyStatusMapping;
+use Illuminate\Support\Facades\Log;
 
 class InstallmentRequestObserver
 {
-    private const NOTIFIABLE_STATUSES = ['approved', 'rejected', 'paused'];
+    private const NOTIFIABLE_STATUSES = ['approved', 'rejected', 'paused', 'canceled'];
 
     public function updated(InstallmentRequest $model): void
     {
-        if (! $model->wasChanged('status')) {
+        $statusChanged = $model->wasChanged('status');
+        $status = (string) $model->status;
+
+        // Staff can also change what they need from the customer on a
+        // request that is already paused - that is a new message too.
+        $actionChanged = $status === 'paused' && $model->wasChanged('customer_action') && filled($model->customer_action);
+
+        if (! $statusChanged && ! $actionChanged) {
             return;
         }
 
-        $status = (string) $model->status;
-
-        $this->syncApplicationStatus($model, $status);
+        if ($statusChanged) {
+            $this->syncApplicationStatus($model, $status);
+        }
 
         if (! in_array($status, self::NOTIFIABLE_STATUSES, true)) {
             return;
         }
 
-        SendWhatsappStatusNotification::dispatchSync(
-            $model->id,
-            $status,
-            $this->reasonText($model->checks_report)
-        );
+        $reason = $this->reasonText($model->checks_report);
+        $decisions = app(StaffDecisionService::class);
+
+        if ($status === 'paused') {
+            try {
+                $decisions->requestFromCustomer($model, $reason, $statusChanged ? (string) $model->getOriginal('status') : null);
+            } catch (\Throwable $e) {
+                // Saving the request must never fail because of the bot side.
+                Log::warning('Staff request to customer failed', ['installment_request_id' => $model->id, 'error' => $e->getMessage()]);
+            }
+        }
+
+        $decisions->logDecision($model, $status, $reason);
+
+        SendWhatsappStatusNotification::dispatchSync($model->id, $status, $reason);
     }
 
     /**
@@ -87,7 +106,7 @@ class InstallmentRequestObserver
     private function reasonText(mixed $checksReport): ?string
     {
         if (is_array($checksReport)) {
-            return trim(implode("\n", array_filter(array_map('strval', $checksReport))));
+            return trim(implode("\n", array_filter(array_map(fn ($v) => is_scalar($v) ? (string) $v : '', $checksReport))));
         }
 
         if (is_string($checksReport) && trim($checksReport) !== '') {

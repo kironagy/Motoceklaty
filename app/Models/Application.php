@@ -19,12 +19,14 @@ class Application extends Model
         'submitted_at',
         'installment_request_id',
         'last_activity_at',
+        'staff_request',
     ];
 
     protected $casts = [
         'down_payment' => 'float',
         'submitted_at' => 'datetime',
         'last_activity_at' => 'datetime',
+        'staff_request' => 'array',
     ];
 
     /** Statuses that count as "still open" for the active-application policy (T13 §3). */

@@ -102,18 +102,9 @@ class SendWhatsappStatusNotification implements ShouldQueue
         return $conversationPhone . '@s.whatsapp.net';
     }
 
+    /** Worded per status and per what staff need from the customer. */
     private function messageFor(InstallmentRequest $request, string $status, ?string $reason): ?string
     {
-        $reason = trim((string) $reason);
-
-        return match ($status) {
-            'approved' => "ألف مبروك يا فندم، طلب التقسيط رقم #{$request->id} تمت الموافقة عليه.\nبرجاء التوجه إلى الفرع لاستكمال باقي الإجراءات واستلام المكنة.",
-            'paused' => "طلبك رقم #{$request->id} متوقف مؤقتًا."
-                . ($reason !== '' ? "\nالسبب: {$reason}" : '')
-                . "\nبرجاء التواصل مع المعرض لاستكمال المطلوب.",
-            'rejected' => "للأسف طلبك رقم #{$request->id} اترفض."
-                . ($reason !== '' ? "\nالسبب: {$reason}" : ''),
-            default => null,
-        };
+        return app(\App\Domain\Applications\StaffDecisionService::class)->message($request, $status, $reason);
     }
 }

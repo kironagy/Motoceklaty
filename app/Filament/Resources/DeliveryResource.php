@@ -1800,6 +1800,18 @@ Forms\Components\Section::make('الملاحظات')
                                 'canceled' => 'الطلب ملغي',
                             ])
                             ->default('new')
+                            ->live()
+                            ->disabled(!$isAdmin)
+                            ->dehydrated($isAdmin),
+
+                        // Paused bot requests: what the customer must do. The
+                        // bot messages him and waits for exactly this.
+                        Forms\Components\Select::make('customer_action')
+                            ->label('المطلوب من العميل')
+                            ->helperText('العميل هيوصله رسالة على الواتساب بالمطلوب والسبب، والبوت هيستنى منه الحاجة دي بس ويرجّع الطلب هنا.')
+                            ->options(fn () => \App\Domain\Applications\StaffDecisionService::actionOptions())
+                            ->placeholder('مفيش - رسالة إن الطلب متوقف بالسبب بس')
+                            ->visible(fn (Forms\Get $get, $record) => $get('status') === 'paused' && $record?->whatsapp_conversation_id)
                             ->disabled(!$isAdmin)
                             ->dehydrated($isAdmin),
 

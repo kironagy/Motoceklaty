@@ -340,4 +340,67 @@ class SubmissionTest extends TestCase
             'delivery_status' => 'sent',
         ]);
     }
+
+    public function test_the_request_belongs_to_the_employee_of_the_whatsapp_number(): void
+    {
+        [$application, $conversation] = $this->completeApplication();
+        $this->submitConfirmed($conversation, $application);
+
+        $this->assertSame(\App\Models\WhatsappBot::find($conversation->whatsapp_bot_id)->staff_id, InstallmentRequest::find($application->refresh()->installment_request_id)->staff_id);
+    }
+
+    public function test_approval_tells_him_to_come_to_the_nearest_branch(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200)]);
+
+        [$application, $conversation] = $this->completeApplication();
+        $this->submitConfirmed($conversation, $application);
+
+        InstallmentRequest::find($application->refresh()->installment_request_id)->update(['status' => 'approved']);
+
+        $text = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('sender_type', 'system')->latest('id')->value('text');
+        $this->assertStringContainsString('مبروك', $text);
+        $this->assertStringContainsString('أقرب فرع', $text);
+    }
+
+    public function test_a_paused_request_asks_him_for_the_fix_and_goes_back_to_the_same_request(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200)]);
+
+        [$application, $conversation] = $this->completeApplication();
+        $this->submitConfirmed($conversation, $application);
+        $request = InstallmentRequest::find($application->refresh()->installment_request_id);
+
+        \Illuminate\Support\Carbon::setTestNow(now()->addMinute());
+        $request->update(['status' => 'paused', 'customer_action' => 'data', 'checks_report' => 'الاسم في الطلب ناقص اسم الجد']);
+
+        $application->refresh();
+        $this->assertSame('needs_more_info', $application->status);
+        $this->assertSame('data', $application->staff_request['type']);
+        $this->assertSame('staff_request', app(\App\Domain\Applications\SnapshotService::class)->for($application)['next_step']['type']);
+
+        $text = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('sender_type', 'system')->latest('id')->value('text');
+        $this->assertStringContainsString('الاسم في الطلب ناقص اسم الجد', $text);
+
+        // Not fixed yet: nothing goes back.
+        $early = app(SubmitApplicationTool::class)->execute(['confirm' => true], $this->ctx($conversation, $application, 5));
+        $this->assertFalse($early->ok);
+
+        \Illuminate\Support\Carbon::setTestNow(now()->addMinute());
+        ApplicationData::where('application_id', $application->id)->where('field_key', 'full_name')->first()->update(['value' => 'Mohamed Ali Hassan']);
+
+        $result = app(SubmitApplicationTool::class)->execute(['confirm' => true], $this->ctx($conversation, $application->refresh(), 6));
+        \Illuminate\Support\Carbon::setTestNow();
+
+        $this->assertTrue($result->ok);
+        $this->assertTrue($result->data['resubmitted']);
+        $this->assertSame($request->id, $result->data['reference']['installment_request_id']);
+        $this->assertSame(1, InstallmentRequest::count());
+
+        $request->refresh();
+        $this->assertSame('new', $request->status);
+        $this->assertSame('Mohamed Ali Hassan', $request->applicant_name);
+        $this->assertSame('submitted', $application->refresh()->status);
+        $this->assertNull($application->staff_request);
+    }
 }

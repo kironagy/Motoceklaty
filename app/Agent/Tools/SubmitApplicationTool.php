@@ -61,7 +61,9 @@ class SubmitApplicationTool implements Tool
         }
 
         if ($result['submitted'] === true) {
-            return ToolResult::ok(['submitted' => true, 'reference' => $result['reference']]);
+            return ToolResult::ok(['submitted' => true, 'reference' => $result['reference']] + (($result['resubmitted'] ?? false)
+                ? ['resubmitted' => true, 'note' => 'What staff asked for was sent back to the same request, now under review again. Tell him that in one line.']
+                : []));
         }
 
         // Not submitted is never a success. The summary is sent by Laravel,

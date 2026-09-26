@@ -49,6 +49,12 @@ class SubmissionService
             $application = Application::whereKey($application->id)->lockForUpdate()->firstOrFail();
 
             if ($application->installment_request_id) {
+                // Staff paused it and asked him for something: once it is in,
+                // the same request goes back to them - no new request.
+                if ($application->status === 'needs_more_info' && is_array($application->staff_request)) {
+                    return app(StaffDecisionService::class)->resubmit($application);
+                }
+
                 return ['submitted' => true, 'reference' => $this->reference($application)];
             }
 
@@ -123,6 +129,8 @@ class SubmissionService
                     'application_id' => $application->id,
                     'machine_id' => $application->machine_id,
                     'whatsapp_conversation_id' => $application->origin_conversation_id,
+                    // The employee the WhatsApp number belongs to owns the request.
+                    'staff_id' => $this->botStaffId($application),
                     'installment_type' => $application->installmentPlan->installmentSystem->name,
                     'months' => $application->installmentPlan->months,
                     'machine_installment_price' => $application->machine->installment_price,
@@ -246,6 +254,13 @@ class SubmissionService
         }
 
         return $values;
+    }
+
+    private function botStaffId(Application $application): ?int
+    {
+        $botId = \App\Models\WhatsappConversation::whereKey($application->origin_conversation_id)->value('whatsapp_bot_id');
+
+        return $botId ? \App\Models\WhatsappBot::whereKey($botId)->value('staff_id') : null;
     }
 
     private function reference(Application $application): array

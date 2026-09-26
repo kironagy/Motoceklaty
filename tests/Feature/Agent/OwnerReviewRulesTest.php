@@ -104,4 +104,9 @@ class OwnerReviewRulesTest extends TestCase
 
         $this->assertSame('- قوله أسماء جهات التمويل ووضح له إننا بنختار له النظام الأنسب والأوفر ليه تلقائياً.', $change->after['find']);
     }
+
+    public function test_a_correct_branch_list_saying_all_branches_are_open_passes(): void
+    {
+        $this->assertNull($this->check("للأسف مفيش فرع لينا في المنصورة.\n\nدي فروعنا المتاحة حالياً:\nفرع عين شمس: ش الزهراء.\n\nكل الفروع شغالة من ١٠ الصبح لـ ١٠ بالليل.", [$this->branchLookup(true)]));
+    }
 }

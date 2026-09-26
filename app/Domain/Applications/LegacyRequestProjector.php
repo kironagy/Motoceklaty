@@ -212,6 +212,17 @@ class LegacyRequestProjector
             ->filter()->values()->all();
     }
 
+    /** @return string[] request columns a document type is copied into */
+    public function documentColumns(string $typeKey): array
+    {
+        return match (true) {
+            $typeKey === 'national_id_front' => ['applicant_id_image', 'guarantor_id_image'],
+            $typeKey === 'national_id_back' => ['applicant_id_back_image', 'guarantor_id_back_image'],
+            isset(self::DOCUMENT_COLUMNS[$typeKey]) => [self::DOCUMENT_COLUMNS[$typeKey][0]],
+            default => [],
+        };
+    }
+
     /** Re-applies the mapping to an already projected request (backfill). */
     public function refresh(InstallmentRequest $request): void
     {

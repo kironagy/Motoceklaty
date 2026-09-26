@@ -18,6 +18,7 @@ class InstallmentRequest extends Model
             ->logOnly([
                 'status',
                 'checks_report',
+                'customer_action',
                 'staff_id',
                 'installment_type',
                 'machine_id',
@@ -126,6 +127,7 @@ class InstallmentRequest extends Model
     // 🔹 الحالة والتحقق
     'status',
     'checks_report',
+    'customer_action',
 
     // 🔹 الموظف المسؤول
     'staff_id',

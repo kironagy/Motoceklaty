@@ -91,6 +91,25 @@ class SnapshotService
         );
 
         $canSubmit = $blockers === [];
+        $staffStep = null;
+
+        // Already submitted; staff paused it and asked for one thing. That
+        // thing is all that is asked, and all that stands in the way.
+        if ($application->status === 'needs_more_info' && is_array($application->staff_request)) {
+            $staffRequest = $application->staff_request;
+            $resolved = app(StaffDecisionService::class)->resolved($application);
+            $blockers = $resolved ? [] : [['type' => 'staff_request', 'key' => $staffRequest['document'] ?? 'data', 'code' => 'PENDING']];
+            $canSubmit = $resolved;
+            $staffStep = $resolved
+                ? ['type' => 'submit', 'why' => 'what staff asked for is in - call submit_application (confirm=true); it goes straight back to the same request under review, no summary needed. Tell him it went back for review.']
+                : (($staffRequest['type'] ?? null) === 'document'
+                    ? ['type' => 'document', 'key' => $staffRequest['document'], 'label' => $staffRequest['label'] ?? $staffRequest['document'],
+                        'why' => 'staff paused his submitted request and need this document again'.(filled($staffRequest['reason'] ?? null) ? ' ('.$staffRequest['reason'].')' : '')
+                            .'. Ask ONLY for this, process it with process_document. Nothing else is needed.']
+                    : ['type' => 'staff_request', 'key' => 'data', 'label' => 'تصحيح البيانات',
+                        'why' => 'staff paused his submitted request to correct data: '.($staffRequest['reason'] ?? '')
+                            .'. Ask him for the correct value(s) and save them with record_customer_data. Nothing else is needed.']);
+        }
 
         return [
             'application_id' => $application->id,
@@ -114,7 +133,9 @@ class SnapshotService
             'eligibility' => $eligibility,
             'can_submit' => $canSubmit,
             'blockers' => $blockers,
-        ] + $this->guidance($application, $requirementsSnapshot['fields']['missing'], $invalid, $documents, $selectionMissing, $eligibility, $canSubmit) + [
+        ] + ($staffStep !== null
+            ? ['next_step' => $staffStep, 'staff_request' => $application->staff_request]
+            : $this->guidance($application, $requirementsSnapshot['fields']['missing'], $invalid, $documents, $selectionMissing, $eligibility, $canSubmit)) + [
             'last_activity_at' => $application->last_activity_at?->toIso8601String(),
         ];
     }
