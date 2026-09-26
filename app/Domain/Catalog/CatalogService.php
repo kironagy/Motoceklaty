@@ -244,8 +244,6 @@ class CatalogService
                         $m->brand?->name,
                         $m->name,
                         $m->cc ? "{$m->cc}cc" : null,
-                        $m->cash_price !== null ? number_format((float) $m->cash_price).' كاش' : null,
-                        $m->installment_price !== null ? number_format((float) $m->installment_price).' قسط' : null,
                     ]);
 
                     return implode(' · ', $parts);

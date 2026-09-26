@@ -58,7 +58,7 @@ class ContextBuilderTest extends TestCase
 
         $request = app(ContextBuilder::class)->build($turn);
 
-        $this->assertStringContainsString('فريق المبيعات في معرض موتوسيكلات', $request->system);
+        $this->assertStringContainsString('فريق المبيعات في معرض موتوجيت للموتوسيكلات', $request->system);
         $this->assertStringContainsString('## الحالة الحالية', $request->system);
         $this->assertStringNotContainsString('فهرس الكتالوج', $request->system);
         $this->assertStringNotContainsString('إرشادات ثابتة', $request->system);
