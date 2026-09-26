@@ -123,8 +123,9 @@ class ReplyGuard
         }
 
         // "المصاريف دي مقابل إجراءات التقسيط والورق" / "تمويل خارجي":
-        // reasons nobody recorded. The numbers are the answer.
-        if (preg_match('/مقابل\s+(?:ال)?(?:إجراءات|اجراءات|ورق|تمويل|خدمات|تكلف[ةه]|تسهيلات|فتح ملف|دراس[ةه])|تمويل خارجي|تكلف[ةه] (?:ال)?تمويل|(?:ال)?خدمات اللي بتتقدم|تكلف[ةه] (?:ال)?إجراءات/u', $assertions)) {
+        // reasons nobody recorded. Judged on the whole reply: the reason
+        // usually sits in an "عشان ..." clause that $assertions drops.
+        if (! $this->hasPriceDifferencePolicy($outcomes) && $this->explainsPriceDifferenceOrFees($replyText)) {
             return 'UNSOURCED_REASON';
         }
 
@@ -148,6 +149,37 @@ class ReplyGuard
         }
 
         return null;
+    }
+
+    /**
+     * The owner's explanation of the cash/installment difference is data
+     * (get_installment_offer.price_difference_policy): with it in hand the
+     * reason is sourced, without it it is invented.
+     */
+    /** "بيغطي تكاليف التمويل والتشغيل" / "مقابل الورق": a reason for the price gap or the fees. */
+    private function explainsPriceDifferenceOrFees(string $text): bool
+    {
+        $reasonWords = '/مقابل\s+(?:ال)?(?:إجراءات|اجراءات|ورق|تمويل|خدمات|تكلف[ةه]|تسهيلات|فتح ملف|دراس[ةه])|تمويل خارجي|جه[ةه] تمويل|تكلف[ةه]|تكاليف|التشغيل|(?:ال)?خدمات|ضريب[ةه]|ضرايب|ضرائب|فوايد|فوائد|تأمين|التأمين/u';
+        $aboutGap = '/الفرق|فرق|أغلى|اغلى|أزيد|ازيد|أكتر من الكاش|اكتر من الكاش|بيغطي|مقابل|المصاريف|مصاريف/u';
+
+        foreach (preg_split('/(?<=[.!؟?\n])/u', $text) as $sentence) {
+            if (preg_match($reasonWords, $sentence) && preg_match($aboutGap, $sentence)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function hasPriceDifferencePolicy(array $outcomes): bool
+    {
+        foreach ($outcomes as $outcome) {
+            if ($outcome['name'] === 'get_installment_offer' && $outcome['ok'] && filled($outcome['data']['price_difference_policy'] ?? null)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function statesUnsourcedTotal(string $replyText, string $toolResultsBlob): bool

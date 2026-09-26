@@ -59,6 +59,9 @@ class AgentSettings
             'documents.name_match_threshold' => ['documents', 'نسبة تطابق الاسم في المستندات', 'float', 'من 0 لـ 1. 1 = لازم الاسم يطابق بالظبط.'],
             'images.resend_window_minutes' => ['documents', 'متبعتش نفس الصور تاني خلال (دقيقة)', 'int', null],
 
+            'installments.first_payment_after_days' => ['sales', 'أول قسط بعد كام يوم من الاستلام', 'int', null],
+            'installments.price_difference_explanation' => ['sales', 'شرح فرق السعر بين الكاش والتقسيط', 'text', 'البوت بيشرح للعميل بكلامه من الكلام ده لما يسأل ليه التقسيط أغلى من الكاش - مش بينقله نسخ.'],
+
             'instructions.approved_version' => ['instructions', 'نسخة التعليمات المعتمدة', 'string', null],
         ];
     }
@@ -72,6 +75,7 @@ class AgentSettings
             'handoff' => 'التحويل لموظف ورسائل النظام',
             'memory' => 'الذاكرة والسياق',
             'documents' => 'الصور والمستندات',
+            'sales' => 'البيع والتقسيط',
         ];
     }
 

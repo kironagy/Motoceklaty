@@ -105,6 +105,11 @@ return [
     'installments' => [
         // The first installment falls due this many days after pickup.
         'first_payment_after_days' => (int) env('AGENT_FIRST_INSTALLMENT_AFTER_DAYS', 45),
+
+        // Owner's policy (2026-09-26) for "why does it cost more on
+        // installments". The agent explains it in its own words; editable
+        // from the dashboard (إعدادات البوت).
+        'price_difference_explanation' => 'التقسيط بيبقى عن طريق جهة تمويل خارجية. الفرق بين سعر الكاش وسعر التقسيط هو تكلفة التمويل والخدمات اللي بتتقدم في نظام التقسيط على مدار المدة اللي العميل اختارها، مش سعر المكنة لوحدها، والسعر بالتقسيط بيبقى شامل الضريبة والخدمات. لو العميل عايز يشتري كاش، سعر الكاش متاح في كل فروعنا.',
     ],
 
     'catalog' => [

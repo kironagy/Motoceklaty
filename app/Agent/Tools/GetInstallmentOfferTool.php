@@ -137,9 +137,12 @@ class GetInstallmentOfferTool implements Tool
                 'down_payment' => $o['down_payment'],
             ], $shown),
             'first_payment_after_days' => $this->firstPaymentAfterDays(),
+            // the owner's wording of why installments cost more than cash
+            'price_difference_policy' => (string) config('agent.installments.price_difference_explanation'),
             'how_to_present' => 'Send the `say` lines as they are (one per line, you may reword lightly, but keep every number and '
                 .'keep saying whether there are admin fees). Admin fees are NOT a down payment - never call them "مقدم". '
-                .'If he asks why installments cost more than cash or what he pays in the end, send the offer\'s `breakdown` as it is - '
+                .'If he asks why installments cost more than cash, explain it in your own short words from price_difference_policy (never copied word for word, never adding reasons it does not give), '
+                .'then offer the cash price. If he asks what he pays in the end, send the offer\'s `breakdown` as it is - '
                 .'installment_price is the price the installment is calculated on, never the total he pays. '
                 .'Add once: "'.$this->firstPaymentLine().'". No system/company names, no word "نظام"/"أنظمة".'.($others !== [] ? ' Say other durations exist ('.implode('/', array_map(fn ($m) => $this->duration($m), $others)).').' : ''),
         ] + ($capped ? ['explain_to_customer' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : []));
