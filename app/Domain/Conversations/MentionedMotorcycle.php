@@ -142,14 +142,7 @@ class MentionedMotorcycle
             }
         }
 
-        foreach (Machine::where('is_active', true)->whereNotNull('brand_id')->get(['name', 'brand_id']) as $machine) {
-            $first = self::letterTokens($machine->name)[0] ?? null;
-
-            if ($first !== null) {
-                $words[$first][] = (int) $machine->brand_id;
-            }
-        }
-
+        // Only brand words: a model name such as "VLR" is sold by two brands.
         $generic = array_map([ArabicTextNormalizer::class, 'normalize'], self::GENERIC);
 
         return array_map(fn ($ids) => array_values(array_unique(array_map('intval', $ids))),
