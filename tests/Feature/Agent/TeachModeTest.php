@@ -236,29 +236,26 @@ class TeachModeTest extends TestCase
         Queue::assertPushed(\App\Jobs\TeachCorrection::class, fn ($job) => $job->sessionId === $stuck->id);
     }
 
-    public function test_an_older_opposite_case_does_not_block_the_new_lesson(): void
+    public function test_teaching_spends_no_requests_on_a_replay(): void
     {
-        // The owner changed his mind ("don't ask the work" after "ask the
-        // work"): the old case failed and the new lesson was reverted.
+        // The owner: no "نفس الموقف بعد التعديل" replay - it cost a simulated
+        // turn and a judge call on every correction.
         Queue::fake();
         [$staff, $conversation, $reply] = $this->simConversation();
-        $old = TeachingCase::create(['history' => [['role' => 'customer', 'text' => 'x', 'media' => []]], 'expectation' => 'يسأل عن الشغل', 'is_active' => true]);
 
         $fake = new FakeAiProvider();
         $fake->queue($this->coachPlan([['kind' => 'lesson', 'summary' => 'الأقساط', 'title' => 'الأقساط', 'rule' => 'اعرض الأقساط من غير ما تسأل عن الشغل', 'changes' => []]]));
         $this->app->instance(AiProvider::class, $fake);
         $runner = \Mockery::mock(RegressionRunner::class);
-        $runner->shouldReceive('related')->andReturn(collect([$old]));
-        $runner->shouldReceive('run')->andReturnUsing(fn (TeachingCase $c) => $c->id === $old->id
-            ? ['pass' => false, 'reply' => 'سنة: ...', 'reason' => 'ما سألش عن الشغل']
-            : ['pass' => true, 'reply' => 'سنة: ...', 'reason' => '']);
+        $runner->shouldNotReceive('run');
         $this->app->instance(RegressionRunner::class, $runner);
 
         $session = app(TeachingCoach::class)->teach($conversation, $reply->id, 'ما تسألش عن الشغل', $staff->id);
 
         $this->assertSame('done', $session->status);
         $this->assertSame(1, BotLesson::where('is_active', true)->count());
-        $this->assertFalse($old->fresh()->is_active);
+        $this->assertCount(1, $fake->requests());
+        $this->assertArrayNotHasKey('checks', (array) $session->result);
     }
 
     public function test_a_lesson_edit_without_its_rule_keeps_the_old_rule(): void

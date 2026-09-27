@@ -19,7 +19,6 @@ class TeachingCoach
         private readonly AiProvider $ai,
         private readonly CoachContext $context,
         private readonly ChangeApplier $applier,
-        private readonly RegressionRunner $regression,
     ) {
     }
 
@@ -199,59 +198,10 @@ class TeachingCoach
         $pending = $changes->where('status', 'proposed')->isNotEmpty();
         $result = (array) $session->result;
 
-        if ($case && $applied->isNotEmpty()) {
-            try {
-                $checks = $this->quickCheck($case, includeCase: ! $pending);
-            } catch (\App\Exceptions\TransientAiFailure $e) {
-                // unchecked lessons do not stay live
-                $applied->each(fn ($c) => $this->applier->revert($c));
-
-                throw $e;
-            }
-
-            // The owner's newest word wins. A lesson was reverted because an
-            // older case expected the opposite ("ask the work" vs "don't ask")
-            // - the owner had changed his mind, the lesson was right. That old
-            // case is retired instead of blocking the new one.
-            foreach ($checks as $i => $check) {
-                if (! $check['pass'] && ($check['case_id'] ?? null) !== $case->id) {
-                    TeachingCase::whereKey($check['case_id'])->update(['is_active' => false, 'last_reason' => 'اتلغى: تعليم أحدث (#'.$session->id.') غيّر المطلوب. '.$check['reason']]);
-                    $checks[$i]['label'] .= ' (اتلغى - التعليم الجديد أحدث منه)';
-                    $checks[$i]['pass'] = true;
-                }
-            }
-
-            $failed = collect($checks)->where('pass', false);
-
-            if ($failed->isNotEmpty()) {
-                if ($retryOnFail) {
-                    $applied->each(fn ($c) => $this->applier->revert($c));
-                    $case->delete();
-                    $session->update(['result' => $result + ['first_attempt' => $checks]]);
-                    $applied->each(fn ($c) => $c->update(['status' => 'failed_check']));
-
-                    $this->process($session, $this->ask(
-                        WhatsappConversation::find($session->conversation_id),
-                        $session->target_message_id,
-                        $session->owner_text,
-                        $failed->map(fn ($f) => "الحالة: {$f['label']}\nرد البوت بعد التعديل: {$f['reply']}\nالسبب: {$f['reason']}")->implode("\n\n")
-                    ), $staffId, retryOnFail: false);
-
-                    return;
-                }
-
-                // Reverting here dropped the owner's rule twice in a row and read
-                // as "I can't". It stays live; the result shows how the test went.
-                $result['note'] = 'الدرس اتطبق. في التجربة الرد لسه مش مظبوط 100% - لو شفته غلط صحّحه تاني وأنا أزبطه.';
-            }
-
-            $result['checks'] = $checks;
-        }
-
-        // Every correction used to re-run every old case in the background:
-        // ~40 simulated conversations per correction emptied the day's 500
-        // requests in half an hour of teaching. The full run is the manual
-        // "جرّب كل الدروس" button now.
+        // No replay after teaching (owner, 2026-09-28): each check was a full
+        // simulated turn plus a judge call on every correction, and re-running
+        // every old case emptied the day's requests. The saved case is only
+        // for the manual "جرّب كل الدروس" button.
         $session->update(['result' => $result, 'status' => $pending ? 'awaiting_approval' : 'done']);
     }
 
@@ -264,32 +214,11 @@ class TeachingCoach
         }
 
         if (! $session->changes()->where('status', 'proposed')->exists()) {
-            $case = $session->cases()->first();
-
-            if ($case) {
-                $result['checks'] = [['label' => 'نفس الموقف بعد التعديل'] + $this->regression->run($case)];
-            }
-
             $session->status = 'done';
         }
 
         $session->result = $result;
         $session->save();
-    }
-
-    /** @return array<int, array{label: string, pass: bool, reply: string, reason: string}> */
-    private function quickCheck(TeachingCase $case, bool $includeCase): array
-    {
-        $cases = $this->regression->related($case, (int) (config('agent.teaching.quick_check_cases') ?? 1));
-
-        if ($includeCase) {
-            $cases->prepend($case);
-        }
-
-        return $cases->map(fn (TeachingCase $c) => [
-            'label' => $c->id === $case->id ? 'نفس الموقف بعد التعليم' : 'درس قديم: '.\Illuminate\Support\Str::limit($c->expectation, 70),
-            'case_id' => $c->id,
-        ] + $this->regression->run($c))->values()->all();
     }
 
     private function documentPreview(TeachingSession $session): ?array

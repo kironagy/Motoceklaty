@@ -64,7 +64,6 @@ class AgentSettings
 
             'teaching.coach_model' => ['teaching', 'موديل المدرّب في وضع التعليم', 'string', 'فاضي = نفس موديل البوت. الأقوى أدق في فهم التصحيح بس أبطأ.'],
             'teaching.lessons_tokens' => ['teaching', 'أقصى حجم للدروس في كل رد (توكن)', 'int', 'الدروس بتتبعت مع كل رسالة. لو اتملت، الأمثلة بتتشال الأول.'],
-            'teaching.quick_check_cases' => ['teaching', 'عدد الحالات القديمة اللي تتجرب قبل تثبيت الدرس', 'int', 'أكتر = أأمن بس أبطأ.'],
 
             'instructions.approved_version' => ['instructions', 'نسخة التعليمات المعتمدة', 'string', null],
         ];

@@ -281,6 +281,5 @@ return [
         'coach_model' => env('AGENT_TEACHING_COACH_MODEL', 'gemini-3.5-flash'),
         'coach_thinking' => env('AGENT_TEACHING_COACH_THINKING', 'low'),
         'lessons_tokens' => env('AGENT_TEACHING_LESSONS_TOKENS', 3000),
-        'quick_check_cases' => env('AGENT_TEACHING_QUICK_CHECK_CASES', 1),
     ],
 ];
