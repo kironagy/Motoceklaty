@@ -23,9 +23,57 @@ class TeachingCoach
     ) {
     }
 
+    /** Saves the correction and works it out in the background (TeachCorrection). */
+    public function start(WhatsappConversation $conversation, ?int $targetMessageId, string $ownerText, ?int $staffId): TeachingSession
+    {
+        $session = $this->newSession($conversation, $targetMessageId, $ownerText, $staffId);
+        \App\Jobs\TeachCorrection::dispatch($session->id);
+
+        return $session;
+    }
+
+    /** A saved correction still at "thinking": work it out now. */
+    public function run(TeachingSession $session): void
+    {
+        if ($session->status !== 'thinking') {
+            return;
+        }
+
+        // what an interrupted run left half-done
+        $session->changes()->where('status', '!=', 'applied')->delete();
+        $session->cases()->delete();
+
+        $this->attempt($session, $session->created_by);
+    }
+
+    /**
+     * A run killed mid-way (deploy, worker restart) leaves the session at
+     * "thinking" with nothing working on it. Started again after 15 minutes.
+     */
+    public function recoverStuck(): int
+    {
+        $stuck = TeachingSession::where('status', 'thinking')->where('updated_at', '<', now()->subMinutes(15))->get();
+
+        foreach ($stuck as $session) {
+            $session->touch();
+            \App\Jobs\TeachCorrection::dispatch($session->id);
+        }
+
+        return $stuck->count();
+    }
+
     public function teach(WhatsappConversation $conversation, ?int $targetMessageId, string $ownerText, ?int $staffId): TeachingSession
     {
-        $session = TeachingSession::create([
+        $session = $this->newSession($conversation, $targetMessageId, $ownerText, $staffId);
+
+        $this->attempt($session, $staffId);
+
+        return $session->refresh();
+    }
+
+    private function newSession(WhatsappConversation $conversation, ?int $targetMessageId, string $ownerText, ?int $staffId): TeachingSession
+    {
+        return TeachingSession::create([
             'conversation_id' => $conversation->id,
             'target_message_id' => $targetMessageId,
             'after_message_id' => $targetMessageId ?? WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->max('id'),
@@ -33,10 +81,6 @@ class TeachingCoach
             'status' => 'thinking',
             'created_by' => $staffId,
         ]);
-
-        $this->attempt($session, $staffId);
-
-        return $session->refresh();
     }
 
     /** A correction that waited for the AI to come back, run again. */

@@ -207,6 +207,35 @@ class TeachModeTest extends TestCase
         $this->assertSame(1, BotLesson::where('is_active', true)->count());
     }
 
+    public function test_a_correction_runs_in_the_background_and_a_stuck_one_is_picked_up_again(): void
+    {
+        // Simulator 680: run inside the page request, the coach hit the
+        // gateway timeout and the session stayed "thinking" for good.
+        Queue::fake();
+        [$staff, $conversation, $reply] = $this->simConversation();
+
+        $session = app(TeachingCoach::class)->start($conversation, $reply->id, 'القسط بيبدأ بعد 45 يوم', $staff->id);
+
+        $this->assertSame('thinking', $session->status);
+        Queue::assertPushed(\App\Jobs\TeachCorrection::class, fn ($job) => $job->sessionId === $session->id && $job->connection === 'teaching');
+
+        $fake = new FakeAiProvider();
+        $fake->queue($this->coachPlan([['kind' => 'lesson', 'summary' => 'القسط', 'title' => 'أول قسط', 'rule' => 'أول قسط بعد 45 يوم', 'changes' => []]]));
+        $this->app->instance(AiProvider::class, $fake);
+        $runner = \Mockery::mock(RegressionRunner::class);
+        $runner->shouldReceive('related')->andReturn(collect());
+        $runner->shouldReceive('run')->andReturn(['pass' => true, 'reply' => 'أول قسط بعد 45 يوم', 'reason' => '']);
+        $this->app->instance(RegressionRunner::class, $runner);
+
+        (new \App\Jobs\TeachCorrection($session->id))->handle(app(TeachingCoach::class));
+        $this->assertSame('done', $session->fresh()->status);
+
+        $stuck = \App\Models\TeachingSession::create(['conversation_id' => $conversation->id, 'owner_text' => 'x', 'status' => 'thinking']);
+        \App\Models\TeachingSession::whereKey($stuck->id)->update(['updated_at' => now()->subMinutes(30)]);
+        $this->assertSame(1, app(TeachingCoach::class)->recoverStuck());
+        Queue::assertPushed(\App\Jobs\TeachCorrection::class, fn ($job) => $job->sessionId === $stuck->id);
+    }
+
     public function test_an_older_opposite_case_does_not_block_the_new_lesson(): void
     {
         // The owner changed his mind ("don't ask the work" after "ask the

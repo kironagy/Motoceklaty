@@ -14,9 +14,16 @@ class RunTeachingRegression implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable;
 
+
     public int $timeout = 1800;
 
     public int $tries = 1;
+
+    public function __construct()
+    {
+        // long runs: its own worker (config/queue.php "teaching")
+        $this->onConnection('teaching')->onQueue('teaching');
+    }
 
     public function handle(RegressionRunner $runner): void
     {

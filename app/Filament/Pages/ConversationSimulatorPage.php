@@ -175,15 +175,13 @@ class ConversationSimulatorPage extends Page
             return;
         }
 
-        @set_time_limit(600);
-
-        $session = app(TeachingCoach::class)->teach(
+        // In the background: run inside this request it hit the gateway
+        // timeout and the session stayed at "المدرب لسه بيشتغل" for good.
+        app(TeachingCoach::class)->start(
             WhatsappConversation::findOrFail($this->conversationId), $targetMessageId, $text, auth()->id()
         );
 
-        if ($session->status === 'error') {
-            Notification::make()->title('المدرّب ما قدرش يكمل')->body($session->understanding)->danger()->persistent()->send();
-        }
+        Notification::make()->title('المدرّب بيشتغل على التصحيح')->body('النتيجة هتظهر هنا لوحدها - مش محتاج تعمل refresh.')->info()->send();
 
         $this->dispatch('simulator-scrolled');
     }
@@ -221,6 +219,13 @@ class ConversationSimulatorPage extends Page
         if ($this->conversationId) {
             $this->simulator()->returnToBot(WhatsappConversation::findOrFail($this->conversationId));
         }
+    }
+
+    /** The page refreshes itself while a correction is being worked out. */
+    public function teachingInProgress(): bool
+    {
+        return $this->conversationId !== null
+            && TeachingSession::where('conversation_id', $this->conversationId)->whereIn('status', ['thinking', 'waiting'])->exists();
     }
 
     public function isHandedOff(): bool

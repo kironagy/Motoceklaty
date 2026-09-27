@@ -46,7 +46,7 @@
     </style>
 
     <div class="sim">
-        <div class="sim-chat">
+        <div class="sim-chat" @if ($this->teachingInProgress()) wire:poll.4s @endif>
             <div class="sim-scroll" id="sim-scroll" x-data x-init="$el.scrollTop = $el.scrollHeight" @simulator-scrolled.window="$nextTick(() => $el.scrollTop = $el.scrollHeight)">
                 @php $turns = $this->getTurns(); @endphp
 

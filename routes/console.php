@@ -30,3 +30,9 @@ Schedule::call(fn () => app(\App\Domain\Applications\ApplicationNudgeService::cl
     ->everyFiveMinutes()
     ->name('application-nudges')
     ->withoutOverlapping();
+
+// A correction whose background run was cut off (deploy, restart) is picked up again.
+Schedule::call(fn () => app(\App\Domain\Teaching\TeachingCoach::class)->recoverStuck())
+    ->everyFiveMinutes()
+    ->name('teaching-recover-stuck')
+    ->withoutOverlapping();

@@ -9,7 +9,7 @@
     <div class="sim-teach-owner">👤 {{ $session->owner_text }}</div>
 
     @if ($session->status === 'thinking')
-        <div>المدرّب لسه بيشتغل…</div>
+        <div>المدرّب بيشتغل على التصحيح… (بياخد دقيقة أو اتنين، والنتيجة هتظهر لوحدها)</div>
     @endif
 
     @if ($session->understanding)

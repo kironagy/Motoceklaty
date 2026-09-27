@@ -43,6 +43,18 @@ return [
             'after_commit' => false,
         ],
 
+        // Teach mode: a correction takes minutes (coach with thinking + a
+        // replay check). On the default worker (--timeout=90) it was killed
+        // mid-way and the session sat at "المدرب لسه بيشتغل" forever.
+        'teaching' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'teaching',
+            'retry_after' => 1900,
+            'after_commit' => false,
+        ],
+
         'beanstalkd' => [
             'driver' => 'beanstalkd',
             'host' => env('BEANSTALKD_QUEUE_HOST', 'localhost'),

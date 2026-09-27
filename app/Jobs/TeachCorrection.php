@@ -9,8 +9,11 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 
-/** Finishes a correction that arrived while the AI was out of requests. */
-class ResumeTeachingSession implements ShouldQueue
+/**
+ * An owner's correction, worked out in the background. Run inside the page
+ * request it hit the gateway timeout and the session never finished.
+ */
+class TeachCorrection implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable;
 
@@ -28,7 +31,7 @@ class ResumeTeachingSession implements ShouldQueue
     public function handle(TeachingCoach $coach): void
     {
         if ($session = TeachingSession::find($this->sessionId)) {
-            $coach->resume($session);
+            $coach->run($session);
         }
     }
 }
