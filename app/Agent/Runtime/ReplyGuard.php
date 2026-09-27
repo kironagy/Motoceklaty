@@ -310,6 +310,8 @@ class ReplyGuard
 
     /** A branch, its address or its opening hours, stated as fact. */
     private const BRANCH_FACT = '/(?:فرع|فروع|فرعنا|فروعنا)\s+(?:في|ف|فى|بـ?)\s+(?!أي|اي|أى|اى|وقت|الوقت|أقرب|اقرب)\S+|(?:فرع|فروع|فرعنا)\s+(?!الـ?معرض)(?:ال)?[\p{Arabic}]{3,}\s*[:،,-]|'
+        // a time of day ("10 الصبح") is an opening hour
+        .'[0-9٠-٩۰-۹]+\\s*(?:الصبح|صباحا|صباحًا|صباحاً|الضهر|الظهر|العصر|المغرب|بالليل|مساء|مساءً|مساءا)|'
         // the customer's own address ("سجلت العنوان") is not a branch fact
         .'(?:عنوان (?:ال)?(?:فرع|معرض)|عنوانّا|عنوانا|عنوان فرعنا|مكاننا|مكان (?:ال)?(?:فرع|معرض)|لوكيشن (?:ال)?(?:فرع|معرض)|maps\.app)|(?:مواعيد\S*|بنفتح|بنقفل|فاتحين|شغالين)\s+(?:\S+\s+){0,4}?(?:من|لـ?|ل|لحد)\s*(?:ال)?(?:ساع[ةه]\s*)?\d/u';
 
@@ -356,6 +358,18 @@ class ReplyGuard
                 return true;
             }
         }
+        // Simulator 688: the hours in the table were changed and the bot
+        // repeated the old ones from earlier in the chat. Every time of day
+        // it states is in the branches it looked up this turn.
+        // (normalized: digits are Latin and the article is gone - "الصبح" is "صبح")
+        preg_match_all('/(\d+)\s*(صبح|صباحا|ضهر|ظهر|عصر|مغرب|بالليل|ليل|مساء|مساءا)/u', \App\Support\ArabicTextNormalizer::normalize($replyText), $times, PREG_SET_ORDER);
+
+        foreach ($times as [, $hour, $period]) {
+            if (! preg_match('/(?<!\d)'.$hour.'\s*'.preg_quote($period, '/').'/u', $source)) {
+                return true;
+            }
+        }
+
         // "مفيش فرع في المنصورة" is the truthful answer, not a claim.
         $affirmed = preg_replace('/(?:مفيش|مافيش|مفيهاش|معندناش|ماعندناش|ما عندناش|ملناش|مالناش|مش عندنا|للأسف مفيش)\s+[^.،,!؟?\n]*/u', ' ', $replyText);
         // Only a bare "فرع X": in "كل الفروع شغالة" the word after "الفروع"

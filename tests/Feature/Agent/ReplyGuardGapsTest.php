@@ -199,4 +199,19 @@ class ReplyGuardGapsTest extends TestCase
         $this->assertSame('RESUBMISSION_CLAIMED', $check('أيوه يا باشا، الطلب اتبعت على النظام الجديد.'));
         $this->assertNull($check('أيوه يا باشا، طلبك اتبعت وفي المراجعة.'));
     }
+
+    public function test_opening_hours_come_from_this_turns_lookup(): void
+    {
+        // Simulator 688: the table said 1 الصبح - 1 بالليل, the bot repeated
+        // "10 الصبح لـ 10 بالليل" from earlier in the chat.
+        $conversation = $this->conversation();
+        $reply = ['messages' => ['مواعيد العمل في كل فروعنا يا باشا من السبت للخميس من 10 الصبح لـ 10 بالليل.']];
+        $lookup = fn (string $hours) => [['name' => 'get_branch_information', 'ok' => true, 'data' => ['branches' => [
+            ['name' => 'فرع عين شمس', 'city' => 'عين شمس', 'map_url' => null, 'working_hours' => ['السبت - الخميس' => $hours]],
+        ]]]];
+
+        $this->assertSame('BRANCH_NOT_SOURCED', app(ReplyGuard::class)->check($reply, $conversation, '', [], []));
+        $this->assertSame('BRANCH_NOT_SOURCED', app(ReplyGuard::class)->check($reply, $conversation, '', [], $lookup('١ الصبح - ١ بالليل')));
+        $this->assertNull(app(ReplyGuard::class)->check($reply, $conversation, '', [], $lookup('10 الصبح - 10 بالليل')));
+    }
 }

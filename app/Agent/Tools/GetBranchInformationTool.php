@@ -19,7 +19,8 @@ class GetBranchInformationTool implements Tool
     public function description(): string
     {
         return 'Branch locations, hours and phones. Use when the customer asks where you are, '
-            .'the nearest branch, or opening hours.';
+            .'the nearest branch, or opening hours - every time: hours and addresses change, never repeat them from earlier '
+            .'in the chat. Pass city = his place as he said it (e.g. "المنصورة") and its governorate.';
     }
 
     public function inputSchema(): array

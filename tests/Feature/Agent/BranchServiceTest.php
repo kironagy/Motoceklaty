@@ -44,6 +44,20 @@ class BranchServiceTest extends TestCase
         $this->assertStringNotContainsString('NO branch in', $result['note']);
     }
 
+    public function test_where_we_have_no_branch_the_nearest_comes_first(): void
+    {
+        // Simulator 688: "انا في المنصورة" got Cairo and Giza before الخصوص.
+        Branch::create(['name' => 'فرع الهرم', 'governorate' => 'giza', 'city' => 'الهرم', 'address' => 'x', 'is_active' => true, 'sort' => 1]);
+        Branch::create(['name' => 'فرع عين شمس', 'governorate' => 'cairo', 'city' => 'عين شمس', 'address' => 'x', 'is_active' => true, 'sort' => 2]);
+        Branch::create(['name' => 'فرع الخصوص', 'governorate' => 'qalyubia', 'city' => 'الخصوص', 'address' => 'x', 'is_active' => true, 'sort' => 3]);
+
+        $result = app(BranchService::class)->find('dakahlia', 'المنصورة');
+
+        $this->assertSame('فرع الخصوص', $result['nearest_branch']);
+        $this->assertSame(['فرع الخصوص', 'فرع عين شمس', 'فرع الهرم'], array_column($result['branches'], 'name'));
+        $this->assertStringContainsString('No branch in المنصورة', $result['note']);
+    }
+
     public function test_inactive_branches_excluded(): void
     {
         Branch::create(['name' => 'قديم', 'governorate' => 'cairo', 'city' => 'x', 'address' => 'x', 'is_active' => false]);

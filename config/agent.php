@@ -92,6 +92,18 @@ return [
         'string' => \App\Domain\Applications\Validators\NonEmptyStringValidator::class,
     ],
 
+    // Rough centre of each governorate (lat, lng) - only to order our
+    // branches nearest-first for a customer where we have none.
+    'governorate_coordinates' => [
+        'cairo' => [30.04, 31.24], 'giza' => [30.01, 31.21], 'alexandria' => [31.20, 29.92], 'qalyubia' => [30.46, 31.18],
+        'port_said' => [31.26, 32.30], 'suez' => [29.97, 32.53], 'dakahlia' => [31.04, 31.38], 'sharqia' => [30.59, 31.50],
+        'gharbia' => [30.79, 31.00], 'monufia' => [30.55, 31.01], 'beheira' => [31.03, 30.47], 'kafr_el_sheikh' => [31.11, 30.94],
+        'damietta' => [31.42, 31.81], 'north_sinai' => [31.13, 33.80], 'south_sinai' => [28.24, 33.62], 'ismailia' => [30.60, 32.27],
+        'beni_suef' => [29.07, 31.10], 'faiyum' => [29.31, 30.84], 'minya' => [28.10, 30.75], 'asyut' => [27.18, 31.18],
+        'sohag' => [26.56, 31.69], 'qena' => [26.16, 32.72], 'aswan' => [24.09, 32.90], 'luxor' => [25.69, 32.64],
+        'red_sea' => [27.26, 33.81], 'new_valley' => [25.45, 30.55], 'matrouh' => [31.35, 27.24],
+    ],
+
     // T11: eligibility rule evaluator registry, keyed by eligibility_rules.rule_type.
     'eligibility_rules' => [
         'age_range' => \App\Domain\Applications\EligibilityRules\AgeRangeEvaluator::class,
