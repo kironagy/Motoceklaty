@@ -323,6 +323,23 @@ class SubmissionTest extends TestCase
         ]);
     }
 
+    public function test_the_customer_can_cancel_after_submitting_and_the_staff_request_is_canceled(): void
+    {
+        // Request 4278: "الغي الطلب" right after submitting got "ألغيت لك
+        // الطلب" while the request stayed live for staff.
+        [$application, $conversation] = $this->completeApplication();
+        $this->submitConfirmed($conversation, $application);
+        $application->refresh();
+
+        $result = app(\App\Agent\Tools\WithdrawApplicationTool::class)->execute(['reason_code' => 'customer_request'], $this->ctx($conversation, $application, 3));
+
+        $this->assertTrue($result->ok);
+        $this->assertSame('withdrawn', $application->refresh()->status);
+        $this->assertSame('canceled', InstallmentRequest::find($application->installment_request_id)->status);
+        // the bot says it itself - no second "اتلغى" notification
+        $this->assertSame(0, WhatsappMessage::where('sender_type', 'system')->count());
+    }
+
     public function test_notification_is_persisted_as_a_system_outbound_message(): void
     {
         Http::fake(['*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200)]);

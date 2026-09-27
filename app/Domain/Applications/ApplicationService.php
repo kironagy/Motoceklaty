@@ -161,6 +161,14 @@ class ApplicationService
             'reason_code' => $reasonCode,
             'note' => $note,
         ]);
+
+        // The staff request must not stay live. Saved quietly: the observer
+        // would also send "طلبك اتلغى" on top of the bot's own reply.
+        $request = $application->installment_request_id ? \App\Models\InstallmentRequest::find($application->installment_request_id) : null;
+
+        if ($request && $request->status !== 'canceled') {
+            $request->forceFill(['status' => 'canceled', 'status_updated_at' => now()])->saveQuietly();
+        }
     }
 
     /** @throws ApplicationSelectionException */

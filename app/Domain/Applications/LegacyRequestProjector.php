@@ -47,7 +47,7 @@ class LegacyRequestProjector
         'delivery_app' => 'دليفري تطبيق (موتوسيكل)',
         'delivery_app_bicycle' => 'دليفري تطبيق (عجلة)',
         'delivery_company' => 'دليفري مطعم / شركة',
-        'craftsman' => 'صاحب مهنة',
+        'craftsman' => 'صنايعي / حرفي (مش صاحب محل)',
         'business_owner' => 'صاحب نشاط',
         'other' => 'شغل حر',
     ];

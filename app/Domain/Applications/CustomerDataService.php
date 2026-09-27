@@ -88,6 +88,14 @@ class CustomerDataService
                 continue;
             }
 
+            // Request 4278: "شغل في ورشه" was saved as the work building number
+            // and the work landmark - the word "ورشة" is neither.
+            if ($code = $this->notAnAddressPart($key, (string) $result->normalized)) {
+                $rejected[] = ['key' => $key, 'code' => $code];
+
+                continue;
+            }
+
             $facts = array_merge($facts, $result->facts);
 
             if ($field->scope === 'customer') {
@@ -119,6 +127,23 @@ class CustomerDataService
         return ['saved' => $saved, 'rejected' => $rejected, 'conflicts' => $conflicts, 'facts' => $facts];
     }
 
+    /** A building number with no number in it, or a landmark that is only the kind of place. */
+    private function notAnAddressPart(string $key, string $value): ?string
+    {
+        $text = \App\Support\ArabicTextNormalizer::normalize($value);
+
+        if (str_ends_with($key, '_building_no')
+            && ! preg_match('/\d|اول|تاني|ثاني|تالت|ثالث|رابع|خامس|سادس|سابع|تامن|ثامن|تاسع|عاشر|مفيش|مافيش|بدون|من غير|مش عارف|ملهاش|مالهاش/u', $text)) {
+            return 'NOT_A_BUILDING_NUMBER';
+        }
+
+        if (str_ends_with($key, '_landmark') && preg_match('/^(?:في |ف )?(?:ورشه|ورشتي|محل|شغل|شغلي|بيت|بيتي|عماره|مكان|شركه|مصنع)$/u', $text)) {
+            return 'NOT_A_LANDMARK';
+        }
+
+        return null;
+    }
+
     /** The work address is the residence address, and he never said he works where he lives. */
     private function copiesResidence(?Application $application, array $fields, string $workAddress, int $conversationId): bool
     {
@@ -131,9 +156,12 @@ class CustomerDataService
         }
 
         $compact = fn (string $v) => preg_replace('/[\s\p{P}]+/u', '', \App\Support\ArabicTextNormalizer::normalize($v));
-        similar_text($compact((string) $residence), $compact($workAddress), $percent);
+        [$home, $work] = [$compact((string) $residence), $compact($workAddress)];
+        similar_text($home, $work, $percent);
 
-        if ($percent < 90) {
+        // "القاهرة، عزبة النخل، شارع الشيخ منصور" was cut from the home
+        // address and saved as the work address.
+        if ($percent < 90 && ($work === '' || ! str_contains($home, $work))) {
             return false;
         }
 

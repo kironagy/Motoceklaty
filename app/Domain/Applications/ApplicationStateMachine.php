@@ -13,10 +13,12 @@ use App\Models\ApplicationEvent;
 class ApplicationStateMachine
 {
     private const TRANSITIONS = [
+        // A customer may cancel until staff decide: "الغي الطلب" right after
+        // submitting got "ألغيت لك الطلب" while request 4278 stayed live.
         'collecting' => ['submitted', 'withdrawn', 'expired'],
-        'submitted' => ['under_review', 'approved', 'rejected', 'needs_more_info'],
-        'under_review' => ['approved', 'rejected', 'needs_more_info'],
-        'needs_more_info' => ['collecting'],
+        'submitted' => ['under_review', 'approved', 'rejected', 'needs_more_info', 'withdrawn'],
+        'under_review' => ['approved', 'rejected', 'needs_more_info', 'withdrawn'],
+        'needs_more_info' => ['collecting', 'withdrawn'],
     ];
 
     /**

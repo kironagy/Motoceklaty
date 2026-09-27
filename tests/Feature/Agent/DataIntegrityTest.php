@@ -189,6 +189,27 @@ class DataIntegrityTest extends TestCase
         $this->assertTrue($same->ok);
     }
 
+    public function test_the_kind_of_place_is_not_a_building_number_or_a_landmark(): void
+    {
+        // Request 4278: "شغل في ورشه" became work_building_no=ورشة and
+        // work_landmark=ورشة, and part of his home address the work address.
+        RequirementField::create(['key' => 'work_address', 'label' => 'عنوان الشغل', 'data_type' => 'address', 'scope' => 'application', 'is_sensitive' => false, 'is_active' => true]);
+        RequirementField::create(['key' => 'work_building_no', 'label' => 'رقم العقار', 'data_type' => 'string', 'scope' => 'application', 'is_sensitive' => false, 'is_active' => true]);
+        RequirementField::create(['key' => 'work_landmark', 'label' => 'علامة', 'data_type' => 'string', 'scope' => 'application', 'is_sensitive' => false, 'is_active' => true]);
+        $this->say('شغل في ورشه');
+        $this->say('القاهرالعنوان عزبه النخل شارع الشيخ منصور شارع حاج عبد اللطيف رابع بيت على الشمال');
+
+        $result = app(RecordCustomerDataTool::class)->execute(['fields' => [
+            ['key' => 'address', 'value' => 'القاهرة، عزبة النخل، شارع الشيخ منصور، شارع حاج عبد اللطيف'],
+            ['key' => 'work_address', 'value' => 'القاهرة، عزبة النخل، شارع الشيخ منصور'],
+            ['key' => 'work_building_no', 'value' => 'ورشة'],
+            ['key' => 'work_landmark', 'value' => 'ورشة'],
+        ]], $this->ctx());
+
+        $this->assertSame(['address'], $result->data['saved']);
+        $this->assertEqualsCanonicalizing(['SAME_AS_RESIDENCE', 'NOT_A_BUILDING_NUMBER', 'NOT_A_LANDMARK'], array_column($result->data['rejected'], 'code'));
+    }
+
     public function test_an_ocr_name_missing_the_first_name_does_not_replace_the_full_name(): void
     {
         $this->say('انا سلام ناصر درويش عبدالمحسن');
