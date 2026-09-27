@@ -256,10 +256,10 @@ class GetInstallmentOfferTool implements Tool
         return isset($parsed['age']) ? (int) $parsed['age'] : null;
     }
 
-    /** The owner: the first installment can come after a month - 45 days is the latest, not a promise. */
+    /** The owner (teach mode, 2026-09-28): "بعد ٤٥ يوم من الاستلام" - not "لحد ٤٥ يوم". The days are a bot setting. */
     public static function firstPaymentLine(): string
     {
-        return 'أول قسط بيبدأ بعد شهر لحد '.(int) config('agent.installments.first_payment_after_days', 45).' يوم من الاستلام';
+        return 'أول قسط بيبدأ بعد '.(int) config('agent.installments.first_payment_after_days', 45).' يوم من الاستلام';
     }
 
     private function duration(int $months): string

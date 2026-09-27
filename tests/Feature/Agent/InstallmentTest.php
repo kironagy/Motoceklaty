@@ -427,8 +427,8 @@ class InstallmentTest extends TestCase
 
         $result = $this->offerTool(['motorcycle_id' => $machine->id]);
 
-        // the owner: it can be after a month - 45 days is the latest
-        $this->assertSame('أول قسط بيبدأ بعد شهر لحد 45 يوم من الاستلام', $result->data['first_payment']);
+        // the owner: "بعد ٤٥ يوم من الاستلام", never "لحد ٤٥ يوم"
+        $this->assertSame('أول قسط بيبدأ بعد 45 يوم من الاستلام', $result->data['first_payment']);
         $this->assertArrayNotHasKey('installment_price', $result->data);
         $this->assertStringNotContainsString('بالتقسيط', $result->data['offers'][0]['breakdown']);
     }
