@@ -214,4 +214,10 @@ class ReplyGuardGapsTest extends TestCase
         $this->assertSame('BRANCH_NOT_SOURCED', app(ReplyGuard::class)->check($reply, $conversation, '', [], $lookup('١ الصبح - ١ بالليل')));
         $this->assertNull(app(ReplyGuard::class)->check($reply, $conversation, '', [], $lookup('10 الصبح - 10 بالليل')));
     }
+
+    public function test_the_word_catalog_is_never_said_to_a_customer(): void
+    {
+        $this->assertSame('BANNED_WORDING', $this->check('للأسف مفيش ميعاد محدد لتوفيرها، المتاح عندنا حالياً هو اللي موجود في الكتالوج.'));
+        $this->assertNull($this->check('للأسف مش متوفرة عندنا حاليا، تحب أشوفلك بديل قريب منها؟'));
+    }
 }
