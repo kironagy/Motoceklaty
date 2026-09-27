@@ -114,6 +114,13 @@ class ProcessDocumentTool implements Tool
         // reason he is given is the real one, worded here, not guessed.
         $results = array_map(fn (array $r) => ($r['accepted'] ?? false) ? $r : $r + ['reason_for_customer' => $this->reason($r['issues'] ?? [])], $results);
 
+        // The job printed on his ID is one the finance companies refuse.
+        $results = array_map(function (array $r) {
+            $say = app(\App\Domain\Applications\OccupationPolicy::class)->rejection($r['occupation_on_id'] ?? null);
+
+            return $say ? $r + ['occupation_not_accepted' => StartApplicationTool::occupationHint($say)] : $r;
+        }, $results);
+
         return ToolResult::ok([
             'results' => $results,
             'snapshot' => $this->snapshots->for($application->refresh()),

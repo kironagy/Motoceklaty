@@ -172,6 +172,13 @@ class ReplyGuard
             return 'WORK_TYPE_NOT_RECORDED';
         }
 
+        // Lesson 33: "أمين الشرطة من المهن اللي جهات التمويل بتتحفظ عليها...
+        // لو حابب نجرب" - the owner wants a plain "هيترفض".
+        if ((str_contains($toolResultsBlob, 'OCCUPATION_NOT_ACCEPTED') || str_contains($toolResultsBlob, 'occupation_not_accepted'))
+            && preg_match('/بتتحفظ|تتحفظ|نجرب|نقد[ّ]?م|اقد[ّ]?م|أقد[ّ]?م|القرار (?:النهائي )?(?:عند|بيكون)|مصدر دخل تاني|ممكن يتقبل|احتمال/u', $replyText)) {
+            return 'OCCUPATION_SOFTENED';
+        }
+
         // A workshop owner was asked for "عقد الورشة أو إيصال مرافق" and a
         // pharmacy courier for app earnings - neither is required of them.
         if ($this->asksForUnrequiredDocument($replyText, $conversation, $outcomes)) {

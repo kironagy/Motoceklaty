@@ -87,6 +87,10 @@ class UpdateApplicationSelectionTool implements Tool
                 return ToolResult::error('OWNERSHIP_NOT_STATED', StartApplicationTool::NOT_OWNER_HINT);
             }
 
+            if ($say = app(\App\Domain\Applications\OccupationPolicy::class)->rejection((string) ($args['customer_type_quote'] ?? ''))) {
+                return ToolResult::error('OCCUPATION_NOT_ACCEPTED', StartApplicationTool::occupationHint($say));
+            }
+
             if ($customerType->key === 'self_employed' && StartApplicationTool::saidInsured($ctx->conversationId)) {
                 return ToolResult::error('INSURED_IS_EMPLOYEE', StartApplicationTool::INSURED_HINT);
             }

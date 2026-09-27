@@ -97,6 +97,7 @@ return [
         'age_range' => \App\Domain\Applications\EligibilityRules\AgeRangeEvaluator::class,
         'financing_cap' => \App\Domain\Applications\EligibilityRules\FinancingCapEvaluator::class,
         'minimum_value' => \App\Domain\Applications\EligibilityRules\MinimumValueEvaluator::class,
+        'excluded_occupation' => \App\Domain\Applications\EligibilityRules\ExcludedOccupationEvaluator::class,
     ],
 
     // DEC-19: factual catalog data, not a business rule - implementer

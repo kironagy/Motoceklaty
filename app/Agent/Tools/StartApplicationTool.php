@@ -86,6 +86,13 @@ class StartApplicationTool implements Tool
             '/(?<!مش )(?<!غير )(?<!مش مت)(?:متامن|مومن)\s+(?:عليا|عليه|علي|عليا)|(?<!مش )(?<!مفيش )عليا\s+تامين/u');
     }
 
+    public static function occupationHint(string $say): string
+    {
+        return 'The finance companies refuse this work (owner\'s rule). Tell him plainly, in these words or very close: "'.$say.'" '
+            .'Do not soften it (no "بتتحفظ", no "القرار عندهم"), do not offer to try or apply anyway, do not ask for another income source, '
+            .'and do not open an application.';
+    }
+
     public const INSURED_HINT = 'He said he is insured (متأمن عليه): he applies as employee - self_employed is only for an employee who is NOT insured. '
         .'If he has no salary slip yet, tell him it is needed and he can send it when he gets it. Never suggest another work type.';
 
@@ -136,6 +143,10 @@ class StartApplicationTool implements Tool
 
         if ($typeEvidence === null) {
             return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote is not in the customer\'s messages. Ask him only "حضرتك بتشتغل إيه؟ ولا على المعاش؟" (never list types like موظف/عامل حر) and wait for their answer.');
+        }
+
+        if ($say = app(\App\Domain\Applications\OccupationPolicy::class)->rejection((string) $args['customer_type_quote'])) {
+            return ToolResult::error('OCCUPATION_NOT_ACCEPTED', self::occupationHint($say));
         }
 
         if ($customerType->key === 'business_owner' && ! self::statesOwnership((string) $args['customer_type_quote'])) {

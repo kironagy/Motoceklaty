@@ -416,10 +416,12 @@ class TeachingCoach
         // a row - Gemini's schema-constrained output can get stuck repeating
         // whitespace. Each retry changes what drives the loop: a higher
         // temperature, then free JSON with no schema at all.
+        // The second try leaves the schema: live, the fallback model looped
+        // on it to MAX_TOKENS twice in a row (sessions 44/45, 3 minutes).
         $attempts = [
             ['temperature' => 0.2, 'schema' => true],
-            ['temperature' => 0.7, 'schema' => true],
             ['temperature' => 0.4, 'schema' => false],
+            ['temperature' => 0.7, 'schema' => true],
         ];
         $failure = null;
 
@@ -433,7 +435,10 @@ class TeachingCoach
                 // Enough for a long plan; a stuck reply fails fast instead of
                 // making the owner wait for 16k tokens of spaces.
                 maxOutputTokens: 8192,
-                timeoutSeconds: 120,
+                // gemini-3.5-flash answers a correction in ~10-30s. Overloaded,
+                // it held the connection 2 minutes before the fallback got a
+                // turn - same model and thinking, just no waiting on a dead line.
+                timeoutSeconds: 45,
                 responseSchema: $attempt['schema'] ? $this->schema() : null,
                 thinkingLevel: config('agent.teaching.coach_thinking') ?: 'low',
             );

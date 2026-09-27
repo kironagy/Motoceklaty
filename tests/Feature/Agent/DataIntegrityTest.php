@@ -264,6 +264,42 @@ class DataIntegrityTest extends TestCase
         $this->assertTrue($switch->ok);
     }
 
+    private function refusedWorkRule(): void
+    {
+        \App\Models\EligibilityRule::create(['rule_type' => 'excluded_occupation', 'is_active' => true, 'params' => [
+            'words' => 'حكومي، حكومه، امين شرطه، ظابط، محامي، محاماه',
+            'message' => 'للأسف جهات التمويل مش بتقبل الشغل الحكومي ولا المحاماة، فالطلب هيترفض.',
+        ]]);
+    }
+
+    public function test_refused_work_is_named_plainly_and_no_application_is_opened(): void
+    {
+        // Lesson 33: a police sergeant got "بتتحفظ... لو حابب نجرب".
+        $this->refusedWorkRule();
+        $policy = app(\App\Domain\Applications\OccupationPolicy::class);
+
+        $this->assertNotNull($policy->rejection('انا أمين شرطة'));
+        $this->assertNotNull($policy->rejection('شغال في المحاماة'));
+        $this->assertNotNull($policy->rejection('موظف حكومة'));
+        $this->assertNull($policy->rejection('الفا شركه خاصه مش حكوميه بس موظف و متأمن عليا'));
+        $this->assertNull($policy->rejection('انا شغال كهربائي'));
+
+        $this->say('انا أمين شرطة وعايز اقسط');
+        $result = app(StartApplicationTool::class)->execute(['customer_type' => 'employee', 'customer_type_quote' => 'انا أمين شرطة'], $this->ctx(0));
+
+        $this->assertSame('OCCUPATION_NOT_ACCEPTED', $result->error['code']);
+        $this->assertStringContainsString('هيترفض', $result->error['detail']);
+    }
+
+    public function test_a_softened_refusal_is_not_sent(): void
+    {
+        $guard = app(\App\Agent\Runtime\ReplyGuard::class);
+        $outcomes = [['name' => 'start_application', 'ok' => false, 'data' => ['code' => 'OCCUPATION_NOT_ACCEPTED']]];
+
+        $this->assertSame('OCCUPATION_SOFTENED', $guard->check(['messages' => ['مهنة أمين الشرطة من المهن اللي جهات التمويل بتتحفظ عليها، لو حابب نجرب ونقدم مفيش مشكلة.']], $this->conversation, '', [], $outcomes));
+        $this->assertNull($guard->check(['messages' => ['للأسف جهات التمويل مش بتقبل الشغل الحكومي، فالطلب هيترفض. لو حابب تشتري كاش أنا معاك.']], $this->conversation, '', [], $outcomes));
+    }
+
     public function test_an_ocr_name_missing_the_first_name_does_not_replace_the_full_name(): void
     {
         $this->say('انا سلام ناصر درويش عبدالمحسن');

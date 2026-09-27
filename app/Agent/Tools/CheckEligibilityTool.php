@@ -28,7 +28,8 @@ class CheckEligibilityTool implements Tool
         return 'Hypothetical eligibility check before or outside an application (e.g. "would a 20 year-old '
             .'qualify?"). Call it whenever the customer states his age, before saying anything about it - with months '
             .'when a duration is on the table (the age at the last installment is limited too). Do not use when an application exists and you only need its status - read '
-            .'`eligibility` in the application snapshot instead.';
+            .'`eligibility` in the application snapshot instead. When he says what he works (before any application), pass '
+            .'work = his own words: some work is refused by the finance companies and he must be told so plainly.';
     }
 
     public function inputSchema(): array
@@ -37,6 +38,7 @@ class CheckEligibilityTool implements Tool
             'type' => 'object',
             'properties' => [
                 'customer_type' => ['type' => 'string'],
+                'work' => ['type' => 'string', 'description' => 'His own words about his work, e.g. "انا امين شرطة".'],
                 'age' => ['type' => 'integer'],
                 'months' => ['type' => 'integer', 'description' => 'Installment duration, to check the age at the last installment.'],
                 'motorcycle_id' => ['type' => 'integer'],
@@ -67,6 +69,10 @@ class CheckEligibilityTool implements Tool
 
         $facts = [];
 
+        if (filled($args['work'] ?? null)) {
+            $facts['work_statement'] = (string) $args['work'];
+        }
+
         if (array_key_exists('age', $args)) {
             $facts['age'] = $args['age'];
         }
@@ -86,6 +92,10 @@ class CheckEligibilityTool implements Tool
         }
 
         $result = $this->eligibility->evaluate($facts, $customerTypeId);
+
+        if ($say = app(\App\Domain\Applications\OccupationPolicy::class)->rejection($facts['work_statement'] ?? null)) {
+            $result['occupation_not_accepted'] = StartApplicationTool::occupationHint($say);
+        }
 
         return ToolResult::ok($result);
     }
