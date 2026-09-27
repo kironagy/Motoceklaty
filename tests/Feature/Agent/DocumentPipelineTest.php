@@ -155,6 +155,59 @@ class DocumentPipelineTest extends TestCase
         $this->assertSame('Mohamed Ali', ApplicationData::where('application_id', $application->id)->where('field_key', 'full_name')->value('value'));
     }
 
+    /** Simulation 676: a sharp ID back read with one digit too many and rejected as "مش واضحة". */
+    public function test_a_misread_id_number_is_settled_from_trusted_sources_not_rejected(): void
+    {
+        $this->fields();
+        $this->nationalIdDocumentType(['key' => 'national_id_back', 'extraction_fields' => ['national_id']]);
+        [$application, $media, $ctx] = $this->bootstrapApplication();
+        $this->fakeOcr();
+        CustomerAttribute::create(['customer_id' => $application->customer_id, 'field_key' => 'national_id', 'value' => '29011260101839', 'source' => 'document', 'status' => 'valid']);
+        $this->queueClassification([
+            'document_type_key' => 'national_id_back', 'legibility' => 'good', 'confidence' => 1,
+            'fields' => ['national_id' => '290112610101839'],
+        ]);
+
+        $result = app(ProcessDocumentTool::class)->execute(['media_ids' => [$media->id]], $ctx);
+
+        $this->assertTrue($result->data['results'][0]['accepted']);
+    }
+
+    public function test_the_ocr_text_settles_a_misread_id_when_nothing_is_known_yet(): void
+    {
+        $this->fields();
+        $this->nationalIdDocumentType(['key' => 'national_id_back', 'extraction_fields' => ['national_id']]);
+        [$application, $media, $ctx] = $this->bootstrapApplication();
+        $ocr = Mockery::mock(OcrProvider::class);
+        $ocr->shouldReceive('extractText')->andReturn(new OcrResult("جمهورية مصر العربية\n٢٩٠١١٢٦٠١٠١٨٣٩\nأعزب"));
+        $this->app->instance(OcrProvider::class, $ocr);
+        $this->queueClassification([
+            'document_type_key' => 'national_id_back', 'legibility' => 'good', 'confidence' => 1,
+            'fields' => ['national_id' => '290112610101839'],
+        ]);
+
+        $result = app(ProcessDocumentTool::class)->execute(['media_ids' => [$media->id]], $ctx);
+
+        $this->assertTrue($result->data['results'][0]['accepted']);
+        $this->assertSame('29011260101839', CustomerAttribute::where('customer_id', $application->customer_id)->where('field_key', 'national_id')->value('value'));
+    }
+
+    public function test_an_unreadable_id_number_with_no_trusted_source_is_still_rejected(): void
+    {
+        $this->fields();
+        $this->nationalIdDocumentType(['key' => 'national_id_back', 'extraction_fields' => ['national_id']]);
+        [, $media, $ctx] = $this->bootstrapApplication();
+        $this->fakeOcr();
+        $this->queueClassification([
+            'document_type_key' => 'national_id_back', 'legibility' => 'good', 'confidence' => 1,
+            'fields' => ['national_id' => '290112610101839'],
+        ]);
+
+        $result = app(ProcessDocumentTool::class)->execute(['media_ids' => [$media->id]], $ctx);
+
+        $this->assertFalse($result->data['results'][0]['accepted']);
+    }
+
     public function test_a_supporting_document_never_overwrites_a_name_read_from_another_document(): void
     {
         $this->fields();

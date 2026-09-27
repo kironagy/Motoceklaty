@@ -172,6 +172,27 @@ class LegacyRequestProjector
             return [];
         }
 
+        // Request 4276: the split made the street "مميز" and moved "الجامعة
+        // الروسية" out of the address into the landmark. What the customer
+        // gave field by field is kept as he gave it; the AI only divides the
+        // address line itself, and only if no word of it is lost.
+        $lineKey = array_search('street', $fields, true);
+
+        foreach ($fields as $storedKey => $part) {
+            if ($storedKey !== $lineKey) {
+                unset($parts[$part]);
+
+                if (filled($values[$storedKey] ?? null)) {
+                    $parts[$part] = (string) $values[$storedKey];
+                }
+            }
+        }
+
+        if ($lineKey && filled($values[$lineKey] ?? null) && ! $this->coversLine((string) $values[$lineKey], $parts)) {
+            unset($parts['area'], $parts['branch_street']);
+            $parts['street'] = (string) $values[$lineKey];
+        }
+
         $columns = [];
 
         foreach ($parts as $part => $value) {
@@ -196,6 +217,22 @@ class LegacyRequestProjector
         }
 
         return array_filter($columns, fn ($v) => $v !== null && $v !== '');
+    }
+
+    /** Every word of the customer's address line is still somewhere in the split parts. */
+    private function coversLine(string $line, array $parts): bool
+    {
+        $words = fn (string $text) => array_filter(preg_split('/[\s،,\-\/]+/u', \App\Support\ArabicTextNormalizer::normalize($text)),
+            fn ($w) => mb_strlen($w) > 1 && ! in_array($w, ['شارع', 'ش', 'في', 'من', 'متفرع', 'محافظه', 'منطقه', 'مدينه'], true));
+        $split = implode(' ', $words(implode(' ', array_intersect_key($parts, array_flip(['governorate', 'area', 'street', 'branch_street'])))));
+
+        foreach ($words($line) as $word) {
+            if (! str_contains($split, $word)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** @return string[] the customer messages these fields were taken from */

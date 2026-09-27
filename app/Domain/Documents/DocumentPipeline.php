@@ -112,6 +112,7 @@ class DocumentPipeline
 
         [$detectedTypeKey, $legibility, $confidence, $extractedFields] = $classification;
         $documentType = $activeTypes->firstWhere('key', $detectedTypeKey);
+        $extractedFields = $this->trustedNationalId($extractedFields, $ocrText, $application);
 
         // The customer said the earlier document was wrong (not theirs, old,
         // the wrong person's). It stops counting - with the values read from
@@ -383,6 +384,51 @@ class DocumentPipeline
 
         foreach ($this->withoutEmptyValues(array_intersect_key(is_array($focused) ? $focused : [], array_flip($all))) as $key => $value) {
             $fields[$key] = $value;
+        }
+
+        return $fields;
+    }
+
+    /**
+     * Simulation 676: a sharp ID back was rejected as "مش واضحة" - the model
+     * read 290112610101839, one digit too many, while the front (accepted a
+     * minute earlier) said 29011260101839. A number that does not parse is
+     * settled from what we can trust, never guessed:
+     *  1. exactly one valid 14-digit ID in the OCR text (character-accurate);
+     *  2. else the ID already verified from this customer's other side, when
+     *     the reading is at most two digits away from it (same card).
+     * Otherwise the reading stays as it was and the document is rejected.
+     */
+    private function trustedNationalId(array $fields, string $ocrText, Application $application): array
+    {
+        if (! isset($fields['national_id'])) {
+            return $fields;
+        }
+
+        $parser = app(\App\Support\EgyptianNationalId::class);
+        $read = $parser->normalizeDigits((string) $fields['national_id']);
+
+        if ($parser->parse($read)['valid']) {
+            return $fields;
+        }
+
+        preg_match_all('/(?<!\d)(?:\d[ \-]?){13}\d(?!\d)/', $parser->normalizeDigits($ocrText), $runs);
+        $valid = array_values(array_unique(array_filter(
+            array_map(fn ($run) => preg_replace('/\D/', '', $run), $runs[0]),
+            fn ($id) => $parser->parse($id)['valid']
+        )));
+
+        if (count($valid) === 1) {
+            return ['national_id' => $valid[0]] + $fields;
+        }
+
+        $known = \App\Models\ApplicationData::where('application_id', $application->id)->where('party', 'applicant')
+            ->where('field_key', 'national_id')->where('status', 'valid')->value('value')
+            ?? \App\Models\CustomerAttribute::where('customer_id', $application->customer_id)
+                ->where('field_key', 'national_id')->where('status', 'valid')->value('value');
+
+        if ($known && $read !== '' && levenshtein($read, (string) $known) <= 2) {
+            return ['national_id' => (string) $known] + $fields;
         }
 
         return $fields;

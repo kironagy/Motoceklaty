@@ -28,7 +28,8 @@ class ProcessDocumentTool implements Tool
             .'Images from earlier messages that were never processed are listed in the state as unprocessed_media - '
             .'process those instead of asking the customer to send them again. Set replaces_previous=true only when '
             .'the customer says a document they sent before was wrong / not theirs and this one replaces it. '
-            .'Do not use for motorcycle photos.';
+            .'Do not use for motorcycle photos. A rejected result carries reason_for_customer: tell him that reason (in your words) - '
+            .'never say the photo is unclear unless that is the reason.';
     }
 
     public function inputSchema(): array
@@ -50,6 +51,21 @@ class ProcessDocumentTool implements Tool
     public function permission(): string
     {
         return 'WRITE';
+    }
+
+    /** The first issue, in the words he is told. Never "unclear" unless the photo really is. */
+    private function reason(array $issues): ?string
+    {
+        $issue = $issues[0] ?? null;
+        $label = fn (?string $key) => $key ? (\App\Models\RequirementField::where('key', $key)->value('label') ?? $key) : 'البيانات';
+
+        return match ($issue['code'] ?? null) {
+            'BLURRY_DOCUMENT', 'UNREADABLE' => 'الصورة مش واضحة كفاية - محتاجين صورة في نور كويس ومن غير انعكاس.',
+            'INVALID_FORMAT' => 'مقدرتش أقرا '.$label($issue['field'] ?? null).' كامل من الصورة - صوّرها تاني من قريب والكارت كله في الصورة.',
+            'MISSING_DATA' => $label($issue['field'] ?? null).' مش ظاهر في الصورة - محتاجين صورة للمستند كله.',
+            'WRONG_DOCUMENT' => 'دي مش الورقة المطلوبة دلوقتي.',
+            default => null,
+        };
     }
 
     public function execute(array $args, ToolContext $ctx): ToolResult
@@ -93,6 +109,10 @@ class ProcessDocumentTool implements Tool
 
             $results[] = $this->pipeline->process($media, $application, $expected, ($args['replaces_previous'] ?? false) === true);
         }
+
+        // Simulation 676: a number read wrong became "الصورة مش واضحة" - the
+        // reason he is given is the real one, worded here, not guessed.
+        $results = array_map(fn (array $r) => ($r['accepted'] ?? false) ? $r : $r + ['reason_for_customer' => $this->reason($r['issues'] ?? [])], $results);
 
         return ToolResult::ok([
             'results' => $results,

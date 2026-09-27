@@ -28,6 +28,7 @@ use App\Models\WhatsappMessage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Mockery;
 use Tests\TestCase;
 
 class SubmissionTest extends TestCase
@@ -357,6 +358,30 @@ class SubmissionTest extends TestCase
         $this->assertNull($application->installment_request_id);
         $this->assertTrue($result->data['snapshot']['can_submit']);
         $this->assertSame('canceled', InstallmentRequest::find($oldRequest)->status);
+    }
+
+    public function test_the_address_split_never_changes_what_he_gave_field_by_field(): void
+    {
+        // Request 4276: the split made the street "مميز", took "الجامعة
+        // الروسية" out of the address, and put it in the landmark.
+        [$application] = $this->completeApplication();
+        foreach (['address' => 'مدينه بدر مميز الجامعه الروسيه الحي التاني', 'address_building_no' => '2', 'address_apartment' => '41',
+            'address_landmark' => 'شارع مدرسه تحيا مصر خلف البنك الأهلي'] as $key => $value) {
+            ApplicationData::create(['application_id' => $application->id, 'party' => 'applicant', 'field_key' => $key, 'value' => $value, 'source' => 'customer_stated', 'status' => 'valid']);
+        }
+        $splitter = Mockery::mock(\App\Domain\Applications\AddressSplitter::class);
+        $splitter->shouldReceive('split')->andReturn([
+            'governorate' => 'القاهرة', 'area' => 'مدينة بدر - الحي التاني', 'street' => 'مميز', 'building_number' => '2',
+            'apartment' => '41', 'landmark' => 'الجامعة الروسية، شارع مدرسة تحيا مصر، خلف البنك الأهلي',
+        ]);
+        $this->app->instance(\App\Domain\Applications\AddressSplitter::class, $splitter);
+
+        $columns = app(\App\Domain\Applications\LegacyRequestProjector::class)->attributes($application, 'employee');
+
+        $this->assertSame('مدينه بدر مميز الجامعه الروسيه الحي التاني', $columns['applicant_street']);
+        $this->assertSame('شارع مدرسه تحيا مصر خلف البنك الأهلي', $columns['applicant_landmark']);
+        $this->assertSame('41', $columns['applicant_apartment']);
+        $this->assertArrayNotHasKey('applicant_floor', array_filter($columns));
     }
 
     public function test_notification_is_persisted_as_a_system_outbound_message(): void
