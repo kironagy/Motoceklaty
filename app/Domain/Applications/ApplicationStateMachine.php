@@ -19,6 +19,8 @@ class ApplicationStateMachine
         'submitted' => ['under_review', 'approved', 'rejected', 'needs_more_info', 'withdrawn'],
         'under_review' => ['approved', 'rejected', 'needs_more_info', 'withdrawn'],
         'needs_more_info' => ['collecting', 'withdrawn'],
+        // he changed his mind again: same application, everything he sent kept
+        'withdrawn' => ['collecting'],
     ];
 
     /**

@@ -24,7 +24,7 @@ class GetInstallmentOfferTool implements Tool
 
     public function description(): string
     {
-        return 'THE tool for any installment question ("القسط كام", "على سنة", "أقل مقدم", "ينفع أقسط"). The best system for '
+        return 'THE tool for any installment question ("القسط كام", "على سنة", "أقل مقدم", "ينفع أقسط", "إجمالي السعر كام", "هدفع كام في الآخر" - the offer\'s `breakdown` is the total). The best system for '
             .'this customer is picked automatically; you get, per duration, the down payment (usually none), the admin fee paid '
             .'at pickup, and the exact monthly payment - the `say` line has them worded correctly. Do NOT name the '
             .'system/company unless he asks who finances it. Pass months when he named a duration, down_payment when he '

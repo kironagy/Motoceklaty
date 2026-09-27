@@ -60,6 +60,12 @@ class ApplicationService
             return ['application' => $existing, 'created' => false];
         }
 
+        // "الغي الطلب" then "لا خلاص كمّل": he is not asked for his ID and
+        // address again - the application he cancelled comes back as it was.
+        if ($reopened = $this->reopenWithdrawn($customer, $customerType, $machine, $plan, $downPayment)) {
+            return ['application' => $reopened, 'created' => false, 'reopened' => true];
+        }
+
         $application = Application::create([
             'customer_id' => $customer->id,
             'origin_conversation_id' => $conversationId,
@@ -153,6 +159,31 @@ class ApplicationService
         $noLongerRequired = $requiredBefore->diff($requiredAfter);
 
         return array_merge($selectionInvalidated, $this->supersedeDocumentsForKeys($application, $noLongerRequired->values()->all()));
+    }
+
+    private function reopenWithdrawn(Customer $customer, CustomerType $customerType, ?Machine $machine, ?InstallmentPlan $plan, ?float $downPayment): ?Application
+    {
+        $application = Application::where('customer_id', $customer->id)
+            ->where('status', 'withdrawn')
+            ->where('updated_at', '>=', now()->subDays((int) (config('agent.applications.reopen_within_days') ?? 30)))
+            ->latest('id')
+            ->first();
+
+        if (! $application) {
+            return null;
+        }
+
+        $this->stateMachine->transition($application, 'collecting', 'reopened', 'customer');
+
+        // The old staff request stays canceled; submitting again opens a new one.
+        $application->update(array_filter([
+            'customer_type_id' => $customerType->id,
+            'machine_id' => $machine?->id,
+            'installment_plan_id' => $plan?->id,
+            'down_payment' => $downPayment,
+        ], fn ($v) => $v !== null) + ['installment_request_id' => null, 'last_activity_at' => now()]);
+
+        return $application->refresh();
     }
 
     public function withdraw(Application $application, string $reasonCode, ?string $note, string $actor = 'customer'): void

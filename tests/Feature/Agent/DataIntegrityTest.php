@@ -210,6 +210,22 @@ class DataIntegrityTest extends TestCase
         $this->assertEqualsCanonicalizing(['SAME_AS_RESIDENCE', 'NOT_A_BUILDING_NUMBER', 'NOT_A_LANDMARK'], array_column($result->data['rejected'], 'code'));
     }
 
+    public function test_owning_the_flat_is_not_its_number(): void
+    {
+        // "الدور الثاني والشقه ملك" - the apartment number became "شقة ملك".
+        RequirementField::create(['key' => 'address_apartment', 'label' => 'رقم الشقة', 'data_type' => 'string', 'scope' => 'application', 'is_sensitive' => false, 'is_active' => true]);
+        RequirementField::create(['key' => 'address_floor', 'label' => 'الدور', 'data_type' => 'string', 'scope' => 'application', 'is_sensitive' => false, 'is_active' => true]);
+        $this->say('رابع بيت على الشمال الدور الثاني والشقه ملك');
+
+        $result = app(RecordCustomerDataTool::class)->execute(['fields' => [
+            ['key' => 'address_floor', 'value' => 'الدور الثاني'],
+            ['key' => 'address_apartment', 'value' => 'الشقه ملك'],
+        ]], $this->ctx());
+
+        $this->assertSame(['address_floor'], $result->data['saved']);
+        $this->assertSame('NOT_AN_APARTMENT_NUMBER', $result->data['rejected'][0]['code']);
+    }
+
     public function test_an_ocr_name_missing_the_first_name_does_not_replace_the_full_name(): void
     {
         $this->say('انا سلام ناصر درويش عبدالمحسن');

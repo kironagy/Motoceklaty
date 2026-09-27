@@ -137,6 +137,12 @@ class CustomerDataService
             return 'NOT_A_BUILDING_NUMBER';
         }
 
+        // "الشقه ملك" (he owns it) was saved as the apartment number.
+        if ((str_ends_with($key, '_apartment') || str_ends_with($key, '_floor'))
+            && ! preg_match('/\d|اول|تاني|ثاني|تالت|ثالث|رابع|خامس|سادس|سابع|تامن|ثامن|تاسع|عاشر|ارضي|بدروم|روف|سطح|مفيش|مافيش|بيت مستقل|كله|كلها/u', $text)) {
+            return str_ends_with($key, '_apartment') ? 'NOT_AN_APARTMENT_NUMBER' : 'NOT_A_FLOOR';
+        }
+
         if (str_ends_with($key, '_landmark') && preg_match('/^(?:في |ف )?(?:ورشه|ورشتي|محل|شغل|شغلي|بيت|بيتي|عماره|مكان|شركه|مصنع)$/u', $text)) {
             return 'NOT_A_LANDMARK';
         }

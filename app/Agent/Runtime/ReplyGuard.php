@@ -168,6 +168,19 @@ class ReplyGuard
             return 'AVAILABILITY_PROMISE';
         }
 
+        // "انا عايز اعرف اجمالي السعر" got "التقسيط عندنا مش بيتحسب
+        // بإجمالي سعر ثابت" - the total is in every offer (breakdown).
+        if (preg_match('/مش\s+(?:بيتحسب|بنحسب|بيبقى|هيبقى)\s+(?:ب)?(?:إجمالي|اجمالي|الإجمالي|الاجمالي)|(?:مفيش|مافيش|ملوش|مالوش)\s+(?:سعر\s+)?(?:إجمالي|اجمالي)|(?:مقدرش|ماقدرش|ما اقدرش|مش هقدر)\s+(?:\S+\s+){0,2}(?:الإجمالي|الاجمالي|إجمالي|اجمالي)/u', $replyText)) {
+            return 'TOTAL_REFUSED';
+        }
+
+        // "حضرتك بتشتغل إيه؟ (موظف، صاحب نشاط، ولا عامل حر؟)": the owner
+        // asks only "بتشتغل إيه؟" - a menu of types steers the answer.
+        if (preg_match_all('/موظف|صاحب نشاط|عامل حر|شغال حر|على المعاش|ع المعاش/u', $replyText) >= 2
+            && preg_match('/بتشتغل|شغلك|شغال إيه|شغال ايه/u', $replyText)) {
+            return 'WORK_TYPES_LISTED';
+        }
+
         // "الـ46 ألف ده إجمالي اللي هتدفعه" - the customer's own number
         // relabelled as the total; the real total was 67,612. A total is
         // only stated from a tool result of this turn.

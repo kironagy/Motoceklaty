@@ -340,6 +340,25 @@ class SubmissionTest extends TestCase
         $this->assertSame(0, WhatsappMessage::where('sender_type', 'system')->count());
     }
 
+    public function test_after_cancelling_he_can_continue_with_everything_he_sent(): void
+    {
+        [$application, $conversation] = $this->completeApplication();
+        $this->submitConfirmed($conversation, $application);
+        $oldRequest = $application->refresh()->installment_request_id;
+        app(\App\Agent\Tools\WithdrawApplicationTool::class)->execute(['reason_code' => 'customer_request'], $this->ctx($conversation, $application, 3));
+
+        WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'لا خلاص كمل انا موظف']);
+        $result = app(\App\Agent\Tools\StartApplicationTool::class)->execute(['customer_type' => 'employee', 'customer_type_quote' => 'انا موظف'], $this->ctx($conversation, $application, 4));
+
+        $this->assertTrue($result->ok);
+        $this->assertSame($application->id, $result->data['application_id']);
+        $this->assertArrayHasKey('reopened', $result->data);
+        $this->assertSame('collecting', $application->refresh()->status);
+        $this->assertNull($application->installment_request_id);
+        $this->assertTrue($result->data['snapshot']['can_submit']);
+        $this->assertSame('canceled', InstallmentRequest::find($oldRequest)->status);
+    }
+
     public function test_notification_is_persisted_as_a_system_outbound_message(): void
     {
         Http::fake(['*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200)]);

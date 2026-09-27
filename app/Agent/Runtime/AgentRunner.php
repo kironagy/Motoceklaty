@@ -238,7 +238,7 @@ class AgentRunner
      * photos were queued for a customer who had just said goodbye.
      */
     /** Style problems only - nothing false is said. */
-    private const SOFT_VIOLATIONS = ['REPEATED_QUESTION', 'DUPLICATE_REPLY'];
+    private const SOFT_VIOLATIONS = ['REPEATED_QUESTION', 'DUPLICATE_REPLY', 'WORK_TYPES_LISTED'];
 
     private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER', 'BRANCH_NOT_SOURCED', 'TOTAL_NOT_SOURCED', 'AGE_NOT_CHECKED'];
 
@@ -256,6 +256,8 @@ class AgentRunner
         'INTERNAL_KEY_IN_REPLY' => 'Not sent: the reply contains an internal key (snake_case like delivery_app). Use the plain Arabic wording instead.',
         'PLACEHOLDER_IN_REPLY' => 'Not sent: the reply contains a history placeholder like [media]. Photos are only sent by calling send_motorcycle_images; write plain text only.',
         'IMAGES_CLAIMED_NOT_SENT' => 'Not sent: the reply says photos are attached but send_motorcycle_images did not succeed this turn. Call it if the customer wants photos, otherwise rewrite without mentioning photos.',
+        'TOTAL_REFUSED' => 'Not sent: the reply refuses to give the total. The total is in every offer: call get_installment_offer for his motorcycle and duration and send that offer\'s `breakdown` (what he pays at pickup + installments = the total in the end).',
+        'WORK_TYPES_LISTED' => 'Not sent: the reply lists work types for him to choose from. Ask only "حضرتك بتشتغل إيه؟" and let him say it in his own words.',
         'TOTAL_NOT_SOURCED' => 'Not sent: the reply states a total that no tool result of this turn contains (a number the customer wrote is not a total). Call get_installment_offer for this motorcycle and duration and quote total_paid and cash_price exactly as returned (never the installment price).',
         'UNSOURCED_REASON' => 'Not sent: the reply explains the fees or the installment/cash difference without the owner\'s policy. Call get_installment_offer for this motorcycle and explain the difference only from its price_difference_policy (in your own words) plus its numbers. The admin fees have no recorded reason - just say they are paid once at pickup.',
         'BRANCH_NOT_SOURCED' => 'Not sent: the reply states a branch, an address or opening hours that no get_branch_information result this turn contains. Call get_branch_information (governorate of the customer if he said it) and use only the branches it returns - if his governorate has none, say so and give the nearest ones it returned. Never name a branch or area that is not in the result.',

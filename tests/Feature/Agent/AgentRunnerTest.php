@@ -321,6 +321,19 @@ class AgentRunnerTest extends TestCase
         $this->assertSame(0, Handoff::where('conversation_id', $conversation->id)->count());
     }
 
+    public function test_the_total_is_never_refused_nor_work_types_listed(): void
+    {
+        $conversation = $this->conversation();
+        $fake = $this->fake();
+        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['التقسيط عندنا مش بيتحسب بإجمالي سعر ثابت']]]]));
+        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['قولي حضرتك بتشتغل إيه؟ (موظف، صاحب نشاط، ولا عامل حر؟)']]]]));
+        $fake->queue($this->response([['id' => 't3', 'name' => 'send_reply', 'args' => ['messages' => ['حضرتك بتشتغل إيه؟']]]]));
+
+        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
+
+        $this->assertSame(['حضرتك بتشتغل إيه؟'], $result['messages']);
+    }
+
     public function test_the_bot_never_says_no_down_payment(): void
     {
         $conversation = $this->conversation();

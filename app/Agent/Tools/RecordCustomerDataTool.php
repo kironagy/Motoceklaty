@@ -100,7 +100,7 @@ class RecordCustomerDataTool implements Tool
             return ToolResult::error('NOTHING_SAVED', 'No field was saved. rejected/conflicts say why: NOT_STATED_BY_CUSTOMER = the customer never wrote this value '
                 .'(if you read it from a photo, use process_document; otherwise ask the customer); QUOTE_NOT_FOUND = give the customer\'s exact words in quote; '
                 .'CONFLICTS_WITH_VERIFIED_VALUE = a document/staff value differs - ask the customer which is right; '
-                .'NOT_A_BUILDING_NUMBER / NOT_A_LANDMARK = that is not a building number / a landmark (e.g. "ورشة") - ask him for it; '
+                .'NOT_A_BUILDING_NUMBER / NOT_A_LANDMARK / NOT_AN_APARTMENT_NUMBER / NOT_A_FLOOR = that value is not one (e.g. "ورشة", or "شقة ملك" which is residence_ownership=owned) - save it in the right field or ask him; '
                 .'SAME_AS_RESIDENCE = the work address is his home address - ask him where he works (the workshop/shop address), unless he says he works from home; '
                 .'DOCUMENT_ONLY = never taken from his words - it is read from the shop photo / tax card (process_document); never tell him it was saved. Details: '
                 .json_encode(['rejected' => $result['rejected'], 'conflicts' => $result['conflicts']], JSON_UNESCAPED_UNICODE));

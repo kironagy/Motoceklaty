@@ -37,7 +37,7 @@ class StartApplicationTool implements Tool
             .'and process_document both require an active application to attach to, so delaying this call means '
             .'customer data and documents they send have nowhere to go and are silently lost. '
             .'Do not use only when they are just asking questions with no intent to apply. If an active '
-            .'application exists, this returns it.';
+            .'application exists, this returns it; if he cancelled one recently and wants to continue, it is reopened with his data.';
     }
 
     /** A work statement mentions work, a job, an employer or an income source. */
@@ -173,6 +173,7 @@ class StartApplicationTool implements Tool
             'application_id' => $outcome['application']->id,
             'created' => $outcome['created'],
             'snapshot' => $this->snapshots->for($outcome['application']),
-        ] + ($planProblem ? ['plan_not_set' => $planProblem] : []));
+        ] + ($planProblem ? ['plan_not_set' => $planProblem] : [])
+          + (($outcome['reopened'] ?? false) ? ['reopened' => 'His cancelled application is back with everything he already sent. Tell him so in one line and continue from snapshot next_step - do not ask again for what is already in.'] : []));
     }
 }
