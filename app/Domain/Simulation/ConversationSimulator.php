@@ -149,6 +149,7 @@ class ConversationSimulator
         } catch (\Throwable $e) {
             $result = ['messages' => [], 'media' => []];
             $error = $e->getMessage();
+            $providerDown = $e instanceof \App\Exceptions\TransientAiFailure;
         }
 
         if (! $error) {
@@ -174,6 +175,8 @@ class ConversationSimulator
             'guard_events' => $trace?->guard_events ?? [],
             'tools' => $trace ? $this->toolSteps($trace) : [],
             'error' => $error,
+            // out of quota / overloaded - says nothing about the reply itself
+            'provider_unavailable' => $providerDown ?? false,
             'trace_id' => $trace?->id,
             'handed_off' => false,
         ];

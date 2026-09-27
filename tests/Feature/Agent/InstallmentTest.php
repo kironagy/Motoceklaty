@@ -391,6 +391,21 @@ class InstallmentTest extends TestCase
         $this->assertEquals(3850, $result->data['offers'][1]['cash_due_upfront']);
     }
 
+    public function test_every_duration_is_quoted_with_its_numbers(): void
+    {
+        // "وفيه مدد تانية زي سنتين": the two-year installment was only named,
+        // and the owner's lesson to quote it could not override the tool.
+        $system = InstallmentSystem::create(['name' => 'أمان', 'pricing_mode' => 'standard', 'administrative_fees' => 7,
+            'plans' => [['months' => 12, 'interest' => 20], ['months' => 18, 'interest' => 30], ['months' => 24, 'interest' => 40], ['months' => 36, 'interest' => 60]]]);
+        $machine = $this->machine(['installment_systems' => [$system->id], 'installment_price' => 55000]);
+
+        $result = $this->offerTool(['motorcycle_id' => $machine->id]);
+
+        $this->assertSame([12, 18, 24, 36], array_column($result->data['offers'], 'months'));
+        $this->assertStringContainsString('سنتين', $result->data['offers'][2]['say']);
+        $this->assertStringNotContainsString('Say other durations exist', $result->data['how_to_present']);
+    }
+
     public function test_admin_fees_are_quoted_as_fees_at_pickup_not_as_a_down_payment(): void
     {
         $aman = $this->standardSystem();

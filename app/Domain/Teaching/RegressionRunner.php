@@ -38,6 +38,13 @@ class RegressionRunner
         $result = $this->simulator->send($conversation, (string) ($last['text'] ?? ''), $paths);
         $reply = trim(implode("\n", $result['reply'] ?? []));
 
+        // Out of daily requests: the case did not fail, the provider did.
+        // Marking it failed reverted good lessons, and the full run went on
+        // through 40 cases that could only fail the same way.
+        if ($result['provider_unavailable'] ?? false) {
+            throw new \App\Exceptions\TransientAiFailure('الـ AI مش متاح دلوقتي (غالبًا خلصت الريكويستات بتاعة النهارده): '.$result['error']);
+        }
+
         $verdict = $result['error']
             ? ['pass' => false, 'reason' => 'البوت ما ردش: '.$result['error']]
             : $this->judge($case, (string) ($last['text'] ?? ''), $reply);

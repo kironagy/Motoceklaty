@@ -83,6 +83,18 @@ class CustomerStatements
         return null;
     }
 
+    /** Whether any recent customer message matches $pattern (run on the normalized text). */
+    public function anyMessageMatches(int $conversationId, string $pattern): bool
+    {
+        foreach ($this->messages($conversationId) as $message) {
+            if (preg_match($pattern, \App\Support\ArabicTextNormalizer::normalize($message['text']))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /** @return array<int, array{id: int, text: string}> newest first */
     private function messages(int $conversationId): array
     {

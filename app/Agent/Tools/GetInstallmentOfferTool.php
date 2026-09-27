@@ -28,7 +28,9 @@ class GetInstallmentOfferTool implements Tool
             .'this customer is picked automatically; you get, per duration, the down payment (usually none), the admin fee paid '
             .'at pickup, and the exact monthly payment - the `say` line has them worded correctly. Do NOT name the '
             .'system/company unless he asks who finances it. Pass months when he named a duration, down_payment when he '
-            .'named an amount, no_upfront=true only when he insists on paying nothing at all at pickup (not even the fees). '
+            .'named an amount, no_upfront=true when he asks for a plan without the admin fees / paying nothing at pickup '
+            .'("مفيش نظام من غير مصاريف؟", "بدون مصاريف") - never answer that question without this call; only its '
+            .'NO_ZERO_UPFRONT_PLAN error means there is none. '
             .'Use get_installment_options only when he asks to compare systems/companies.';
     }
 
@@ -41,7 +43,7 @@ class GetInstallmentOfferTool implements Tool
                 'motorcycle_id' => ['type' => 'integer'],
                 'months' => ['type' => 'integer', 'minimum' => 1],
                 'down_payment' => ['type' => 'number', 'minimum' => 0],
-                'no_upfront' => ['type' => 'boolean', 'description' => 'true only when the customer insists on paying nothing at pickup - no down payment and no admin fees.'],
+                'no_upfront' => ['type' => 'boolean', 'description' => 'true when the customer asks for a plan with nothing paid at pickup - no down payment and no admin fees.'],
                 'customer_type' => ['type' => 'string', 'description' => 'Only a type the customer stated (or the open application\'s). Omit when unknown.'],
                 'governorate' => ['type' => 'string', 'description' => 'Governorate key (cairo, giza, ...) only if the customer said where he lives.'],
                 'age' => ['type' => 'integer', 'description' => 'The customer\'s age if he stated it - durations that end past the age limit are left out.'],
@@ -128,12 +130,11 @@ class GetInstallmentOfferTool implements Tool
 
         $capped = collect($offers)->firstWhere('cap', '!==', null);
 
-        // Four durations in a row read like a price list: the shortest, one
-        // in the middle and the longest, the rest only named.
-        $shown = $months === null && count($offers) > 3
-            ? [$offers[0], $offers[intdiv(count($offers) - 1, 2)], $offers[count($offers) - 1]]
-            : $offers;
-        $others = array_values(array_diff(array_column($offers, 'months'), array_column($shown, 'months')));
+        // Every duration is quoted with its numbers. Showing three and only
+        // naming the rest ("وفيه مدد تانية زي سنتين") left the customer asking
+        // for the two-year installment, and the owner's lesson to quote it
+        // could not override this tool's own wording.
+        $shown = $offers;
 
         return ToolResult::ok([
             'cash_price' => (float) $machine->cash_price,
@@ -159,7 +160,7 @@ class GetInstallmentOfferTool implements Tool
                 .'If he asks why installments cost more than cash, explain it in your own short words from price_difference_policy (never copied word for word, never adding reasons it does not give), '
                 .'then offer the cash price. If he asks what he pays in the end, send the offer\'s `breakdown` as it is - '
                 .'installment_price is the price the installment is calculated on, never the total he pays. '
-                .'Add once: "'.$this->firstPaymentLine().'". If must_add_line is present his work is not known yet: add it as is, never say "من غير مقدم" without it, and ask what he works. No system/company names, no word "نظام"/"أنظمة".'.($others !== [] ? ' Say other durations exist ('.implode('/', array_map(fn ($m) => $this->duration($m), $others)).').' : ''),
+                .'Add once: "'.$this->firstPaymentLine().'". If must_add_line is present his work is not known yet: add it as is, never say "من غير مقدم" without it, and ask what he works. No system/company names, no word "نظام"/"أنظمة". Quote every offer below with its numbers - never say "فيه مدد تانية" instead of quoting one.',
         ] + ($capped ? ['explain_to_customer' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : [])
           + (($caveat = $customerTypeId === null ? $this->unknownWorkCaveat($machine) : null) ? ['must_add_line' => $caveat] : []));
     }

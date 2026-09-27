@@ -61,6 +61,24 @@ class StartApplicationTool implements Tool
             || (bool) preg_match('/^\s*انا\s+(?!عايز|عاوز|عايزه|عاوزه|محتاج|موافق|تمام|جاهز|هقدم|مش|كنت|بسال|عارف|فاهم|معاك|هنا|اسف|شاكر|متشكر|سالت|قلت)\S{3,}/u', $text);
     }
 
+    /**
+     * "شغال في ورشة" was opened as صاحب ورشة: asked for business photos he
+     * does not have and a work address that is his employer's. Owning the
+     * business has to be in his own words.
+     */
+    public static function statesOwnership(string $quote): bool
+    {
+        $text = \App\Support\ArabicTextNormalizer::normalize($quote);
+
+        return (bool) preg_match(\App\Support\ArabicTextNormalizer::normalize('/صاحب|بملك|املك|ملكي|عندي (?:محل|ورشه|مطعم|كافيه|شركه|معرض|مصنع|مزرعه|مكتب|نشاط|مخبز|فرن|سوبر ?ماركت)|'
+            .'ليا (?:محل|ورشه|مطعم|كافيه|شركه|معرض|مصنع|مزرعه|مكتب)|فاتح (?:محل|ورشه|مطعم|كافيه|شركه|معرض|مكتب)|'
+            .'(?:محل|ورشه|ورشت|مطعم|كافيه|شركت|معرض|مصنع|مزرعت|مكتب)(?:ي|ى)(?=\s|$|[،.!؟?])|(?:محل|ورشه|مطعم|كافيه|شركه|معرض|مصنع|مزرعه|مكتب) بتاعي|تاجر|سجل تجاري|بطاقه ضريبيه|owner|my shop/u'), $text);
+    }
+
+    public const NOT_OWNER_HINT = 'business_owner only when he said he OWNS the place (صاحب/عندي محل/ورشتي...). '
+        .'"شغال في ورشة/محل/مطعم" is working there, not owning it. Ask him "إنت صاحب المكان ولا شغال فيه؟" '
+        .'- working there: a craft (ميكانيكي، نجار...) → self_employed with work_type craftsman; with a salary and insurance → employee.';
+
     public function inputSchema(): array
     {
         return [
@@ -104,6 +122,10 @@ class StartApplicationTool implements Tool
 
         if ($typeEvidence === null) {
             return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote is not in the customer\'s messages. Ask him only "حضرتك بتشتغل إيه؟ ولا على المعاش؟" (never list types like موظف/عامل حر) and wait for their answer.');
+        }
+
+        if ($customerType->key === 'business_owner' && ! self::statesOwnership((string) $args['customer_type_quote'])) {
+            return ToolResult::error('OWNERSHIP_NOT_STATED', self::NOT_OWNER_HINT);
         }
 
         $machine = null;

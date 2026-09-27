@@ -150,7 +150,9 @@ class TeachModeTest extends TestCase
 
         $this->assertEquals(33, $plan->fresh()->interest_percent);
         $this->assertSame('done', $session->fresh()->status);
-        Queue::assertPushed(RunTeachingRegression::class);
+        // the full run over every old case is the manual button - running it
+        // after each correction emptied the day's requests
+        Queue::assertNotPushed(RunTeachingRegression::class);
     }
 
     public function test_an_edit_that_drops_existing_rules_is_blocked(): void

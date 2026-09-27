@@ -154,6 +154,41 @@ class DataIntegrityTest extends TestCase
         $this->assertSame('CUSTOMER_TYPE_NOT_STATED', $result->error['code']);
     }
 
+    public function test_working_in_a_workshop_is_not_owning_it(): void
+    {
+        // Opened as صاحب ورشة: asked for shop photos he does not have.
+        CustomerType::create(['key' => 'business_owner', 'label' => 'صاحب نشاط', 'is_active' => true]);
+        $this->say('انا شغال في ورشة ميكانيكا');
+
+        $worker = app(StartApplicationTool::class)->execute(['customer_type' => 'business_owner', 'customer_type_quote' => 'شغال في ورشة ميكانيكا'], $this->ctx(0));
+        $this->assertSame('OWNERSHIP_NOT_STATED', $worker->error['code']);
+
+        $this->say('لا انا صاحب الورشة');
+        $owner = app(StartApplicationTool::class)->execute(['customer_type' => 'business_owner', 'customer_type_quote' => 'انا صاحب الورشة'], $this->ctx(0));
+        $this->assertTrue($owner->ok);
+    }
+
+    public function test_the_home_address_is_not_saved_as_the_work_address(): void
+    {
+        RequirementField::create(['key' => 'work_address', 'label' => 'عنوان الشغل', 'data_type' => 'address', 'scope' => 'application', 'is_sensitive' => false, 'is_active' => true]);
+        $this->say('انا ساكن في الخصوص شارع السعاده عقار 3');
+
+        $result = app(RecordCustomerDataTool::class)->execute(['fields' => [
+            ['key' => 'address', 'value' => 'الخصوص، شارع السعادة، عقار 3'],
+            ['key' => 'work_address', 'value' => 'الخصوص، شارع السعادة، عقار 3'],
+        ]], $this->ctx());
+
+        $this->assertSame(['address'], $result->data['saved']);
+        $this->assertSame('SAME_AS_RESIDENCE', $result->data['rejected'][0]['code']);
+
+        // he says so himself: then it is his work address too
+        $this->say('الورشة تحت البيت نفس العنوان');
+        $same = app(RecordCustomerDataTool::class)->execute(['fields' => [
+            ['key' => 'work_address', 'value' => 'الخصوص، شارع السعادة، عقار 3'],
+        ]], $this->ctx());
+        $this->assertTrue($same->ok);
+    }
+
     public function test_an_ocr_name_missing_the_first_name_does_not_replace_the_full_name(): void
     {
         $this->say('انا سلام ناصر درويش عبدالمحسن');

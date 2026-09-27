@@ -20,6 +20,11 @@ class RunTeachingRegression implements ShouldQueue, ShouldBeUnique
 
     public function handle(RegressionRunner $runner): void
     {
-        TeachingCase::where('is_active', true)->orderBy('id')->each(fn (TeachingCase $case) => $runner->run($case));
+        try {
+            TeachingCase::where('is_active', true)->orderBy('id')->each(fn (TeachingCase $case) => $runner->run($case));
+        } catch (\App\Exceptions\TransientAiFailure $e) {
+            // no requests left today - the remaining cases would fail the same way
+            report($e);
+        }
     }
 }

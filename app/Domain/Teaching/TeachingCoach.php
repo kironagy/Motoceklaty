@@ -6,7 +6,6 @@ use App\Agent\Providers\AiProvider;
 use App\Agent\Providers\AiRequest;
 use App\Domain\Applications\ApplicationService;
 use App\Domain\Documents\DocumentPipeline;
-use App\Jobs\RunTeachingRegression;
 use App\Models\MessageMedia;
 use App\Models\TeachingCase;
 use App\Models\TeachingChange;
@@ -116,7 +115,15 @@ class TeachingCoach
         $result = (array) $session->result;
 
         if ($case && $applied->isNotEmpty()) {
-            $checks = $this->quickCheck($case, includeCase: ! $pending);
+            try {
+                $checks = $this->quickCheck($case, includeCase: ! $pending);
+            } catch (\App\Exceptions\TransientAiFailure $e) {
+                // unchecked lessons do not stay live
+                $applied->each(fn ($c) => $this->applier->revert($c));
+
+                throw $e;
+            }
+
             $failed = collect($checks)->where('pass', false);
 
             if ($failed->isNotEmpty()) {
@@ -143,11 +150,11 @@ class TeachingCoach
             $result['checks'] = $checks;
         }
 
+        // Every correction used to re-run every old case in the background:
+        // ~40 simulated conversations per correction emptied the day's 500
+        // requests in half an hour of teaching. The full run is the manual
+        // "جرّب كل الدروس" button now.
         $session->update(['result' => $result, 'status' => $pending ? 'awaiting_approval' : 'done']);
-
-        if (! $pending) {
-            RunTeachingRegression::dispatch();
-        }
     }
 
     private function afterApproval(TeachingSession $session, TeachingChange $change): void
@@ -166,7 +173,6 @@ class TeachingCoach
             }
 
             $session->status = 'done';
-            RunTeachingRegression::dispatch();
         }
 
         $session->result = $result;
@@ -176,7 +182,7 @@ class TeachingCoach
     /** @return array<int, array{label: string, pass: bool, reply: string, reason: string}> */
     private function quickCheck(TeachingCase $case, bool $includeCase): array
     {
-        $cases = $this->regression->related($case, (int) (config('agent.teaching.quick_check_cases') ?? 3));
+        $cases = $this->regression->related($case, (int) (config('agent.teaching.quick_check_cases') ?? 1));
 
         if ($includeCase) {
             $cases->prepend($case);

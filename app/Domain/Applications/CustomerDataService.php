@@ -80,6 +80,14 @@ class CustomerDataService
                 continue;
             }
 
+            // A workshop worker's home address was saved as his work address
+            // too - the model copied the one address he gave into both.
+            if ($key === 'work_address' && $this->copiesResidence($application, $fields, (string) $result->normalized, $conversationId)) {
+                $rejected[] = ['key' => $key, 'code' => 'SAME_AS_RESIDENCE'];
+
+                continue;
+            }
+
             $facts = array_merge($facts, $result->facts);
 
             if ($field->scope === 'customer') {
@@ -109,6 +117,28 @@ class CustomerDataService
         }
 
         return ['saved' => $saved, 'rejected' => $rejected, 'conflicts' => $conflicts, 'facts' => $facts];
+    }
+
+    /** The work address is the residence address, and he never said he works where he lives. */
+    private function copiesResidence(?Application $application, array $fields, string $workAddress, int $conversationId): bool
+    {
+        $residence = collect($fields)->firstWhere('key', 'address')['value']
+            ?? ($application ? ApplicationData::where('application_id', $application->id)->where('party', 'applicant')
+                ->where('field_key', 'address')->value('value') : null);
+
+        if (blank($residence)) {
+            return false;
+        }
+
+        $compact = fn (string $v) => preg_replace('/[\s\p{P}]+/u', '', \App\Support\ArabicTextNormalizer::normalize($v));
+        similar_text($compact((string) $residence), $compact($workAddress), $percent);
+
+        if ($percent < 90) {
+            return false;
+        }
+
+        return ! $this->statements->anyMessageMatches($conversationId,
+            '/نفس (?:العنوان|عنوان|المكان|مكان)|(?:بشتغل|شغال|شغلي)\s+(?:\S+\s+)?(?:من|في|ف)\s+(?:البيت|بيت|بيتي)|تحت (?:البيت|بيت)|ورشه تحت|محل تحت|اونلاين|من البيت/u');
     }
 
     /**
