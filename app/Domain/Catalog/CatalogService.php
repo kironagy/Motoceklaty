@@ -40,13 +40,6 @@ class CatalogService
                 : $query->whereHas('brand', fn ($q) => $q->where('name', 'like', '%'.$filters['brand'].'%'));
         }
 
-        if (isset($filters['cc_min'])) {
-            $query->where('cc', '>=', $filters['cc_min']);
-        }
-
-        if (isset($filters['cc_max'])) {
-            $query->where('cc', '<=', $filters['cc_max']);
-        }
 
         if (isset($filters['max_cash_price'])) {
             $query->where('cash_price', '<=', $filters['max_cash_price']);
@@ -61,6 +54,16 @@ class CatalogService
         }
 
         $machines = $query->with('brand')->get();
+
+        // cc is empty for most rows ("250cc" sits in the name or features):
+        // filtering on the column found almost nothing.
+        if (isset($filters['cc_min']) || isset($filters['cc_max'])) {
+            $machines = $machines->filter(function (Machine $m) use ($filters) {
+                $cc = self::engineCc($m);
+
+                return $cc !== null && $cc >= ($filters['cc_min'] ?? 0) && $cc <= ($filters['cc_max'] ?? PHP_INT_MAX);
+            })->values();
+        }
 
         if (! empty($filters['name_query'])) {
             $machines = $this->filterByNameQuery($machines, $filters['name_query']);
@@ -91,6 +94,59 @@ class CatalogService
             'items' => $machines->take($limit)->map(fn (Machine $m) => $this->toSearchItem($m))->values()->all(),
             'total' => $machines->count(),
         ];
+    }
+
+    /** Engine size: the cc column, else a size in the name ("L250"), else in the features ("200 CC", "197 سم مكعب"). */
+    public static function engineCc(Machine $machine): ?int
+    {
+        if ($machine->cc) {
+            return (int) $machine->cc;
+        }
+
+        $name = ArabicTextNormalizer::normalize((string) $machine->name);
+
+        if (preg_match('/(?<!\d)(100|110|125|135|150|160|180|197|200|220|250|300|400)(?!\d)/', $name, $m)) {
+            return (int) $m[1];
+        }
+
+        $features = ArabicTextNormalizer::normalize(collect($machine->features ?? [])->pluck('title')->implode(' '));
+
+        return preg_match('/(?<!\d)(\d{2,3})\s*(?:cc|سي ?سي|سم)/iu', $features, $m) ? (int) $m[1] : null;
+    }
+
+    /** motorcycle / scooter / tricycle / electric - the kind of vehicle, from its brand group. */
+    public static function kind(Machine $machine): string
+    {
+        $brand = mb_strtolower(ArabicTextNormalizer::normalize((string) $machine->brand?->name));
+
+        return match (true) {
+            str_contains($brand, 'electric') || str_contains($brand, 'كهرب') => 'electric',
+            str_contains($brand, 'scooter') || str_contains($brand, 'سكوتر') => 'scooter',
+            str_contains($brand, 'تروسيك') || str_contains($brand, 'tricycle') => 'tricycle',
+            default => 'motorcycle',
+        };
+    }
+
+    /**
+     * Simulator 690: asked for "srk 200" (not carried), then "ايه الموجود؟"
+     * got a 39,000 Dayun and 250cc Hogans. What he gets is the same kind and
+     * size first, closest in price.
+     *
+     * @return array<int, array> search items
+     */
+    public function similar(?int $cc, ?string $kind = null, ?float $price = null, int $limit = 5, array $excludeIds = []): array
+    {
+        return Machine::query()->where('is_active', true)->where('availability', 'in_stock')->with('brand')->get()
+            ->reject(fn (Machine $m) => in_array($m->id, $excludeIds, true))
+            ->filter(fn (Machine $m) => $kind === null || self::kind($m) === $kind)
+            ->filter(fn (Machine $m) => $cc === null || (($own = self::engineCc($m)) !== null && abs($own - $cc) <= 25))
+            ->sortBy(fn (Machine $m) => [
+                $cc === null ? 0 : abs((self::engineCc($m) ?? 9999) - $cc),
+                $price === null ? 0 : abs((float) $m->cash_price - $price),
+            ])
+            ->take($limit)
+            ->map(fn (Machine $m) => $this->toSearchItem($m))
+            ->values()->all();
     }
 
     private function filterByNameQuery(Collection $machines, string $nameQuery): Collection
@@ -136,7 +192,7 @@ class CatalogService
             'id' => $m->id,
             'name' => $m->name,
             'brand' => $m->brand?->name,
-            'cc' => $m->cc,
+            'cc' => self::engineCc($m),
             'cash_price' => $m->cash_price,
             // no installment_price: the owner never tells the customer the
             // price the installment is calculated on
@@ -174,7 +230,7 @@ class CatalogService
                 'colors' => $colors,
                 'availability' => $m->availability,
                 'installment_system_ids' => $m->installmentSystemIds(),
-                'cc' => $m->cc,
+                'cc' => self::engineCc($m),
                 'model_year' => $m->model_year,
                 'description' => $m->description,
                 'specifications' => $m->specifications,

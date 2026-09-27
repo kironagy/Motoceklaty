@@ -115,6 +115,32 @@ class CatalogServiceTest extends TestCase
         $this->assertStringContainsString('VLR200', $sent->data['motorcycle']);
     }
 
+    public function test_a_model_we_do_not_carry_gets_the_same_size_and_so_does_a_later_what_do_you_have(): void
+    {
+        // Simulator 690: "srk 200" (not carried), then "ايه الموجود حاليا؟"
+        // got a 150cc Dayun and 250cc Hogans.
+        // as live: cc is empty, the size is in the name or the features
+        $this->machine(['name' => 'دايو ٤', 'cc' => null, 'cash_price' => 39000, 'features' => [['title' => '150 cc']]]);
+        $this->machine(['name' => 'L250', 'cc' => null, 'cash_price' => 70000, 'features' => [['title' => '250cc']]]);
+        $this->machine(['name' => 'VLR200', 'cc' => null, 'cash_price' => 50000, 'features' => [['title' => '200cc']]]);
+        $this->machine(['name' => 'وينج ٢٠٠', 'cc' => null, 'cash_price' => 39000]);
+
+        $staff = \App\Models\Staff::create(['name' => 'S', 'email' => uniqid().'@x.com', 'password' => 'secret']);
+        $bot = \App\Models\WhatsappBot::create(['staff_id' => $staff->id, 'name' => 'B', 'whatsapp_phone_number_id' => uniqid(), 'is_active' => true]);
+        $conversation = \App\Models\WhatsappConversation::create(['whatsapp_bot_id' => $bot->id, 'phone' => '2011', 'status' => 'open']);
+        $trace = \App\Models\AiTrace::create(['conversation_id' => $conversation->id, 'turn_id' => 1, 'status' => 'running']);
+        $ctx = new \App\Agent\Tools\ToolContext(1, $conversation->id, null, 1, $trace->id, new \App\Agent\Runtime\TurnResultBuilder());
+        $tool = app(\App\Agent\Tools\SearchMotorcyclesTool::class);
+
+        $missing = $tool->execute(['name_query' => 'srk 200'], $ctx);
+        $this->assertTrue($missing->data['not_carried']);
+        $this->assertEqualsCanonicalizing(['VLR200', 'وينج ٢٠٠'], array_column($missing->data['similar_available'], 'name'));
+
+        $available = $tool->execute(['available_only' => true], $ctx);
+        $this->assertEqualsCanonicalizing(['VLR200', 'وينج ٢٠٠'], array_column($available->data['items'], 'name'));
+        $this->assertStringContainsString('srk 200', $available->data['note']);
+    }
+
     public function test_images_fall_back_to_display_image_and_match_hex_by_arabic_name(): void
     {
         $machine = $this->machine();
