@@ -18,13 +18,33 @@ class ChangeApplier
     {
     }
 
+    /**
+     * An edit to an existing lesson sent without its rule (only a new title
+     * or example) was refused as "الدرس من غير قاعدة" and the owner's
+     * correction was lost. The lesson keeps its current rule.
+     */
+    private function keepExistingRule(TeachingChange $change): bool
+    {
+        $after = (array) $change->after;
+        $rule = ($after['lesson_id'] ?? null) ? BotLesson::whereKey($after['lesson_id'])->value('rule') : null;
+
+        if (blank($rule)) {
+            return false;
+        }
+
+        $after['fields']['rule'] = $rule;
+        $change->after = $after;
+
+        return true;
+    }
+
     /** Throws before touching anything when the change is invalid. */
     public function validate(TeachingChange $change): void
     {
         $after = (array) $change->after;
 
         match ($change->kind) {
-            'lesson' => trim((string) ($after['fields']['rule'] ?? '')) !== '' || throw new \InvalidArgumentException('الدرس من غير قاعدة'),
+            'lesson' => trim((string) ($after['fields']['rule'] ?? '')) !== '' || $this->keepExistingRule($change) || throw new \InvalidArgumentException('الدرس من غير قاعدة'),
             'instruction' => $this->locate($change),
             'setting' => isset(AgentSettings::definitions()[$change->target_id]) || throw new \InvalidArgumentException("الإعداد {$change->target_id} مش موجود"),
             'data_update' => $this->castAll($change->target_type, $after) && $this->record($change),

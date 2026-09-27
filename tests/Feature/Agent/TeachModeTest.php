@@ -155,6 +155,108 @@ class TeachModeTest extends TestCase
         Queue::assertNotPushed(RunTeachingRegression::class);
     }
 
+    private function simConversation(): array
+    {
+        $staff = Staff::create(['name' => 'S', 'email' => 'a'.uniqid().'@x.com', 'password' => 'secret']);
+        $bot = WhatsappBot::create(['staff_id' => $staff->id, 'name' => 'B', 'whatsapp_phone_number_id' => uniqid(), 'is_active' => false]);
+        $conversation = WhatsappConversation::create(['whatsapp_bot_id' => $bot->id, 'phone' => 'sim-'.uniqid(), 'status' => 'open']);
+        WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'whatsapp_bot_id' => $bot->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'القسط كام']);
+        $reply = WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'whatsapp_bot_id' => $bot->id, 'direction' => 'outgoing', 'sender_type' => 'bot', 'type' => 'text', 'text' => 'حضرتك بتشتغل إيه؟']);
+
+        return [$staff, $conversation, $reply];
+    }
+
+    private function coachPlan(array $operations): AiResponse
+    {
+        return new AiResponse([json_encode([
+            'understanding' => 'فهمت', 'question' => '', 'expectation' => 'يعرض الأقساط', 'must_contain' => [], 'stage' => 'installments',
+            'operations' => $operations,
+        ], JSON_UNESCAPED_UNICODE)], [], 'STOP', [], 'fake', null, 1);
+    }
+
+    public function test_a_correction_waits_for_the_ai_instead_of_failing(): void
+    {
+        // "حصلت مشكلة - المدرّب مش متاح" nine times in one night: the day's
+        // requests were gone. The correction is kept and finished later.
+        Queue::fake();
+        [$staff, $conversation, $reply] = $this->simConversation();
+        $this->app->instance(AiProvider::class, new class implements AiProvider {
+            public function chat(\App\Agent\Providers\AiRequest $request): AiResponse
+            {
+                throw new \App\Agent\Providers\AiProviderException('all keys rate-limited', retryable: true);
+            }
+        });
+
+        $session = app(TeachingCoach::class)->teach($conversation, $reply->id, 'اعرض الأقساط على طول', $staff->id);
+
+        $this->assertSame('waiting', $session->status);
+        $this->assertStringNotContainsString('مشكلة', $session->understanding);
+        Queue::assertPushed(\App\Jobs\ResumeTeachingSession::class);
+
+        $fake = new FakeAiProvider();
+        $fake->queue($this->coachPlan([['kind' => 'lesson', 'summary' => 'الأقساط', 'title' => 'الأقساط', 'rule' => 'اعرض الأقساط فورًا', 'changes' => []]]));
+        $this->app->instance(AiProvider::class, $fake);
+        $runner = \Mockery::mock(RegressionRunner::class);
+        $runner->shouldReceive('related')->andReturn(collect());
+        $runner->shouldReceive('run')->andReturn(['pass' => true, 'reply' => 'سنة: القسط ...', 'reason' => '']);
+        $this->app->instance(RegressionRunner::class, $runner);
+
+        (new \App\Jobs\ResumeTeachingSession($session->id))->handle(app(TeachingCoach::class));
+
+        $this->assertSame('done', $session->fresh()->status);
+        $this->assertSame(1, BotLesson::where('is_active', true)->count());
+    }
+
+    public function test_an_older_opposite_case_does_not_block_the_new_lesson(): void
+    {
+        // The owner changed his mind ("don't ask the work" after "ask the
+        // work"): the old case failed and the new lesson was reverted.
+        Queue::fake();
+        [$staff, $conversation, $reply] = $this->simConversation();
+        $old = TeachingCase::create(['history' => [['role' => 'customer', 'text' => 'x', 'media' => []]], 'expectation' => 'يسأل عن الشغل', 'is_active' => true]);
+
+        $fake = new FakeAiProvider();
+        $fake->queue($this->coachPlan([['kind' => 'lesson', 'summary' => 'الأقساط', 'title' => 'الأقساط', 'rule' => 'اعرض الأقساط من غير ما تسأل عن الشغل', 'changes' => []]]));
+        $this->app->instance(AiProvider::class, $fake);
+        $runner = \Mockery::mock(RegressionRunner::class);
+        $runner->shouldReceive('related')->andReturn(collect([$old]));
+        $runner->shouldReceive('run')->andReturnUsing(fn (TeachingCase $c) => $c->id === $old->id
+            ? ['pass' => false, 'reply' => 'سنة: ...', 'reason' => 'ما سألش عن الشغل']
+            : ['pass' => true, 'reply' => 'سنة: ...', 'reason' => '']);
+        $this->app->instance(RegressionRunner::class, $runner);
+
+        $session = app(TeachingCoach::class)->teach($conversation, $reply->id, 'ما تسألش عن الشغل', $staff->id);
+
+        $this->assertSame('done', $session->status);
+        $this->assertSame(1, BotLesson::where('is_active', true)->count());
+        $this->assertFalse($old->fresh()->is_active);
+    }
+
+    public function test_a_lesson_edit_without_its_rule_keeps_the_old_rule(): void
+    {
+        $lesson = BotLesson::create(['title' => 'المدد', 'rule' => 'اعرض كل المدد', 'is_active' => true]);
+        $change = $this->change(['kind' => 'lesson', 'target_type' => 'bot_lesson', 'target_id' => (string) $lesson->id,
+            'after' => ['lesson_id' => $lesson->id, 'fields' => ['title' => 'المدد الأربعة', 'rule' => '']]]);
+
+        app(ChangeApplier::class)->validate($change);
+        app(ChangeApplier::class)->apply($change);
+
+        $this->assertSame('اعرض كل المدد', $lesson->fresh()->rule);
+        $this->assertSame('المدد الأربعة', $lesson->fresh()->title);
+    }
+
+    public function test_the_newest_lessons_are_kept_when_the_budget_is_full(): void
+    {
+        config(['agent.teaching.lessons_tokens' => 20]);
+        BotLesson::create(['title' => 'قديم', 'rule' => str_repeat('كلام قديم ', 10), 'is_active' => true]);
+        BotLesson::create(['title' => 'جديد', 'rule' => 'اعرض السنتين', 'is_active' => true]);
+
+        $text = app(LessonBook::class)->forPrompt(null)['text'];
+
+        $this->assertStringContainsString('اعرض السنتين', $text);
+        $this->assertStringNotContainsString('كلام قديم', $text);
+    }
+
     public function test_an_edit_that_drops_existing_rules_is_blocked(): void
     {
         Queue::fake();

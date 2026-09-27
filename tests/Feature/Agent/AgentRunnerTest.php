@@ -303,6 +303,24 @@ class AgentRunnerTest extends TestCase
         $this->assertSame(0, Handoff::where('conversation_id', $conversation->id)->count());
     }
 
+    public function test_out_of_tries_a_repeated_reply_is_sent_rather_than_handed_off(): void
+    {
+        config(['agent.runtime.max_model_calls' => 1, 'agent.handoff.waiting_message' => 'وصلتني رسالتك، زميلي هيرد عليك.']);
+        $conversation = $this->conversation();
+        WhatsappMessage::create([
+            'whatsapp_conversation_id' => $conversation->id, 'direction' => 'outgoing',
+            'sender_type' => 'bot', 'type' => 'text', 'text' => 'تمام يا فندم',
+        ]);
+        $fake = $this->fake();
+        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['تمام يا فندم']]]]));
+        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['تمام يا فندم']]]]));
+
+        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
+
+        $this->assertSame(['تمام يا فندم'], $result['messages']);
+        $this->assertSame(0, Handoff::where('conversation_id', $conversation->id)->count());
+    }
+
     public function test_the_bot_never_says_no_down_payment(): void
     {
         $conversation = $this->conversation();

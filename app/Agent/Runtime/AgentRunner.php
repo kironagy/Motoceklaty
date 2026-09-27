@@ -117,7 +117,16 @@ class AgentRunner
 
                             // Handing off is the last resort (owner: the bot closes ~90%
                             // itself): two misses used to end the turn with a colleague.
-                            $exhausted = $numberGuardViolations >= 3 || $this->countCode($guardEvents, 'DUPLICATE_REPLY') >= 3;
+                            $exhausted = $numberGuardViolations >= 3 || $this->countCode($guardEvents, 'DUPLICATE_REPLY') >= 3 || $limitReached;
+
+                            // Out of tries, a repeated question or wording is still a
+                            // true answer - better than handing the customer off.
+                            if ($exhausted && in_array($violation, self::SOFT_VIOLATIONS, true)) {
+                                $violation = null;
+                            }
+                        }
+
+                        if ($violation !== null) {
 
                             // A freelancer's offer went to a colleague three times in one
                             // morning because each try carried one figure the model worked
@@ -192,7 +201,8 @@ class AgentRunner
                     break;
                 }
 
-                if ($limitReached) {
+                // the final no-numbers try still gets its one call
+                if ($limitReached && ! $forceSendNext) {
                     return $this->unverifiedReply($conversation, $trace, $guardEvents, 'LIMIT_REACHED_WITHOUT_REPLY');
                 }
             }
@@ -227,6 +237,9 @@ class AgentRunner
      * after a claim guard made the model call *something* - six motorcycle
      * photos were queued for a customer who had just said goodbye.
      */
+    /** Style problems only - nothing false is said. */
+    private const SOFT_VIOLATIONS = ['REPEATED_QUESTION', 'DUPLICATE_REPLY'];
+
     private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER', 'BRANCH_NOT_SOURCED', 'TOTAL_NOT_SOURCED', 'AGE_NOT_CHECKED'];
 
     private const GUARD_HINTS = [

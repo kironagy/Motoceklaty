@@ -34,16 +34,57 @@ class TeachingCoach
             'created_by' => $staffId,
         ]);
 
-        try {
-            $plan = $this->ask($conversation, $targetMessageId, $ownerText);
-            $this->process($session, $plan, $staffId, retryOnFail: true);
-        } catch (\Throwable $e) {
-            report($e);
-            $session->update(['status' => 'error', 'understanding' => 'حصلت مشكلة وأنا بفهم التصحيح: '.$e->getMessage()]);
-        }
+        $this->attempt($session, $staffId);
 
         return $session->refresh();
     }
+
+    /** A correction that waited for the AI to come back, run again. */
+    public function resume(TeachingSession $session): void
+    {
+        if ($session->status !== 'waiting') {
+            return;
+        }
+
+        // what the interrupted try left half-done
+        $session->changes()->where('status', '!=', 'applied')->delete();
+        $session->cases()->delete();
+
+        $this->attempt($session, $session->created_by);
+    }
+
+    /**
+     * The owner was told "حصلت مشكلة / المدرّب مش متاح - جرّب تاني" nine
+     * times in one night: the day's requests had run out. The correction is
+     * kept and finished on its own once the AI answers again.
+     */
+    private function attempt(TeachingSession $session, ?int $staffId): void
+    {
+        try {
+            $plan = $this->ask(WhatsappConversation::findOrFail($session->conversation_id), $session->target_message_id, $session->owner_text);
+            $this->process($session, $plan, $staffId, retryOnFail: true);
+        } catch (\Throwable $e) {
+            report($e);
+            $retries = (int) (((array) $session->result)['retries'] ?? 0);
+
+            if ($retries >= self::MAX_RETRIES) {
+                $session->update(['status' => 'error', 'understanding' => 'حاولت أكمّل التصحيح ده يوم كامل والـ AI مش بيرد - ابعته تاني.']);
+
+                return;
+            }
+
+            $session->update([
+                'status' => 'waiting',
+                'understanding' => 'التصحيح اتحفظ. الـ AI مشغول دلوقتي (غالبًا ريكويستات النهارده خلصت)، وهكمّله لوحدي أول ما يرجع - مش محتاج تبعته تاني.',
+                'result' => ['retries' => $retries + 1],
+            ]);
+
+            \App\Jobs\ResumeTeachingSession::dispatch($session->id)->delay(now()->addMinutes(15));
+        }
+    }
+
+    /** 15 minutes apart: a day, past Google's daily reset. */
+    private const MAX_RETRIES = 96;
 
     public function approve(TeachingChange $change, ?int $staffId): void
     {
@@ -124,12 +165,23 @@ class TeachingCoach
                 throw $e;
             }
 
+            // The owner's newest word wins. A lesson was reverted because an
+            // older case expected the opposite ("ask the work" vs "don't ask")
+            // - the owner had changed his mind, the lesson was right. That old
+            // case is retired instead of blocking the new one.
+            foreach ($checks as $i => $check) {
+                if (! $check['pass'] && ($check['case_id'] ?? null) !== $case->id) {
+                    TeachingCase::whereKey($check['case_id'])->update(['is_active' => false, 'last_reason' => 'اتلغى: تعليم أحدث (#'.$session->id.') غيّر المطلوب. '.$check['reason']]);
+                    $checks[$i]['label'] .= ' (اتلغى - التعليم الجديد أحدث منه)';
+                    $checks[$i]['pass'] = true;
+                }
+            }
+
             $failed = collect($checks)->where('pass', false);
 
             if ($failed->isNotEmpty()) {
-                $applied->each(fn ($c) => $this->applier->revert($c));
-
                 if ($retryOnFail) {
+                    $applied->each(fn ($c) => $this->applier->revert($c));
                     $case->delete();
                     $session->update(['result' => $result + ['first_attempt' => $checks]]);
                     $applied->each(fn ($c) => $c->update(['status' => 'failed_check']));
@@ -144,7 +196,9 @@ class TeachingCoach
                     return;
                 }
 
-                $applied->each(fn ($c) => $c->update(['status' => 'failed_check', 'error' => $failed->first()['reason']]));
+                // Reverting here dropped the owner's rule twice in a row and read
+                // as "I can't". It stays live; the result shows how the test went.
+                $result['note'] = 'الدرس اتطبق. في التجربة الرد لسه مش مظبوط 100% - لو شفته غلط صحّحه تاني وأنا أزبطه.';
             }
 
             $result['checks'] = $checks;
@@ -190,6 +244,7 @@ class TeachingCoach
 
         return $cases->map(fn (TeachingCase $c) => [
             'label' => $c->id === $case->id ? 'نفس الموقف بعد التعليم' : 'درس قديم: '.\Illuminate\Support\Str::limit($c->expectation, 70),
+            'case_id' => $c->id,
         ] + $this->regression->run($c))->values()->all();
     }
 

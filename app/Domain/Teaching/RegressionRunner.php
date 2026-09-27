@@ -108,7 +108,9 @@ class RegressionRunner
 
             return ['pass' => (bool) ($json['pass'] ?? false), 'reason' => (string) ($json['reason'] ?? '')];
         } catch (\Throwable $e) {
-            return ['pass' => false, 'reason' => 'الحكم ما اشتغلش: '.$e->getMessage()];
+            // "الحكم ما اشتغلش" failed and reverted good lessons: a judge that
+            // could not answer says nothing about the reply.
+            throw new \App\Exceptions\TransientAiFailure('الحكم مش متاح دلوقتي: '.$e->getMessage(), 0, $e);
         }
     }
 

@@ -29,11 +29,13 @@ class LessonBook
     /** @return array{text: ?string, count: int} */
     public function forPrompt(?string $customerType): array
     {
-        $budget = (int) (config('agent.teaching.lessons_tokens') ?: 1500);
+        $budget = (int) (config('agent.teaching.lessons_tokens') ?: 3000);
         $used = 0;
         $lines = [];
 
-        foreach ($this->active() as $lesson) {
+        // Newest first: once the budget filled up, the owner's latest
+        // corrections were the ones left out and the bot "didn't learn".
+        foreach ($this->active()->sortByDesc('id') as $lesson) {
             $scope = (array) ($lesson->scope_customer_types ?? []);
 
             if ($scope !== [] && $customerType && ! in_array($customerType, $scope, true)) {
@@ -54,9 +56,11 @@ class LessonBook
                 }
             }
 
-            $lines[] = $line;
+            $lines[$lesson->id] = $line;
             $used += $cost;
         }
+
+        ksort($lines);
 
         if ($lines === []) {
             return ['text' => null, 'count' => 0];
@@ -65,8 +69,10 @@ class LessonBook
         return [
             'text' => "## دروس من صاحب الشغل\n"
                 ."دي تصحيحات صاحب المعرض ليك. طبّق الفكرة بأسلوبك وبكلام مختلف كل مرة - الأمثلة للتوضيح مش للنسخ. "
-                ."الثوابت (أسماء، أرقام، عبارات مطلوبة بالنص) تتقال زي ما هي. الدروس دي أعلى من قسم الأسلوب، "
-                ."لكن أقل من \"اللي السيستم بيفرضه\" و\"الأمان\" ومن نتايج الأدوات.\n\n"
+                ."الثوابت (أسماء، أرقام، عبارات مطلوبة بالنص) تتقال زي ما هي. "
+                ."الدروس دي أحدث وأعلى من أي تعليمات تانية هنا ومن توجيهات عرض الأدوات (how_to_present، سطر say، أي hint): "
+                ."لو درس بيقول حاجة وتعليمات تانية أو أداة بتقول عكسها، اعمل اللي في الدرس. ولو درسين اتعارضوا، الأحدث (اللي تحت) هو الصح. "
+                ."الحاجة الوحيدة اللي أعلى من الدروس: أي رقم أو بيانة لازم تيجي من أداة، وما تقولش إنك عملت حاجة ما اتعملتش.\n\n"
                 .implode("\n", $lines),
             'count' => count($lines),
         ];
