@@ -159,7 +159,7 @@ class GetInstallmentOfferTool implements Tool
                 'installment_system' => $o['system'],
                 'down_payment' => $o['down_payment'],
             ], $shown),
-            // say only if he asks when payments start
+            // once with the offer, or when he asks (owner's instructions)
             'first_payment' => self::firstPaymentLine(),
             // the owner's wording of why installments cost more than cash
             'price_difference_policy' => (string) config('agent.installments.price_difference_explanation'),
@@ -168,7 +168,7 @@ class GetInstallmentOfferTool implements Tool
                 .'If he asks why installments cost more than cash, explain it in your own short words from price_difference_policy (never copied word for word, never adding reasons it does not give), '
                 .'then offer the cash price. If he asks what he pays in the end, send the offer\'s `breakdown` as it is. '
                 .'Never tell him the installment price of the motorcycle (the price the installment is calculated on). '
-                .'If he asks when payments start, say `first_payment`. Never write the words "من غير مقدم" / "بدون مقدم" - say what is paid at pickup instead. No system/company names, no word "نظام"/"أنظمة". Quote every offer below with its numbers - never say "فيه مدد تانية" instead of quoting one.',
+                .'Say `first_payment` once with the offer (or when he asks). Never write the words "من غير مقدم" / "بدون مقدم" - say what is paid at pickup instead. No system/company names, no word "نظام"/"أنظمة". Quote every offer below with its numbers - never say "فيه مدد تانية" instead of quoting one.',
         ] + ($capped ? ['explain_to_customer' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : [])
         );
     }

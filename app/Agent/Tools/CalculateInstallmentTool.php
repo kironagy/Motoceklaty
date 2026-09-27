@@ -128,7 +128,7 @@ class CalculateInstallmentTool implements Tool
             'monthly_payment' => $result->monthlyInstallment,
             'admin_fee' => $result->administrativeFees,
             'cash_due_upfront' => round($result->downPayment + $result->administrativeFees),
-            // say only if he asks when payments start
+            // once with the offer, or when he asks
             'first_payment' => GetInstallmentOfferTool::firstPaymentLine(),
             'warnings' => $warnings,
         ] + ($downPayment > $requestedDownPayment ? ['financing_cap' => [
