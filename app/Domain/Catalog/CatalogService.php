@@ -138,7 +138,8 @@ class CatalogService
             'brand' => $m->brand?->name,
             'cc' => $m->cc,
             'cash_price' => $m->cash_price,
-            'installment_price' => $m->installment_price,
+            // no installment_price: the owner never tells the customer the
+            // price the installment is calculated on
             'is_offer' => $m->type === 'offer',
             'offer_price' => $m->type === 'offer' ? $m->new_price : null,
             'availability' => $m->availability,
@@ -166,7 +167,6 @@ class CatalogService
                 'name' => $m->name,
                 'brand' => $m->brand?->name,
                 'cash_price' => $m->cash_price,
-                'installment_price' => $m->installment_price,
                 'is_offer' => $m->type === 'offer',
                 'old_price' => $m->type === 'offer' ? $m->old_price : null,
                 'new_price' => $m->type === 'offer' ? $m->new_price : null,

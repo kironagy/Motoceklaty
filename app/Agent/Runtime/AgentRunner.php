@@ -75,6 +75,8 @@ class AgentRunner
         /** @var array<int, array{name: string, ok: bool, data: array}> $outcomes */
         $outcomes = [];
         $forceToolNext = false;
+        $forceSendNext = false;
+        $safeReplyTried = false;
         $started = microtime(true);
         $lastResponse = null;
 
@@ -84,8 +86,9 @@ class AgentRunner
                     || $toolCallCount >= (int) $maxToolCalls
                     || (microtime(true) - $started) >= (int) $wallClockSeconds;
 
-                $response = $this->callModel($request->system, $contents, $toolDeclarations, forceSendReply: $limitReached, forceOtherTool: ! $limitReached && $forceToolNext);
+                $response = $this->callModel($request->system, $contents, $toolDeclarations, forceSendReply: $limitReached || $forceSendNext, forceOtherTool: ! $limitReached && ! $forceSendNext && $forceToolNext);
                 $forceToolNext = false;
+                $forceSendNext = false;
                 $lastResponse = $response;
                 $this->addUsage($response);
                 $modelCalls++;
@@ -114,9 +117,34 @@ class AgentRunner
 
                             // Handing off is the last resort (owner: the bot closes ~90%
                             // itself): two misses used to end the turn with a colleague.
-                            if ($numberGuardViolations >= 3 || $this->countCode($guardEvents, 'DUPLICATE_REPLY') >= 3) {
+                            $exhausted = $numberGuardViolations >= 3 || $this->countCode($guardEvents, 'DUPLICATE_REPLY') >= 3;
+
+                            // A freelancer's offer went to a colleague three times in one
+                            // morning because each try carried one figure the model worked
+                            // out itself. The rest of the reply was right: send it without
+                            // those sentences.
+                            $rescued = $exhausted ? $this->withoutUnverifiedSentences($toolCall['args'], $violation, $conversation, $request->system, $contents, $outcomes) : null;
+
+                            if ($rescued !== null) {
+                                $guardEvents[] = ['code' => 'RESCUED_WITHOUT_UNVERIFIED_SENTENCES', 'args' => $rescued];
+                                $toolCall['args'] = $rescued;
+                            } elseif ($exhausted && ! $safeReplyTried) {
+                                // one more try, told exactly how to pass: no numbers at all
+                                $safeReplyTried = true;
+                                $forceSendNext = true;
+                                $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => [
+                                    'code' => $violation,
+                                    'detail' => (self::GUARD_HINTS[$violation] ?? '').' FINAL TRY: send a short reply with NO numbers at all and no claims - '
+                                        .'answer his message in words, or ask him one short question. Do not promise that a colleague will follow up.',
+                                ]]);
+
+                                continue;
+                            } elseif ($exhausted) {
                                 return $this->unverifiedReply($conversation, $trace, $guardEvents, $violation);
                             }
+                        }
+
+                        if ($violation !== null && $rescued === null) {
 
                             // Told "call the tool first", the model resent the same
                             // number twice and the turn ended in the "we're busy"
@@ -215,7 +243,7 @@ class AgentRunner
         'INTERNAL_KEY_IN_REPLY' => 'Not sent: the reply contains an internal key (snake_case like delivery_app). Use the plain Arabic wording instead.',
         'PLACEHOLDER_IN_REPLY' => 'Not sent: the reply contains a history placeholder like [media]. Photos are only sent by calling send_motorcycle_images; write plain text only.',
         'IMAGES_CLAIMED_NOT_SENT' => 'Not sent: the reply says photos are attached but send_motorcycle_images did not succeed this turn. Call it if the customer wants photos, otherwise rewrite without mentioning photos.',
-        'TOTAL_NOT_SOURCED' => 'Not sent: the reply states a total that no tool result of this turn contains (a number the customer wrote is not a total). Call get_installment_offer for this motorcycle and duration and quote total_paid, cash_price and installment_price exactly as returned.',
+        'TOTAL_NOT_SOURCED' => 'Not sent: the reply states a total that no tool result of this turn contains (a number the customer wrote is not a total). Call get_installment_offer for this motorcycle and duration and quote total_paid and cash_price exactly as returned (never the installment price).',
         'UNSOURCED_REASON' => 'Not sent: the reply explains the fees or the installment/cash difference without the owner\'s policy. Call get_installment_offer for this motorcycle and explain the difference only from its price_difference_policy (in your own words) plus its numbers. The admin fees have no recorded reason - just say they are paid once at pickup.',
         'BRANCH_NOT_SOURCED' => 'Not sent: the reply states a branch, an address or opening hours that no get_branch_information result this turn contains. Call get_branch_information (governorate of the customer if he said it) and use only the branches it returns - if his governorate has none, say so and give the nearest ones it returned. Never name a branch or area that is not in the result.',
         'AGE_NOT_CHECKED' => 'Not sent: the reply says his age is fine without a check. Call check_eligibility with his age (and months if a duration is known) and answer from its result - if not_eligible, tell him kindly and clearly.',
@@ -226,7 +254,7 @@ class AgentRunner
         'UNRECORDED_PROMISE' => 'Not sent: the reply promises something nothing records - a reservation ("محجوزة", "نحجزلك"), a time frame ("نفس اليوم", "خلال كذا يوم"), a warranty, a guarantor, or "I will tell you as soon as...". None of these exist in our data. Remove the promise; say only what the tools returned.',
         'INTEREST_DENIED' => 'Not sent: the reply says there is no interest/no increase. That is false - the installment price is higher than cash. Never deny it. If he asks about interest, give the cash price and what he pays in total from get_installment_offer (the breakdown line), and explain the difference only from price_difference_policy.',
         'SCRIPTED_PHRASE_REQUEST' => 'Not sent: the reply asks the customer to say/write a specific sentence. Never do that. If he already said what he works, use his own earlier words as the quote (record_customer_data / start_application). If he did not, just ask "حضرتك بتشتغل إيه؟".',
-        'BANNED_WORDING' => 'Not sent: the reply uses wording the owner banned - a name for yourself (never give yourself a name), "أهلاً بك" or "حقك عليا". Rewrite without it.',
+        'BANNED_WORDING' => 'Not sent: the reply uses wording the owner banned - a name for yourself (never give yourself a name), "أهلاً بك", "حقك عليا" or "من غير مقدم"/"بدون مقدم" (say what is paid at pickup instead). Rewrite without it.',
         'UNVERIFIED_NUMBER' => 'Not sent: the reply contains a number (a price, or a measured value like km/litre, hp, months, %) that no tool result or structured state contains. Prices must come from a tool call in THIS turn (the catalog index is for names only) - call get_motorcycle_details / calculate_installment first, or leave the number out. Never state specifications that are not in a tool result.',
     ];
 
@@ -245,6 +273,37 @@ class AgentRunner
             toolMode: $allowed === [] ? 'auto' : 'any',
             allowedTools: $allowed,
         ));
+    }
+
+    /**
+     * The reply minus the sentences carrying an unsourced number, if what is
+     * left still says something and passes every guard - otherwise null.
+     */
+    private function withoutUnverifiedSentences(array $args, string $violation, WhatsappConversation $conversation, string $system, array $contents, array $outcomes): ?array
+    {
+        if (! in_array($violation, ['UNVERIFIED_NUMBER', 'TOTAL_NOT_SOURCED'], true)) {
+            return null;
+        }
+
+        $messages = [];
+
+        foreach ((array) ($args['messages'] ?? []) as $message) {
+            $bad = $this->guard->unverifiedSentences((string) $message, $system, $contents, $outcomes);
+            $kept = trim(str_replace($bad, '', (string) $message));
+
+            if ($kept !== '') {
+                // the dropped sentence leaves its line break behind
+                $messages[] = preg_replace('/\n{2,}/u', str_contains((string) $message, "\n\n") ? "\n\n" : "\n", $kept);
+            }
+        }
+
+        $rescued = ['messages' => $messages] + $args;
+
+        if (mb_strlen(implode(' ', $messages)) < 15 || $messages === (array) ($args['messages'] ?? [])) {
+            return null;
+        }
+
+        return $this->guard->check($rescued, $conversation, $system, $contents, $outcomes) === null ? $rescued : null;
     }
 
     private function modelToolCallContent(AiResponse $response): array

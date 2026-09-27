@@ -82,6 +82,14 @@ class GetInstallmentOfferTool implements Tool
             $customerTypeId = $customerType->id;
         }
 
+        // The owner: above the freelancer cap (60,000) the offer depends on
+        // his work, so the work comes first; below it the numbers come first.
+        if ($customerTypeId === null && ($capLabels = $this->cappedWorkTypes($machine)) !== null) {
+            return ToolResult::error('ASK_WORK_FIRST', 'Before any installment number, tell him the cash price ('
+                .number_format((float) $machine->cash_price).' جنيه) and ask only "حضرتك بتشتغل إيه؟" - for this motorcycle the '
+                .'installment depends on his work ('.$capLabels.' pay part of the price at pickup). When he answers, call again with customer_type.');
+        }
+
         $months = isset($args['months']) ? (int) $args['months'] : null;
 
         // He already chose a duration: a freelancer's financing cap then
@@ -138,7 +146,6 @@ class GetInstallmentOfferTool implements Tool
 
         return ToolResult::ok([
             'cash_price' => (float) $machine->cash_price,
-            'installment_price' => (float) ($machine->installment_price ?: $machine->cash_price),
             'offers' => array_map(fn (array $o) => [
                 'months' => $o['months'],
                 'cash_due_upfront' => $o['cash_due_upfront'],
@@ -152,40 +159,32 @@ class GetInstallmentOfferTool implements Tool
                 'installment_system' => $o['system'],
                 'down_payment' => $o['down_payment'],
             ], $shown),
-            'first_payment_after_days' => $this->firstPaymentAfterDays(),
+            // say only if he asks when payments start
+            'first_payment' => self::firstPaymentLine(),
             // the owner's wording of why installments cost more than cash
             'price_difference_policy' => (string) config('agent.installments.price_difference_explanation'),
             'how_to_present' => 'Send the `say` lines as they are (one per line, you may reword lightly, but keep every number and '
                 .'keep saying whether there are admin fees). Admin fees are NOT a down payment - never call them "مقدم". '
                 .'If he asks why installments cost more than cash, explain it in your own short words from price_difference_policy (never copied word for word, never adding reasons it does not give), '
-                .'then offer the cash price. If he asks what he pays in the end, send the offer\'s `breakdown` as it is - '
-                .'installment_price is the price the installment is calculated on, never the total he pays. '
-                .'Add once: "'.$this->firstPaymentLine().'". If must_add_line is present his work is not known yet: add it as is, never say "من غير مقدم" without it, and ask what he works. No system/company names, no word "نظام"/"أنظمة". Quote every offer below with its numbers - never say "فيه مدد تانية" instead of quoting one.',
+                .'then offer the cash price. If he asks what he pays in the end, send the offer\'s `breakdown` as it is. '
+                .'Never tell him the installment price of the motorcycle (the price the installment is calculated on). '
+                .'If he asks when payments start, say `first_payment`. Never write the words "من غير مقدم" / "بدون مقدم" - say what is paid at pickup instead. No system/company names, no word "نظام"/"أنظمة". Quote every offer below with its numbers - never say "فيه مدد تانية" instead of quoting one.',
         ] + ($capped ? ['explain_to_customer' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : [])
-          + (($caveat = $customerTypeId === null ? $this->unknownWorkCaveat($machine) : null) ? ['must_add_line' => $caveat] : []));
+        );
     }
 
     /**
      * A plasterer was quoted "من غير مقدم" and, once his application was
      * opened as عامل حر, got a 15,000 down payment. While his work is not
-     * known, an offer above a work-type cap carries that condition.
+     * known, a motorcycle above a work-type cap is not quoted at all.
      */
-    private function unknownWorkCaveat(Machine $machine): ?string
+    private function cappedWorkTypes(Machine $machine): ?string
     {
         $price = (float) ($machine->installment_price ?: $machine->cash_price);
         $capped = \App\Models\EligibilityRule::where('is_active', true)->where('rule_type', 'financing_cap')->whereNotNull('customer_type_id')->get()
-            ->map(fn ($r) => ['cap' => (float) ($r->params['max_amount'] ?? 0), 'type' => $r->customer_type_id])
-            ->filter(fn ($c) => $c['cap'] > 0 && $c['cap'] < $price);
+            ->filter(fn ($r) => ($cap = (float) ($r->params['max_amount'] ?? 0)) > 0 && $cap < $price);
 
-        if ($capped->isEmpty()) {
-            return null;
-        }
-
-        $labels = \App\Models\CustomerType::whereIn('id', $capped->pluck('type'))->pluck('label')->implode(' أو ');
-        $cap = $capped->min('cap');
-
-        return 'العرض ده لو شغلك بإثبات دخل. لو شغلك '.$labels.'، أقصى مبلغ بيتقسط '.number_format($cap)
-            .' جنيه، فالفرق عن سعر المكنة (حوالي '.number_format($price - $cap).' جنيه) بيتدفع مقدم وقت الاستلام.';
+        return $capped->isEmpty() ? null : \App\Models\CustomerType::whereIn('id', $capped->pluck('customer_type_id'))->pluck('label')->implode(' أو ');
     }
 
     /**
@@ -201,8 +200,10 @@ class GetInstallmentOfferTool implements Tool
         $upfront = match (true) {
             $down > 0 && $fee > 0 => 'مقدم '.number_format($down).' + مصاريف إدارية '.number_format($fee).' وقت الاستلام',
             $down > 0 => 'مقدم '.number_format($down).' ومن غير مصاريف إدارية',
-            $fee > 0 => 'من غير مقدم، بس فيه مصاريف إدارية '.number_format($fee).' بتدفعها وقت الاستلام',
-            default => 'من غير مقدم ومن غير أي مصاريف',
+            // The owner banned the words "من غير مقدم" - a lesson could not
+            // win against this line, which the bot is told to send as is.
+            $fee > 0 => 'مصاريف إدارية '.number_format($fee).' بتدفعها مرة واحدة وقت الاستلام',
+            default => 'مفيش أي مبلغ بيتدفع وقت الاستلام',
         };
 
         return $this->duration($offer['months']).': '.$upfront.'، والقسط '.number_format($offer['monthly_payment']).' جنيه في الشهر';
@@ -215,11 +216,10 @@ class GetInstallmentOfferTool implements Tool
      */
     private function breakdown(Machine $machine, array $offer): string
     {
-        $installmentPrice = (float) ($machine->installment_price ?: $machine->cash_price);
         $upfront = (float) $offer['cash_due_upfront'];
 
-        return 'سعرها كاش '.number_format((float) $machine->cash_price).' جنيه، وسعرها بالتقسيط '.number_format($installmentPrice)
-            .' جنيه وده السعر اللي القسط بيتحسب عليه. على '.$this->duration($offer['months']).': '
+        // no installment price: the owner never tells it to the customer
+        return 'سعرها كاش '.number_format((float) $machine->cash_price).' جنيه. على '.$this->duration($offer['months']).': '
             .($upfront > 0 ? number_format($upfront).' جنيه وقت الاستلام + ' : '')
             .$offer['months'].' قسط × '.number_format($offer['monthly_payment']).' جنيه = '
             .number_format(round($upfront + $offer['monthly_payment'] * $offer['months'])).' جنيه في الآخر.';
@@ -256,14 +256,10 @@ class GetInstallmentOfferTool implements Tool
         return isset($parsed['age']) ? (int) $parsed['age'] : null;
     }
 
-    private function firstPaymentAfterDays(): int
+    /** The owner: the first installment can come after a month - 45 days is the latest, not a promise. */
+    public static function firstPaymentLine(): string
     {
-        return (int) config('agent.installments.first_payment_after_days', 45);
-    }
-
-    private function firstPaymentLine(): string
-    {
-        return 'أول قسط بيبدأ بعد '.$this->firstPaymentAfterDays().' يوم من الاستلام';
+        return 'أول قسط بيبدأ بعد شهر لحد '.(int) config('agent.installments.first_payment_after_days', 45).' يوم من الاستلام';
     }
 
     private function duration(int $months): string

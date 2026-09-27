@@ -258,12 +258,61 @@ class AgentRunnerTest extends TestCase
         $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['السعر 99999 جنيه']]]]));
         $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['برضو 88888 جنيه']]]]));
         $fake->queue($this->response([['id' => 't3', 'name' => 'send_reply', 'args' => ['messages' => ['خلاص 77777 جنيه']]]]));
+        // the final no-numbers try fails too
+        $fake->queue($this->response([['id' => 't4', 'name' => 'send_reply', 'args' => ['messages' => ['آخر كلام 66666 جنيه']]]]));
 
         $result = app(AgentRunner::class)->run($this->turnFor($conversation));
 
         $this->assertSame(['وصلتني رسالتك، زميلي هيرد عليك.'], $result['messages']);
         $this->assertSame('awaiting_agent', $conversation->fresh()->status);
         $this->assertSame(1, Handoff::where('conversation_id', $conversation->id)->count());
+    }
+
+    public function test_the_sentence_with_an_invented_number_is_dropped_instead_of_handing_off(): void
+    {
+        // A freelancer's offer went to a colleague three times: every try
+        // carried one figure the model had worked out itself.
+        config(['agent.handoff.waiting_message' => 'وصلتني رسالتك، زميلي هيرد عليك.']);
+        $conversation = $this->conversation();
+        $fake = $this->fake();
+        $reply = fn (string $n) => ['messages' => ["تمام يا باشا، بما إن شغلك حر فيه حد أقصى للتمويل.\nالفرق اللي هتدفعه {$n} جنيه.\nتحب نكمل؟"]];
+        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => $reply('99999')]]));
+        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => $reply('88888')]]));
+        $fake->queue($this->response([['id' => 't3', 'name' => 'send_reply', 'args' => $reply('77777')]]));
+
+        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
+
+        $this->assertSame(["تمام يا باشا، بما إن شغلك حر فيه حد أقصى للتمويل.\nتحب نكمل؟"], $result['messages']);
+        $this->assertNotSame('awaiting_agent', $conversation->fresh()->status);
+    }
+
+    public function test_a_final_reply_without_numbers_keeps_the_customer_with_the_bot(): void
+    {
+        config(['agent.handoff.waiting_message' => 'وصلتني رسالتك، زميلي هيرد عليك.']);
+        $conversation = $this->conversation();
+        $fake = $this->fake();
+        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['السعر 99999 جنيه']]]]));
+        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['برضو 88888 جنيه']]]]));
+        $fake->queue($this->response([['id' => 't3', 'name' => 'send_reply', 'args' => ['messages' => ['خلاص 77777 جنيه']]]]));
+        $fake->queue($this->response([['id' => 't4', 'name' => 'send_reply', 'args' => ['messages' => ['تحب أحسبلك القسط على أنهي مدة؟']]]]));
+
+        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
+
+        $this->assertSame(['تحب أحسبلك القسط على أنهي مدة؟'], $result['messages']);
+        $this->assertSame(['send_reply'], $fake->lastRequest()->allowedTools);
+        $this->assertSame(0, Handoff::where('conversation_id', $conversation->id)->count());
+    }
+
+    public function test_the_bot_never_says_no_down_payment(): void
+    {
+        $conversation = $this->conversation();
+        $fake = $this->fake();
+        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['التقسيط من غير مقدم يا باشا']]]]));
+        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['وقت الاستلام بتدفع المصاريف الإدارية بس']]]]));
+
+        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
+
+        $this->assertSame(['وقت الاستلام بتدفع المصاريف الإدارية بس'], $result['messages']);
     }
 
     public function test_a_crashing_turn_does_not_leave_its_trace_running(): void

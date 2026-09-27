@@ -415,7 +415,7 @@ class InstallmentTest extends TestCase
 
         // 55000 * 7% = 3850 fees, (55000 * 1.2) / 12 = 5500 a month
         $this->assertEquals(3850, $offer['admin_fee_at_pickup']);
-        $this->assertStringContainsString('من غير مقدم', $offer['say']);
+        $this->assertStringNotContainsString('مقدم', $offer['say']);
         $this->assertStringContainsString('مصاريف إدارية 3,850', $offer['say']);
         $this->assertStringContainsString('5,500', $offer['say']);
         $this->assertStringNotContainsString('مقدم 3,850', $offer['say']);
@@ -427,8 +427,10 @@ class InstallmentTest extends TestCase
 
         $result = $this->offerTool(['motorcycle_id' => $machine->id]);
 
-        $this->assertSame(45, $result->data['first_payment_after_days']);
-        $this->assertStringContainsString('45 يوم', $result->data['how_to_present']);
+        // the owner: it can be after a month - 45 days is the latest
+        $this->assertSame('أول قسط بيبدأ بعد شهر لحد 45 يوم من الاستلام', $result->data['first_payment']);
+        $this->assertArrayNotHasKey('installment_price', $result->data);
+        $this->assertStringNotContainsString('بالتقسيط', $result->data['offers'][0]['breakdown']);
     }
 
     public function test_the_no_upfront_system_is_offered_only_when_the_customer_insists(): void
@@ -446,7 +448,7 @@ class InstallmentTest extends TestCase
         $this->assertEquals(0, $insists->data['offers'][0]['cash_due_upfront']);
         // 55000 * 1.3 / 12
         $this->assertEquals(5958, $insists->data['offers'][0]['monthly_payment']);
-        $this->assertStringContainsString('من غير مقدم ومن غير أي مصاريف', $insists->data['offers'][0]['say']);
+        $this->assertStringContainsString('مفيش أي مبلغ بيتدفع وقت الاستلام', $insists->data['offers'][0]['say']);
     }
 
     public function test_no_upfront_with_no_such_system_says_so(): void
@@ -503,7 +505,24 @@ class InstallmentTest extends TestCase
         $this->assertEquals(10200, $result->data['offers'][0]['cash_due_upfront']);
         $this->assertStringContainsString('60,000', $result->data['explain_to_customer']);
 
-        $missing = $this->offerTool(['motorcycle_id' => $machine->id, 'months' => 18]);
+        $missing = $this->offerTool(['motorcycle_id' => $machine->id, 'months' => 18, 'customer_type' => 'self_employed']);
         $this->assertSame('DURATION_NOT_AVAILABLE', $missing->error['code']);
+    }
+
+    public function test_above_the_freelancer_cap_the_work_comes_before_any_installment(): void
+    {
+        // The owner: under 60,000 quote first and ask the work at the end;
+        // above it (an F250) ask the work first - he may owe part up front.
+        $this->selfEmployedCappedAt(60000);
+        $system = $this->standardSystem();
+        $big = $this->machine(['installment_systems' => [$system->id], 'cash_price' => 62000, 'installment_price' => 66000]);
+        $small = $this->machine(['installment_systems' => [$system->id], 'cash_price' => 41000, 'installment_price' => 47000]);
+
+        $first = $this->offerTool(['motorcycle_id' => $big->id]);
+        $this->assertSame('ASK_WORK_FIRST', $first->error['code']);
+        $this->assertStringContainsString('62,000', $first->error['detail']);
+
+        $this->assertTrue($this->offerTool(['motorcycle_id' => $big->id, 'customer_type' => 'self_employed'])->ok);
+        $this->assertTrue($this->offerTool(['motorcycle_id' => $small->id])->ok);
     }
 }

@@ -121,7 +121,6 @@ class CalculateInstallmentTool implements Tool
             'installment_system' => trim((string) $plan->installmentSystem->name),
             'plan_id' => $plan->id,
             'months' => $result->months,
-            'base_price' => (float) ($machine->installment_price ?: $machine->cash_price),
             'down_payment' => $result->downPayment,
             'financed_amount' => $result->financedAmount,
             'interest_amount' => round($result->totalWithInterest - $result->financedAmount, 2),
@@ -129,7 +128,8 @@ class CalculateInstallmentTool implements Tool
             'monthly_payment' => $result->monthlyInstallment,
             'admin_fee' => $result->administrativeFees,
             'cash_due_upfront' => round($result->downPayment + $result->administrativeFees),
-            'first_payment_after_days' => (int) config('agent.installments.first_payment_after_days', 45),
+            // say only if he asks when payments start
+            'first_payment' => GetInstallmentOfferTool::firstPaymentLine(),
             'warnings' => $warnings,
         ] + ($downPayment > $requestedDownPayment ? ['financing_cap' => [
             'max_financed_amount' => $cap,

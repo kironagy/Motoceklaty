@@ -120,9 +120,9 @@ class ReplyGuard
             return 'SCRIPTED_PHRASE_REQUEST';
         }
 
-        // The owner: the bot never gives itself a name, and never "أهلاً بك"
-        // or "حقك عليا".
-        if (preg_match('/(?:معاك|أنا|انا|اسمي)\s+(?:ال)?حاوي|أهلاً بك|أهلا بك|اهلاً بك|اهلا بك|حقك عليا|حقك عليّا/u', $replyText)) {
+        // The owner: the bot never gives itself a name, and never "أهلاً بك",
+        // "حقك عليا" or "من غير مقدم".
+        if (preg_match('/(?:معاك|أنا|انا|اسمي)\s+(?:ال)?حاوي|أهلاً بك|أهلا بك|اهلاً بك|اهلا بك|حقك عليا|حقك عليّا|(?:من غير|بدون)\s+(?:أي\s+|اي\s+)?مقد[مّ]/u', $replyText)) {
             return 'BANNED_WORDING';
         }
 
@@ -709,6 +709,35 @@ class ReplyGuard
      */
     private function hasUnverifiedNumber(string $replyText, string $system, string $toolResultsBlob, array $contents): bool
     {
+        return $this->unverifiedNumbers($replyText, $system, $toolResultsBlob, $contents) !== [];
+    }
+
+    /**
+     * The reply's sentences that carry a number no tool result, instruction or
+     * earlier message contains - what the runner drops to rescue a reply the
+     * model kept sending with one invented figure.
+     *
+     * @param  array<int, array{name: string, ok: bool, data: array}>  $outcomes
+     * @return string[]
+     */
+    public function unverifiedSentences(string $replyText, string $system, array $contents, array $outcomes): array
+    {
+        $blob = json_encode(array_column($outcomes, 'data'), JSON_UNESCAPED_UNICODE) ?: '';
+        $bad = $this->unverifiedNumbers($replyText, $system, $blob, $contents);
+
+        if ($bad === []) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            preg_split('/(?<=[.!؟?\n])/u', $replyText),
+            fn ($sentence) => array_intersect($this->extractNumbers($sentence), $bad) !== []
+        ));
+    }
+
+    /** @return float[] */
+    private function unverifiedNumbers(string $replyText, string $system, string $toolResultsBlob, array $contents): array
+    {
         $minValue = config('agent.guard.number_min_value');
         $sourcedSystem = $this->removeBlock($system, '## فهرس الكتالوج');
         // What the customer wrote, and what was already said to them: a
@@ -731,11 +760,11 @@ class ReplyGuard
             }
 
             if (! in_array($number, $haystackNumbers, true)) {
-                return true;
+                $unverified[] = $number;
             }
         }
 
-        return false;
+        return $unverified ?? [];
     }
 
     /** @return float[] numbers directly attached to a measurement unit */

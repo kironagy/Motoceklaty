@@ -36,7 +36,10 @@ class HandoffToHumanTool implements Tool
             'properties' => [
                 'reason' => [
                     'type' => 'string',
-                    'enum' => ['customer_request', 'complaint', 'document_unresolvable', 'out_of_scope', 'low_confidence', 'other'],
+                    // "not sure" and "out of scope" are not the owner's reasons to
+                    // stop the bot - the model answers or asks instead.
+                    'enum' => ['customer_request', 'complaint', 'document_unresolvable', 'other'],
+                    'description' => 'other = he insists on a discount, IDENTITY_IN_USE_BY_ANOTHER_CUSTOMER, or he insists on information we do not have to decide.',
                 ],
                 'note' => ['type' => 'string', 'maxLength' => 300],
             ],
