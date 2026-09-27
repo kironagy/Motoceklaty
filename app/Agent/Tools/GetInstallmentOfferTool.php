@@ -152,7 +152,9 @@ class GetInstallmentOfferTool implements Tool
                 'monthly_payment' => $o['monthly_payment'],
                 'admin_fee_at_pickup' => $o['admin_fee'],
                 // what he pays in all: fees/down payment + every installment
-                'total_paid' => round($o['cash_due_upfront'] + $o['monthly_payment'] * $o['months']),
+                // the owner: the total is the motorcycle's - down payment (if any) + every installment.
+                // The admin fee is said on its own, never added to it.
+                'total_paid' => round($o['down_payment'] + $o['monthly_payment'] * $o['months']),
                 'breakdown' => $this->breakdown($machine, $o),
                 'say' => $this->line($o),
                 // internal: pass these to update_application_selection when he picks this offer - never say them
@@ -216,13 +218,17 @@ class GetInstallmentOfferTool implements Tool
      */
     private function breakdown(Machine $machine, array $offer): string
     {
-        $upfront = (float) $offer['cash_due_upfront'];
+        $down = (float) $offer['down_payment'];
+        $fee = (float) $offer['admin_fee'];
 
-        // no installment price: the owner never tells it to the customer
+        // no installment price: the owner never tells it to the customer.
+        // The owner: "متضفش المصاريف الاداريه علي اجمالي قسط المكنه" - the
+        // fee is its own sentence, the total is the motorcycle's only.
         return 'سعرها كاش '.number_format((float) $machine->cash_price).' جنيه. على '.$this->duration($offer['months']).': '
-            .($upfront > 0 ? number_format($upfront).' جنيه وقت الاستلام + ' : '')
+            .($down > 0 ? 'مقدم '.number_format($down).' جنيه + ' : '')
             .$offer['months'].' قسط × '.number_format($offer['monthly_payment']).' جنيه = '
-            .number_format(round($upfront + $offer['monthly_payment'] * $offer['months'])).' جنيه في الآخر.';
+            .number_format(round($down + $offer['monthly_payment'] * $offer['months'])).' جنيه في الآخر.'
+            .($fee > 0 ? ' والمصاريف الإدارية '.number_format($fee).' جنيه لوحدها، بتدفعها مرة واحدة وقت الاستلام.' : '');
     }
 
     private function maxMonthsForAge(?int $age): ?int

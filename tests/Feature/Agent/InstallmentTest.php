@@ -406,6 +406,20 @@ class InstallmentTest extends TestCase
         $this->assertStringNotContainsString('Say other durations exist', $result->data['how_to_present']);
     }
 
+    public function test_the_admin_fee_is_never_added_to_the_total(): void
+    {
+        // The owner: "متضفش المصاريف الاداريه علي اجمالي قسط المكنه".
+        $machine = $this->machine(['installment_systems' => [$this->standardSystem()->id]]);
+
+        $offer = $this->offerTool(['motorcycle_id' => $machine->id, 'months' => 12])->data['offers'][0];
+
+        // 55000 * 1.2 = 66000 in 12 × 5,500; the 3,850 fee stays apart
+        $this->assertEquals(66000, $offer['total_paid']);
+        $this->assertStringContainsString('12 قسط × 5,500 جنيه = 66,000 جنيه في الآخر.', $offer['breakdown']);
+        $this->assertStringContainsString('والمصاريف الإدارية 3,850 جنيه لوحدها', $offer['breakdown']);
+        $this->assertStringNotContainsString('69,850', $offer['breakdown']);
+    }
+
     public function test_admin_fees_are_quoted_as_fees_at_pickup_not_as_a_down_payment(): void
     {
         $aman = $this->standardSystem();
