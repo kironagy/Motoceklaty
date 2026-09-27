@@ -75,6 +75,20 @@ class StartApplicationTool implements Tool
             .'(?:محل|ورشه|ورشت|مطعم|كافيه|شركت|معرض|مصنع|مزرعت|مكتب)(?:ي|ى)(?=\s|$|[،.!؟?])|(?:محل|ورشه|مطعم|كافيه|شركه|معرض|مصنع|مزرعه|مكتب) بتاعي|تاجر|سجل تجاري|بطاقه ضريبيه|owner|my shop/u'), $text);
     }
 
+    /**
+     * Request 4272: "متأمن عليا بس في فترة تقييم" was switched to عامل حر
+     * so no salary slip was needed. The owner's exception is only for an
+     * employee who is NOT insured.
+     */
+    public static function saidInsured(int $conversationId): bool
+    {
+        return app(\App\Domain\Conversations\CustomerStatements::class)->anyMessageMatches($conversationId,
+            '/(?<!مش )(?<!غير )(?<!مش مت)(?:متامن|مومن)\s+(?:عليا|عليه|علي|عليا)|(?<!مش )(?<!مفيش )عليا\s+تامين/u');
+    }
+
+    public const INSURED_HINT = 'He said he is insured (متأمن عليه): he applies as employee - self_employed is only for an employee who is NOT insured. '
+        .'If he has no salary slip yet, tell him it is needed and he can send it when he gets it. Never suggest another work type.';
+
     public const NOT_OWNER_HINT = 'business_owner only when he said he OWNS the place (صاحب/عندي محل/ورشتي...). '
         .'"شغال في ورشة/محل/مطعم" is working there, not owning it. Ask him "إنت صاحب المكان ولا شغال فيه؟" '
         .'- working there: a craft (ميكانيكي، نجار...) → self_employed with work_type craftsman; with a salary and insurance → employee.';
@@ -126,6 +140,10 @@ class StartApplicationTool implements Tool
 
         if ($customerType->key === 'business_owner' && ! self::statesOwnership((string) $args['customer_type_quote'])) {
             return ToolResult::error('OWNERSHIP_NOT_STATED', self::NOT_OWNER_HINT);
+        }
+
+        if ($customerType->key === 'self_employed' && self::saidInsured($ctx->conversationId)) {
+            return ToolResult::error('INSURED_IS_EMPLOYEE', self::INSURED_HINT);
         }
 
         $machine = null;

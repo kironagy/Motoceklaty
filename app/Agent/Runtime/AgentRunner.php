@@ -238,7 +238,7 @@ class AgentRunner
      * photos were queued for a customer who had just said goodbye.
      */
     /** Style problems only - nothing false is said. */
-    private const SOFT_VIOLATIONS = ['REPEATED_QUESTION', 'DUPLICATE_REPLY', 'WORK_TYPES_LISTED'];
+    private const SOFT_VIOLATIONS = ['REPEATED_QUESTION', 'DUPLICATE_REPLY', 'WORK_TYPES_LISTED', 'HANDOFF_TIME_PROMISED'];
 
     private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER', 'BRANCH_NOT_SOURCED', 'TOTAL_NOT_SOURCED', 'AGE_NOT_CHECKED'];
 
@@ -256,6 +256,11 @@ class AgentRunner
         'INTERNAL_KEY_IN_REPLY' => 'Not sent: the reply contains an internal key (snake_case like delivery_app). Use the plain Arabic wording instead.',
         'PLACEHOLDER_IN_REPLY' => 'Not sent: the reply contains a history placeholder like [media]. Photos are only sent by calling send_motorcycle_images; write plain text only.',
         'IMAGES_CLAIMED_NOT_SENT' => 'Not sent: the reply says photos are attached but send_motorcycle_images did not succeed this turn. Call it if the customer wants photos, otherwise rewrite without mentioning photos.',
+        'RESUBMISSION_CLAIMED' => 'Not sent: the reply says the application was sent (again / to another system / "فعلاً"), but nothing was submitted this turn - his application is not being sent anywhere now. Tell him the truth: what its status is (from the snapshot), and that moving it to another finance company is done by a colleague.',
+        'RESUBMISSION_PROMISED' => 'Not sent: the reply offers to submit him to another system/finance company. You cannot do that - only a colleague can. Tell him so honestly; if he wants it, call handoff_to_human (reason other, note: wants another finance company) and say a colleague will check it, with no time promise.',
+        'WORK_TYPE_SWITCH_SUGGESTED' => 'Not sent: the reply suggests applying under another work type than what he really does. Never do that. Apply with his real work; if a document is missing (e.g. salary slip), tell him what is needed and that he can send it when he has it.',
+        'DOCUMENT_NOT_REQUIRED' => 'Not sent: the reply asks for a document this customer does not need (e.g. a workshop contract, a utility bill, app earnings for a non-app job). Ask only for what the snapshot (documents.required / next_step) or get_application_requirements lists.',
+        'HANDOFF_TIME_PROMISED' => 'Not sent: the reply promises when a colleague will answer ("ثواني", "حالا", "فوراً", "للمرة الأخيرة"). Nobody controls that. Say a colleague will answer, with no time - and keep helping him yourself with what you can answer.',
         'TOTAL_REFUSED' => 'Not sent: the reply refuses to give the total. The total is in every offer: call get_installment_offer for his motorcycle and duration and send that offer\'s `breakdown` (what he pays at pickup + installments = the total in the end).',
         'WORK_TYPES_LISTED' => 'Not sent: the reply lists work types for him to choose from. Ask only "حضرتك بتشتغل إيه؟" and let him say it in his own words.',
         'TOTAL_NOT_SOURCED' => 'Not sent: the reply states a total that no tool result of this turn contains (a number the customer wrote is not a total). Call get_installment_offer for this motorcycle and duration and quote total_paid and cash_price exactly as returned (never the installment price).',

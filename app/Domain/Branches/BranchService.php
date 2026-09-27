@@ -23,6 +23,22 @@ class BranchService
 
         $branches = $query->orderBy('sort')->get();
 
+        // "البساتين" (Cairo) matched no branch city and the note said "no
+        // branch in القاهرة" - the bot then offered Giza while Cairo has
+        // two. No branch in his area: the ones in his governorate come first.
+        if ($branches->isEmpty() && $city !== null && $governorate !== null) {
+            $inGovernorate = Branch::where('is_active', true)->where('governorate', $governorate)->orderBy('sort')->get();
+
+            if ($inGovernorate->isNotEmpty()) {
+                return [
+                    'branches' => $this->present($inGovernorate),
+                    'no_branch_in_requested_area' => true,
+                    'note' => 'No branch in '.$city.' itself. These are our branches in '.(config('agent.governorates')[$governorate] ?? $governorate)
+                        .', his governorate - give them as the nearest. Never name any other branch or area.',
+                ];
+            }
+        }
+
         // "انا في المنصورة" with no branch there got an invented Mansoura
         // branch. The customer gets every real branch to choose the nearest.
         if ($branches->isEmpty() && ($governorate !== null || $city !== null)) {

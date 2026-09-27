@@ -32,6 +32,18 @@ class BranchServiceTest extends TestCase
         $this->assertCount(1, $byCity['branches']);
     }
 
+    public function test_an_area_without_a_branch_gets_the_branches_of_its_governorate(): void
+    {
+        // Request 4274: البساتين (Cairo) was told "no branch in القاهرة" and got Giza.
+        Branch::create(['name' => 'فرع عين شمس', 'governorate' => 'cairo', 'city' => 'عين شمس', 'address' => 'x', 'is_active' => true]);
+        Branch::create(['name' => 'فرع الهرم', 'governorate' => 'giza', 'city' => 'الهرم', 'address' => 'x', 'is_active' => true]);
+
+        $result = app(BranchService::class)->find('cairo', 'البساتين');
+
+        $this->assertSame(['فرع عين شمس'], array_column($result['branches'], 'name'));
+        $this->assertStringNotContainsString('NO branch in', $result['note']);
+    }
+
     public function test_inactive_branches_excluded(): void
     {
         Branch::create(['name' => 'قديم', 'governorate' => 'cairo', 'city' => 'x', 'address' => 'x', 'is_active' => false]);

@@ -226,6 +226,44 @@ class DataIntegrityTest extends TestCase
         $this->assertSame('NOT_AN_APARTMENT_NUMBER', $result->data['rejected'][0]['code']);
     }
 
+    public function test_the_flat_number_is_not_the_floor_and_a_named_building_is_a_building(): void
+    {
+        // Request 4276: "عماره 2 شقه 41" - 41 became the floor.
+        foreach (['address_floor' => 'الدور', 'address_apartment' => 'الشقة', 'address_building_no' => 'العقار'] as $key => $label) {
+            RequirementField::create(['key' => $key, 'label' => $label, 'data_type' => 'string', 'scope' => 'application', 'is_sensitive' => false, 'is_active' => true]);
+        }
+        $this->say('مدينه بدر الحي التاني عماره 2 شقه 41');
+        $this->say('عمارة السندباد الدور الخامس');
+
+        $result = app(RecordCustomerDataTool::class)->execute(['fields' => [
+            ['key' => 'address_floor', 'value' => '41'],
+            ['key' => 'address_apartment', 'value' => '41'],
+            ['key' => 'address_building_no', 'value' => 'عمارة السندباد'],
+        ]], $this->ctx());
+
+        $this->assertSame(['address_apartment', 'address_building_no'], $result->data['saved']);
+        $this->assertSame('NOT_A_FLOOR', $result->data['rejected'][0]['code']);
+    }
+
+    public function test_an_insured_employee_is_not_switched_to_self_employed(): void
+    {
+        // Request 4272: "متأمن عليا بس في فترة تقييم" was moved to عامل حر.
+        $this->say('متأمن عليا بس انا حاليا في فتره تقييم من الشركه ف مش هعرف اطلع مفردات مرتب');
+
+        $switch = app(UpdateApplicationSelectionTool::class)->execute(['customer_type' => 'self_employed', 'customer_type_quote' => 'مش هعرف اطلع مفردات مرتب'], $this->ctx());
+        $this->assertSame('INSURED_IS_EMPLOYEE', $switch->error['code']);
+    }
+
+    public function test_an_employee_who_is_not_insured_may_apply_as_self_employed(): void
+    {
+        // the owner's one exception
+        $this->say('انا موظف بس مش متأمن عليا ومعنديش مفردات');
+
+        $this->assertFalse(StartApplicationTool::saidInsured($this->conversation->id));
+        $switch = app(UpdateApplicationSelectionTool::class)->execute(['customer_type' => 'self_employed', 'customer_type_quote' => 'مش متأمن عليا'], $this->ctx());
+        $this->assertTrue($switch->ok);
+    }
+
     public function test_an_ocr_name_missing_the_first_name_does_not_replace_the_full_name(): void
     {
         $this->say('انا سلام ناصر درويش عبدالمحسن');

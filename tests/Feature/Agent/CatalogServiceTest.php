@@ -92,6 +92,29 @@ class CatalogServiceTest extends TestCase
         $this->assertSame(['black'], $result['colors_available']);
     }
 
+    public function test_photos_are_of_the_motorcycle_he_was_quoted(): void
+    {
+        // Request 4272: quoted the Figuri "VLR200", sent the Benelli "VLR 200" photos.
+        $figuri = $this->machine(['name' => ' VLR200']);
+        $benelli = $this->machine(['name' => 'VLR 200']);
+        MotorcycleImage::create(['machine_id' => $benelli->id, 'color' => 'black', 'path' => 'b.jpg', 'is_display' => false, 'sort' => 0]);
+        MotorcycleImage::create(['machine_id' => $figuri->id, 'color' => 'black', 'path' => 'f.jpg', 'is_display' => false, 'sort' => 0]);
+
+        $staff = \App\Models\Staff::create(['name' => 'S', 'email' => uniqid().'@x.com', 'password' => 'secret']);
+        $bot = \App\Models\WhatsappBot::create(['staff_id' => $staff->id, 'name' => 'B', 'whatsapp_phone_number_id' => uniqid(), 'is_active' => true]);
+        $conversation = \App\Models\WhatsappConversation::create(['whatsapp_bot_id' => $bot->id, 'phone' => '2011', 'status' => 'open']);
+        $trace = \App\Models\AiTrace::create(['conversation_id' => $conversation->id, 'turn_id' => 1, 'status' => 'running']);
+        $ctx = new \App\Agent\Tools\ToolContext(1, $conversation->id, null, 1, $trace->id, new \App\Agent\Runtime\TurnResultBuilder());
+        \App\Domain\Conversations\QuotedMotorcycle::remember($conversation->id, $figuri->id);
+
+        $tool = app(\App\Agent\Tools\SendMotorcycleImagesTool::class);
+
+        $this->assertSame('MOTORCYCLE_DIFFERS_FROM_LAST_QUOTED', $tool->execute(['motorcycle_id' => $benelli->id], $ctx)->error['code']);
+        $sent = $tool->execute(['motorcycle_id' => $figuri->id], $ctx);
+        $this->assertTrue($sent->ok);
+        $this->assertStringContainsString('VLR200', $sent->data['motorcycle']);
+    }
+
     public function test_images_fall_back_to_display_image_and_match_hex_by_arabic_name(): void
     {
         $machine = $this->machine();

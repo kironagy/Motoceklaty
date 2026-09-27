@@ -54,9 +54,31 @@ class ReplyGuard
             return 'SUBMISSION_CLAIMED_NOT_DONE';
         }
 
+        // Request 4272, rejected by the finance company: "الطلب اتبعت على
+        // أمان" four times - nothing was sent anywhere. An earlier
+        // submission does not cover a claim that it went again / elsewhere.
+        if ($this->claimsSubmission($assertions) && ! $this->submittedThisTurn($outcomes)
+            && ($this->mentionsResubmission($assertions) || $this->latestApplicationClosed($conversation))) {
+            return 'RESUBMISSION_CLAIMED';
+        }
+
+        // "ممكن نقدم تاني على نظام تاني" - only staff can move a submitted
+        // request to another finance company.
+        if (preg_match('/(?:نقد[ّ]?م|أقد[ّ]?م|اقد[ّ]?م|هقد[ّ]?م|هنقد[ّ]?م|نجرب|أجرب|اجرب|هجرب|نحول|أحول|احول)(?:لك|هولك)?\s+(?:\S+\s+){0,3}?(?:على|علي|ع)\s+(?:نظام|جه[ةه]|شرك[ةه])\s+(?:\S+\s+)?(?:تاني|تانية|تانيه|تانى|مختلف[ةه]?|أخرى|اخرى)/u', $replyText)) {
+            return 'RESUBMISSION_PROMISED';
+        }
+
+        // "هعدلك الطلب لعامل حر بدل موظف": he said he is insured; the bot
+        // must never suggest another work type so he gets accepted.
+        if (preg_match('/(?:عامل حر|موظف|صاحب نشاط)["”]?\s*(?:\([^)]{0,40}\)\s*)?بدل\s+(?:ما\s+)?["“]?(?:موظف|عامل حر|صاحب نشاط)|(?:نقد[ّ]?م|نسجل|نكتب|نعدل|نحول)(?:ك|لك)?\s+(?:\S+\s+){0,2}?(?:على\s+)?(?:إنك|انك)\s+["“]?(?:عامل حر|موظف|صاحب نشاط)/u', $replyText)) {
+            return 'WORK_TYPE_SWITCH_SUGGESTED';
+        }
+
         // "سجلت البيانات" with no write this turn: the customer's phone and
         // address were lost while they were told they had been saved.
-        if (preg_match('/(?:^|\s)و?(?:سجلت|سجّلت|سجلتها|سجلتهم|اتسجل|اتسجلت|تم تسجيل|حفظت|ثبت|ثبّت|غيرت|غيّرت|عدلت|عدّلت|حدثت|حدّثت|اتغيرت|اتعدلت)(?:\s|$|[،.!])/u', $assertions)
+        // "أنا عدلتها عندي في الطلب" - the company name was never changed.
+        if ((preg_match('/(?:^|\s)و?(?:سجلت|سجّلت|اتسجل|اتسجلت|تم تسجيل|حفظت|ثبت|ثبّت|غيرت|غيّرت|عدلت|عدّلت|حدثت|حدّثت|اتغيرت|اتعدلت|صححت|صحّحت)(?:ها|هم|ه|هولك|هالك|لك|ت)?(?:\s|$|[،.!])/u', $assertions)
+                || preg_match('/(?:الرقم|رقمك|العنوان|عنوانك|بياناتك|البيانات|الاسم|اسمك)\s+(?:\S+\s+)?(?:وصل|وصلت|وصلني|وصلتني|اتسجل|اتسجلت|اتعدل|اتعدلت|اتحفظ)(?:\s|$|[،.!])/u', $assertions))
             && array_intersect($succeeded, self::WRITE_TOOLS) === []) {
             return 'DATA_CLAIMED_NOT_SAVED';
         }
@@ -72,7 +94,8 @@ class ReplyGuard
         // letter from a script no customer here writes, is a model glitch
         // (seen from the fallback model under load), never real wording -
         // model names sit next to Arabic ("الـHLX"), not inside a word.
-        if (preg_match('/\p{Arabic}[A-Za-z]+\p{Arabic}|[\p{Hebrew}\p{Cyrillic}\p{Han}\p{Hangul}\p{Thai}\p{Devanagari}]/u', $replyText)) {
+        if (preg_match('/\p{Arabic}[A-Za-z]+\p{Arabic}|[\p{Hebrew}\p{Cyrillic}\p{Han}\p{Hangul}\p{Thai}\p{Devanagari}]/u', $replyText)
+            || $this->latinGluedToArabic($replyText)) {
             return 'GARBLED_TEXT';
         }
 
@@ -122,7 +145,7 @@ class ReplyGuard
 
         // The owner: the bot never gives itself a name, and never "أهلاً بك",
         // "حقك عليا" or "من غير مقدم".
-        if (preg_match('/(?:معاك|أنا|انا|اسمي)\s+(?:ال)?حاوي|أهلاً بك|أهلا بك|اهلاً بك|اهلا بك|حقك عليا|حقك عليّا|(?:من غير|بدون|مفيش|مافيش)\s+(?:أي\s+|اي\s+)?مقد[مّ]/u', $replyText)) {
+        if (preg_match('/(?:معاك|أنا|انا|اسمي)\s+(?:ال)?حاوي|أهلاً بك|أهلا بك|اهلاً بك|اهلا بك|حقك عليا|حقك عليّا|(?:من غير|بدون|مفيش|مافيش)\s+(?:(?:أي|اي|عندنا|خالص|فيه|فيها)\s+){0,2}مقد[مّ]/u', $replyText)) {
             return 'BANNED_WORDING';
         }
 
@@ -147,6 +170,18 @@ class ReplyGuard
             && $this->listsWorkDocuments($assertions)
             && $this->workTypeStillMissing($conversation)) {
             return 'WORK_TYPE_NOT_RECORDED';
+        }
+
+        // A workshop owner was asked for "عقد الورشة أو إيصال مرافق" and a
+        // pharmacy courier for app earnings - neither is required of them.
+        if ($this->asksForUnrequiredDocument($replyText, $conversation, $outcomes)) {
+            return 'DOCUMENT_NOT_REQUIRED';
+        }
+
+        // "ثواني ويكون معاك زميل" said four times over ninety minutes while
+        // nobody answered.
+        if ($this->promisesColleagueSoon($replyText)) {
+            return 'HANDOFF_TIME_PROMISED';
         }
 
         // "لينا فرع في المنصورة، شارع الجيش، من 10 الصبح" with no lookup:
@@ -502,10 +537,115 @@ class ReplyGuard
      * "الطلب اتبعت للمراجعة" / "أكدت إرسال الطلب" while the application was
      * still collecting: two customers were told they had applied.
      */
+    private function submittedThisTurn(array $outcomes): bool
+    {
+        foreach ($outcomes as $outcome) {
+            if ($outcome['name'] === 'submit_application' && $outcome['ok'] && ($outcome['data']['submitted'] ?? false) === true) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function mentionsResubmission(string $text): bool
+    {
+        return (bool) preg_match('/تاني|تانى|من جديد|الجديد|التاني|نظام|جه[ةه] تمويل|أمان|امان|مايلو|فاليو|كونتكت|(?:اتقدم|اتبعت)\s+فعل/u', $text);
+    }
+
+    /** His latest application was cancelled or refused - it is not "submitted". */
+    private function latestApplicationClosed(WhatsappConversation $conversation): bool
+    {
+        $status = $conversation->customer_id
+            ? Application::where('customer_id', $conversation->customer_id)->latest('id')->value('status')
+            : null;
+
+        return in_array($status, ['withdrawn', 'rejected', 'expired'], true);
+    }
+
+    /** "هبعتلusd الطلب": Latin letters stuck to an Arabic word that is not an article/prefix ("الـHLX", "بالVLR"). */
+    private function latinGluedToArabic(string $text): bool
+    {
+        preg_match_all('/([\x{0621}-\x{064A}\x{0640}]+)[A-Za-z]{2,}/u', $text, $matches);
+
+        foreach ($matches[1] as $prefix) {
+            if (! in_array(str_replace('ـ', '', $prefix), ['ال', 'بال', 'وال', 'فال', 'كال', 'لل', 'ل', 'ب', 'و', 'ف', 'ك'], true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private const DOCUMENT_WORDS = [
+        'salary_slip' => '/مفردات/u',
+        'pension_statement' => '/كشف\s+(?:ال)?معاش/u',
+        'delivery_app_earnings' => '/(?:ا?سكرين|screen)\S*\s+(?:\S+\s+){0,3}?(?:أرباح|ارباح|الأرباح|الارباح)|(?:أرباح|ارباح)\S*\s+(?:من\s+)?(?:ال)?تطبيق/u',
+        'driving_license' => '/رخص[ةه]\s*(?:ال)?(?:قياد[ةه]|سواق[ةه])|(?:صور[ةه]|وش|ضهر)\s+(?:ال)?رخص[ةه]/u',
+        'business_place_photo' => '/صور[ةه]?\s+(?:\S+\s+)?(?:ال)?(?:مكان|ورش[ةه]|محل|نشاط|يافط[ةه])/u',
+        'tax_card' => '/بطاق[ةه]\s+ضريبي[ةه]|سجل\s+تجاري/u',
+        // never required of anyone
+        '' => '/عقد\s+(?:ال)?(?:ورش[ةه]|محل|إيجار|ايجار|شغل)|إيصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|ايصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|فاتور[ةه]\s+(?:ال)?(?:كهرب|ميا[هه]|غاز)/u',
+    ];
+
+    private function asksForUnrequiredDocument(string $replyText, WhatsappConversation $conversation, array $outcomes): bool
+    {
+        $allowed = $this->allowedDocuments($conversation, $outcomes);
+
+        foreach (preg_split('/(?<=[.!؟?\n])/u', $replyText) as $sentence) {
+            if (! preg_match('/ابعت|محتاج|محتاجين|مطلوب|المطلوب|هنحتاج|بنحتاج|نحتاج|لازم|هات|جهز/u', $sentence)
+                || preg_match('/مش\s+(?:محتاج|مطلوب|لازم|شرط)|ممنوع|من غير\s+(?:\S+\s+)?(?:مفردات|سكرين|رخص)/u', $sentence)) {
+                continue;
+            }
+
+            foreach (self::DOCUMENT_WORDS as $key => $pattern) {
+                if (preg_match($pattern, $sentence) && ($key === '' || ($allowed !== null && ! in_array($key, $allowed, true)))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /** @return string[]|null document keys this customer may be asked for; null = not known yet (no application, no lookup) */
+    private function allowedDocuments(WhatsappConversation $conversation, array $outcomes): ?array
+    {
+        $blob = json_encode(array_column($outcomes, 'data'), JSON_UNESCAPED_UNICODE) ?: '';
+        $fromTools = array_values(array_filter(array_keys(self::DOCUMENT_WORDS), fn ($k) => $k !== '' && str_contains($blob, '"'.$k.'"')));
+
+        $application = $conversation->customer_id
+            ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->latest('id')->first()
+            : null;
+
+        if (! $application) {
+            return $fromTools === [] ? null : $fromTools;
+        }
+
+        $required = (array) (app(\App\Domain\Applications\SnapshotService::class)->for($application)['documents']['required'] ?? []);
+        $optional = \App\Models\ApplicationRequirement::where('customer_type_id', $application->customer_type_id)
+            ->where('requirement_type', 'document')->where('is_required', false)
+            ->with('documentType')->get()->pluck('documentType.key')->filter()->all();
+
+        return array_values(array_unique(array_merge($required, $optional, $fromTools)));
+    }
+
+    private function promisesColleagueSoon(string $replyText): bool
+    {
+        foreach (preg_split('/(?<=[.!؟?\n])/u', $replyText) as $sentence) {
+            if (preg_match('/زميل|الزملا|حد من (?:ال)?فريق/u', $sentence)
+                && preg_match('/ثواني|ثانية|حالا|حالاً|فورا|فوراً|فورًا|دقيق[ةه]|دقايق|للمر[ةه] الأخير[ةه]|للمره الاخيره/u', $sentence)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function claimsSubmission(string $assertions): bool
     {
         return (bool) preg_match(
-            '/(?:الطلب|طلبك|الملف)\s+(?:\S+\s+){0,2}?(?:اتبعت|اتقدم|اتقدّم|اترفع|اتأكد|وصل|راح|اتحول)'
+            '/(?:الطلب|طلبك|الملف)\s+(?:\S+\s+){0,2}?و?(?:اتبعت|اتقدم|اتقدّم|اترفع|اتأكد|وصل|راح|اتحول)'
             .'|(?:تم|اتم)\s+(?:إرسال|ارسال|تقديم|رفع|تأكيد|تاكيد)\s+(?:ال)?(?:طلب|ملف)'
             .'|(?:أكدت|اكدت|بعت|بعتت|قدمت|قدّمت|رفعت)\s+(?:\S+\s+)?(?:ال)?(?:طلب|ملف)'
             .'|(?:أكدت|اكدت)\s+(?:إرسال|ارسال|تقديم)'
@@ -546,7 +686,7 @@ class ReplyGuard
     /** A promise no record backs: a reservation, a time frame, a warranty or a guarantor. */
     private function makesUnrecordedPromise(string $replyText, string $sources): bool
     {
-        if (preg_match('/(?<!مش )محجوز[ةه]?|(?:[نهأا]|ن|هن)?حجز(?:ت)?(?:لك|هالك|هولك|ها لك)|نلحق\s+(?:\S+\s+)?نحجز|في نفس اليوم|فى نفس اليوم|نفس اليوم|خلال\s+\S+\s+(?:يوم|ايام|أيام|ساع[ةه]|ساعات)|من\s+(?:يوم|يومين|\d+)\s+(?:لـ?|ل|إلى|الى)\s*\S+\s+(?:يوم|ايام|أيام)|أول ما يجيلي رد|اول ما يجيلي رد|المصنع بيدينا/u', $replyText)) {
+        if (preg_match('/(?<!مش )محجوز[ةه]?|(?:[نهأا]|ن|هن)?حجز(?:ت)?(?:لك|هالك|هولك|ها لك)|نلحق\s+(?:\S+\s+)?نحجز|في نفس اليوم|فى نفس اليوم|نفس اليوم|خلال\s+(?:\S+\s+){0,2}?(?:يوم|يومين|ايام|أيام|ساع[ةه]|ساعات|اسبوع|أسبوع|اسبوعين|أسبوعين|أسابيع|اسابيع)|(?:يوم|يومين|\d+\s+(?:يوم|أيام|ايام))\s+(?:عمل|شغل)|بالرقمين|كأولوي[ةه]|هيجربوا\s+(?:ال)?رقم|من\s+(?:يوم|يومين|\d+)\s+(?:لـ?|ل|إلى|الى)\s*\S+\s+(?:يوم|ايام|أيام)|أول ما يجيلي رد|اول ما يجيلي رد|المصنع بيدينا/u', $replyText)) {
             return true;
         }
 

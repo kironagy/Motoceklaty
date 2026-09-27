@@ -35,6 +35,7 @@ class SendMotorcycleImagesTool implements Tool
                 'motorcycle_id' => ['type' => 'integer'],
                 'color' => ['type' => 'string'],
                 'max' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 4],
+                'different_motorcycle_confirmed' => ['type' => 'boolean', 'description' => 'true only when the customer clearly asked for photos of another model than the one he was last quoted.'],
                 'resend' => ['type' => 'boolean', 'description' => 'true ONLY when the customer explicitly asked to get the same photos again (e.g. they did not open). Skips the recently-sent check.'],
             ],
         ];
@@ -49,6 +50,12 @@ class SendMotorcycleImagesTool implements Tool
     {
         if (! $this->catalog->machineExists($args['motorcycle_id'])) {
             return ToolResult::error('UNKNOWN_MOTORCYCLE');
+        }
+
+        // "VLR 200" (بينيلي, 20) and "VLR200" (فيجوري, 31): the customer
+        // was quoted the Figuri and got the Benelli's photos.
+        if ($mismatch = \App\Domain\Conversations\QuotedMotorcycle::mismatch($ctx->conversationId, (int) $args['motorcycle_id'], ($args['different_motorcycle_confirmed'] ?? false) === true)) {
+            return ToolResult::error('MOTORCYCLE_DIFFERS_FROM_LAST_QUOTED', $mismatch);
         }
 
         $max = $args['max'] ?? 4;
@@ -104,7 +111,11 @@ class SendMotorcycleImagesTool implements Tool
 
         \App\Domain\Conversations\QuotedMotorcycle::remember($ctx->conversationId, (int) $args['motorcycle_id']);
 
+        $machine = \App\Models\Machine::with('brand')->find($args['motorcycle_id']);
+
         return ToolResult::ok([
+            // name it exactly so in the reply - two brands share model names
+            'motorcycle' => trim(($machine?->brand?->name ? $machine->brand->name.' ' : '').trim((string) $machine?->name)),
             'queued_count' => count($images['paths']),
             // what the customer is about to see, photo by photo - talk about these colors,
             // e.g. two photos رمادي + أبيض means both colors are available

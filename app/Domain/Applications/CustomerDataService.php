@@ -9,6 +9,7 @@ use App\Models\ApplicationDocument;
 use App\Models\Customer;
 use App\Models\CustomerAttribute;
 use App\Models\RequirementField;
+use App\Models\WhatsappMessage;
 use App\Domain\Conversations\CustomerStatements;
 
 /**
@@ -88,6 +89,13 @@ class CustomerDataService
                 continue;
             }
 
+            // Request 4276: "عماره 2 شقه 41" - 41 was saved as the floor.
+            if (str_ends_with($key, '_floor') && $this->isApartmentNumber((string) $result->normalized, $evidenceMessageId)) {
+                $rejected[] = ['key' => $key, 'code' => 'NOT_A_FLOOR'];
+
+                continue;
+            }
+
             // Request 4278: "شغل في ورشه" was saved as the work building number
             // and the work landmark - the word "ورشة" is neither.
             if ($code = $this->notAnAddressPart($key, (string) $result->normalized)) {
@@ -127,13 +135,23 @@ class CustomerDataService
         return ['saved' => $saved, 'rejected' => $rejected, 'conflicts' => $conflicts, 'facts' => $facts];
     }
 
+    private function isApartmentNumber(string $value, ?int $messageId): bool
+    {
+        $digits = preg_replace('/\D+/', '', \App\Support\ArabicTextNormalizer::normalize($value));
+        $text = $messageId ? \App\Support\ArabicTextNormalizer::normalize((string) WhatsappMessage::whereKey($messageId)->value('text')) : '';
+
+        return $digits !== '' && preg_match('/شق[هة]\s*(?:رقم\s*)?'.$digits.'(?!\d)/u', $text)
+            && ! preg_match('/(?:دور|الدور)\s*(?:رقم\s*)?'.$digits.'(?!\d)/u', $text);
+    }
+
     /** A building number with no number in it, or a landmark that is only the kind of place. */
     private function notAnAddressPart(string $key, string $value): ?string
     {
         $text = \App\Support\ArabicTextNormalizer::normalize($value);
 
+        // "عمارة السندباد" names the building - "ورشة" does not
         if (str_ends_with($key, '_building_no')
-            && ! preg_match('/\d|اول|تاني|ثاني|تالت|ثالث|رابع|خامس|سادس|سابع|تامن|ثامن|تاسع|عاشر|مفيش|مافيش|بدون|من غير|مش عارف|ملهاش|مالهاش/u', $text)) {
+            && ! preg_match('/عمار|برج|فيلا|مبني|بيت|بلوك|\d|اول|تاني|ثاني|تالت|ثالث|رابع|خامس|سادس|سابع|تامن|ثامن|تاسع|عاشر|مفيش|مافيش|بدون|من غير|مش عارف|ملهاش|مالهاش/u', $text)) {
             return 'NOT_A_BUILDING_NUMBER';
         }
 

@@ -92,6 +92,11 @@ class ReplyGuardGapsTest extends TestCase
             'scope' => 'application', 'is_sensitive' => false, 'is_active' => true,
         ]);
         \App\Models\ApplicationRequirement::create(['customer_type_id' => $type->id, 'requirement_type' => 'field', 'requirement_field_id' => $field->id, 'is_required' => true]);
+        foreach (['driving_license' => 'رخصة القيادة', 'delivery_app_earnings' => 'سكرين أرباح'] as $key => $label) {
+            $document = \App\Models\DocumentType::create(['key' => $key, 'label' => $label, 'is_active' => true]);
+            \App\Models\ApplicationRequirement::create(['customer_type_id' => $type->id, 'requirement_type' => 'document', 'document_type_id' => $document->id,
+                'is_required' => true, 'condition' => ['op' => 'in', 'fact' => 'work_type', 'value' => ['delivery_app']]]);
+        }
         $application = \App\Models\Application::create([
             'customer_id' => $customer->id, 'origin_conversation_id' => $conversation->id,
             'customer_type_id' => $type->id, 'status' => 'collecting',
@@ -110,6 +115,8 @@ class ReplyGuardGapsTest extends TestCase
         $reply = 'المطلوب: صورة البطاقة، ورخصة قيادة سارية، وسكرين أرباح من التطبيق.';
 
         $this->assertSame('WORK_TYPE_NOT_RECORDED', app(ReplyGuard::class)->check(['messages' => [$reply]], $conversation, '', [], []));
+        // saved in this turn
+        \App\Models\ApplicationData::create(['application_id' => \App\Models\Application::first()->id, 'field_key' => 'work_type', 'party' => 'applicant', 'value' => 'delivery_app', 'source' => 'customer_stated', 'status' => 'valid']);
         $this->assertNull(app(ReplyGuard::class)->check(['messages' => [$reply]], $conversation, '', [], [
             ['name' => 'record_customer_data', 'ok' => true, 'data' => []],
         ]));
@@ -148,5 +155,48 @@ class ReplyGuardGapsTest extends TestCase
 
         $this->assertSame('REPEATED_QUESTION', app(ReplyGuard::class)->check(['messages' => ['الترخيص بيتظبط في الفرع.', 'تحب أقولك سعر الهوجن كاش كام؟']], $conversation, '', [], []));
         $this->assertNull(app(ReplyGuard::class)->check(['messages' => ['الترخيص بيتظبط في الفرع. تحب تعرف القسط عليها؟']], $conversation, '', [], []));
+    }
+
+    /** Sentences the bot really sent in bot requests 4272-4278 (2026-09-26). */
+    public function test_what_went_wrong_in_the_bot_requests_is_blocked(): void
+    {
+        $this->assertSame('GARBLED_TEXT', $this->check('كده كل البيانات خلصت، هبعتلusd الطلب دلوقتي للمراجعة.'));
+        $this->assertNull($this->check('صور الفيجوري بالVLR200 وصلت؟'));
+        $this->assertSame('RESUBMISSION_PROMISED', $this->check('طالما معاك البطاقة بس، إحنا ممكن نقدم تاني على نظام مختلف من غير ما نعقد الدنيا.'));
+        $this->assertSame('WORK_TYPE_SWITCH_SUGGESTED', $this->check('ممكن نقدّم على إنك "عامل حر" (دخل حر) بدل "موظف". تحب نكمل كده؟'));
+        $this->assertSame('DATA_CLAIMED_NOT_SAVED', $this->check('ولا يهمك، أنا عدلتها عندي في الطلب لـ "شركة اسكويار".'));
+        $this->assertSame('DATA_CLAIMED_NOT_SAVED', $this->check('تمام يا غالي، الرقم وصل. ابعتلي عنوان السكن.'));
+        $this->assertSame('BANNED_WORDING', $this->check('بص يا غالي، مفيش عندنا مقدم خالص.'));
+        $this->assertSame('DOCUMENT_NOT_REQUIRED', $this->check('المطلوب منك صورة من عقد الورشة أو إيصال مرافق للمكان.'));
+        $this->assertSame('UNRECORDED_PROMISE', $this->check('في الغالب الرد بييجي خلال أيام قليلة، مش أسبوعين.'));
+        $this->assertSame('UNRECORDED_PROMISE', $this->check('في العادة الموضوع بياخد من يوم لـ ٣ أيام عمل.'));
+        $this->assertSame('UNRECORDED_PROMISE', $this->check('غالباً في خلال يوم أو يومين عمل بتكون الأمور وضحت.'));
+        $this->assertSame('UNRECORDED_PROMISE', $this->check('كده الطلب متسجل بالرقمين عشان نضمن إننا نوصلك.'));
+    }
+
+    public function test_a_colleague_is_never_promised_in_seconds(): void
+    {
+        $conversation = $this->conversation();
+        $conversation->update(['status' => 'awaiting_agent']);
+
+        $this->assertSame('HANDOFF_TIME_PROMISED', app(ReplyGuard::class)->check(['messages' => ['ثواني ويكون معاك زميل من فريق المبيعات يوضحلك كل التفاصيل حالا.']], $conversation, '', [], []));
+        $this->assertNull(app(ReplyGuard::class)->check(['messages' => ['زميلي هيرد عليك، ولحد ما يرد اسألني أي حاجة.']], $conversation, '', [], []));
+    }
+
+    public function test_a_second_submission_is_not_claimed_when_nothing_was_sent(): void
+    {
+        // Request 4272, refused by the finance company: "الطلب اتقفل واتبعت على أمان".
+        $conversation = $this->conversation();
+        $customer = \App\Models\Customer::create(['whatsapp_bot_id' => $conversation->whatsapp_bot_id, 'jid' => '2011@s.whatsapp.net', 'phone' => '2011']);
+        $conversation->update(['customer_id' => $customer->id]);
+        $type = \App\Models\CustomerType::create(['key' => 'self_employed', 'label' => 'عامل حر']);
+        \App\Models\Application::create(['customer_id' => $customer->id, 'origin_conversation_id' => $conversation->id,
+            'customer_type_id' => $type->id, 'status' => 'submitted', 'submitted_at' => now()]);
+
+        $check = fn (string $reply) => app(ReplyGuard::class)->check(['messages' => [$reply]], $conversation, '', [], []);
+
+        $this->assertSame('RESUBMISSION_CLAIMED', $check('الطلب اتقفل واتبعت على أمان يا غالي.'));
+        $this->assertSame('RESUBMISSION_CLAIMED', $check('أيوه يا باشا، الطلب اتبعت على النظام الجديد.'));
+        $this->assertNull($check('أيوه يا باشا، طلبك اتبعت وفي المراجعة.'));
     }
 }
