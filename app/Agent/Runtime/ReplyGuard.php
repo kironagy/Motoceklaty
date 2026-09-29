@@ -185,6 +185,13 @@ class ReplyGuard
             return 'DOCUMENT_NOT_REQUIRED';
         }
 
+        // Owner 2026-09-29: "بما إن المكنة سعرها تحت 60 ألف" is our own rule,
+        // not something to tell a customer. Above the cap it is said, with
+        // the offer's explanation (the difference is paid in cash).
+        if ($this->mentionsCapThreshold($replyText, $toolResultsBlob)) {
+            return 'CAP_THRESHOLD_MENTIONED';
+        }
+
         // Owner 2026-09-29: every document on his job's list is asked. A
         // workshop owner was told the required tax card was "مش شرط، لو مش
         // معاك مفيش مشكلة"; a rider was told "بالبطاقة بس".
@@ -631,6 +638,36 @@ class ReplyGuard
                 if (preg_match($pattern, $sentence) && ($key === '' || ($allowed !== null && ! in_array($key, $allowed, true)))) {
                     return true;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    private function mentionsCapThreshold(string $replyText, string $toolResultsBlob): bool
+    {
+        $caps = \App\Models\EligibilityRule::where('is_active', true)->where('rule_type', 'financing_cap')->get()
+            ->map(fn ($r) => (int) ($r->params['max_amount'] ?? 0))->filter(fn ($c) => $c >= 1000)->unique();
+
+        foreach ($caps as $cap) {
+            $western = [(string) intdiv($cap, 1000), number_format($cap), (string) $cap];
+            $forms = [];
+
+            foreach ($western as $form) {
+                $forms[] = preg_quote($form, '/');
+                $forms[] = preg_quote(strtr($form, ['0' => '٠', '1' => '١', '2' => '٢', '3' => '٣', '4' => '٤', '5' => '٥', '6' => '٦', '7' => '٧', '8' => '٨', '9' => '٩', ',' => '٬']), '/');
+            }
+
+            $number = '(?:'.implode('|', $forms).')(?!\d|[٠-٩])';
+            $below = '/(?:تحت|أقل|اقل|أقل من|مش معدي[ةه]?)\s+(?:من\s+)?(?:ال)?'.$number.'/u';
+            $above = '/(?:فوق|أعلى|اعلى|أكتر|اكتر|أكثر|اكثر|معدي[ةه]?|بتعدي|تعدي)\s+(?:من\s+)?(?:ال)?'.$number.'/u';
+
+            if (preg_match($below, $replyText)) {
+                return true;
+            }
+
+            if (preg_match($above, $replyText) && ! str_contains($toolResultsBlob, 'explain_to_customer')) {
+                return true;
             }
         }
 

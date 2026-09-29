@@ -40,8 +40,9 @@ class FinancingCapPolicy
     {
         $label = $customerTypeId !== null ? \App\Models\CustomerType::whereKey($customerTypeId)->value('label') : null;
 
-        return ($label ? "بما إن شغلك {$label}، " : '').'أقصى مبلغ بيتقسط '.number_format($cap).' جنيه، '
-            .'فالفرق عن سعر المكنة بيتدفع كاش في الأول مع المصاريف الإدارية، والباقي بيتقسط.';
+        // the owner's wording: above the cap, the difference is paid in cash and the rest is financed
+        return ($label ? "بما إن شغلك {$label}، " : '').'أقصى مبلغ بيتقسط '.number_format($cap).' جنيه والمكنة أعلى من كده، '
+            .'فالفرق بيتدفع كاش في الأول مع المصاريف الإدارية، والباقي بيتقسط.';
     }
 
     /** The customer-type cap and the system's own cap (dashboard), whichever is tighter. */

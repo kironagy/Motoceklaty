@@ -149,6 +149,29 @@ class ReplyGuardGapsTest extends TestCase
         $this->assertNull(app(ReplyGuard::class)->check(['messages' => ['أيوه بالبطاقة بس يا باشا، وش وضهر.']], $conversation, '', [], []));
     }
 
+    /**
+     * Owner 2026-09-29: "بما إن المكنة سعرها تحت 60 ألف، قولي بتشتغل إيه"
+     * is our own rule, not something to tell a customer. Above the cap it is
+     * said - a freelancer pays the difference in cash and the rest is
+     * financed - but only with the offer's explanation.
+     */
+    public function test_the_financing_cap_threshold_is_said_only_when_it_applies(): void
+    {
+        \App\Models\EligibilityRule::create(['customer_type_id' => \App\Models\CustomerType::create(['key' => 'self_employed', 'label' => 'عامل حر'])->id,
+            'rule_type' => 'financing_cap', 'params' => ['max_amount' => 60000], 'is_active' => true]);
+        $check = fn (string $reply, array $outcomes = []) => app(ReplyGuard::class)->check(['messages' => [$reply]], $this->conversation(), '', [], $outcomes);
+
+        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('بما إن المكنة سعرها تحت 60 ألف، قولي حضرتك بتشتغل إيه؟'));
+        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('المكنة دي أقل من ٦٠ ألف فمش محتاج تدفع فرق.'));
+        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('المكنة أعلى من 60,000 جنيه فهتدفع الفرق كاش.'));
+
+        $capped = [['name' => 'get_installment_offer', 'ok' => true, 'data' => ['explain_to_customer' => 'بما إن شغلك عامل حر، أقصى مبلغ بيتقسط 60,000 جنيه']]];
+        $this->assertNull($check('بما إن شغلك عامل حر والمكنة أعلى من 60 ألف، هتدفع الفرق كاش والباقي يتقسط.', $capped));
+        // before his work is known he is only asked what he does
+        $askWork = [['name' => 'get_installment_offer', 'ok' => false, 'data' => ['code' => 'ASK_WORK_FIRST']]];
+        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('المكنة أكتر من 60 ألف، فالقسط على حسب شغلك. حضرتك بتشتغل إيه؟', $askWork));
+    }
+
     public function test_the_same_list_passes_once_work_type_is_saved(): void
     {
         $conversation = $this->conversation();
