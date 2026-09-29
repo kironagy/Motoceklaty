@@ -213,6 +213,12 @@ class ContextBuilder
             'handoff' => $handoff,
         ];
 
+        // "ايه المتاح؟" after an SRK 250 photo was answered with 150cc bikes.
+        if (($interest = $state['interest'] ?? null) && ($interest['cc'] ?? null)) {
+            $payload['customer_is_after'] = ($interest['label'] ?? '').' (about '.$interest['cc'].'cc). For "what do you have" / alternatives call '
+                .'search_motorcycles - it returns this size first. Never list other sizes or kinds unless he asks for them.';
+        }
+
         $unprocessed = $this->unprocessedMedia($conversation, $turnId);
 
         if ($unprocessed !== []) {

@@ -23,12 +23,6 @@ class SearchMotorcyclesTool implements Tool
             .'obvious from the catalog index. Do not use when the ID is already known (use get_motorcycle_details).';
     }
 
-    /** A size in a model name the customer typed ("srk 200"). */
-    private function ccIn(string $query): ?int
-    {
-        return preg_match('/(?<!\d)(100|110|125|150|160|180|200|220|250|300|400)(?!\d)/', \App\Support\ArabicTextNormalizer::normalize($query), $m) ? (int) $m[1] : null;
-    }
-
     /** "ايه الموجود؟": no name, brand, size, price, color or offer filter. */
     private function isGeneric(array $args): bool
     {
@@ -68,16 +62,15 @@ class SearchMotorcyclesTool implements Tool
         }
 
         $result = $this->catalog->search($args);
-        $conversation = \App\Models\WhatsappConversation::find($ctx->conversationId);
-        $state = $conversation?->state ?? [];
+        $interest = \App\Domain\Conversations\CustomerInterest::class;
 
         // A model we do not carry: what he gets instead is the same kind and
         // size, and that is remembered for a later "ايه الموجود؟".
         if (filled($args['name_query'] ?? null) && $result['items'] === []) {
-            $cc = $this->ccIn((string) $args['name_query']);
+            $cc = $interest::ccIn((string) $args['name_query']);
 
             if ($cc !== null) {
-                $state['interest'] = ['label' => (string) $args['name_query'], 'cc' => $cc, 'kind' => null];
+                $interest::remember($ctx->conversationId, (string) $args['name_query'], $cc);
                 $result['not_carried'] = true;
                 $result['similar_available'] = $this->catalog->similar($cc, 'motorcycle', null, 5);
                 $result['note'] = 'We do not carry "'.$args['name_query'].'". He wants about '.$cc.'cc: if he asks what we have, offer similar_available '
@@ -85,19 +78,13 @@ class SearchMotorcyclesTool implements Tool
             }
         } elseif (filled($args['name_query'] ?? null) && count($result['items']) === 1) {
             // he named a model we have: its kind and size is what he is after
-            $found = \App\Models\Machine::with('brand')->find($result['items'][0]['id']);
-            $state['interest'] = ['label' => $found->name, 'cc' => \App\Domain\Catalog\CatalogService::engineCc($found),
-                'kind' => \App\Domain\Catalog\CatalogService::kind($found), 'price' => (float) $found->cash_price, 'id' => $found->id];
-        } elseif ($this->isGeneric($args) && ($interest = $state['interest'] ?? null) && ($interest['cc'] ?? null)) {
-            // "ايه الموجود حاليا؟" right after asking about a 200cc model
-            $result['items'] = $this->catalog->similar((int) $interest['cc'], $interest['kind'] ?? 'motorcycle', $interest['price'] ?? null,
-                (int) min(8, $args['limit'] ?? 5), array_filter([$interest['id'] ?? null]));
-            $result['note'] = 'He was asking about '.$interest['label'].' (about '.$interest['cc'].'cc): these are the closest we have. '
+            $interest::rememberMachine($ctx->conversationId, \App\Models\Machine::with('brand')->find($result['items'][0]['id']));
+        } elseif ($this->isGeneric($args) && ($wanted = $interest::get($ctx->conversationId)) && ($wanted['cc'] ?? null)) {
+            // "ايه الموجود حاليا؟" right after asking about a 250cc model
+            $result['items'] = $this->catalog->similar((int) $wanted['cc'], $wanted['kind'] ?? 'motorcycle', $wanted['price'] ?? null,
+                (int) min(8, $args['limit'] ?? 5), array_filter([$wanted['id'] ?? null]));
+            $result['note'] = 'He was asking about '.$wanted['label'].' (about '.$wanted['cc'].'cc): these are the closest we have. '
                 .'Offer these; other sizes or kinds only if he asks for something different.';
-        }
-
-        if ($conversation && $state !== ($conversation->state ?? [])) {
-            $conversation->update(['state' => $state]);
         }
 
         // "VLR 200" is sold by two brands at different prices; picking one

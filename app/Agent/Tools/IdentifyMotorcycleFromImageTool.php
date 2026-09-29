@@ -2,6 +2,7 @@
 
 namespace App\Agent\Tools;
 
+use App\Domain\Conversations\CustomerInterest;
 use App\Agent\Providers\AiProvider;
 use App\Agent\Providers\AiProviderException;
 use App\Agent\Providers\AiRequest;
@@ -31,7 +32,7 @@ class IdentifyMotorcycleFromImageTool implements Tool
             .'band=similar: say it looks like / resembles the candidates and ask or offer them - never state it IS that model or quote its price as the photo\'s price. '
             .'band=unknown: say you could not tell and ask for the name. '
             .'band=not_in_catalog: the photo is observed.model, which we do NOT carry - say plainly what it is and "للأسف مش متوفرة عندنا حاليا", '
-            .'never call it one of our models and never guess when it will be available; you may offer the candidates as alternatives. '
+            .'never call it one of our models and never guess when it will be available; alternatives are similar_available (same kind and size), not the look-alike candidates. '
             .'Do not use for documents (use process_document).';
     }
 
@@ -182,6 +183,17 @@ class IdentifyMotorcycleFromImageTool implements Tool
             'note' => 'Several motorcycles are in this photo. Do not claim which model it is: name the likely candidate(s) '
                 .'and ask which bike in the photo the customer means.',
         ] : []);
+
+        // Simulator 691: an SRK 250 photo, then "ايه المتاح؟" got 150cc
+        // bikes. What the photo shows is what he is after.
+        if ($band === 'not_in_catalog' && ($cc = CustomerInterest::ccIn($observedModel)) !== null) {
+            $kind = str_contains(mb_strtolower((string) ($parsed['observed']['style'] ?? '')), 'scooter') ? 'scooter' : 'motorcycle';
+            CustomerInterest::remember($ctx->conversationId, trim(($parsed['observed']['brand'] ?? '').' '.$observedModel), $cc, $kind);
+            $result['similar_available'] = app(\App\Domain\Catalog\CatalogService::class)->similar($cc, $kind, null, 5);
+            $result['note'] = trim(($result['note'] ?? '').' Alternatives are similar_available (same kind, about '.$cc.'cc) - never other sizes or kinds unless he asks.');
+        } elseif ($band === 'match' && ($top = $candidates->first())) {
+            CustomerInterest::rememberMachine($ctx->conversationId, Machine::with('brand')->find($top['motorcycle_id']));
+        }
 
         $media->update(['analysis' => $result]);
 

@@ -136,6 +136,13 @@ class CatalogServiceTest extends TestCase
         $this->assertTrue($missing->data['not_carried']);
         $this->assertEqualsCanonicalizing(['VLR200', 'وينج ٢٠٠'], array_column($missing->data['similar_available'], 'name'));
 
+        $this->assertSame(200, \App\Domain\Conversations\CustomerInterest::get($conversation->id)['cc']);
+
+        // a photo of a 250 we do not carry moves what he is after
+        \App\Domain\Conversations\CustomerInterest::remember($conversation->id, 'QJ Motor SRK 250', 250);
+        $this->assertSame(['L250'], array_column($tool->execute(['available_only' => true], $ctx)->data['items'], 'name'));
+        \App\Domain\Conversations\CustomerInterest::remember($conversation->id, 'srk 200', 200);
+
         $available = $tool->execute(['available_only' => true], $ctx);
         $this->assertEqualsCanonicalizing(['VLR200', 'وينج ٢٠٠'], array_column($available->data['items'], 'name'));
         $this->assertStringContainsString('srk 200', $available->data['note']);
