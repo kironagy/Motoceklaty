@@ -2,9 +2,12 @@
 
 namespace App\Support;
 
+use App\Domain\Simulation\ConversationSimulator;
 use App\Models\ApplicationData;
+use App\Models\Customer;
 use App\Models\CustomerAttribute;
 use App\Models\RequirementField;
+use App\Models\WhatsappBot;
 
 /**
  * Keyed hash of an identity value (national ID) so duplicates across
@@ -33,6 +36,22 @@ class IdentityLookup
      */
     public static function otherCustomersWith(string $hash, int $customerId): array
     {
+        // Simulator and teach-mode customers are test runs, not people:
+        // three runs with the same test ID handed the third to staff
+        // (conversation 708). They clash with nobody, and nobody with them.
+        $testCustomers = Customer::whereIn('whatsapp_bot_id', WhatsappBot::whereIn('whatsapp_phone_number_id', [
+            ConversationSimulator::BOT_KEY, ConversationSimulator::CHECK_BOT_KEY,
+        ])->select('id'))->pluck('id');
+
+        if ($testCustomers->contains($customerId)) {
+            return [];
+        }
+
+        return self::holders($hash, $customerId)->diff($testCustomers)->values()->all();
+    }
+
+    private static function holders(string $hash, int $customerId): \Illuminate\Support\Collection
+    {
         $fromAttributes = CustomerAttribute::where('lookup_hash', $hash)
             ->where('customer_id', '!=', $customerId)
             ->pluck('customer_id');
@@ -43,6 +62,6 @@ class IdentityLookup
             ->where('applications.customer_id', '!=', $customerId)
             ->pluck('applications.customer_id');
 
-        return $fromAttributes->merge($fromApplications)->unique()->values()->all();
+        return $fromAttributes->merge($fromApplications)->unique();
     }
 }

@@ -330,6 +330,23 @@ class DataIntegrityTest extends TestCase
         $this->assertSame('علي محمد علي احمد', ApplicationData::where('field_key', 'full_name')->value('value'));
     }
 
+    /**
+     * Conversation 708: three simulator runs used the same test national ID,
+     * and the third "customer" was handed to staff as an identity conflict.
+     * Simulator and teach-mode customers are not people - they never clash
+     * with anyone, and a real customer never clashes with them.
+     */
+    public function test_a_simulator_customer_never_counts_as_another_holder_of_the_identity(): void
+    {
+        $simulated = app(\App\Domain\Simulation\ConversationSimulator::class)->start('sim')->customer;
+        CustomerAttribute::create(['customer_id' => $simulated->id, 'field_key' => 'national_id', 'value' => '30411262102496', 'source' => 'customer_stated', 'status' => 'valid']);
+        CustomerAttribute::create(['customer_id' => $this->customer->id, 'field_key' => 'national_id', 'value' => '30411262102496', 'source' => 'document', 'status' => 'valid']);
+
+        $snapshot = app(SnapshotService::class)->for($this->application);
+
+        $this->assertNotContains(['key' => 'national_id', 'code' => 'IDENTITY_IN_USE_BY_ANOTHER_CUSTOMER'], $snapshot['fields']['invalid']);
+    }
+
     public function test_an_identity_already_held_by_another_customer_blocks_submission(): void
     {
         $other = Customer::create(['whatsapp_bot_id' => $this->customer->whatsapp_bot_id, 'jid' => '2012@s.whatsapp.net', 'phone' => '2012']);

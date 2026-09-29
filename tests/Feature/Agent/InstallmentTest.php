@@ -379,7 +379,7 @@ class InstallmentTest extends TestCase
             'plans' => [['months' => 12, 'interest' => 22], ['months' => 24, 'interest' => 60]]]);
         $machine = $this->machine(['installment_systems' => [$aman->id, $cheapAt12->id], 'installment_price' => 55000]);
 
-        $result = $this->offerTool(['motorcycle_id' => $machine->id]);
+        $result = $this->offerTool(['motorcycle_id' => $machine->id, 'all_durations' => true]);
 
         $this->assertTrue($result->ok);
         $this->assertSame([12, 24], array_column($result->data['offers'], 'months'));
@@ -391,19 +391,40 @@ class InstallmentTest extends TestCase
         $this->assertEquals(3850, $result->data['offers'][1]['cash_due_upfront']);
     }
 
-    public function test_every_duration_is_quoted_with_its_numbers(): void
+    private function fourDurationMachine(): Machine
     {
-        // "وفيه مدد تانية زي سنتين": the two-year installment was only named,
-        // and the owner's lesson to quote it could not override the tool.
         $system = InstallmentSystem::create(['name' => 'أمان', 'pricing_mode' => 'standard', 'administrative_fees' => 7,
             'plans' => [['months' => 12, 'interest' => 20], ['months' => 18, 'interest' => 30], ['months' => 24, 'interest' => 40], ['months' => 36, 'interest' => 60]]]);
-        $machine = $this->machine(['installment_systems' => [$system->id], 'installment_price' => 55000]);
 
-        $result = $this->offerTool(['motorcycle_id' => $machine->id]);
+        return $this->machine(['installment_systems' => [$system->id], 'installment_price' => 55000]);
+    }
 
-        $this->assertSame([12, 18, 24, 36], array_column($result->data['offers'], 'months'));
-        $this->assertStringContainsString('سنتين', $result->data['offers'][2]['say']);
-        $this->assertStringNotContainsString('Say other durations exist', $result->data['how_to_present']);
+    /**
+     * Owner 2026-09-29 (conversation 708): "القسط كام؟" got all four
+     * durations. With no duration named he is asked which one first - the
+     * durations by name, no numbers.
+     */
+    public function test_without_a_duration_he_is_asked_which_one_before_any_number(): void
+    {
+        $result = $this->offerTool(['motorcycle_id' => $this->fourDurationMachine()->id]);
+
+        $this->assertTrue($result->ok);
+        $this->assertArrayNotHasKey('offers', $result->data);
+        $this->assertSame(['سنة', 'سنة ونص', 'سنتين', '٣ سنين'], $result->data['durations']);
+        $this->assertStringContainsString('which duration', $result->data['how_to_present']);
+    }
+
+    /** Several durations with their numbers only when he asks for more than one. */
+    public function test_several_durations_are_quoted_only_when_he_asks_for_them(): void
+    {
+        $machine = $this->fourDurationMachine();
+
+        $two = $this->offerTool(['motorcycle_id' => $machine->id, 'months_list' => [12, 24]]);
+        $this->assertSame([12, 24], array_column($two->data['offers'], 'months'));
+
+        $all = $this->offerTool(['motorcycle_id' => $machine->id, 'all_durations' => true]);
+        $this->assertSame([12, 18, 24, 36], array_column($all->data['offers'], 'months'));
+        $this->assertStringContainsString('سنتين', $all->data['offers'][2]['say']);
     }
 
     public function test_the_admin_fee_is_never_added_to_the_total(): void
@@ -439,7 +460,7 @@ class InstallmentTest extends TestCase
     {
         $machine = $this->machine(['installment_systems' => [$this->standardSystem()->id]]);
 
-        $result = $this->offerTool(['motorcycle_id' => $machine->id]);
+        $result = $this->offerTool(['motorcycle_id' => $machine->id, 'months' => 12]);
 
         // the owner: "بعد ٤٥ يوم من الاستلام", never "لحد ٤٥ يوم"
         $this->assertSame('أول قسط بيبدأ بعد 45 يوم من الاستلام', $result->data['first_payment']);
@@ -454,10 +475,10 @@ class InstallmentTest extends TestCase
             'no_upfront_only' => true, 'plans' => [['months' => 12, 'interest' => 30], ['months' => 24, 'interest' => 60]]]);
         $machine = $this->machine(['installment_systems' => [$aman->id, $noUpfront->id]]);
 
-        $normal = $this->offerTool(['motorcycle_id' => $machine->id]);
+        $normal = $this->offerTool(['motorcycle_id' => $machine->id, 'all_durations' => true]);
         $this->assertSame(['أمان', 'أمان'], array_column($normal->data['offers'], 'installment_system'));
 
-        $insists = $this->offerTool(['motorcycle_id' => $machine->id, 'no_upfront' => true]);
+        $insists = $this->offerTool(['motorcycle_id' => $machine->id, 'no_upfront' => true, 'all_durations' => true]);
         $this->assertSame(['امان بدون مصاريف', 'امان بدون مصاريف'], array_column($insists->data['offers'], 'installment_system'));
         $this->assertEquals(0, $insists->data['offers'][0]['cash_due_upfront']);
         // 55000 * 1.3 / 12

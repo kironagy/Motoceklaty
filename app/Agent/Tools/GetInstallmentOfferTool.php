@@ -25,8 +25,9 @@ class GetInstallmentOfferTool implements Tool
     public function description(): string
     {
         return 'THE tool for any installment question ("القسط كام", "على سنة", "أقل مقدم", "ينفع أقسط", "إجمالي السعر كام", "هدفع كام في الآخر" - the offer\'s `breakdown` is the total). The best system for '
-            .'this customer is picked automatically; you get, per duration, the down payment (usually none), the admin fee paid '
-            .'at pickup, and the exact monthly payment - the `say` line has them worded correctly. Do NOT name the '
+            .'this customer is picked automatically. With no duration named you get the durations to ask him about (no numbers); '
+            .'with months (or months_list / all_durations when he asked for more than one) you get, per duration, the down payment '
+            .'(usually none), the admin fee paid at pickup, and the exact monthly payment - the `say` line has them worded correctly. Do NOT name the '
             .'system/company unless he asks who finances it. Pass months when he named a duration, down_payment when he '
             .'named an amount, no_upfront=true when he asks for a plan without the admin fees / paying nothing at pickup '
             .'("مفيش نظام من غير مصاريف؟", "بدون مصاريف") - never answer that question without this call; only its '
@@ -41,7 +42,9 @@ class GetInstallmentOfferTool implements Tool
             'required' => ['motorcycle_id'],
             'properties' => [
                 'motorcycle_id' => ['type' => 'integer'],
-                'months' => ['type' => 'integer', 'minimum' => 1],
+                'months' => ['type' => 'integer', 'minimum' => 1, 'description' => 'The one duration he named ("على سنة" = 12, "سنة ونص" = 18, "سنتين" = 24, "٣ سنين" = 36).'],
+                'months_list' => ['type' => 'array', 'items' => ['type' => 'integer', 'minimum' => 1], 'description' => 'Only when he asked for more than one duration ("احسبهالي على سنة وسنتين").'],
+                'all_durations' => ['type' => 'boolean', 'description' => 'true only when he asked for every duration ("قولي كل المدد", "على كل الفترات"). Without months, months_list or this, you get the durations to ask him about - no numbers.'],
                 'down_payment' => ['type' => 'number', 'minimum' => 0],
                 'no_upfront' => ['type' => 'boolean', 'description' => 'true when the customer asks for a plan with nothing paid at pickup - no down payment and no admin fees.'],
                 'customer_type' => ['type' => 'string', 'description' => 'Only a type the customer stated (or the open application\'s). Omit when unknown.'],
@@ -137,12 +140,29 @@ class GetInstallmentOfferTool implements Tool
         \App\Domain\Conversations\QuotedMotorcycle::remember($ctx->conversationId, $machine->id);
 
         $capped = collect($offers)->firstWhere('cap', '!==', null);
+        $cap = $capped ? ['explain_to_customer' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : [];
 
-        // Every duration is quoted with its numbers. Showing three and only
-        // naming the rest ("وفيه مدد تانية زي سنتين") left the customer asking
-        // for the two-year installment, and the owner's lesson to quote it
-        // could not override this tool's own wording.
-        $shown = $offers;
+        // The owner (2026-09-29, conversation 708): "القسط كام؟" is not
+        // answered with every duration - he is asked which one first, and
+        // gets several only when he asks for more than one.
+        $asked = array_values(array_unique(array_map('intval', (array) ($args['months_list'] ?? []))));
+
+        if ($months === null && $asked === [] && ($args['all_durations'] ?? false) !== true) {
+            return ToolResult::ok([
+                'cash_price' => (float) $machine->cash_price,
+                'durations' => array_map(fn (array $o) => $this->duration($o['months']), $offers),
+                'how_to_present' => 'He did not name a duration: ask him which duration he wants, naming these durations only - '
+                    .'no installment, fee or total numbers yet (e.g. "حابب تقسطها على قد إيه؟ سنة، ولا سنة ونص، ولا سنتين، ولا ٣ سنين؟"). '
+                    .'When he answers, call again with months (or months_list if he wants more than one compared).',
+            ] + $cap);
+        }
+
+        $shown = $asked === [] ? $offers : array_values(array_filter($offers, fn ($o) => in_array($o['months'], $asked, true)));
+
+        if ($shown === []) {
+            return ToolResult::error('DURATION_NOT_AVAILABLE', 'No plan for '.implode(', ', $asked).' months. Available durations: '
+                .implode(', ', array_column($offers, 'months')).' - offer the closest ones.');
+        }
 
         return ToolResult::ok([
             'cash_price' => (float) $machine->cash_price,
@@ -170,8 +190,8 @@ class GetInstallmentOfferTool implements Tool
                 .'If he asks why installments cost more than cash, explain it in your own short words from price_difference_policy (never copied word for word, never adding reasons it does not give), '
                 .'then offer the cash price. If he asks what he pays in the end, send the offer\'s `breakdown` as it is. '
                 .'Never tell him the installment price of the motorcycle (the price the installment is calculated on). '
-                .'Say `first_payment` once with the offer (or when he asks). Never write the words "من غير مقدم" / "بدون مقدم" - say what is paid at pickup instead. No system/company names, no word "نظام"/"أنظمة". Quote every offer below with its numbers - never say "فيه مدد تانية" instead of quoting one.',
-        ] + ($capped ? ['explain_to_customer' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : [])
+                .'Say `first_payment` once with the offer (or when he asks). Never write the words "من غير مقدم" / "بدون مقدم" - say what is paid at pickup instead. No system/company names, no word "نظام"/"أنظمة". Quote only the offers below (the duration(s) he asked for), each with its numbers.',
+        ] + $cap
         );
     }
 
