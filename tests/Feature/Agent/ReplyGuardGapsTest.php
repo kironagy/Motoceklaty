@@ -153,7 +153,7 @@ class ReplyGuardGapsTest extends TestCase
      * Owner 2026-09-29: "بما إن المكنة سعرها تحت 60 ألف، قولي بتشتغل إيه"
      * is our own rule, not something to tell a customer. Above the cap it is
      * said - a freelancer pays the difference in cash and the rest is
-     * financed - but only with the offer's explanation.
+     * financed - but only when this turn's offer shows it is above.
      */
     public function test_the_financing_cap_threshold_is_said_only_when_it_applies(): void
     {
@@ -167,9 +167,11 @@ class ReplyGuardGapsTest extends TestCase
 
         $capped = [['name' => 'get_installment_offer', 'ok' => true, 'data' => ['explain_to_customer' => 'بما إن شغلك عامل حر، أقصى مبلغ بيتقسط 60,000 جنيه']]];
         $this->assertNull($check('بما إن شغلك عامل حر والمكنة أعلى من 60 ألف، هتدفع الفرق كاش والباقي يتقسط.', $capped));
-        // before his work is known he is only asked what he does
-        $askWork = [['name' => 'get_installment_offer', 'ok' => false, 'data' => ['code' => 'ASK_WORK_FIRST']]];
-        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('المكنة أكتر من 60 ألف، فالقسط على حسب شغلك. حضرتك بتشتغل إيه؟', $askWork));
+        // above the cap before his work is known (the tool asked for it): said
+        $askWork = [['name' => 'get_installment_offer', 'ok' => false, 'data' => ['code' => 'ASK_WORK_FIRST', 'message' => 'حد التمويل 60,000']]];
+        $this->assertNull($check('بما إن سعره بيعدي 60 ألف، قولي حضرتك بتشتغل إيه؟', $askWork));
+        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('بما إن سعره بيعدي 60 ألف، قولي حضرتك بتشتغل إيه؟'));
+        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('بما إن المكنة تحت 60 ألف، قولي بتشتغل إيه؟', $askWork));
     }
 
     public function test_the_same_list_passes_once_work_type_is_saved(): void

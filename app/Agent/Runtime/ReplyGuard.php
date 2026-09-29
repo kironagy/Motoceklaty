@@ -186,8 +186,8 @@ class ReplyGuard
         }
 
         // Owner 2026-09-29: "بما إن المكنة سعرها تحت 60 ألف" is our own rule,
-        // not something to tell a customer. Above the cap it is said, with
-        // the offer's explanation (the difference is paid in cash).
+        // not something to tell a customer. Above the cap it is said - only
+        // when this turn's offer shows it is above (explanation or ASK_WORK_FIRST).
         if ($this->mentionsCapThreshold($replyText, $toolResultsBlob)) {
             return 'CAP_THRESHOLD_MENTIONED';
         }
@@ -660,13 +660,13 @@ class ReplyGuard
 
             $number = '(?:'.implode('|', $forms).')(?!\d|[٠-٩])';
             $below = '/(?:تحت|أقل|اقل|أقل من|مش معدي[ةه]?)\s+(?:من\s+)?(?:ال)?'.$number.'/u';
-            $above = '/(?:فوق|أعلى|اعلى|أكتر|اكتر|أكثر|اكثر|معدي[ةه]?|بتعدي|تعدي)\s+(?:من\s+)?(?:ال)?'.$number.'/u';
+            $above = '/(?:فوق|أعلى|اعلى|أكتر|اكتر|أكثر|اكثر|معدي[ةه]?|بتعدي|بيعدي|تعدي|يعدي)\s+(?:من\s+)?(?:ال)?'.$number.'/u';
 
             if (preg_match($below, $replyText)) {
                 return true;
             }
 
-            if (preg_match($above, $replyText) && ! str_contains($toolResultsBlob, 'explain_to_customer')) {
+            if (preg_match($above, $replyText) && ! str_contains($toolResultsBlob, 'explain_to_customer') && ! str_contains($toolResultsBlob, 'ASK_WORK_FIRST')) {
                 return true;
             }
         }
