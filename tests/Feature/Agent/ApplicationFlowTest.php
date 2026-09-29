@@ -47,15 +47,52 @@ class ApplicationFlowTest extends TestCase
         return [$application, $conversation];
     }
 
-    public function test_the_id_photo_comes_first_and_the_fields_it_fills_are_not_asked(): void
+    private function recordWorkType(Application $application): void
+    {
+        \App\Models\ApplicationData::create(['application_id' => $application->id, 'field_key' => 'work_type', 'value' => 'other']);
+    }
+
+    /**
+     * Owner 2026-09-29: a delivery rider was asked for his ID only - his job
+     * was never recorded, so the license and app screenshots never showed.
+     * The job decides the documents, so it is recorded first.
+     */
+    public function test_the_work_type_comes_before_the_id_because_it_decides_the_documents(): void
     {
         [$application] = $this->application();
 
         $snapshot = app(SnapshotService::class)->for($application);
 
+        $this->assertSame('work_type', $snapshot['next_step']['key']);
+        $this->assertSame('بطاقة الرقم القومي', $snapshot['progress']['then']);
+        $this->assertFalse($snapshot['documents']['list_complete']);
+    }
+
+    /** Owner 2026-09-29: "المطلوب ايه؟" is answered with every document, not the first one. */
+    public function test_the_snapshot_lists_every_required_document_by_label(): void
+    {
+        [$application] = $this->application();
+        $this->recordWorkType($application);
+        $license = DocumentType::create(['key' => 'driving_license', 'label' => 'رخصة القيادة', 'description_for_ai' => 'l',
+            'accepted_mimes' => ['image/jpeg'], 'extraction_fields' => [], 'validation_rules' => [], 'is_active' => true]);
+        ApplicationRequirement::create(['customer_type_id' => $application->customer_type_id, 'requirement_type' => 'document', 'document_type_id' => $license->id, 'is_required' => true, 'sort' => 5]);
+
+        $documents = app(SnapshotService::class)->for($application)['documents'];
+
+        $this->assertSame(['بطاقة الرقم القومي', 'رخصة القيادة'], $documents['list']);
+        $this->assertTrue($documents['list_complete']);
+    }
+
+    public function test_the_id_photo_comes_first_and_the_fields_it_fills_are_not_asked(): void
+    {
+        [$application] = $this->application();
+        $this->recordWorkType($application);
+
+        $snapshot = app(SnapshotService::class)->for($application);
+
         $this->assertSame('national_id_front', $snapshot['next_step']['key']);
-        // name and national id come from the photo, so the work type is next
-        $this->assertSame('نوع الشغل', $snapshot['progress']['then']);
+        // name and national id come from the photo, so the phone is next
+        $this->assertSame('رقم التليفون', $snapshot['progress']['then']);
         // six things left: no scary count
         $this->assertArrayNotHasKey('remaining', $snapshot['progress']);
     }
@@ -63,6 +100,7 @@ class ApplicationFlowTest extends TestCase
     public function test_the_id_photo_step_does_not_tell_him_what_is_read_from_it(): void
     {
         [$application] = $this->application();
+        $this->recordWorkType($application);
 
         $why = app(SnapshotService::class)->for($application)['next_step']['why'];
 
@@ -100,7 +138,8 @@ class ApplicationFlowTest extends TestCase
     {
         config(['agent.enabled' => true, 'agent.applications.nudge_after_minutes' => 45, 'agent.applications.nudge_quiet_from' => 0, 'agent.applications.nudge_quiet_to' => 0]);
         Http::fake(['*' => fn () => Http::response(['ok' => true, 'wa_message_id' => uniqid('wa', true)])]);
-        [, $conversation] = $this->application();
+        [$application, $conversation] = $this->application();
+        $this->recordWorkType($application);
         $this->botSaid($conversation, 'ابعتلي صورة وش البطاقة', now()->subHour());
 
         $this->assertSame(1, app(ApplicationNudgeService::class)->nudgeStalled());
@@ -154,6 +193,7 @@ class ApplicationFlowTest extends TestCase
     public function test_after_two_unanswered_asks_the_next_thing_is_asked_instead(): void
     {
         [$application, $conversation] = $this->application();
+        $this->recordWorkType($application);
 
         foreach (['ابعتلي صورة وش البطاقة', 'مستنيين بس صورة البطاقة'] as $text) {
             WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'عايز اقدم']);
@@ -162,7 +202,7 @@ class ApplicationFlowTest extends TestCase
 
         $snapshot = app(SnapshotService::class)->for($application);
 
-        $this->assertSame('work_type', $snapshot['next_step']['key']);
+        $this->assertSame('phone', $snapshot['next_step']['key']);
         $this->assertStringContainsString('بطاقة الرقم القومي', $snapshot['next_step']['why']);
     }
 

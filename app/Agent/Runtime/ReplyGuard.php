@@ -185,6 +185,13 @@ class ReplyGuard
             return 'DOCUMENT_NOT_REQUIRED';
         }
 
+        // Owner 2026-09-29: every document on his job's list is asked. A
+        // workshop owner was told the required tax card was "مش شرط، لو مش
+        // معاك مفيش مشكلة"; a rider was told "بالبطاقة بس".
+        if ($this->waivesRequiredDocument($replyText, $conversation)) {
+            return 'REQUIRED_DOCUMENT_WAIVED';
+        }
+
         // "ثواني ويكون معاك زميل" said four times over ninety minutes while
         // nobody answered.
         if ($this->promisesColleagueSoon($replyText)) {
@@ -605,6 +612,7 @@ class ReplyGuard
         'driving_license' => '/رخص[ةه]\s*(?:ال)?(?:قياد[ةه]|سواق[ةه])|(?:صور[ةه]|وش|ضهر)\s+(?:ال)?رخص[ةه]/u',
         'business_place_photo' => '/صور[ةه]?\s+(?:\S+\s+)?(?:ال)?(?:مكان|ورش[ةه]|محل|نشاط|يافط[ةه])/u',
         'tax_card' => '/بطاق[ةه]\s+ضريبي[ةه]|سجل\s+تجاري/u',
+        'delivery_app_profile' => '/(?:ا?سكرين|صور[ةه])\S*\s+(?:\S+\s+){0,2}?(?:ال)?بروفايل|البروفايل/u',
         // never required of anyone
         '' => '/عقد\s+(?:ال)?(?:ورش[ةه]|محل|إيجار|ايجار|شغل)|إيصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|ايصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|فاتور[ةه]\s+(?:ال)?(?:كهرب|ميا[هه]|غاز)/u',
     ];
@@ -621,6 +629,42 @@ class ReplyGuard
 
             foreach (self::DOCUMENT_WORDS as $key => $pattern) {
                 if (preg_match($pattern, $sentence) && ($key === '' || ($allowed !== null && ! in_array($key, $allowed, true)))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function waivesRequiredDocument(string $replyText, WhatsappConversation $conversation): bool
+    {
+        $application = $conversation->customer_id
+            ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->latest('id')->first()
+            : null;
+
+        if (! $application) {
+            return false;
+        }
+
+        $required = (array) (app(\App\Domain\Applications\SnapshotService::class)->for($application)['documents']['required'] ?? []);
+        $beyondId = array_diff($required, ['national_id_front', 'national_id_back']);
+
+        foreach (preg_split('/(?<=[.!؟?\n])/u', $replyText) as $sentence) {
+            if (preg_match('/مش\s+(?:هينفع|ينفع|هنقدر|نقدر)|لازم/u', $sentence)) {
+                continue;
+            }
+
+            if ($beyondId !== [] && preg_match('/(?<!مش\s)(?:بال)?بطاق[ةه]\s+(?:بس|فقط)/u', $sentence)) {
+                return true;
+            }
+
+            if (! preg_match('/مش\s+(?:شرط|ضروري[ةه]?|مطلوب[ةه]?|مهم[ةه]?)|لو\s+(?:مش\s+)?(?:معاك|موجود[ةه]?|متاح[ةه]?|عندك|متوفر[ةه]?)|اختياري|مفيش\s+مشكل[ةه]|ينفع\s+من\s+غير/u', $sentence)) {
+                continue;
+            }
+
+            foreach ($required as $key) {
+                if (isset(self::DOCUMENT_WORDS[$key]) && preg_match(self::DOCUMENT_WORDS[$key], $sentence)) {
                     return true;
                 }
             }

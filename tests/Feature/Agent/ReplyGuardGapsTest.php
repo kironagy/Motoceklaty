@@ -122,6 +122,33 @@ class ReplyGuardGapsTest extends TestCase
         ]));
     }
 
+    /**
+     * Owner 2026-09-29: every document on his list is asked, none waived.
+     * Simulated workshop owner: "البطاقة الضريبية أو السجل التجاري مش شرط
+     * أساسي، لو مش معاك مفيش مشكلة" while the tax card was required.
+     */
+    public function test_a_required_document_is_never_waived(): void
+    {
+        $conversation = $this->conversation();
+        $this->selfEmployedApplicationFor($conversation, workTypeSaved: true);
+        $check = fn (string $reply) => app(ReplyGuard::class)->check(['messages' => [$reply]], $conversation, '', [], []);
+
+        $this->assertSame('REQUIRED_DOCUMENT_WAIVED', $check('أيوة طبعاً، رخصة القيادة مش شرط أساسي، لو مش معاك مفيش مشكلة.'));
+        $this->assertSame('REQUIRED_DOCUMENT_WAIVED', $check('ابعتلي صورة البطاقة، ولو معاك سكرين الأرباح يا ريت تبعته.'));
+        $this->assertSame('REQUIRED_DOCUMENT_WAIVED', $check('أيوه بالبطاقة بس يا باشا.'));
+        $this->assertNull($check('لا يا باشا، رخصة القيادة لازم عشان جهة التمويل، مش هينفع من غيرها.'));
+        $this->assertNull($check('محتاجين رخصة القيادة وسكرين الأرباح'));
+    }
+
+    public function test_only_the_id_is_fine_when_that_is_all_his_job_needs(): void
+    {
+        $conversation = $this->conversation();
+        $this->selfEmployedApplicationFor($conversation, workTypeSaved: false);
+        \App\Models\ApplicationData::create(['application_id' => \App\Models\Application::first()->id, 'field_key' => 'work_type', 'party' => 'applicant', 'value' => 'other', 'source' => 'customer_stated', 'status' => 'valid']);
+
+        $this->assertNull(app(ReplyGuard::class)->check(['messages' => ['أيوه بالبطاقة بس يا باشا، وش وضهر.']], $conversation, '', [], []));
+    }
+
     public function test_the_same_list_passes_once_work_type_is_saved(): void
     {
         $conversation = $this->conversation();

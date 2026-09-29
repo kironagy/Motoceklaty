@@ -8,6 +8,8 @@ use App\Domain\Installments\InstallmentCalculator;
 use App\Models\Application;
 use App\Models\ApplicationData;
 use App\Models\ApplicationDocument;
+use App\Models\ApplicationRequirement;
+use App\Models\CustomerType;
 use App\Models\CustomerAttribute;
 use App\Models\RequirementField;
 use App\Models\DocumentType;
@@ -57,6 +59,11 @@ class SnapshotService
             'missing' => array_values(array_diff($requiredDocumentKeys, $acceptedKeys)),
             'rejected' => $this->unresolvedRejections($documentRows, $acceptedKeys),
             'processing' => $documentRows->where('status', 'processing')->pluck('expected_type_key')->filter()->values()->all(),
+            // Owner 2026-09-29: "المطلوب ايه؟" is answered with all of it -
+            // a rider was told "البطاقة بس" and his license was never asked.
+            'list' => collect($requirements['documents'])->where('required', true)->pluck('label')->values()->all(),
+            // false until his job is known: the job adds documents (license, app screenshots...)
+            'list_complete' => ! $this->workTypeUnknown($customerType, $facts),
         ] + ($partial === [] ? [] : ['partial' => $partial]);
 
         $eligibility = $this->eligibility->evaluate($facts, $customerType->id);
@@ -164,6 +171,14 @@ class SnapshotService
 
         $backMissing = in_array('national_id_back', $documents['missing'], true);
 
+        // The job decides which documents he needs: asking for the ID first
+        // left a rider's license and app screenshots out of the list.
+        if (in_array('work_type', $missingFields, true)) {
+            $steps[] = ['type' => 'field', 'key' => 'work_type', 'label' => $fieldLabels['work_type'] ?? 'work_type',
+                'why' => 'it decides his documents - record it now from what he already said; if he has not said exactly what he works, ask him.'];
+            $missingFields = array_values(array_diff($missingFields, ['work_type']));
+        }
+
         if ($idMissing) {
             $steps[] = ['type' => 'document', 'key' => 'national_id_front', 'label' => $documentLabels['national_id_front'] ?? 'صورة البطاقة',
                 'why' => 'the photo fills full_name and national_id by itself - do not ask him to type them. '
@@ -226,6 +241,16 @@ class SnapshotService
                 'remaining' => count($steps) <= 3 ? count($steps) : null,
             ], fn ($v) => $v !== null),
         ];
+    }
+
+    /** This type asks for work_type (or depends on it) and it is not recorded yet. */
+    private function workTypeUnknown(CustomerType $customerType, array $facts): bool
+    {
+        return ($facts['work_type'] ?? null) === null
+            && ApplicationRequirement::where('customer_type_id', $customerType->id)
+                ->where(fn ($q) => $q->where('condition->fact', 'work_type')
+                    ->orWhereHas('requirementField', fn ($f) => $f->where('key', 'work_type')))
+                ->exists();
     }
 
     /** Home address parts, asked in this order. */
