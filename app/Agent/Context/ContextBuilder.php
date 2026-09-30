@@ -344,11 +344,11 @@ class ContextBuilder
      */
     private function buildL7(WhatsappConversation $conversation, object $turn): array
     {
-        $sessionStartedAt = $conversation->state['session_started_at'] ?? null;
-
+        // No cut at session_started_at: a customer back after a day got a
+        // bot that had forgotten his job and the bike, and asked it all
+        // again. The token budget and the summary bound the window instead.
         $query = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
             ->where(fn ($q) => $q->whereNull('turn_id')->orWhere('turn_id', '!=', $turn->id))
-            ->when($sessionStartedAt, fn ($q) => $q->where('created_at', '>=', $sessionStartedAt))
             ->when($conversation->summary_until_message_id, fn ($q) => $q->where('id', '>', $conversation->summary_until_message_id))
             ->orderByDesc('id');
 

@@ -166,6 +166,23 @@ class ContextBuilderTest extends TestCase
         $this->assertStringContainsString('رسالة رقم 5', $lastContent['parts'][0]['text']);
     }
 
+    public function test_a_customer_returning_after_the_session_gap_still_has_the_earlier_chat(): void
+    {
+        [$conversation] = $this->conversationWithCustomer();
+
+        $old = WhatsappMessage::create([
+            'whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming',
+            'sender_type' => 'customer', 'type' => 'text', 'text' => 'شغال في شركة سياحة ومش متأمن عليا',
+        ]);
+        $old->forceFill(['created_at' => now()->subDay()])->save();
+
+        $conversation->update(['state' => ['session_started_at' => now()->toIso8601String()]]);
+
+        $request = app(ContextBuilder::class)->build($this->turnFor($conversation));
+
+        $this->assertStringContainsString('شركة سياحة', json_encode($request->contents, JSON_UNESCAPED_UNICODE));
+    }
+
     public function test_quoted_message_and_its_stored_focus_appear_in_l8(): void
     {
         [$conversation] = $this->conversationWithCustomer();
