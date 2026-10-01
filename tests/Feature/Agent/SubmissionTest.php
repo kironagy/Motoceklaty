@@ -413,6 +413,22 @@ class SubmissionTest extends TestCase
         $this->assertArrayNotHasKey('work_area', $columns);
     }
 
+    public function test_an_address_with_no_street_leaves_the_street_empty(): void
+    {
+        [$application] = $this->completeApplication();
+        foreach (['address' => 'محافظه القاهره مدينه بدر الحي الرابع ابن بيتك أ قطعه 194', 'address_building_no' => '194'] as $key => $value) {
+            ApplicationData::create(['application_id' => $application->id, 'party' => 'applicant', 'field_key' => $key, 'value' => $value, 'source' => 'customer_stated', 'status' => 'valid']);
+        }
+        $splitter = Mockery::mock(\App\Domain\Applications\AddressSplitter::class);
+        $splitter->shouldReceive('split')->andReturn(['governorate' => 'القاهرة', 'area' => 'مدينة بدر - الحي الرابع - ابن بيتك أ', 'building_number' => '194']);
+        $this->app->instance(\App\Domain\Applications\AddressSplitter::class, $splitter);
+
+        $columns = app(\App\Domain\Applications\LegacyRequestProjector::class)->attributes($application, 'no_income_proof');
+
+        $this->assertNull($columns['applicant_street']);
+        $this->assertSame('مدينة بدر - الحي الرابع - ابن بيتك أ', $columns['applicant_area']);
+    }
+
     public function test_notification_is_persisted_as_a_system_outbound_message(): void
     {
         Http::fake(['*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200)]);

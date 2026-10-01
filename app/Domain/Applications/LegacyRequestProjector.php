@@ -146,8 +146,18 @@ class LegacyRequestProjector
             ]];
         }
 
-        $attributes = array_merge($attributes, $this->splitAddress($application, $applicant, self::HOME_FIELDS, 'applicant'));
-        $attributes = array_merge($attributes, $this->splitAddress($application, $applicant, self::WORK_FIELDS, 'work'));
+        foreach (['applicant' => self::HOME_FIELDS, 'work' => self::WORK_FIELDS] as $prefix => $fields) {
+            $split = $this->splitAddress($application, $applicant, $fields, $prefix);
+
+            // Request 4391: "مدينة بدر ... قطعة 194" has no street - the
+            // split put it in area + building, and the whole line stayed
+            // in the street column on top of them.
+            if ($split !== [] && ! isset($split[$prefix.'_street'])) {
+                $attributes[$prefix.'_street'] = null;
+            }
+
+            $attributes = array_merge($attributes, $split);
+        }
 
         return array_merge($attributes, $this->documents($application));
     }
