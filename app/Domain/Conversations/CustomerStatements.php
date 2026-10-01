@@ -80,7 +80,38 @@ class CustomerStatements
             }
         }
 
+        // "انا شغال شيف" / "ف مجال السياحه وكدا" and "حكومه" / "متامن" /
+        // "عليه": customers answer in several short messages and the quote
+        // joins them. 53 openings were refused in a week, and the customer
+        // was asked his work again after he had said it.
+        foreach ($this->consecutiveRuns($conversationId) as $run) {
+            if (str_contains($this->compact($run['text']), $needle) || $this->containsTokens($run['text'], $quote)) {
+                return $run['id'];
+            }
+        }
+
         return null;
+    }
+
+    /**
+     * Up to four consecutive recent customer messages joined, newest runs
+     * first; id = the newest message of the run.
+     *
+     * @return array<int, array{id: int, text: string}>
+     */
+    private function consecutiveRuns(int $conversationId): array
+    {
+        $recent = array_reverse(array_slice($this->messages($conversationId), 0, 30));
+        $runs = [];
+
+        for ($end = count($recent) - 1; $end >= 1; $end--) {
+            for ($length = 2; $length <= 4 && $end - $length + 1 >= 0; $length++) {
+                $slice = array_slice($recent, $end - $length + 1, $length);
+                $runs[] = ['id' => $recent[$end]['id'], 'text' => implode(' ', array_column($slice, 'text'))];
+            }
+        }
+
+        return $runs;
     }
 
     /** Whether any recent customer message matches $pattern (run on the normalized text). */

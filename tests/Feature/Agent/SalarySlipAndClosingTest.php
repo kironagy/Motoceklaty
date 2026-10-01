@@ -133,4 +133,17 @@ class SalarySlipAndClosingTest extends TestCase
         $say('incoming', 'customer', 'تمام', 503);
         $this->assertFalse(ConversationClosing::onlyThanksAfterGoodbye($conversation->id, 503));
     }
+
+    public function test_a_job_said_over_several_messages_is_found(): void
+    {
+        $conversation = $this->conversation();
+        foreach (['او مكنه f250', 'انا شغال شيف', 'ف مجال السياحه وكدا', 'بس اخويا موظف', 'حكومه', 'متامن', 'عليه'] as $text) {
+            WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => $text]);
+        }
+        $statements = new \App\Domain\Conversations\CustomerStatements();
+
+        $this->assertNotNull($statements->messageContainingQuote($conversation->id, 'شغال شيفف مجال السياحه'));
+        $this->assertNotNull($statements->messageContainingQuote($conversation->id, 'حكومهمتامنعليه'));
+        $this->assertNull($statements->messageContainingQuote($conversation->id, 'شغال نجار في ورشة'));
+    }
 }

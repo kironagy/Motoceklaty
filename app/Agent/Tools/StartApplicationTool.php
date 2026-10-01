@@ -54,11 +54,53 @@ class StartApplicationTool implements Tool
             .'صاحب|بملك|مطعم|كافيه|كافتيري|قهوه|سوبر ?ماركت|بقال|فرن|مخبز|حلواني|جزار|فكهاني|خضري|مكتب|عقار|صيدل|محامي|مبيض|محاره|'
             .'عربيه فول|كشك|سوق|بضاعه|صنعه|صنعتي|ظابط|ضابط|امين شرطه|مطار|شحن|نقل|جبس|بورد|سباكه|كهربا|نقاشه|دهان|مباني|سيراميك|الوميتال|'
             .'مصنع|مخزن|امن|حارس|بواب|خدمه|نضافه|فندق|مستشفي|مدرسه|جامعه|طالب|يوميه|يوميات|اجري|'
+            .'مدير|شيف|طباخ|كوافير|صالون|طلباط|مرسول|سايس|محاسب|كاشير|بيزنس|اونلاين|فري ?لانس|'
             .'employee|freelanc|driver|delivery|uber|job|work/u'), $text)
+            || self::describesSomething($text)
             // "انا مبيض محارة": the customer describing himself names his
             // work even when the job is not in the list above - a whitelist
             // of jobs never ends, and "صاحب مطعم" was sent back to be asked again.
             || (bool) preg_match('/^\s*انا\s+(?!عايز|عاوز|عايزه|عاوزه|محتاج|موافق|تمام|جاهز|هقدم|مش|كنت|بسال|عارف|فاهم|معاك|هنا|اسف|شاكر|متشكر|سالت|قلت)\S{3,}/u', $text);
+    }
+
+    /**
+     * A job list never ends ("مدير"، "طلباط" were refused). Anything that
+     * is not about buying, not a bare "تمام" and has a real word in it is
+     * taken as his answer; "عايز اقدم" / "هوجن ٤ على سنة" still are not.
+     */
+    private static function describesSomething(string $text): bool
+    {
+        if (\App\Domain\Conversations\ConversationClosing::isBareAcknowledgement($text)
+            || preg_match('/(?<!\p{L})(?:عايز|عاوز|عايزه|محتاج|اقسط|قسط|تقسيط|اقدم|هقدم|مكنه|موتوسيكل|سكوتر|سنه|سنتين|شهر|شهور|كاش|مقدم|سعر|بكام|كام|ايوه|اه|لا|موافق|ماشي|تمام|يلا|يالا|طيب|خلاص|حاضر|اوك|فرز|استيراد|موديل|لون)(?!\p{L})|\d/u', $text)
+            || self::namesABrand($text)) {
+            return false;
+        }
+
+        return (bool) preg_match('/\p{Arabic}{3,}/u', $text);
+    }
+
+    /** "هوجن فرز تاني" is a motorcycle, not a job. */
+    private static function namesABrand(string $text): bool
+    {
+        static $brands = null;
+
+        try {
+            $brands ??= \App\Models\Brand::pluck('name')->merge(\App\Models\Machine::pluck('name'))
+                ->map(fn ($n) => \App\Support\ArabicTextNormalizer::normalize((string) $n))
+                ->flatMap(fn ($n) => preg_split('/\s+/u', $n))
+                ->filter(fn ($w) => mb_strlen($w) >= 3 && preg_match('/\p{Arabic}/u', $w))
+                ->unique()->values()->all();
+        } catch (\Throwable) {
+            $brands = [];
+        }
+
+        foreach (array_merge($brands, ['هوجن', 'هوجان', 'فيجوري', 'دايو', 'بينيلي', 'بجاج', 'سوزوكي', 'هوندا', 'ياماها', 'كيواي', 'زونتس']) as $word) {
+            if (preg_match('/(?<!\p{L})'.preg_quote($word, '/').'(?!\p{L})/u', $text)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -142,7 +184,7 @@ class StartApplicationTool implements Tool
         }
 
         if ($typeEvidence === null) {
-            return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote is not in the customer\'s messages. Ask him only "حضرتك بتشتغل إيه؟ ولا على المعاش؟" (never list types like موظف/عامل حر) and wait for their answer.');
+            return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote is not in the customer\'s messages. If he already said what he works, copy his words EXACTLY as he wrote them (same spelling, no additions, no merging with your own words) and call again. Only if he never said it, ask him "حضرتك بتشتغل إيه؟ ولا على المعاش؟" (never list types like موظف/عامل حر).');
         }
 
         if ($say = app(\App\Domain\Applications\OccupationPolicy::class)->rejection((string) $args['customer_type_quote'])) {
