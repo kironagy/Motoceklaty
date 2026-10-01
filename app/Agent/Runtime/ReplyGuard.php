@@ -652,6 +652,17 @@ class ReplyGuard
         return false;
     }
 
+    private function namesAnyDocument(string $sentence, array $keys): bool
+    {
+        foreach ($keys as $key) {
+            if (isset(self::DOCUMENT_WORDS[$key]) && preg_match(self::DOCUMENT_WORDS[$key], $sentence)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function mentionsCapThreshold(string $replyText, string $toolResultsBlob): bool
     {
         $caps = \App\Models\EligibilityRule::where('is_active', true)->where('rule_type', 'financing_cap')->get()
@@ -701,6 +712,14 @@ class ReplyGuard
             }
 
             if ($beyondId !== [] && preg_match('/(?<!مش\s)(?:بال)?بطاق[ةه]\s+(?:بس|فقط)/u', $sentence)) {
+                return true;
+            }
+
+            // "مفيش مشكلة، نكمّل بالبطاقة وعنوان شغلك" said while his
+            // application still needs the salary slip: the switch
+            // (documents.if_unavailable) was never made, so it would stall.
+            if ($beyondId !== [] && preg_match('/(?:نكم[ّ]?ل|هنكم[ّ]?ل|نقد[ّ]?م|هنقد[ّ]?م|نمشي|هنمشي)\S*\s+(?:\S+\s+){0,2}?بالبطاق[ةه]/u', $sentence)
+                && ! $this->namesAnyDocument($sentence, $beyondId)) {
                 return true;
             }
 

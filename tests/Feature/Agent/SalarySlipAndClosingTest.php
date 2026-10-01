@@ -64,6 +64,20 @@ class SalarySlipAndClosingTest extends TestCase
         $this->assertStringContainsString('Never offer a substitute', $hint);
     }
 
+    public function test_going_on_with_the_id_needs_the_switch_first(): void
+    {
+        $conversation = $this->conversation();
+        $application = $this->employeeApplication($conversation);
+        $check = fn (string $reply) => app(ReplyGuard::class)->check(['messages' => [$reply]], $conversation, '', [], []);
+
+        $this->assertSame('REQUIRED_DOCUMENT_WAIVED', $check('مفيش مشكلة يا غالي، نكمّل بالبطاقة وعنوان شغلك.'));
+        $this->assertNull($check('عشان نكمل، ابعتلي صورة وش وضهر البطاقة.'));
+
+        // switched to self_employed: the slip is no longer on his list
+        $application->update(['customer_type_id' => CustomerType::create(['key' => 'self_employed', 'label' => 'عامل حر'])->id]);
+        $this->assertNull($check('مفيش مشكلة يا غالي، نكمّل بالبطاقة وعنوان شغلك.'));
+    }
+
     public function test_invented_substitutes_for_the_salary_slip_are_blocked(): void
     {
         $this->assertSame('DOCUMENT_NOT_REQUIRED', $this->check('بما إن الشركة مش بتطلع مفردات، ممكن تبعتلي كشف حساب بنكي لآخر ٦ شهور؟'));
