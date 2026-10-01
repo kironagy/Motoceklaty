@@ -373,6 +373,16 @@ class AgentRunner
             return $this->fallback($conversation, $trace, $guardEvents, $reason);
         }
 
+        // Owner 2026-10-02: one reply the guards would not pass sent the
+        // customer to a colleague and the bot went quiet for twenty minutes
+        // (18 times in a week). The first time it keeps the conversation
+        // going with something true; only a second miss in a row hands off.
+        if ($this->recordFailure($conversation) < 2) {
+            $this->finishTrace($trace, 'fallback', $guardEvents, null, 'GUARD_UNRESOLVED_KEPT_GOING: '.$reason);
+
+            return ['messages' => [$this->keepGoingReply($conversation)]];
+        }
+
         $this->finishTrace($trace, 'fallback', $guardEvents, null, 'GUARD_UNRESOLVED: '.$reason);
 
         if ($conversation->status !== 'awaiting_agent') {
@@ -385,6 +395,26 @@ class AgentRunner
         }
 
         return ['messages' => [$waiting]];
+    }
+
+    /** A reply that claims nothing: the next thing his application needs, or a question. */
+    private function keepGoingReply(WhatsappConversation $conversation): string
+    {
+        $application = $conversation->customer_id
+            ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->latest('id')->first()
+            : null;
+
+        try {
+            $step = $application ? (app(\App\Domain\Applications\SnapshotService::class)->for($application)['next_step'] ?? null) : null;
+        } catch (\Throwable) {
+            $step = null;
+        }
+
+        if (in_array($step['type'] ?? null, ['field', 'document'], true) && filled($step['label'] ?? null)) {
+            return "تمام يا باشا 👌 عشان نكمّل طلبك، ابعتلي: {$step['label']}";
+        }
+
+        return 'معلش يا باشا، ممكن توضحلي تقصد إيه بالظبط عشان أرد عليك صح؟';
     }
 
     /** @return array{messages: string[]} */

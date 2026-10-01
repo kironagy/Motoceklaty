@@ -250,16 +250,37 @@ class AgentRunnerTest extends TestCase
         $this->assertNotSame('awaiting_agent', $conversation->fresh()->status);
     }
 
-    public function test_unresolvable_guards_hand_off_with_the_waiting_message_not_the_outage_notice(): void
+    private function queueFourBadReplies($fake): void
+    {
+        foreach (['99999', '88888', '77777', '66666'] as $i => $n) {
+            $fake->queue($this->response([['id' => 't'.$i, 'name' => 'send_reply', 'args' => ['messages' => ["السعر {$n} جنيه"]]]]));
+        }
+    }
+
+    /**
+     * Owner 2026-10-02: one reply the guards would not pass sent the
+     * customer to a colleague and the bot sat silent for twenty minutes.
+     * The first miss keeps going; a second miss in a row hands off.
+     */
+    public function test_one_unresolvable_reply_keeps_the_customer_with_the_bot(): void
     {
         config(['agent.handoff.waiting_message' => 'وصلتني رسالتك، زميلي هيرد عليك.']);
         $conversation = $this->conversation();
-        $fake = $this->fake();
-        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['السعر 99999 جنيه']]]]));
-        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['برضو 88888 جنيه']]]]));
-        $fake->queue($this->response([['id' => 't3', 'name' => 'send_reply', 'args' => ['messages' => ['خلاص 77777 جنيه']]]]));
-        // the final no-numbers try fails too
-        $fake->queue($this->response([['id' => 't4', 'name' => 'send_reply', 'args' => ['messages' => ['آخر كلام 66666 جنيه']]]]));
+        $this->queueFourBadReplies($this->fake());
+
+        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
+
+        $this->assertSame(['معلش يا باشا، ممكن توضحلي تقصد إيه بالظبط عشان أرد عليك صح؟'], $result['messages']);
+        $this->assertNotSame('awaiting_agent', $conversation->fresh()->status);
+        $this->assertSame(0, Handoff::where('conversation_id', $conversation->id)->count());
+    }
+
+    public function test_two_unresolvable_replies_in_a_row_hand_off_with_the_waiting_message(): void
+    {
+        config(['agent.handoff.waiting_message' => 'وصلتني رسالتك، زميلي هيرد عليك.']);
+        $conversation = $this->conversation();
+        $conversation->update(['state' => ['failed_turns_since_success' => 1]]);
+        $this->queueFourBadReplies($this->fake());
 
         $result = app(AgentRunner::class)->run($this->turnFor($conversation));
 
