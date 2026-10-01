@@ -68,6 +68,12 @@ class ReplyGuard
             return 'RESUBMISSION_PROMISED';
         }
 
+        // "ممكن تجيب قريب أو صاحب يقدم هو الطلب باسمه": no such way to
+        // apply exists - the owner never offered it.
+        if (preg_match('/(?:حد|شخص|قريب|صاحب|قرايبك|أصحابك|اصحابك)\s+(?:\S+\s+){0,6}?و?(?:يقد[ّ]?م|يتقد[ّ]?م|تقد[ّ]?م)\s+(?:\S+\s+){0,3}?باسم|(?:نقد[ّ]?م|يقد[ّ]?م|تقد[ّ]?م)\s+(?:\S+\s+){0,2}?باسم\s+(?:حد|شخص)|باسم\s+(?:حد|شخص)\s+تاني/u', $replyText)) {
+            return 'INVENTED_APPLICATION_ROUTE';
+        }
+
         // "هعدلك الطلب لعامل حر بدل موظف": he said he is insured; the bot
         // must never suggest another work type so he gets accepted.
         if (preg_match('/(?:عامل حر|موظف|صاحب نشاط)["”]?\s*(?:\([^)]{0,40}\)\s*)?بدل\s+(?:ما\s+)?["“]?(?:موظف|عامل حر|صاحب نشاط)|(?:نقد[ّ]?م|نسجل|نكتب|نعدل|نحول)(?:ك|لك)?\s+(?:\S+\s+){0,2}?(?:على\s+)?(?:إنك|انك)\s+["“]?(?:عامل حر|موظف|صاحب نشاط)/u', $replyText)) {
@@ -621,7 +627,9 @@ class ReplyGuard
         'tax_card' => '/بطاق[ةه]\s+ضريبي[ةه]|سجل\s+تجاري/u',
         'delivery_app_profile' => '/(?:ا?سكرين|صور[ةه])\S*\s+(?:\S+\s+){0,2}?(?:ال)?بروفايل|البروفايل/u',
         // never required of anyone
-        '' => '/عقد\s+(?:ال)?(?:ورش[ةه]|محل|إيجار|ايجار|شغل)|إيصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|ايصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|فاتور[ةه]\s+(?:ال)?(?:كهرب|ميا[هه]|غاز)/u',
+        // A warehouse worker with no salary slip was offered a bank
+        // statement, then "صورة العقد", then an insurance print - none exist.
+        '' => '/كشف\s+حساب|برنت\s+(?:ال)?(?:تأمينات|تامينات)|صور[ةه]\s+(?:ال)?عقد|عقد\s+(?:ال)?(?:ورش[ةه]|محل|إيجار|ايجار|شغل)|إيصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|ايصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|فاتور[ةه]\s+(?:ال)?(?:كهرب|ميا[هه]|غاز)/u',
     ];
 
     private function asksForUnrequiredDocument(string $replyText, WhatsappConversation $conversation, array $outcomes): bool
@@ -629,7 +637,7 @@ class ReplyGuard
         $allowed = $this->allowedDocuments($conversation, $outcomes);
 
         foreach (preg_split('/(?<=[.!؟?\n])/u', $replyText) as $sentence) {
-            if (! preg_match('/ابعت|محتاج|محتاجين|مطلوب|المطلوب|هنحتاج|بنحتاج|نحتاج|لازم|هات|جهز/u', $sentence)
+            if (! preg_match('/ابعت|تبعت|تجيب|محتاج|محتاجين|مطلوب|المطلوب|هنحتاج|بنحتاج|نحتاج|لازم|هات|جهز|بديل/u', $sentence)
                 || preg_match('/مش\s+(?:محتاج|مطلوب|لازم|شرط)|ممنوع|من غير\s+(?:\S+\s+)?(?:مفردات|سكرين|رخص)/u', $sentence)) {
                 continue;
             }
@@ -776,7 +784,9 @@ class ReplyGuard
 
     private function claimsWithdrawal(string $assertions): bool
     {
-        return (bool) preg_match('/(?:^|\s)و?(?:قفلت|قفلتلك|قفلتهولك|لغيت|لغيتلك|ألغيت|الغيت|الغيتلك|سحبت|سحبتلك|كنسلت|كنسلتلك)(?:\s|$|[،.!])'
+        // "وقفتلك الطلب" / "هقفل الطلب دلوقتي" were said with no tool call.
+        return (bool) preg_match('/(?:^|\s)و?(?:قفلت|قفلتلك|قفلتهولك|لغيت|لغيتلك|ألغيت|الغيت|الغيتلك|سحبت|سحبتلك|كنسلت|كنسلتلك|وقفت|وقفتلك|وقفتهولك)(?:\s|$|[،.!])'
+            .'|(?:^|\s)(?:ه|ح)(?:قفل|لغي|ألغي|الغي|وقف|سحب|كنسل)(?:لك)?\s+(?:ال)?طلب'
             .'|(?:الطلب|طلبك)\s+(?:\S+\s+)?(?:اتقفل|اتلغى|اتلغي|اتسحب|اتكنسل)|(?:تم|اتم)\s+(?:إلغاء|الغاء|قفل|سحب)\s+(?:ال)?طلب/u', $assertions);
     }
 

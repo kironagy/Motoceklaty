@@ -136,7 +136,8 @@ class SnapshotService
                 // customer from memory showed a name the DB did not hold.
                 'values' => $this->nonSensitiveValues($collectedRows),
             ] + $this->missingFieldHints($requirementsSnapshot['fields']['missing']),
-            'documents' => $documents + $this->missingDocumentHints($requirements['documents'], $documents['missing']),
+            'documents' => $documents + $this->missingDocumentHints($requirements['documents'], $documents['missing'])
+                + $this->ifUnavailable($customerType, $documents['missing']),
             'eligibility' => $eligibility,
             'can_submit' => $canSubmit,
             'blockers' => $blockers,
@@ -404,6 +405,29 @@ class SnapshotService
             ->all();
 
         return $hints === [] ? [] : ['missing_hints' => $hints];
+    }
+
+    /**
+     * Owner 2026-10-01: a warehouse worker whose company issues no salary
+     * slip was refused for an hour, offered a bank statement, a contract and
+     * "someone else applies in his name" - and a colleague then took him
+     * with the ID and his work address. The showroom rule already said an
+     * uninsured employee with no slip applies as self_employed; the bot
+     * never used it. This says how, where the bot looks for the slip.
+     */
+    private function ifUnavailable(CustomerType $customerType, array $missingDocuments): array
+    {
+        if ($customerType->key !== 'employee' || ! in_array('salary_slip', $missingDocuments, true)) {
+            return [];
+        }
+
+        return ['if_unavailable' => ['salary_slip' => 'Only when he says his company does not issue it or he cannot get it. '
+            .'If he has not said whether he is insured, ask only "متأمن عليك؟". '
+            .'Not insured: switch now with update_application_selection customer_type=self_employed (customer_type_quote = his own words about where he works) '
+            .'and record_customer_data work_type=other - then the ID and his work address are all that is needed. '
+            .'Tell him simply "مفيش مشكلة، نكمّل بالبطاقة وعنوان شغلك" and ask the next step - do not name work types or say you changed his type. '
+            .'Insured: he sends the slip when he gets it. '
+            .'Never offer a substitute (bank statement, contract, insurance print, a company letter) or someone else applying in his name - none exist.']];
     }
 
     private function acceptedDocumentKeys(Application $application): array
