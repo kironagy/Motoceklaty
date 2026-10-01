@@ -427,7 +427,7 @@ class SnapshotService
             .'and record_customer_data work_type=other - then the ID and his work address are all that is needed. '
             .'Tell him simply "مفيش مشكلة، نكمّل بالبطاقة وعنوان شغلك" and ask the next step - do not name work types or say you changed his type. '
             .'Insured: he sends the slip when he gets it. '
-            .'Never offer a substitute (bank statement, contract, insurance print, a company letter) or someone else applying in his name - none exist.']];
+            .'Never offer a substitute (bank statement, contract, insurance print, a company letter) - none exist - and a missing slip is no reason to suggest someone else applies in his name.']];
     }
 
     private function acceptedDocumentKeys(Application $application): array

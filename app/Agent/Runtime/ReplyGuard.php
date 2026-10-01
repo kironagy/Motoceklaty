@@ -68,9 +68,11 @@ class ReplyGuard
             return 'RESUBMISSION_PROMISED';
         }
 
-        // "ممكن تجيب قريب أو صاحب يقدم هو الطلب باسمه": no such way to
-        // apply exists - the owner never offered it.
-        if (preg_match('/(?:حد|شخص|قريب|صاحب|قرايبك|أصحابك|اصحابك)\s+(?:\S+\s+){0,6}?و?(?:يقد[ّ]?م|يتقد[ّ]?م|تقد[ّ]?م)\s+(?:\S+\s+){0,3}?باسم|(?:نقد[ّ]?م|يقد[ّ]?م|تقد[ّ]?م)\s+(?:\S+\s+){0,2}?باسم\s+(?:حد|شخص)|باسم\s+(?:حد|شخص)\s+تاني/u', $replyText)) {
+        // Owner 2026-10-02 (lessons 37/38): anyone may apply in his place -
+        // but only offered when he does not work at all, is about to start,
+        // is under 21 or has a bad credit record. A warehouse worker short
+        // of a salary slip was told "هات قريب أو صاحب يقدم باسمه" instead.
+        if (! $this->mayApplyThroughSomeoneElse($conversation, $toolResultsBlob) && preg_match('/(?:حد|شخص|قريب|صاحب|قرايبك|أصحابك|اصحابك)\s+(?:\S+\s+){0,6}?و?(?:يقد[ّ]?م|يتقد[ّ]?م|تقد[ّ]?م)\s+(?:\S+\s+){0,3}?باسم|(?:نقد[ّ]?م|يقد[ّ]?م|تقد[ّ]?م)\s+(?:\S+\s+){0,2}?باسم\s+(?:حد|شخص)|باسم\s+(?:حد|شخص)\s+تاني/u', $replyText)) {
             return 'INVENTED_APPLICATION_ROUTE';
         }
 
@@ -790,6 +792,16 @@ class ReplyGuard
         }
 
         return null;
+    }
+
+    private function mayApplyThroughSomeoneElse(WhatsappConversation $conversation, string $toolResultsBlob): bool
+    {
+        if (str_contains($toolResultsBlob, 'not_eligible') || str_contains($toolResultsBlob, 'AGE_OUT_OF_RANGE')) {
+            return true;
+        }
+
+        return app(\App\Domain\Conversations\CustomerStatements::class)->anyMessageMatches($conversation->id,
+            '/(?<!\p{L})(?:مش شغال|مبشتغلش|ما بشتغلش|مش بشتغل|مش بيشتغل|مبيشتغلش|عاطل|بدون عمل|مش لاقي شغل|لسه هشتغل|هشتغل|هيشتغل|هبدا|ناوي اشتغل|طالب|سكور|ايسكور|متعثر|متعثره|قضيه|قضايا|اقساط متاخره|قسط متاخر|بلاك ?ليست|عليا مديونيه|عليه مديونيه|(?:عندي|سني|سنه|عمري)\s*(?:1[0-9]|20)(?!\d))(?!\p{L})/u');
     }
 
     private function claimsSubmission(string $assertions): bool

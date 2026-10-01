@@ -90,6 +90,23 @@ class SalarySlipAndClosingTest extends TestCase
         $this->assertSame('INVENTED_APPLICATION_ROUTE', $this->check('تحب نجرّب نقدّم باسم حد تاني من طرفك؟'));
     }
 
+    /** Owner 2026-10-02 (lessons 37/38): offered when he does not work, is about to, is under 21 or has a bad score. */
+    public function test_someone_else_may_apply_when_he_cannot(): void
+    {
+        $reply = 'ينفع أي حد تاني (مش شرط قريب) يقدم الطلب باسمه، وجواب الترخيص يطلع باسمك لو هو موافق.';
+
+        foreach (['انا طالب عندي 19 سنه', 'لسه مش شغال بس هشتغل عليها دليفري', 'عليا سكور في البنك'] as $said) {
+            $conversation = $this->conversation();
+            WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => $said]);
+
+            $this->assertNotSame('INVENTED_APPLICATION_ROUTE', app(ReplyGuard::class)->check(['messages' => [$reply]], $conversation, '', [], []), $said);
+        }
+
+        $worker = $this->conversation();
+        WhatsappMessage::create(['whatsapp_conversation_id' => $worker->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'الشركه مش بتطلع مفردات']);
+        $this->assertSame('INVENTED_APPLICATION_ROUTE', app(ReplyGuard::class)->check(['messages' => [$reply]], $worker, '', [], []));
+    }
+
     public function test_stopping_the_application_without_the_tool_is_blocked(): void
     {
         $this->assertSame('WITHDRAWAL_CLAIMED_NOT_DONE', $this->check('تمام يا باشا، وقفتلك الطلب دلوقتي.'));
