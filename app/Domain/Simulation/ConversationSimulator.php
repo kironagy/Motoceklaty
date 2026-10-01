@@ -2,7 +2,6 @@
 
 namespace App\Domain\Simulation;
 
-use App\Agent\Runtime\AgentRunner;
 use App\Domain\Conversations\DeliveryService;
 use App\Models\AiTrace;
 use App\Models\AiTraceStep;
@@ -144,7 +143,9 @@ class ConversationSimulator
             // per-turn reads (e.g. CustomerStatements' customer messages), so
             // one runner reused across turns never saw newer messages and
             // rejected a national ID the customer had just typed
-            $result = app(AgentRunner::class)->run($turn);
+            // through the processor, like the worker: it decides some turns
+            // need no reply at all (thanks after our goodbye)
+            $result = app(\App\Agent\Runtime\AgentTurnProcessor::class)->process($turn);
             $error = null;
         } catch (\Throwable $e) {
             $result = ['messages' => [], 'media' => []];
