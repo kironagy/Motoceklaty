@@ -509,4 +509,79 @@ class SubmissionTest extends TestCase
         $this->assertSame('submitted', $application->refresh()->status);
         $this->assertNull($application->staff_request);
     }
+
+    private function lastSystemText(WhatsappConversation $conversation): string
+    {
+        return (string) WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('sender_type', 'system')->latest('id')->value('text');
+    }
+
+    /** Owner 2026-10-02: an unclear ID photo is asked for again, and only that. */
+    public function test_a_request_paused_for_an_unclear_id_asks_him_for_the_id_only(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200)]);
+        [$application, $conversation] = $this->completeApplication();
+        $front = \App\Models\DocumentType::create(['key' => 'national_id_front', 'label' => 'صورة وش البطاقة', 'is_active' => true]);
+        $this->submitConfirmed($conversation, $application);
+        $request = InstallmentRequest::find($application->refresh()->installment_request_id);
+        $photo = WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'image']);
+        $media = \App\Models\MessageMedia::create(['message_id' => $photo->id, 'media_type' => 'image', 'mime' => 'image/jpeg', 'disk' => 'local', 'path' => 'id.jpg', 'size' => 10]);
+        \App\Models\ApplicationDocument::create(['application_id' => $application->id, 'media_id' => $media->id, 'document_type_id' => $front->id, 'party' => 'applicant',
+            'status' => 'accepted', 'expected_type_key' => 'national_id_front', 'detected_type_key' => 'national_id_front']);
+
+        \Illuminate\Support\Carbon::setTestNow(now()->addMinute());
+        $request->update(['status' => 'paused', 'customer_action' => 'national_id_front', 'checks_report' => 'صورة البطاقة مش واضحة']);
+        \Illuminate\Support\Carbon::setTestNow();
+
+        $text = $this->lastSystemText($conversation);
+        $this->assertStringContainsString('#'.$request->id, $text);
+        $this->assertStringContainsString('صورة البطاقة مش واضحة', $text);
+        $this->assertStringContainsString('ابعتلي صورة وش البطاقة تاني', $text);
+
+        $snapshot = app(\App\Domain\Applications\SnapshotService::class)->for($application->refresh());
+        $this->assertSame('needs_more_info', $application->status);
+        $this->assertSame('national_id_front', $snapshot['next_step']['key']);
+        $this->assertSame(0, \App\Models\ApplicationDocument::where('application_id', $application->id)->where('status', 'accepted')->count());
+    }
+
+    public function test_approval_tells_him_his_number_and_to_come_sign(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200)]);
+        [$application, $conversation] = $this->completeApplication();
+        $this->submitConfirmed($conversation, $application);
+        $request = InstallmentRequest::find($application->refresh()->installment_request_id);
+
+        $request->update(['status' => 'approved']);
+
+        $text = $this->lastSystemText($conversation);
+        $this->assertStringContainsString('#'.$request->id, $text);
+        $this->assertStringContainsString('اتوافق', $text);
+        $this->assertStringContainsString('تمضي العقد', $text);
+    }
+
+    public function test_a_rejection_tells_him_why(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200)]);
+        [$application, $conversation] = $this->completeApplication();
+        $this->submitConfirmed($conversation, $application);
+        $request = InstallmentRequest::find($application->refresh()->installment_request_id);
+
+        $request->update(['status' => 'rejected', 'checks_report' => 'عليه أقساط متأخرة في الاستعلام']);
+
+        $text = $this->lastSystemText($conversation);
+        $this->assertStringContainsString('#'.$request->id, $text);
+        $this->assertStringContainsString('ما وافقتش', $text);
+        $this->assertStringContainsString('السبب: عليه أقساط متأخرة في الاستعلام', $text);
+    }
+
+    public function test_the_submit_reply_must_carry_the_request_number(): void
+    {
+        [$application, $conversation] = $this->completeApplication();
+        $result = $this->submitConfirmed($conversation, $application);
+        $number = (string) $result->data['reference']['installment_request_id'];
+        $outcomes = [['name' => 'submit_application', 'ok' => true, 'data' => $result->data]];
+        $check = fn (string $reply) => app(\App\Agent\Runtime\ReplyGuard::class)->check(['messages' => [$reply]], $conversation, '', [], $outcomes);
+
+        $this->assertSame('REQUEST_NUMBER_MISSING', $check('تمام يا باشا، الطلب اتبعت للمراجعة.'));
+        $this->assertNull($check("تمام يا باشا، طلبك اتبعت للمراجعة ورقمه #{$number}."));
+    }
 }

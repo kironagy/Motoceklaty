@@ -61,7 +61,9 @@ class SubmitApplicationTool implements Tool
         }
 
         if ($result['submitted'] === true) {
-            return ToolResult::ok(['submitted' => true, 'reference' => $result['reference']] + (($result['resubmitted'] ?? false)
+            return ToolResult::ok(['submitted' => true, 'reference' => $result['reference'],
+                'tell_customer' => 'Give him his request number: #'.($result['reference']['installment_request_id'] ?? '').' - he quotes it at the branch.']
+                + (($result['resubmitted'] ?? false)
                 ? ['resubmitted' => true, 'note' => 'What staff asked for was sent back to the same request, now under review again. Tell him that in one line.']
                 : []));
         }

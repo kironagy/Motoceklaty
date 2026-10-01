@@ -238,7 +238,7 @@ class AgentRunner
      * photos were queued for a customer who had just said goodbye.
      */
     /** Style problems only - nothing false is said. */
-    private const SOFT_VIOLATIONS = ['REPEATED_QUESTION', 'DUPLICATE_REPLY', 'WORK_TYPES_LISTED', 'HANDOFF_TIME_PROMISED'];
+    private const SOFT_VIOLATIONS = ['REPEATED_QUESTION', 'DUPLICATE_REPLY', 'WORK_TYPES_LISTED', 'HANDOFF_TIME_PROMISED', 'REQUEST_NUMBER_MISSING'];
 
     private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER', 'BRANCH_NOT_SOURCED', 'TOTAL_NOT_SOURCED', 'AGE_NOT_CHECKED'];
 
@@ -272,6 +272,7 @@ class AgentRunner
         'AGE_NOT_CHECKED' => 'Not sent: the reply says his age is fine without a check. Call check_eligibility with his age (and months if a duration is known) and answer from its result - if not_eligible, tell him kindly and clearly.',
         'AVAILABILITY_PROMISE' => 'Not sent: the reply promises to tell him when a model arrives. Nothing records or sends such a notice. Say it is not available with us right now (للأسف مش متوفرة عندنا حاليا), with no date or promise, and offer an available alternative.',
         'DOCUMENT_CLAIMED_NOT_ACCEPTED' => 'Not sent: the reply says his document/photo arrived or was saved, but no process_document accepted a document this turn. If he sent a photo call process_document and answer from its result (a rejected photo: tell him why and ask for a new one). Otherwise do not say it arrived.',
+        'REQUEST_NUMBER_MISSING' => 'Not sent: the application was submitted but the reply does not give him its number. Tell him his request number exactly as `reference.installment_request_id` (e.g. "رقم طلبك #4395") so he can quote it to the branch.',
         'INVENTED_APPLICATION_ROUTE' => 'Not sent: the reply offers a way to apply that does not exist (someone else applying in his name). Never invent one. If his only problem is the salary slip, follow documents.if_unavailable in the snapshot; otherwise tell him plainly what is needed.',
         'WITHDRAWAL_CLAIMED_NOT_DONE' => 'Not sent: the reply says the application was (or will be) closed/stopped/cancelled, but withdraw_application did not succeed this turn. If he clearly asked to cancel, call withdraw_application first; otherwise do not say it was closed.',
         'APPLICATION_CLAIMED_NOT_OPENED' => 'Not sent: the reply says an application was opened, but none is open. Call start_application first (after he said what he works), or do not say it.',

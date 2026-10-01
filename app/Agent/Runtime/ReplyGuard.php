@@ -109,6 +109,13 @@ class ReplyGuard
             return 'INTERNAL_KEY_IN_REPLY';
         }
 
+        // Owner 2026-10-02: "الطلب اتبعت للمراجعة" with no number - the
+        // customer has nothing to quote when he calls or comes in.
+        if (($number = $this->submittedRequestNumber($outcomes)) !== null
+            && ! str_contains(\App\Support\ArabicTextNormalizer::normalize($replyText), $number)) {
+            return 'REQUEST_NUMBER_MISSING';
+        }
+
         // Placeholders from the history rendering, never customer-facing text.
         // "[سيظهر ملخص الطلب هنا]" went to two customers as it was.
         if (preg_match('/\[(media|staff)\]|\(اتبعت للعميل|\(تم إرسال الصور\)|\[[^\]]*\p{Arabic}[^\]]*\]/u', $replyText)) {
@@ -769,6 +776,20 @@ class ReplyGuard
         }
 
         return false;
+    }
+
+    /** The request number when submit_application succeeded this turn. */
+    private function submittedRequestNumber(array $outcomes): ?string
+    {
+        foreach ($outcomes as $outcome) {
+            if ($outcome['name'] === 'submit_application' && $outcome['ok'] && ($outcome['data']['submitted'] ?? false) === true) {
+                $id = $outcome['data']['reference']['installment_request_id'] ?? null;
+
+                return $id ? (string) $id : null;
+            }
+        }
+
+        return null;
     }
 
     private function claimsSubmission(string $assertions): bool
