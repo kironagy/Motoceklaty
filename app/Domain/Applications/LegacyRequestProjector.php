@@ -232,7 +232,7 @@ class LegacyRequestProjector
     {
         $words = fn (string $text) => array_filter(
             preg_split('/[\s،,\-\/]+/u', preg_replace('/(\d)(?=\D)|(\D)(?=\d)/u', '$1$2 ', \App\Support\ArabicTextNormalizer::normalize($text))),
-            fn ($w) => mb_strlen($w) > 1 && ! in_array($w, ['شارع', 'ش', 'في', 'من', 'متفرع', 'محافظه', 'منطقه', 'مدينه', 'رقم', 'عماره', 'عقار'], true));
+            fn ($w) => mb_strlen($w) > 1 && ! in_array($w, ['شارع', 'ش', 'في', 'من', 'متفرع', 'محافظه', 'منطقه', 'مدينه', 'رقم', 'عماره', 'عقار', 'قطعه', 'بلوك'], true));
         $split = implode(' ', $words(implode(' ', array_intersect_key($parts, array_flip(['governorate', 'area', 'street', 'branch_street', 'building_number', 'floor', 'apartment', 'landmark'])))));
 
         foreach ($words($line) as $word) {
