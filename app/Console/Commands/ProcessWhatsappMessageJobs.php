@@ -262,6 +262,11 @@ class ProcessWhatsappMessageJobs extends Command
             'updated_at' => now(),
         ]);
 
+        // His messages from the outage were never answered: they go to the
+        // newer turn as part of what it answers, not as old history.
+        \App\Models\WhatsappMessage::where('turn_id', $job->id)->where('direction', 'incoming')
+            ->update(['turn_id' => $newer]);
+
         return true;
     }
 
@@ -298,10 +303,16 @@ class ProcessWhatsappMessageJobs extends Command
     /**
      * Gemini rate-limited on every key: three immediate retries 5s apart
      * all failed inside a minute and the customer's "سلام" got no answer at
-     * all. Retries now back off through process_after (the worker is free
-     * meanwhile); when the normal attempts run out the customer is told once
-     * that we're busy and the turn keeps retrying for a few more minutes
-     * before it finally fails and goes to staff.
+     * all. Retries back off through process_after (the worker is free
+     * meanwhile) and the customer is told once that we're busy.
+     *
+     * Owner 2026-10-02: on 1/10 the quota ran out for three hours. After
+     * five minutes each conversation went to staff ("زميلي هيرد عليك"),
+     * nobody answered, and the bot sat silent twenty minutes at a time - a
+     * customer got the busy notice six times. An outage is not something a
+     * colleague can fix: the turn keeps retrying every minute until the AI
+     * is back (agent.turns.outage_retry_minutes), then answers everything
+     * he wrote, from where the conversation stopped.
      *
      * @return array{0: string, 1: ?\Illuminate\Support\Carbon}
      */
@@ -309,24 +320,18 @@ class ProcessWhatsappMessageJobs extends Command
     {
         $attempts = (int) $job->attempts;
         $max = (int) config('agent.delivery.max_attempts');
-        $lateRetries = 4;
 
         if ($attempts < $max) {
             return ['pending', now()->addSeconds(10 * $attempts)];
         }
 
-        if ($attempts === $max) {
-            $this->tellCustomerWeAreBusy($job);
-        }
+        $this->tellCustomerWeAreBusy($job);
 
-        if ($attempts < $max + $lateRetries) {
+        $window = (int) config('agent.turns.outage_retry_minutes', 720);
+        $startedAt = \Illuminate\Support\Carbon::parse($job->created_at ?? now());
+
+        if ($startedAt->copy()->addMinutes($window)->isFuture()) {
             return ['pending', now()->addSeconds(60)];
-        }
-
-        $conversation = \App\Models\WhatsappConversation::find($job->whatsapp_conversation_id);
-
-        if ($conversation && $conversation->status !== 'awaiting_agent') {
-            app(\App\Domain\Handoff\HandoffService::class)->handOffForFailures($conversation, 'AI_UNAVAILABLE');
         }
 
         return ['failed', null];
@@ -341,11 +346,15 @@ class ProcessWhatsappMessageJobs extends Command
             return;
         }
 
-        // One notice per outage, not one per stuck turn.
+        // One notice per outage, not one per stuck turn or every ten
+        // minutes: told already since our last real reply = told.
+        $lastReplyId = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')->whereIn('sender_type', ['bot', 'human', 'human_phone', 'staff'])->max('id');
+
         $recentlyTold = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
             ->where('sender_type', 'system')
             ->where('text', $message)
-            ->where('created_at', '>=', now()->subMinutes(10))
+            ->when($lastReplyId, fn ($q) => $q->where('id', '>', $lastReplyId))
             ->exists();
 
         if ($recentlyTold) {

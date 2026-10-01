@@ -41,6 +41,9 @@ return [
         // Not decision-gated: how long a turn waits for a pending voice
         // transcription (DEC-08) before claiming anyway.
         'transcript_wait_seconds' => env('AGENT_TURNS_TRANSCRIPT_WAIT_SECONDS', 10),
+        // AI down (quota, rate limit): how long a turn keeps retrying, once
+        // a minute, before giving up. No handoff - staff cannot fix it.
+        'outage_retry_minutes' => env('AGENT_TURNS_OUTAGE_RETRY_MINUTES', 720),
     ],
 
     'delivery' => [
