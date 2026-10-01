@@ -27,9 +27,10 @@ class AddressSplitter
     /**
      * @param  array<string, string>  $stored  what the bot saved (address, building_no, floor, apartment, landmark)
      * @param  string[]  $customerMessages  the customer's own messages the values came from
+     * @param  string  $which  home|work - one message often holds both addresses
      * @return array<string, string> part => value, only the parts that are known
      */
-    public function split(array $stored, array $customerMessages): array
+    public function split(array $stored, array $customerMessages, string $which = 'home'): array
     {
         $stored = array_filter($stored, fn ($v) => trim((string) $v) !== '');
 
@@ -47,7 +48,13 @@ class AddressSplitter
                     .'branch_street = the street it branches from ("متفرع من ..."). building_number = the building/house number (عمارة/عقار/بيت). '
                     .'floor = the floor only (دور). apartment = the apartment number only (شقة) - "شقة 41" is an apartment, never a floor. '
                     .'landmark = the nearby known place (جنب/أمام/خلف ...). Fix obvious typos of well known places only (الجمعه الروسيه → الجامعة الروسية). '
-                    .'Leave a field empty when it is not given.',
+                    .'Leave a field empty when it is not given. '
+                    // Request 4395: the work address was split from a message
+                    // that held the home address first - it came back as the home.
+                    .($which === 'work'
+                        ? 'This is his WORK address (where he works). The messages may also hold his home address - ignore it. '
+                        : 'This is his HOME address (where he lives). The messages may also hold his work address - ignore it. ')
+                    .'saved_fields is what he gave for this address: split saved_fields.address / work_address, and use the messages only to read it right.',
                 contents: [[
                     'role' => 'user',
                     'parts' => [['type' => 'text', 'text' => json_encode([

@@ -384,6 +384,35 @@ class SubmissionTest extends TestCase
         $this->assertArrayNotHasKey('applicant_floor', array_filter($columns));
     }
 
+    public function test_a_building_number_stuck_to_the_street_keeps_a_correct_split(): void
+    {
+        // Request 4395: "48ش الحريه..." - the "48ش" token threw the whole
+        // split away and the line landed in the street with no area.
+        [$application] = $this->completeApplication();
+        foreach (['address' => '48ش الحريه من جمال عبد الناصر المنيب الجيزه', 'address_building_no' => '48', 'address_landmark' => 'المنيب الجيزه',
+            'work_address' => 'المعادي كورنيش صيدليه اللؤلؤه', 'work_building_no' => '33'] as $key => $value) {
+            ApplicationData::create(['application_id' => $application->id, 'party' => 'applicant', 'field_key' => $key, 'value' => $value, 'source' => 'customer_stated', 'status' => 'valid']);
+        }
+        $splitter = Mockery::mock(\App\Domain\Applications\AddressSplitter::class);
+        $splitter->shouldReceive('split')->with(Mockery::any(), Mockery::any(), 'home')->andReturn([
+            'governorate' => 'الجيزة', 'area' => 'المنيب', 'street' => 'الحرية', 'branch_street' => 'جمال عبد الناصر', 'building_number' => '48',
+        ]);
+        // the work split came back as the home address
+        $splitter->shouldReceive('split')->with(Mockery::any(), Mockery::any(), 'work')->andReturn([
+            'governorate' => 'الجيزة', 'area' => 'المنيب', 'street' => 'الحريه', 'building_number' => '48',
+        ]);
+        $this->app->instance(\App\Domain\Applications\AddressSplitter::class, $splitter);
+
+        $columns = app(\App\Domain\Applications\LegacyRequestProjector::class)->attributes($application, 'no_income_proof');
+
+        $this->assertSame('الحرية', $columns['applicant_street']);
+        $this->assertSame('المنيب', $columns['applicant_area']);
+        $this->assertSame('جمال عبد الناصر', $columns['applicant_branch_street']);
+        $this->assertSame('المعادي كورنيش صيدليه اللؤلؤه', $columns['work_street']);
+        $this->assertArrayNotHasKey('work_governorate', $columns);
+        $this->assertArrayNotHasKey('work_area', $columns);
+    }
+
     public function test_notification_is_persisted_as_a_system_outbound_message(): void
     {
         Http::fake(['*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200)]);

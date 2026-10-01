@@ -166,7 +166,7 @@ class LegacyRequestProjector
             return [];
         }
 
-        $parts = $this->addresses->split($stored, $this->evidenceMessages($application, array_keys($fields)));
+        $parts = $this->addresses->split($stored, $this->evidenceMessages($application, array_keys($fields)), $prefix === 'work' ? 'work' : 'home');
 
         if ($parts === []) {
             return [];
@@ -188,8 +188,10 @@ class LegacyRequestProjector
             }
         }
 
+        // A split that lost a word of his line is not trusted at all - its
+        // governorate too: a Maadi work address kept "الجيزة" from the home.
         if ($lineKey && filled($values[$lineKey] ?? null) && ! $this->coversLine((string) $values[$lineKey], $parts)) {
-            unset($parts['area'], $parts['branch_street']);
+            unset($parts['area'], $parts['branch_street'], $parts['governorate']);
             $parts['street'] = (string) $values[$lineKey];
         }
 
@@ -219,12 +221,19 @@ class LegacyRequestProjector
         return array_filter($columns, fn ($v) => $v !== null && $v !== '');
     }
 
-    /** Every word of the customer's address line is still somewhere in the split parts. */
+    /**
+     * Every word of the customer's address line is still somewhere in the
+     * split parts. The building number and landmark count: they hold what
+     * he gave for them ("48ش الحرية" keeps 48 as the building; "خلف
+     * المحكمة" said in the line is his landmark) - "48ش" alone used to
+     * throw away a correct split and put the whole line in the street.
+     */
     private function coversLine(string $line, array $parts): bool
     {
-        $words = fn (string $text) => array_filter(preg_split('/[\s،,\-\/]+/u', \App\Support\ArabicTextNormalizer::normalize($text)),
-            fn ($w) => mb_strlen($w) > 1 && ! in_array($w, ['شارع', 'ش', 'في', 'من', 'متفرع', 'محافظه', 'منطقه', 'مدينه'], true));
-        $split = implode(' ', $words(implode(' ', array_intersect_key($parts, array_flip(['governorate', 'area', 'street', 'branch_street'])))));
+        $words = fn (string $text) => array_filter(
+            preg_split('/[\s،,\-\/]+/u', preg_replace('/(\d)(?=\D)|(\D)(?=\d)/u', '$1$2 ', \App\Support\ArabicTextNormalizer::normalize($text))),
+            fn ($w) => mb_strlen($w) > 1 && ! in_array($w, ['شارع', 'ش', 'في', 'من', 'متفرع', 'محافظه', 'منطقه', 'مدينه', 'رقم', 'عماره', 'عقار'], true));
+        $split = implode(' ', $words(implode(' ', array_intersect_key($parts, array_flip(['governorate', 'area', 'street', 'branch_street', 'building_number', 'floor', 'apartment', 'landmark'])))));
 
         foreach ($words($line) as $word) {
             if (! str_contains($split, $word)) {

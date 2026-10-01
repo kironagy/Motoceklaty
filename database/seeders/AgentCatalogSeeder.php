@@ -101,7 +101,7 @@ class AgentCatalogSeeder extends Seeder
         );
         $selfEmployed = CustomerType::firstOrCreate(
             ['key' => 'self_employed'],
-            ['label' => 'عامل حر', 'legacy_work_status' => 'self_employed', 'is_active' => true, 'sort' => 2]
+            ['label' => 'عامل حر', 'legacy_work_status' => 'no_income_proof', 'is_active' => true, 'sort' => 2]
         );
         $pension = CustomerType::firstOrCreate(
             ['key' => 'pension'],
