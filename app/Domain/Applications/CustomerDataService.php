@@ -67,6 +67,25 @@ class CustomerDataService
                 continue;
             }
 
+            // Conversation 731: "لا يوجد رقم" for a school was saved as "مفيش
+            // رقم" - not his words - refused, and he was asked for the
+            // building number again and again. "There is none" is an answer
+            // in any wording, once he actually said it.
+            if (self::isAddressPart($key) && self::saysNone((string) $item['value'])
+                && ($noneEvidence = $this->statements->messageMatching($conversationId, self::NONE_PATTERN, 4)) !== null) {
+                $outcome = $this->writeApplicationOrCustomer($customer, $application, $field, 'لا يوجد', $noneEvidence);
+
+                if ($outcome === null) {
+                    $rejected[] = ['key' => $key, 'code' => 'NO_ACTIVE_APPLICATION'];
+                } elseif ($outcome === 'conflict') {
+                    $conflicts[] = ['key' => $key, 'code' => 'CONFLICTS_WITH_VERIFIED_VALUE'];
+                } else {
+                    $saved[] = $key;
+                }
+
+                continue;
+            }
+
             // Provenance: a customer_stated value must be something the
             // customer actually wrote. An enum is a classification of what
             // they said, so the AI must point at the words it relied on.
@@ -135,6 +154,35 @@ class CustomerDataService
         return ['saved' => $saved, 'rejected' => $rejected, 'conflicts' => $conflicts, 'facts' => $facts];
     }
 
+    /** He said the building/floor/apartment/landmark has none, or he does not know it. */
+    private const NONE_PATTERN = '/(?<!\p{L})(?:مفيش|مافيش|مفيهاش|مفيهوش|لا يوجد|مش موجود|ملهاش|مالهاش|ملوش|مالوش|بدون|من غير|مش عارف|معرفش|ماعرفش|مش فاكر|غير معروف)(?!\p{L})/u';
+
+    private static function isAddressPart(string $key): bool
+    {
+        return (bool) preg_match('/_(?:building_no|floor|apartment|landmark)$/', $key);
+    }
+
+    private static function saysNone(string $value): bool
+    {
+        $text = \App\Support\ArabicTextNormalizer::normalize($value);
+
+        return (bool) preg_match(self::NONE_PATTERN, $text) || (bool) preg_match('/^(?:لا|لا شي|غير محدد|لم يذكر|غير مذكور|none|n\/a|-)$/u', $text);
+    }
+
+    /** @return string|null 'conflict', 'saved'-like outcome, or null when there is no application */
+    private function writeApplicationOrCustomer($customer, ?Application $application, RequirementField $field, string $value, int $evidenceMessageId): ?string
+    {
+        if ($field->scope === 'customer') {
+            return $this->writeCustomerAttribute($customer, $field, $value, $evidenceMessageId);
+        }
+
+        if (! $application) {
+            return null;
+        }
+
+        return $this->writeApplicationData($application, $field, $field->scope === 'guarantor' ? 'guarantor' : 'applicant', $value, $evidenceMessageId);
+    }
+
     private function isApartmentNumber(string $value, ?int $messageId): bool
     {
         $digits = preg_replace('/\D+/', '', \App\Support\ArabicTextNormalizer::normalize($value));
@@ -151,13 +199,13 @@ class CustomerDataService
 
         // "عمارة السندباد" names the building - "ورشة" does not
         if (str_ends_with($key, '_building_no')
-            && ! preg_match('/عمار|برج|فيلا|مبني|بيت|بلوك|\d|اول|تاني|ثاني|تالت|ثالث|رابع|خامس|سادس|سابع|تامن|ثامن|تاسع|عاشر|مفيش|مافيش|بدون|من غير|مش عارف|ملهاش|مالهاش/u', $text)) {
+            && ! preg_match('/عمار|برج|فيلا|مبني|بيت|بلوك|\d|اول|تاني|ثاني|تالت|ثالث|رابع|خامس|سادس|سابع|تامن|ثامن|تاسع|عاشر|مفيش|مافيش|بدون|من غير|مش عارف|ملهاش|مالهاش|لا يوجد/u', $text)) {
             return 'NOT_A_BUILDING_NUMBER';
         }
 
         // "الشقه ملك" (he owns it) was saved as the apartment number.
         if ((str_ends_with($key, '_apartment') || str_ends_with($key, '_floor'))
-            && ! preg_match('/\d|اول|تاني|ثاني|تالت|ثالث|رابع|خامس|سادس|سابع|تامن|ثامن|تاسع|عاشر|ارضي|بدروم|روف|سطح|مفيش|مافيش|بيت مستقل|كله|كلها/u', $text)) {
+            && ! preg_match('/\d|اول|تاني|ثاني|تالت|ثالث|رابع|خامس|سادس|سابع|تامن|ثامن|تاسع|عاشر|ارضي|بدروم|روف|سطح|اخير|مفيش|مافيش|لا يوجد|بيت مستقل|كله|كلها/u', $text)) {
             return str_ends_with($key, '_apartment') ? 'NOT_AN_APARTMENT_NUMBER' : 'NOT_A_FLOOR';
         }
 

@@ -421,4 +421,33 @@ class DataIntegrityTest extends TestCase
         $this->assertSame('DOWN_PAYMENT_TOO_HIGH', $result->error['code']);
         $this->assertNull($this->application->fresh()->down_payment);
     }
+
+    /** Conversation 731: "لا يوجد رقم" saved as "مفيش رقم" was refused and asked again and again. */
+    public function test_there_is_no_number_is_an_answer_in_any_wording(): void
+    {
+        RequirementField::create(['key' => 'work_building_no', 'label' => 'رقم عقار الشغل', 'data_type' => 'string', 'scope' => 'application', 'is_sensitive' => false, 'is_active' => true]);
+        RequirementField::create(['key' => 'address_floor', 'label' => 'الدور', 'data_type' => 'string', 'scope' => 'application', 'is_sensitive' => false, 'is_active' => true]);
+        $this->say('مش موجود والله رقم عقار للمدرسه');
+        $this->say('لا يوجد رقم');
+
+        $result = app(RecordCustomerDataTool::class)->execute(['fields' => [['key' => 'work_building_no', 'value' => 'مفيش رقم']]], $this->ctx());
+
+        $this->assertTrue($result->ok);
+        $this->assertSame('لا يوجد', ApplicationData::where('field_key', 'work_building_no')->value('value'));
+
+        // "الأخير" is a floor
+        $this->say('الدور الأخير');
+        $this->assertTrue(app(RecordCustomerDataTool::class)->execute(['fields' => [['key' => 'address_floor', 'value' => 'الأخير']]], $this->ctx())->ok);
+    }
+
+    public function test_none_is_not_accepted_when_he_never_said_it(): void
+    {
+        RequirementField::create(['key' => 'address_landmark', 'label' => 'علامة مميزة', 'data_type' => 'string', 'scope' => 'application', 'is_sensitive' => false, 'is_active' => true]);
+        $this->say('ساكن في شبرا');
+
+        $result = app(RecordCustomerDataTool::class)->execute(['fields' => [['key' => 'address_landmark', 'value' => 'غير مذكور']]], $this->ctx());
+
+        $this->assertFalse($result->ok);
+        $this->assertSame(0, ApplicationData::where('field_key', 'address_landmark')->count());
+    }
 }
