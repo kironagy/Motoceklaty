@@ -1139,6 +1139,18 @@ class ReplyGuard
     {
         $messages = array_values((array) ($args['messages'] ?? []));
 
+        // Owner 2026-10-02: every greeting came out as the same template with
+        // "معاك فريق المبيعات في معرض موتوجيت". Said only when he asks who we are.
+        if ($messages !== [] && preg_match('/معاك\s+فريق\s+المبيعات/u', (string) $messages[0])) {
+            $asked = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+                ->where('turn_id', $turnId)->where('direction', 'incoming')->pluck('text')
+                ->contains(fn ($t) => preg_match('/مين|انت بوت|انت روبوت|بني ?ادم|ai/iu', (string) $t));
+            if (! $asked) {
+                $messages[0] = trim((string) preg_replace('/[،,.]?\s*(?:أنا\s+|انا\s+)?معاك\s+فريق\s+المبيعات(?:\s+في\s+معرض\s+موتوجيت)?\s*[،,.]?\s*/u', '، ', (string) $messages[0]), " ،,\n");
+                $args['messages'] = $messages;
+            }
+        }
+
         if ($messages === [] || ! preg_match('/^\s*وعليكم\s+السلام/u', (string) $messages[0])) {
             return $args;
         }
