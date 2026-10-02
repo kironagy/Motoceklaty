@@ -50,7 +50,11 @@ class InstallmentRequestObserver
 
         $decisions->logDecision($model, $status, $reason);
 
-        SendWhatsappStatusNotification::dispatchSync($model->id, $status, $reason);
+        // Request 4400: "متوقف مؤقتًا", "محتاج تصحيح" and "ألف مبروك" reached
+        // the customer inside four minutes while staff clicked through
+        // statuses. Sent after a short wait, and only if still current.
+        SendWhatsappStatusNotification::dispatch($model->id, $status, $reason, (string) $model->customer_action)
+            ->delay(now()->addMinutes((int) config('agent.notifications.status_delay_minutes', 3)));
     }
 
     /**

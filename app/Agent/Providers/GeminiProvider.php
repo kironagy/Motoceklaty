@@ -140,6 +140,25 @@ class GeminiProvider implements AiProvider
                     continue;
                 }
 
+                // 2026-10-02: Google's bare "Resource has been exhausted" (no quota
+                // details) hit every key in the same second - it is Google's
+                // capacity, not this key's quota. Walking all eleven keys parked
+                // each one for a minute and the bot answered nobody. Treat it
+                // like a 5xx: a short pause on this key and at most a couple of
+                // tries, so the turn retries soon with the whole pool intact.
+                if ($status === 429 && ! preg_match('/quota_?metric|QuotaFailure|quotaId|PerDay|per day|free_tier/i', $body)) {
+                    $manager->markRateLimited(model: $modelRow, error: $body, dailyLimit: false, cooldownSeconds: 10);
+                    $transientFailures++;
+
+                    Log::warning('Gemini capacity 429, trying next key', ['key_id' => $modelRow->gemini_api_key_id, 'model' => $modelRow->model_code]);
+
+                    if ($transientFailures <= $maxTransientFailovers) {
+                        continue;
+                    }
+
+                    throw new AiProviderException('Gemini is temporarily out of capacity.', retryable: true);
+                }
+
                 if ($status === 429 || $this->isQuotaError($body)) {
                     $rateLimit = app(GeminiRateLimitParser::class)->analyze($body, $response->header('Retry-After'));
 
@@ -154,7 +173,10 @@ class GeminiProvider implements AiProvider
                 }
 
                 if (in_array($status, [500, 502, 503, 504], true)) {
-                    $manager->markError($modelRow, $body, 120);
+                    // 2026-10-01/02: a 503 ("high demand") cooled each key for two
+                    // minutes; a few busy turns put every key in cooldown and the
+                    // bot answered nobody for minutes after Google had recovered.
+                    $manager->markError($modelRow, $body, 15);
                     $manager->refundReservation($modelRow);
                     $transientFailures++;
 
@@ -181,7 +203,7 @@ class GeminiProvider implements AiProvider
                     retryable: false,
                 );
             } catch (ConnectionException $e) {
-                $manager->markError($modelRow, $e->getMessage(), 120);
+                $manager->markError($modelRow, $e->getMessage(), 30);
                 $manager->refundReservation($modelRow);
                 $transientFailures++;
 

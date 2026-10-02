@@ -19,6 +19,7 @@ class SendWhatsappStatusNotification implements ShouldQueue
         public int $installmentRequestId,
         public string $status,
         public ?string $reason = null,
+        public ?string $customerAction = null,
     ) {
     }
 
@@ -34,6 +35,11 @@ class SendWhatsappStatusNotification implements ShouldQueue
             return;
         }
 
+        // Staff moved on since this was queued: the newer status sends its own.
+        if ((string) $request->status !== $this->status
+            || ($this->customerAction !== null && (string) $request->customer_action !== $this->customerAction)) {
+            return;
+        }
         $conversation = $request->whatsappConversation;
         $jid = $this->recipientJid($request, $conversation);
 

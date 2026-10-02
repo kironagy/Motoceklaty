@@ -83,6 +83,9 @@ class UpdateApplicationSelectionTool implements Tool
                 return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'A customer type change needs customer_type_quote with the customer\'s own words. Ask them first.');
             }
 
+            if (StartApplicationTool::saysNoWork((string) ($args['customer_type_quote'] ?? ''))) {
+                return ToolResult::error('APPLICANT_HAS_NO_WORK', StartApplicationTool::NO_WORK_HINT);
+            }
             if ($customerType->key === 'business_owner' && ! StartApplicationTool::statesOwnership((string) ($args['customer_type_quote'] ?? ''))) {
                 return ToolResult::error('OWNERSHIP_NOT_STATED', StartApplicationTool::NOT_OWNER_HINT);
             }

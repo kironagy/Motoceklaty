@@ -72,11 +72,15 @@ class ToolRegistry
         }
 
         $start = microtime(true);
+        [$args, $carriedWorkType] = \App\Domain\Applications\CustomerTypeAlias::normalize($args);
+        if ($carriedWorkType !== null && $name === 'start_application') {
+            $args['_work_type'] = $carriedWorkType;
+        }
 
         try {
             $result = ($conflict = $this->mentionedMotorcycleConflict($args, $ctx))
                 ? ToolResult::error('NOT_THE_MODEL_HE_NAMED', $conflict)->toArray()
-                : $tool->execute($args, $ctx)->toArray();
+                : $this->executeWithReconnect($tool, $args, $ctx);
         } catch (\Throwable $e) {
             // submit_application crashed on a null plan and nothing anywhere
             // said why - the exception was swallowed whole. Log where it
@@ -112,6 +116,26 @@ class ToolRegistry
         ]);
 
         return $redactedResult;
+    }
+
+    /**
+     * 2026-10-01 (request 4395): submit_application died on "MySQL server
+     * has gone away" in the long-lived worker after a slow model call; the
+     * customer was told it was being sent and had to confirm a second time.
+     */
+    private function executeWithReconnect(Tool $tool, array $args, ToolContext $ctx): array
+    {
+        try {
+            return $tool->execute($args, $ctx)->toArray();
+        } catch (\Throwable $e) {
+            if (! str_contains($e->getMessage(), 'gone away') && ! str_contains($e->getMessage(), 'Lost connection')) {
+                throw $e;
+            }
+
+            \Illuminate\Support\Facades\DB::reconnect();
+
+            return $tool->execute($args, $ctx)->toArray();
+        }
     }
 
     /** Every tool that takes a motorcycle must take the one the customer just named. */

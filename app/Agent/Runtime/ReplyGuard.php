@@ -107,6 +107,9 @@ class ReplyGuard
             return 'GARBLED_TEXT';
         }
 
+        if (($code = $this->conversationFailure($replyText, $conversation, $outcomes)) !== null) {
+            return $code;
+        }
         if ($this->containsInternalKey($replyText)) {
             return 'INTERNAL_KEY_IN_REPLY';
         }
@@ -1123,6 +1126,95 @@ class ReplyGuard
         $next = mb_strpos($system, "\n\n## ", $start + 1);
 
         return mb_substr($system, 0, $start).($next === false ? '' : mb_substr($system, $next));
+    }
+
+    /**
+     * 2026-10-02 (conversations 713, 755): "وعليكم السلام ورحمة الله وبركاته"
+     * opened replies to "متاح تقسيط مكن" and "وهدفع مقدم ولا لا" - nobody had
+     * said السلام عليكم. The salam is answered only in the turn he said it.
+     */
+    public function withoutUnpromptedSalam(array $args, WhatsappConversation $conversation, int $turnId): array
+    {
+        $messages = array_values((array) ($args['messages'] ?? []));
+
+        if ($messages === [] || ! preg_match('/^\s*وعليكم\s+السلام/u', (string) $messages[0])) {
+            return $args;
+        }
+
+        $said = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('turn_id', $turnId)->where('direction', 'incoming')
+            ->get(['text', 'transcript'])
+            ->contains(fn ($m) => preg_match('/سلام|salam/iu', (string) $m->text.' '.(string) $m->transcript));
+
+        if ($said) {
+            return $args;
+        }
+
+        $first = preg_replace('/^\s*وعليكم\s+السلام(?:\s+ورحم[ةه]\s+الله)?(?:\s+وبركاته)?\s*[،,.!]*\s*/u', '', (string) $messages[0]);
+        $first = ltrim((string) $first, " \n،,.");
+
+        if ($first === '') {
+            array_shift($messages);
+        } else {
+            $messages[0] = $first;
+        }
+
+        if ($messages !== []) {
+            $args['messages'] = array_values($messages);
+        }
+
+        return $args;
+    }
+
+    /** What the customer wrote since our last reply. */
+    private function customerTextSinceLastReply(WhatsappConversation $conversation): string
+    {
+        $lastOut = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')->whereIn('sender_type', ['bot', 'human', 'human_phone', 'staff'])->max('id');
+
+        return WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'incoming')
+            ->when($lastOut, fn ($q) => $q->where('id', '>', $lastOut))
+            ->orderBy('id')->get(['text', 'transcript'])
+            ->map(fn ($m) => trim((string) $m->text.' '.(string) $m->transcript))
+            ->implode(' ');
+    }
+
+    /** Failures found in the 2026-10-02 review of the last fifteen live conversations. */
+    private function conversationFailure(string $replyText, WhatsappConversation $conversation, array $outcomes): ?string
+    {
+        $calls = array_column($outcomes, 'name');
+        $okCalls = array_column(array_filter($outcomes, fn ($o) => $o['ok']), 'name');
+
+        // 748: "ممكن حد يكلمني صوت عشان انا ضعيف في القرايه" got "أنا هنا
+        // مخصص للرد كتابة بس". A request for a person or a call is a handoff.
+        if (! in_array('handoff_to_human', $okCalls, true) && $conversation->status !== 'awaiting_agent') {
+            $customer = \App\Support\ArabicTextNormalizer::normalize($this->customerTextSinceLastReply($conversation));
+
+            if ($customer !== '' && preg_match('/(?:حد|موظف|زميل|بني ?ادم|انسان|مسيول|مسئول|مدير|مندوب)\s+(?:من المعرض\s+)?(?:يكلمني|يكلمنا|يتصل|يرن|يكلمني صوت|اكلمه)|يكلمني صوت|كلمني (?:صوت|فون|تليفون)|كلموني|اتصلوا? بيا|اتصل بيا|رنوا? عليا|عايز اكلم (?:حد|موظف|بني ?ادم|انسان|مدير|مسيول|مسئول|المعرض|خدمه العملا)|محتاج اكلم (?:حد|موظف|بني ?ادم|انسان)|مكالمه (?:صوت|تليفون)|رقم (?:المعرض|الفرع|حد اكلمه|خدمه العملا)/u', $customer)) {
+                return 'HUMAN_REQUEST_IGNORED';
+            }
+        }
+
+        // 713, 758: "القسط كام؟" got "محتاج أفتحلك طلب الأول، ابعتلي صورة
+        // البطاقة وبعدها أقولك" - numbers never wait for an application.
+        $quoted = (bool) array_filter($outcomes, fn ($o) => $o['ok'] && in_array($o['name'], ['get_installment_offer', 'calculate_installment'], true) && isset($o['data']['offers']));
+        if (! $quoted && preg_match('/(?:عشان|علشان|وبعدها|بعدها|بعد كده)\s+(?:\S+\s+){0,3}?(?:احسبلك|أحسبلك|نحسبلك|اقولك|أقولك|هقولك|نقولك|اديك|أديك)\s+(?:\S+\s+){0,2}?(?:القسط|الاقساط|الأقساط|تفاصيل|كل التفاصيل|المصاريف|الأنظمة|الانظمه)/u', $replyText)
+            && preg_match('/(?:افتحلك|أفتحلك|نفتح|فتح|نكمل بيانات)\s+(?:\S+\s+)?(?:طلب|الطلب|ملف)|صور[ةه]\s+(?:وش|البطاق)|البطاق[ةه]\s+(?:وش|الشخصي)/u', $replyText)) {
+            return 'QUOTE_GATED';
+        }
+
+        // 748, 752, 735: our own summary went out and then the stored one -
+        // the customer got his data twice. "(سيتم إرسال ملخص...)" too.
+        if (preg_match('/\((?:سيتم|يرجى|ملاحظ)|يرجى\s|سيتم\s+إرسال/u', $replyText)) {
+            return 'META_TEXT';
+        }
+        $confirmationPending = (bool) array_filter($outcomes, fn ($o) => $o['name'] === 'submit_application' && ! $o['ok'] && ($o['data']['code'] ?? null) === 'CUSTOMER_CONFIRMATION_REQUIRED');
+        if ($confirmationPending && preg_match_all('/(?:^|\n)\s*(?:•|-|–|\d+[.)])\s*\S/u', $replyText) >= 3) {
+            return 'SUMMARY_DUPLICATED';
+        }
+
+        return null;
     }
 
     private function normalizeWhitespace(string $text): string

@@ -274,7 +274,7 @@ return [
     ],
 
     'rate_limits' => [
-        'temporary_cooldown_seconds' => 60,
+        'temporary_cooldown_seconds' => 20,
         'max_cooldown_seconds' => 3600,
         'max_transient_failovers' => 2,
         'daily_reset_timezone' => 'America/Los_Angeles',

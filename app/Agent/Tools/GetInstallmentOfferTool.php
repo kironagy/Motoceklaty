@@ -102,6 +102,14 @@ class GetInstallmentOfferTool implements Tool
             $months = Application::whereKey($ctx->activeApplicationId)->first()?->installmentPlan?->months;
         }
         $downPayment = isset($args['down_payment']) ? (float) $args['down_payment'] : null;
+        // Conversation 742: he chose 34,000 down, asked "لو سنة ونص؟" and was
+        // quoted the minimum down payment - he had to say 34 again.
+        if ($downPayment === null && ($args['no_upfront'] ?? false) !== true && $ctx->activeApplicationId) {
+            $selected = Application::whereKey($ctx->activeApplicationId)->first(['machine_id', 'down_payment']);
+            if ($selected && (int) $selected->machine_id === (int) $machine->id && (float) $selected->down_payment > 0) {
+                $downPayment = (float) $selected->down_payment;
+            }
+        }
         $governorate = $args['governorate'] ?? null;
         $noUpfront = ($args['no_upfront'] ?? false) === true;
 
@@ -188,7 +196,7 @@ class GetInstallmentOfferTool implements Tool
             'how_to_present' => 'Send the `say` lines as they are (one per line, you may reword lightly, but keep every number and '
                 .'keep saying whether there are admin fees). Admin fees are NOT a down payment - never call them "مقدم". '
                 .'If he asks why installments cost more than cash, explain it in your own short words from price_difference_policy (never copied word for word, never adding reasons it does not give), '
-                .'then offer the cash price. If he asks what he pays in the end, send the offer\'s `breakdown` as it is. '
+                .'then offer the cash price. Send only the `say` line per duration - do NOT paste the `breakdown` after it too (same numbers twice); send `breakdown` only when he asks what he pays in total / in the end. '
                 .'Never tell him the installment price of the motorcycle (the price the installment is calculated on). '
                 .'Say `first_payment` once with the offer (or when he asks). Never write the words "من غير مقدم" / "بدون مقدم" - say what is paid at pickup instead. No system/company names, no word "نظام"/"أنظمة". Quote only the offers below (the duration(s) he asked for), each with its numbers.',
         ] + $cap

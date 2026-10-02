@@ -109,6 +109,7 @@ class AgentRunner
                     $toolCallCount++;
 
                     if ($toolCall['name'] === 'send_reply') {
+                        $toolCall['args'] = $this->guard->withoutUnpromptedSalam($toolCall['args'], $conversation, (int) $turn->id);
                         $violation = $this->guard->check($toolCall['args'], $conversation, $request->system, $contents, $outcomes);
 
                         if ($violation !== null) {
@@ -280,6 +281,10 @@ class AgentRunner
         'INTEREST_DENIED' => 'Not sent: the reply says there is no interest/no increase. That is false - the installment price is higher than cash. Never deny it. If he asks about interest, give the cash price and what he pays in total from get_installment_offer (the breakdown line), and explain the difference only from price_difference_policy.',
         'SCRIPTED_PHRASE_REQUEST' => 'Not sent: the reply asks the customer to say/write a specific sentence. Never do that. If he already said what he works, use his own earlier words as the quote (record_customer_data / start_application). If he did not, just ask "حضرتك بتشتغل إيه؟".',
         'BANNED_WORDING' => 'Not sent: the reply uses wording the owner banned - a name for yourself (never give yourself a name), "أهلاً بك", "حقك عليا", "من غير مقدم"/"بدون مقدم" (say what is paid at pickup instead) or the word "كتالوج" (say "عندنا" / "المتاح عندنا"). Rewrite without it.',
+        'HUMAN_REQUEST_IGNORED' => 'Not sent: he asked to talk to a person / to be called. That is always honoured at once: call handoff_to_human (reason customer_request, short note) in this step, then tell him a colleague from the showroom will contact him - no time promise, no "I only answer in writing".',
+        'QUOTE_GATED' => 'Not sent: the reply makes the installment numbers wait for an application, his ID or more data. Prices and installments never need an application or a document. Call get_installment_offer now (customer_type if he said his work, down_payment if he named one, months if he named a duration) and give him the numbers; ask for the ID only after, if he wants to apply.',
+        'META_TEXT' => 'Not sent: the reply contains a note in brackets or formal Arabic ("سيتم"، "يرجى"). Write only what a salesman would send, in Egyptian Arabic.',
+        'SUMMARY_DUPLICATED' => 'Not sent: the stored summary is sent to him automatically right after your message - do not write your own summary or list his data. Just ask him in one or two short lines to check the summary below and confirm, or say what to fix.',
         'UNVERIFIED_NUMBER' => 'Not sent: the reply contains a number (a price, or a measured value like km/litre, hp, months, %) that no tool result or structured state contains. Prices must come from a tool call in THIS turn (the catalog index is for names only) - call get_motorcycle_details / calculate_installment first, or leave the number out. Never state specifications that are not in a tool result.',
     ];
 

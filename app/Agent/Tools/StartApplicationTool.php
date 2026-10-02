@@ -45,6 +45,13 @@ class StartApplicationTool implements Tool
     {
         $text = \App\Support\ArabicTextNormalizer::normalize($quote);
 
+        // "انا هقسط ببطاقة اختي" was taken as his work and the application
+        // opened as عامل حر: whose card it is says who applies, not what he works.
+        if (preg_match('/بطاق[هت]\s+(?:اخت|اخو|اخ|ابو|ام|والد|مرات|جوز|خال|عم|ماما|بابا|صاحب|قريب)/u', $text)
+            && ! preg_match('/شغال|بشتغل|موظف|متامن|معاش|صنايعي|دليفري|طلبات|اوبر/u', $text)) {
+            return false;
+        }
+
         // The pattern is normalized like the text: "كهربائي" became
         // "كهربايي" in the text only, and an electrician was asked his work
         // four times.
@@ -128,6 +135,32 @@ class StartApplicationTool implements Tool
             '/(?<!مش )(?<!غير )(?<!مش مت)(?:متامن|مومن)\s+(?:عليا|عليه|علي|عليا)|(?<!مش )(?<!مفيش )عليا\s+تامين/u');
     }
 
+    /**
+     * Request 4400 (2026-10-02): "بدون عمل", then the mother "ربت منزل" -
+     * the application went in as عامل حر with the home as the work address
+     * and staff stopped it: "لازم يكون الوالده ليها عمل". The applicant has
+     * to work (or be on a pension); a student or someone about to start
+     * work only when he also says he works now.
+     */
+    public static function saysNoWork(string $quote): bool
+    {
+        $text = \App\Support\ArabicTextNormalizer::normalize($quote);
+
+        if (preg_match('/(?:بدون|من غير|مفيش|معنديش|ما عنديش|ماعنديش|مليش|ماليش)\s+(?:عمل|شغل|شغلانه|وظيفه)|(?<!\p{L})(?:مش|ما|مبقتش|مبقيتش)\s+(?:شغال|شغاله|بشتغل|بتشتغل|بيشتغل|بتعمل)(?!\p{L})|مبشتغلش|مابشتغلش|ما بشتغلش|مبتشتغلش|ما بتشتغلش|عاطل|قاعد في البيت|قاعده في البيت|رب[هت] منزل|رب[هت] بيت|ست بيت|لا يعمل|لا تعمل|سايب الشغل|سبت الشغل|مستقيل|(?:لسه|لسا)\s+(?:مش|ما)\s+(?:شغال|شغاله|بشتغل|شغل|اشتغلت)/u', $text)) {
+            return true;
+        }
+
+        $notYet = preg_match('/(?<!\p{L})(?:هشتغل|حشتغل|هبقي اشتغل|هنزل اشتغل|هبدا اشتغل|طالب|طالبه|بدرس)(?!\p{L})/u', $text);
+        $worksNow = preg_match('/(?<!مش )(?<!ما )(?<!\p{L})و?(?:شغال|شغاله|بشتغل|موظف|موظفه|صنايعي|متامن|معاش|ورديه)(?!\p{L})/u', $text);
+
+        return $notYet && ! $worksNow;
+    }
+
+    public const NO_WORK_HINT = 'The applicant must be working (or on a pension) - these words say he is not working, a housewife, a student '
+        .'or about to start work. Do not open or switch an application with these words. Before collecting anything, tell him kindly that any '
+        .'other person who works (21 or older, not necessarily a relative) can apply in his own name with his own papers, and the licence can be '
+        .'in the customer\'s name. When he says who will apply, ask what THAT person works ("هو بيشتغل إيه؟") and use that person\'s own words.';
+
     public static function occupationHint(string $say): string
     {
         return 'The finance companies refuse this work (owner\'s rule). Tell him plainly, in these words or very close: "'.$say.'" '
@@ -187,6 +220,10 @@ class StartApplicationTool implements Tool
             return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote is not in the customer\'s messages. If he already said what he works, copy his words EXACTLY as he wrote them (same spelling, no additions, no merging with your own words) and call again. Only if he never said it, ask him "حضرتك بتشتغل إيه؟ ولا على المعاش؟" (never list types like موظف/عامل حر).');
         }
 
+        if (self::saysNoWork((string) $args['customer_type_quote'])) {
+            return ToolResult::error('APPLICANT_HAS_NO_WORK', self::NO_WORK_HINT);
+        }
+
         if ($say = app(\App\Domain\Applications\OccupationPolicy::class)->rejection((string) $args['customer_type_quote'])) {
             return ToolResult::error('OCCUPATION_NOT_ACCEPTED', self::occupationHint($say));
         }
@@ -238,6 +275,22 @@ class StartApplicationTool implements Tool
             );
         } catch (ApplicationSelectionException $e) {
             return ToolResult::error($e->errorCode);
+        }
+
+        // "طلبات" came as customer_type delivery_app: he is self_employed
+        // and the work type is saved with his own words.
+        if (filled($args['_work_type'] ?? null) && $customerType->key === 'self_employed') {
+            try {
+                app(\App\Domain\Applications\CustomerDataService::class)->record(
+                    Customer::findOrFail($ctx->customerId),
+                    $outcome['application'],
+                    [['key' => 'work_type', 'value' => (string) $args['_work_type'], 'quote' => (string) $args['customer_type_quote']]],
+                    $ctx->conversationId,
+                );
+                $outcome['application']->refresh();
+            } catch (\Throwable) {
+                // the snapshot still asks for the work type
+            }
         }
 
         return ToolResult::ok([

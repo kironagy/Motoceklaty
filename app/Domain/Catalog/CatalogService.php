@@ -165,6 +165,53 @@ class CatalogService
             return $machines->filter(fn (Machine $m) => in_array((int) $m->brand_id, $brandIds, true))->values();
         }
 
+        // 2026-10-02 (conversations 746, 763): "فيجوري L250" found only
+        // Hogan's "L250" - the brand word was ignored, Vigory's "Vg L250" was
+        // never matched and the customer was told we do not carry it. With a
+        // brand in the query, that brand's models are searched first with
+        // the rest of his words.
+        $brandWords = [];
+        $restWords = [];
+        foreach (preg_split('/\s+/u', $normalizedQuery) as $word) {
+            $ids = \App\Domain\Conversations\MentionedMotorcycle::brandIdsFor($word)
+                ?: \App\Domain\Conversations\MentionedMotorcycle::brandIdsFor(preg_replace('/^ال(?=\p{Arabic}{2,})/u', '', $word));
+            if ($ids !== []) {
+                $brandWords = array_merge($brandWords, $ids);
+            } else {
+                $restWords[] = $word;
+            }
+        }
+        $rest = trim(implode(' ', $restWords));
+        if ($brandWords !== [] && $rest !== '') {
+            $ofBrand = $this->matchName($machines->filter(fn (Machine $m) => in_array((int) $m->brand_id, $brandWords, true)), $rest);
+            if ($ofBrand->isNotEmpty()) {
+                return $ofBrand;
+            }
+        }
+
+        return $this->matchName($machines, $normalizedQuery);
+    }
+
+    private function matchName(Collection $machines, string $normalizedQuery): Collection
+    {
+        // "Z250" also listed L250, f250, H250 and Vg L250 by fuzzy match: a
+        // model he named exactly is the answer on its own.
+        $exact = $machines->filter(function (Machine $machine) use ($normalizedQuery) {
+            foreach (array_merge([$machine->name], $machine->aliases ?? []) as $candidate) {
+                $normalizedCandidate = mb_strtolower(ArabicTextNormalizer::normalize((string) $candidate));
+                if ($normalizedCandidate !== '' && ($normalizedCandidate === mb_strtolower($normalizedQuery)
+                    || in_array(mb_strtolower($normalizedQuery), preg_split('/\s+/u', $normalizedCandidate), true))) {
+                    return true;
+                }
+            }
+
+            return false;
+        })->values();
+
+        if ($exact->isNotEmpty()) {
+            return $exact;
+        }
+
         return $machines->filter(function (Machine $machine) use ($normalizedQuery) {
             $candidates = array_merge([$machine->name], $machine->aliases ?? []);
 
