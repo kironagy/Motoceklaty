@@ -62,7 +62,7 @@ class AgentRunner
 
         $request = $this->context->build($turn);
         $contents = $request->contents;
-        $toolDeclarations = $this->tools->declarations();
+        $toolDeclarations = $this->toolsFor($activeApplication !== null, $turn);
 
         $ctx = new ToolContext(
             $customer->id, $conversation->id, $activeApplication?->id, $turn->id, $trace->id, new TurnResultBuilder()
@@ -94,6 +94,10 @@ class AgentRunner
                 $modelCalls++;
 
                 $toolCalls = $response->toolCalls;
+                // [send_reply("سجلت"), record_customer_data] in one step: the
+                // reply was judged before the save ran and refused - a whole
+                // extra model call for nothing. The step's tools run first.
+                usort($toolCalls, fn ($a, $b) => ($a['name'] === 'send_reply') <=> ($b['name'] === 'send_reply'));
 
                 if ($toolCalls === []) {
                     // Plain text without send_reply: still a reply candidate,
@@ -189,6 +193,7 @@ class AgentRunner
                         // NO_ACTIVE_APPLICATION.
                         if ($toolCall['name'] === 'start_application' && isset($result['data']['application_id'])) {
                             $ctx = $ctx->withActiveApplication((int) $result['data']['application_id']);
+                            $toolDeclarations = $this->toolsFor(true, $turn);
                         }
                     }
                     $contents[] = $this->toolResultContent($toolCall['id'], $toolCall['name'], $result);
@@ -287,6 +292,30 @@ class AgentRunner
         'SUMMARY_DUPLICATED' => 'Not sent: the stored summary is sent to him automatically right after your message - do not write your own summary or list his data. Just ask him in one or two short lines to check the summary below and confirm, or say what to fix.',
         'UNVERIFIED_NUMBER' => 'Not sent: the reply contains a number (a price, or a measured value like km/litre, hp, months, %) that no tool result or structured state contains. Prices must come from a tool call in THIS turn (the catalog index is for names only) - call get_motorcycle_details / calculate_installment first, or leave the number out. Never state specifications that are not in a tool result.',
     ];
+
+    /**
+     * 2026-10-02 review: every model call carried all 21 tool definitions
+     * (~7,700 tokens) on top of the instructions. Tools that only act on an
+     * open application, or on a photo, are left out until they can be used.
+     */
+    private function toolsFor(bool $hasApplication, object $turn): array
+    {
+        $hasMedia = \App\Models\WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')
+            ->whereIn('type', ['image', 'document', 'video'])->exists();
+
+        $hidden = [];
+        if (! $hasApplication) {
+            $hidden = ['update_application_selection', 'submit_application', 'withdraw_application'];
+            if (! $hasMedia) {
+                $hidden[] = 'process_document';
+            }
+        }
+        if (! $hasMedia) {
+            $hidden[] = 'identify_motorcycle_from_image';
+        }
+
+        return array_values(array_filter($this->tools->declarations(), fn ($d) => ! in_array($d['name'], $hidden, true)));
+    }
 
     private function callModel(string $system, array $contents, array $tools, bool $forceSendReply, bool $forceOtherTool = false): AiResponse
     {
