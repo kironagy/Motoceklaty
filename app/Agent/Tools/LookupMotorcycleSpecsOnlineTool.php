@@ -109,6 +109,7 @@ class LookupMotorcycleSpecsOnlineTool implements Tool
             'maxOutputTokens' => 1024,
             'timeout' => 20,
             'quotaIsolated' => true,
+            'purpose' => 'specs',
         ]);
 
         if (! ($response['ok'] ?? false)) {

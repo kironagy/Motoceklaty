@@ -34,6 +34,29 @@ class HandoffService
     }
 
     /**
+     * Owner 2026-10-03: "ممكن اكلمك تليفون" handed the customer to staff and
+     * his next two messages ("انا بشتغل ترزي ملابس"، "مكنه دايو 4 قسط على سنه
+     * ونص") got only "زميلي هيرد عليك" for twenty minutes. A call request
+     * tells staff to call him; until a colleague actually writes, the bot
+     * keeps answering him on WhatsApp.
+     */
+    public static function botKeepsAnswering(WhatsappConversation $conversation): bool
+    {
+        if ($conversation->status !== 'awaiting_agent') {
+            return false;
+        }
+
+        $handoff = Handoff::where('conversation_id', $conversation->id)->whereNull('closed_at')->latest('opened_at')->first();
+
+        return $handoff !== null
+            && $handoff->reason === 'call_request'
+            && ! WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+                ->whereIn('sender_type', ['agent', 'human_phone'])
+                ->where('created_at', '>=', $handoff->opened_at)
+                ->exists();
+    }
+
+    /**
      * Deterministic trigger for T17: repeated turn failures reach
      * config('agent.handoff.max_failed_turns') (DEC-13) and the customer
      * is handed off without the AI having "decided" anything from text.

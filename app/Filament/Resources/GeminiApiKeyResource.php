@@ -55,6 +55,13 @@ class GeminiApiKeyResource extends Resource
                             ->rows(3)
                             ->columnSpanFull(),
 
+                        Forms\Components\Toggle::make('is_paid')
+                            ->label('مفتاح مدفوع (بيتحسب تكلفته في صفحة التكلفة)'),
+                        Forms\Components\TextInput::make('credit_usd')
+                            ->label('الرصيد بالدولار')
+                            ->numeric(),
+                        Forms\Components\DateTimePicker::make('credit_since')
+                            ->label('الرصيد بيتحسب من'),
                         Forms\Components\Toggle::make('is_active')
                             ->label('مفعل')
                             ->default(true),

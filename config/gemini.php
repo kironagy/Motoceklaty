@@ -33,6 +33,29 @@ return [
     ],
 
     /*
+    | Owner 2026-10-02: which keys each kind of AI work may spend (see
+    | GeminiKeyManager::for). Customer-facing work that matters, or carries
+    | personal data (ID cards, voice), goes on the paid key - Google may use
+    | what is sent on a free key. Background or low-stakes work goes free
+    | first and falls back to paid so the customer never waits. Simulator and
+    | teaching never touch the paid key.
+    */
+    'key_pools' => [
+        'reply' => 'paid',
+        'document' => 'paid',
+        'voice' => 'paid',
+        // reading his work runs inside a customer reply
+        'work' => 'paid',
+        'image' => 'free_first',
+        'summary' => 'free_first',
+        'address' => 'free_first',
+        'specs' => 'free_first',
+        'other' => 'free_first',
+        'simulator' => 'free_only',
+        'teaching' => 'free_only',
+    ],
+
+    /*
     |--------------------------------------------------------------------------
     | Planner Thinking Budget
     |--------------------------------------------------------------------------

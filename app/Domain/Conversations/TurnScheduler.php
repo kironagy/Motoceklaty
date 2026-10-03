@@ -19,7 +19,7 @@ class TurnScheduler implements TurnSchedulerHook
     {
         $conversation = $message->conversation;
 
-        if ($conversation->status === 'awaiting_agent') {
+        if ($conversation->status === 'awaiting_agent' && ! \App\Domain\Handoff\HandoffService::botKeepsAnswering($conversation)) {
             // Message stays with turn_id=null; a human is already handling it.
             if ($message->direction === 'incoming') {
                 AcknowledgeHandoffWait::dispatch($conversation->id)->afterCommit();

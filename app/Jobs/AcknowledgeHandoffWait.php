@@ -31,7 +31,8 @@ class AcknowledgeHandoffWait implements ShouldQueue
         $message = config('agent.handoff.waiting_message');
         $conversation = WhatsappConversation::find($this->conversationId);
 
-        if (blank($message) || ! $conversation || $conversation->status !== 'awaiting_agent') {
+        if (blank($message) || ! $conversation || $conversation->status !== 'awaiting_agent'
+            || \App\Domain\Handoff\HandoffService::botKeepsAnswering($conversation)) {
             return;
         }
 

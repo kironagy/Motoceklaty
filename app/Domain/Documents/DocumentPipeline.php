@@ -261,6 +261,7 @@ class DocumentPipeline
 
         try {
             $response = $this->ai->chat(new AiRequest(
+                purpose: 'document',
                 system: "Classify a customer-submitted document image against these types (key: description):\n{$typeList}\n\n"
                     .'Use a type only if the image really is that document as described (the side and content the description names). '
                     .'If it matches none of them - e.g. the other side of a card when only one side is listed, or a different document - '
@@ -352,6 +353,7 @@ class DocumentPipeline
 
         try {
             $response = $this->ai->chat(new AiRequest(
+                purpose: 'document',
                 system: "This document is: {$type->label} - {$type->description_for_ai}\n\n"
                     .'Extract these fields: '.implode(', ', $all).'. Copy every number digit by digit exactly as printed '
                     .'(check it against the OCR text), converting Arabic-Indic digits to 0-9; an amount is the one the field '

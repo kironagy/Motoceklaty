@@ -138,6 +138,12 @@ class CustomerStatements
         return false;
     }
 
+    /** @return string[] recent customer messages, normalized, newest first */
+    public function recentTexts(int $conversationId): array
+    {
+        return array_map(fn (array $message) => \App\Support\ArabicTextNormalizer::normalize((string) $message['text']), $this->messages($conversationId));
+    }
+
     /** @return array<int, array{id: int, text: string}> newest first */
     private function messages(int $conversationId): array
     {

@@ -7,7 +7,6 @@ use App\Domain\Applications\ApplicationService;
 use App\Domain\Installments\BestOfferService;
 use App\Domain\Installments\PlanResolver;
 use App\Domain\Installments\PlanResolutionException;
-use App\Domain\Conversations\CustomerStatements;
 use App\Domain\Applications\SnapshotService;
 use App\Models\Customer;
 use App\Models\CustomerType;
@@ -38,122 +37,6 @@ class StartApplicationTool implements Tool
             .'customer data and documents they send have nowhere to go and are silently lost. '
             .'Do not use only when they are just asking questions with no intent to apply. If an active '
             .'application exists, this returns it; if he cancelled one recently and wants to continue, it is reopened with his data.';
-    }
-
-    /** A work statement mentions work, a job, an employer or an income source. */
-    public static function talksAboutWork(string $quote): bool
-    {
-        $text = \App\Support\ArabicTextNormalizer::normalize($quote);
-
-        // "انا هقسط ببطاقة اختي" was taken as his work and the application
-        // opened as عامل حر: whose card it is says who applies, not what he works.
-        if (preg_match('/بطاق[هت]\s+(?:اخت|اخو|اخ|ابو|ام|والد|مرات|جوز|خال|عم|ماما|بابا|صاحب|قريب)/u', $text)
-            && ! preg_match('/شغال|بشتغل|موظف|متامن|معاش|صنايعي|دليفري|طلبات|اوبر/u', $text)) {
-            return false;
-        }
-
-        // The pattern is normalized like the text: "كهربائي" became
-        // "كهربايي" in the text only, and an electrician was asked his work
-        // four times.
-        return (bool) preg_match(\App\Support\ArabicTextNormalizer::normalize('/موظف|وظيف|حكوم|شرك|قطاع|مرتب|راتب|تامين|متامن|معاش|متقاعد|حر|شغال|بشتغل|اشتغل|شغلي|شغلانه|صنايعي|حرفي|'
-            .'سواق|سايق|دليفري|ديليفري|توصيل|طيار|مندوب|اوبر|طلبات|كريم|اندرايف|تطبيق|ابلكيشن|تاجر|تجاره|محل|ورشه|معرض|مصنع|مقاول|فلاح|'
-            .'مزارع|نجار|سباك|كهربائي|نقاش|حداد|ميكانيكي|سمكري|ترزي|حلاق|بياع|عامل|فني|مهندس|دكتور|مدرس|محاسب|ممرض|عسكري|جيش|شرطه|'
-            .'صاحب|بملك|مطعم|كافيه|كافتيري|قهوه|سوبر ?ماركت|بقال|فرن|مخبز|حلواني|جزار|فكهاني|خضري|مكتب|عقار|صيدل|محامي|مبيض|محاره|'
-            .'عربيه فول|كشك|سوق|بضاعه|صنعه|صنعتي|ظابط|ضابط|امين شرطه|مطار|شحن|نقل|جبس|بورد|سباكه|كهربا|نقاشه|دهان|مباني|سيراميك|الوميتال|'
-            .'مصنع|مخزن|امن|حارس|بواب|خدمه|نضافه|فندق|مستشفي|مدرسه|جامعه|طالب|يوميه|يوميات|اجري|'
-            .'مدير|شيف|طباخ|كوافير|صالون|طلباط|مرسول|سايس|محاسب|كاشير|بيزنس|اونلاين|فري ?لانس|'
-            .'employee|freelanc|driver|delivery|uber|job|work/u'), $text)
-            || self::describesSomething($text)
-            // "انا مبيض محارة": the customer describing himself names his
-            // work even when the job is not in the list above - a whitelist
-            // of jobs never ends, and "صاحب مطعم" was sent back to be asked again.
-            || (bool) preg_match('/^\s*انا\s+(?!عايز|عاوز|عايزه|عاوزه|محتاج|موافق|تمام|جاهز|هقدم|مش|كنت|بسال|عارف|فاهم|معاك|هنا|اسف|شاكر|متشكر|سالت|قلت)\S{3,}/u', $text);
-    }
-
-    /**
-     * A job list never ends ("مدير"، "طلباط" were refused). Anything that
-     * is not about buying, not a bare "تمام" and has a real word in it is
-     * taken as his answer; "عايز اقدم" / "هوجن ٤ على سنة" still are not.
-     */
-    private static function describesSomething(string $text): bool
-    {
-        if (\App\Domain\Conversations\ConversationClosing::isBareAcknowledgement($text)
-            || preg_match('/(?<!\p{L})(?:عايز|عاوز|عايزه|محتاج|اقسط|قسط|تقسيط|اقدم|هقدم|مكنه|موتوسيكل|سكوتر|سنه|سنتين|شهر|شهور|كاش|مقدم|سعر|بكام|كام|ايوه|اه|لا|موافق|ماشي|تمام|يلا|يالا|طيب|خلاص|حاضر|اوك|فرز|استيراد|موديل|لون)(?!\p{L})|\d/u', $text)
-            || self::namesABrand($text)) {
-            return false;
-        }
-
-        return (bool) preg_match('/\p{Arabic}{3,}/u', $text);
-    }
-
-    /** "هوجن فرز تاني" is a motorcycle, not a job. */
-    private static function namesABrand(string $text): bool
-    {
-        static $brands = null;
-
-        try {
-            $brands ??= \App\Models\Brand::pluck('name')->merge(\App\Models\Machine::pluck('name'))
-                ->map(fn ($n) => \App\Support\ArabicTextNormalizer::normalize((string) $n))
-                ->flatMap(fn ($n) => preg_split('/\s+/u', $n))
-                ->filter(fn ($w) => mb_strlen($w) >= 3 && preg_match('/\p{Arabic}/u', $w))
-                ->unique()->values()->all();
-        } catch (\Throwable) {
-            $brands = [];
-        }
-
-        foreach (array_merge($brands, ['هوجن', 'هوجان', 'فيجوري', 'دايو', 'بينيلي', 'بجاج', 'سوزوكي', 'هوندا', 'ياماها', 'كيواي', 'زونتس']) as $word) {
-            if (preg_match('/(?<!\p{L})'.preg_quote($word, '/').'(?!\p{L})/u', $text)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * "شغال في ورشة" was opened as صاحب ورشة: asked for business photos he
-     * does not have and a work address that is his employer's. Owning the
-     * business has to be in his own words.
-     */
-    public static function statesOwnership(string $quote): bool
-    {
-        $text = \App\Support\ArabicTextNormalizer::normalize($quote);
-
-        return (bool) preg_match(\App\Support\ArabicTextNormalizer::normalize('/صاحب|بملك|املك|ملكي|عندي (?:محل|ورشه|مطعم|كافيه|شركه|معرض|مصنع|مزرعه|مكتب|نشاط|مخبز|فرن|سوبر ?ماركت)|'
-            .'ليا (?:محل|ورشه|مطعم|كافيه|شركه|معرض|مصنع|مزرعه|مكتب)|فاتح (?:محل|ورشه|مطعم|كافيه|شركه|معرض|مكتب)|'
-            .'(?:محل|ورشه|ورشت|مطعم|كافيه|شركت|معرض|مصنع|مزرعت|مكتب)(?:ي|ى)(?=\s|$|[،.!؟?])|(?:محل|ورشه|مطعم|كافيه|شركه|معرض|مصنع|مزرعه|مكتب) بتاعي|تاجر|سجل تجاري|بطاقه ضريبيه|owner|my shop/u'), $text);
-    }
-
-    /**
-     * Request 4272: "متأمن عليا بس في فترة تقييم" was switched to عامل حر
-     * so no salary slip was needed. The owner's exception is only for an
-     * employee who is NOT insured.
-     */
-    public static function saidInsured(int $conversationId): bool
-    {
-        return app(\App\Domain\Conversations\CustomerStatements::class)->anyMessageMatches($conversationId,
-            '/(?<!مش )(?<!غير )(?<!مش مت)(?:متامن|مومن)\s+(?:عليا|عليه|علي|عليا)|(?<!مش )(?<!مفيش )عليا\s+تامين/u');
-    }
-
-    /**
-     * Request 4400 (2026-10-02): "بدون عمل", then the mother "ربت منزل" -
-     * the application went in as عامل حر with the home as the work address
-     * and staff stopped it: "لازم يكون الوالده ليها عمل". The applicant has
-     * to work (or be on a pension); a student or someone about to start
-     * work only when he also says he works now.
-     */
-    public static function saysNoWork(string $quote): bool
-    {
-        $text = \App\Support\ArabicTextNormalizer::normalize($quote);
-
-        if (preg_match('/(?:بدون|من غير|مفيش|معنديش|ما عنديش|ماعنديش|مليش|ماليش)\s+(?:عمل|شغل|شغلانه|وظيفه)|(?<!\p{L})(?:مش|ما|مبقتش|مبقيتش)\s+(?:شغال|شغاله|بشتغل|بتشتغل|بيشتغل|بتعمل)(?!\p{L})|مبشتغلش|مابشتغلش|ما بشتغلش|مبتشتغلش|ما بتشتغلش|عاطل|قاعد في البيت|قاعده في البيت|رب[هت] منزل|رب[هت] بيت|ست بيت|لا يعمل|لا تعمل|سايب الشغل|سبت الشغل|مستقيل|(?:لسه|لسا)\s+(?:مش|ما)\s+(?:شغال|شغاله|بشتغل|شغل|اشتغلت)/u', $text)) {
-            return true;
-        }
-
-        $notYet = preg_match('/(?<!\p{L})(?:هشتغل|حشتغل|هبقي اشتغل|هنزل اشتغل|هبدا اشتغل|طالب|طالبه|بدرس)(?!\p{L})/u', $text);
-        $worksNow = preg_match('/(?<!مش )(?<!ما )(?<!\p{L})و?(?:شغال|شغاله|بشتغل|موظف|موظفه|صنايعي|متامن|معاش|ورديه)(?!\p{L})/u', $text);
-
-        return $notYet && ! $worksNow;
     }
 
     public const NO_WORK_HINT = 'The applicant must be working (or on a pension) - these words say he is not working, a housewife, a student '
@@ -208,32 +91,18 @@ class StartApplicationTool implements Tool
 
         // An application was opened as "employee" while the same reply was
         // still asking the customer whether they were an employee.
-        $typeEvidence = app(CustomerStatements::class)->messageContainingQuote($ctx->conversationId, (string) $args['customer_type_quote']);
-
-        // "عايز اقسط هوجن ٤ على سنة" was passed as the quote and the customer
-        // was opened as عامل حر without ever saying what he works.
-        if ($typeEvidence !== null && ! self::talksAboutWork((string) $args['customer_type_quote'])) {
-            return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote says nothing about his work. Ask him only "حضرتك بتشتغل إيه؟ ولا على المعاش؟" - never list types like موظف/عامل حر.');
-        }
+        $typeEvidence = app(\App\Domain\Applications\WorkClassification::class)->statedQuote($ctx->conversationId, (string) $args['customer_type_quote']);
+        $args['customer_type_quote'] = $typeEvidence ?? $args['customer_type_quote'];
 
         if ($typeEvidence === null) {
             return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote is not in the customer\'s messages. If he already said what he works, copy his words EXACTLY as he wrote them (same spelling, no additions, no merging with your own words) and call again. Only if he never said it, ask him "حضرتك بتشتغل إيه؟ ولا على المعاش؟" (never list types like موظف/عامل حر).');
         }
 
-        if (self::saysNoWork((string) $args['customer_type_quote'])) {
-            return ToolResult::error('APPLICANT_HAS_NO_WORK', self::NO_WORK_HINT);
-        }
-
-        if ($say = app(\App\Domain\Applications\OccupationPolicy::class)->rejection((string) $args['customer_type_quote'])) {
-            return ToolResult::error('OCCUPATION_NOT_ACCEPTED', self::occupationHint($say));
-        }
-
-        if ($customerType->key === 'business_owner' && ! self::statesOwnership((string) $args['customer_type_quote'])) {
-            return ToolResult::error('OWNERSHIP_NOT_STATED', self::NOT_OWNER_HINT);
-        }
-
-        if ($customerType->key === 'self_employed' && self::saidInsured($ctx->conversationId)) {
-            return ToolResult::error('INSURED_IS_EMPLOYEE', self::INSURED_HINT);
+        // Owner 2026-10-03: his work is read by the AI from the conversation
+        // (no job lists) - not working, refused work, government or private,
+        // owner or worker, insured or not.
+        if ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, $customerType->key, (string) $args['customer_type_quote'])) {
+            return ToolResult::error($problem['code'], $problem['hint']);
         }
 
         $machine = null;
@@ -279,6 +148,11 @@ class StartApplicationTool implements Tool
 
         // "طلبات" came as customer_type delivery_app: he is self_employed
         // and the work type is saved with his own words.
+        // "ترزي ملابس" with no work type from the model: the reading has it.
+        if (! filled($args['_work_type'] ?? null) && $customerType->key === 'self_employed') {
+            $args['_work_type'] = app(\App\Domain\Applications\WorkClassification::class)->workType($ctx->conversationId, (string) $args['customer_type_quote']);
+        }
+
         if (filled($args['_work_type'] ?? null) && $customerType->key === 'self_employed') {
             try {
                 app(\App\Domain\Applications\CustomerDataService::class)->record(

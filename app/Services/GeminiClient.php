@@ -9,6 +9,10 @@ class GeminiClient
 {
     public function generateText(string $prompt, ?string $preferredModelCode = 'gemini-3.1-flash-lite', array $options = []): array
     {
+        if (filled($options['purpose'] ?? null) && GeminiKeyManager::purpose() !== $options['purpose']) {
+            return GeminiKeyManager::for($options['purpose'], fn () => $this->generateText($prompt, $preferredModelCode, $options));
+        }
+
         $manager = app(GeminiKeyManager::class);
 
         $failed429 = [];
@@ -171,6 +175,7 @@ class GeminiClient
                     );
 
                     $manager->markUsed($modelRow, $usedTokens, $estimatedTokens);
+                    $manager->recordUsage($modelRow, (array) $json, (string) ($options['usage_source'] ?? 'tools'));
 
                     return [
                         'ok' => true,

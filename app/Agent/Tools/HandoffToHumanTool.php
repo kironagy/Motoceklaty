@@ -25,7 +25,7 @@ class HandoffToHumanTool implements Tool
             .'IDENTITY_IN_USE_BY_ANOTHER_CUSTOMER. Otherwise handle it yourself: a question with no data on file, an '
             .'unclear message, a rejected document or an unusual job are NOT reasons to hand off - answer what you know, '
             .'ask a short question, or ask for the document again. You must still send_reply telling the customer a '
-            .'colleague will follow up.';
+            .'colleague will follow up (call_request: a colleague will call him, and you keep answering what he asked).';
     }
 
     public function inputSchema(): array
@@ -38,8 +38,8 @@ class HandoffToHumanTool implements Tool
                     'type' => 'string',
                     // "not sure" and "out of scope" are not the owner's reasons to
                     // stop the bot - the model answers or asks instead.
-                    'enum' => ['customer_request', 'complaint', 'document_unresolvable', 'other'],
-                    'description' => 'other = he insists on a discount, IDENTITY_IN_USE_BY_ANOTHER_CUSTOMER, or he insists on information we do not have to decide.',
+                    'enum' => ['call_request', 'customer_request', 'complaint', 'document_unresolvable', 'other'],
+                    'description' => 'call_request = he asks for a phone/voice call: staff call him and you KEEP answering him here meanwhile. customer_request = he asks for a person instead of you. other = he insists on a discount, IDENTITY_IN_USE_BY_ANOTHER_CUSTOMER, or he insists on information we do not have to decide.',
                 ],
                 'note' => ['type' => 'string', 'maxLength' => 300],
             ],

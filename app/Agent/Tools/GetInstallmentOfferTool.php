@@ -83,6 +83,17 @@ class GetInstallmentOfferTool implements Tool
             }
 
             $customerTypeId = $customerType->id;
+
+            // Owner 2026-10-02: "انا محاسب" was quoted as an insured employee
+            // with no question. Above the cap he is asked the owner's question
+            // first; below it the numbers come without his type.
+            if (! $ctx->activeApplicationId && ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, $customerType->key))) {
+                if ($this->cappedWorkTypes($machine) !== null) {
+                    return ToolResult::error($problem['code'], $problem['hint']);
+                }
+
+                $customerTypeId = null;
+            }
         }
 
         // The owner: above the freelancer cap (60,000) the offer depends on

@@ -1,11 +1,40 @@
 <x-filament-panels::page>
     <div class="fi-ta-text-sm" style="direction: rtl;">
         <p>
-            الأرقام دي بتتقرا من الداتابيز مباشرة (مش من اللوج). أهم رقم فيهم هو
-            إجمالي الرصيد: كل رد بيتصرف منه، وأول ما يخلص البوت بيبطّل يرد خالص —
-            مفيش موديل احتياطي وراه.
+            الأرقام دي بتتقرا من الداتابيز مباشرة (مش من اللوج). البوت بيرد بالمفتاح المدفوع بس،
+            والمفاتيح المجانية مبتشتغلش غير لو المدفوع خلص خالص (اتقفل أو جوجل رفضته).
         </p>
     </div>
+
+    @php
+        $usd = fn ($v) => '$' . number_format((float) $v, 2);
+        $cents = fn ($v) => number_format((float) $v * 100, 2) . ' سنت';
+    @endphp
+
+    @foreach ($this->getMoney() as $key)
+        <x-filament::section style="direction: rtl;">
+            <x-slot name="heading">الفلوس — {{ $key['name'] }} @unless ($key['is_active']) <span class="text-danger-600">(موقوف)</span> @endunless</x-slot>
+            <x-slot name="description">
+                من {{ $key['since'] }}. التفاصيل طلب بطلب في
+                <a href="{{ \App\Filament\Pages\AiCosts::getUrl() }}" class="text-primary-600 underline">تكلفة الذكاء الاصطناعي</a>
+                (وهناك تعدّل الرصيد لما تشحن).
+            </x-slot>
+            <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
+                <div><div class="text-xs text-gray-500">الرصيد اللي شحنته</div><div class="text-xl font-bold tabular-nums">{{ $key['credit'] !== null ? $usd($key['credit']) : '—' }}</div></div>
+                <div><div class="text-xs text-gray-500">اتصرف لحد دلوقتي</div><div class="text-xl font-bold tabular-nums text-warning-600">{{ $usd($key['spent']) }}</div><div class="text-xs text-gray-500 tabular-nums">{{ $cents($key['spent']) }}</div></div>
+                <div><div class="text-xs text-gray-500">الفاضل</div><div @class(['text-xl font-bold tabular-nums', 'text-success-600' => ($key['remaining'] ?? 1) > 5, 'text-danger-600' => ($key['remaining'] ?? 1) <= 5])>{{ $key['remaining'] !== null ? $usd($key['remaining']) : '—' }}</div></div>
+                <div><div class="text-xs text-gray-500">يكفي حوالي</div><div class="text-xl font-bold tabular-nums">{{ $key['days_left'] !== null ? number_format($key['days_left']) . ' يوم' : '—' }}</div><div class="text-xs text-gray-500">بمعدل الصرف الحالي</div></div>
+                <div><div class="text-xs text-gray-500">النهاردة</div><div class="text-lg tabular-nums">{{ $cents($key['today']) }}</div></div>
+                <div><div class="text-xs text-gray-500">الشهر ده</div><div class="text-lg tabular-nums">{{ $usd($key['month']) }}</div></div>
+                <div><div class="text-xs text-gray-500">متوسط اليوم</div><div class="text-lg tabular-nums">{{ $cents($key['per_day']) }}</div></div>
+                <div><div class="text-xs text-gray-500">متوسط رد العميل</div><div class="text-lg tabular-nums">{{ $key['per_reply'] !== null ? $cents($key['per_reply']) : '—' }}</div></div>
+                <div><div class="text-xs text-gray-500">عدد الطلبات</div><div class="text-lg tabular-nums">{{ number_format($key['calls']) }}</div></div>
+                <div><div class="text-xs text-gray-500">ردود متوقعة بالفاضل</div><div class="text-lg tabular-nums">{{ $key['replies_left'] !== null ? number_format($key['replies_left']) : '—' }}</div></div>
+                <div><div class="text-xs text-gray-500">الكاش وفّرلك</div><div class="text-lg tabular-nums text-success-600">{{ $cents($key['saved']) }}</div></div>
+                <div><div class="text-xs text-gray-500">نسبة التوكنز من الكاش</div><div class="text-lg tabular-nums">{{ $key['cached_percent'] !== null ? $key['cached_percent'] . '%' : '—' }}</div></div>
+            </div>
+        </x-filament::section>
+    @endforeach
 
     <x-filament::section collapsible :collapsed="false" style="direction: rtl;">
         <x-slot name="heading">الرصيد لكل مفتاح</x-slot>

@@ -57,6 +57,7 @@ class SummarizeConversation implements ShouldQueue
 
         try {
             $response = $ai->chat(new AiRequest(
+                purpose: \App\Services\GeminiKeyManager::isTestPhone($conversation->phone) ? 'simulator' : 'summary',
                 system: 'لخّص المحادثة دي بشكل محايد ومختصر بالعربي. اذكر الحقائق المهمة بس (زي نوع الموتوسيكل '
                     .'اللي بيتكلموا عنه أو حالة الطلب)، من غير أي بيانات حساسة زي أرقام قومية أو بيانات مستندات.',
                 contents: [

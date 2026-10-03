@@ -18,7 +18,7 @@ use Illuminate\Support\Facades\Cache;
  */
 class CatalogService
 {
-    private const INDEX_CACHE_KEY = 'catalog.index_lines';
+    private const INDEX_CACHE_KEY = 'catalog.index_lines.v2';
 
     public function __construct(private readonly FuzzyArabicMatcher $fuzzy = new FuzzyArabicMatcher())
     {
@@ -69,6 +69,13 @@ class CatalogService
             $machines = $this->filterByNameQuery($machines, $filters['name_query']);
         }
 
+        // 2026-10-03 (conversation 852): a girl asking for a scooter was
+        // offered the Superlight cruiser "as a scooter" - search had no way
+        // to keep to the kind of vehicle he asked for.
+        if (in_array($filters['kind'] ?? null, self::KINDS, true)) {
+            $machines = $machines->filter(fn (Machine $m) => self::kind($m) === $filters['kind'])->values();
+        }
+
         // "عايز المكنة الحمرا" had no model name and search had no way to
         // ask by color, so the agent could only ask back.
         if (! empty($filters['color'])) {
@@ -112,6 +119,24 @@ class CatalogService
         $features = ArabicTextNormalizer::normalize(collect($machine->features ?? [])->pluck('title')->implode(' '));
 
         return preg_match('/(?<!\d)(\d{2,3})\s*(?:cc|سي ?سي|سم)/iu', $features, $m) ? (int) $m[1] : null;
+    }
+
+    public const KINDS = ['motorcycle', 'scooter', 'electric', 'tricycle'];
+
+    private const CATEGORY_LABELS = [
+        'commuter' => 'عادي', 'naked' => 'نيكد', 'sport' => 'سبورت', 'cruiser' => 'كروزر',
+        'off_road' => 'أوف رود', 'touring' => 'تورينج',
+    ];
+
+    /** "سكوتر", "سكوتر كهربا", "تروسيكل", "موتوسيكل كروزر" - what the vehicle is, in the customer's words. */
+    public static function kindLabel(Machine $machine): string
+    {
+        return match (self::kind($machine)) {
+            'scooter' => 'سكوتر',
+            'electric' => 'سكوتر كهربا',
+            'tricycle' => 'تروسيكل',
+            default => trim('موتوسيكل '.(self::CATEGORY_LABELS[$machine->category] ?? '')),
+        };
     }
 
     /** motorcycle / scooter / tricycle / electric - the kind of vehicle, from its brand group. */
@@ -239,6 +264,7 @@ class CatalogService
             'id' => $m->id,
             'name' => $m->name,
             'brand' => $m->brand?->name,
+            'kind' => self::kindLabel($m),
             'cc' => self::engineCc($m),
             'cash_price' => $m->cash_price,
             // no installment_price: the owner never tells the customer the
@@ -346,6 +372,7 @@ class CatalogService
                         $m->id,
                         $m->brand?->name,
                         $m->name,
+                        self::kindLabel($m),
                         $m->cc ? "{$m->cc}cc" : null,
                     ]);
 

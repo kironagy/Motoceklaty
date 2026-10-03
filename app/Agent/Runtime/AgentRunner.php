@@ -36,6 +36,13 @@ class AgentRunner
     /** @return array{messages: string[], quote_wa_message_id?: ?string, media?: array, focus_motorcycle_ids?: array} */
     public function run(object $turn): array
     {
+        $purpose = \App\Services\GeminiKeyManager::isTestPhone(WhatsappConversation::whereKey($turn->whatsapp_conversation_id)->value('phone'))
+            ? 'simulator' : 'reply';
+
+        if (\App\Services\GeminiKeyManager::purpose() !== $purpose) {
+            return \App\Services\GeminiKeyManager::for($purpose, fn () => $this->run($turn));
+        }
+
         $maxModelCalls = config('agent.runtime.max_model_calls');
         $maxToolCalls = config('agent.runtime.max_tool_calls');
         $wallClockSeconds = config('agent.runtime.wall_clock_seconds');
@@ -285,9 +292,14 @@ class AgentRunner
         'UNRECORDED_PROMISE' => 'Not sent: the reply promises something nothing records - a reservation ("محجوزة", "نحجزلك"), a time frame ("نفس اليوم", "خلال كذا يوم"), a warranty, a guarantor, or "I will tell you as soon as...". None of these exist in our data. Remove the promise; say only what the tools returned.',
         'INTEREST_DENIED' => 'Not sent: the reply says there is no interest/no increase. That is false - the installment price is higher than cash. Never deny it. If he asks about interest, give the cash price and what he pays in total from get_installment_offer (the breakdown line), and explain the difference only from price_difference_policy.',
         'SCRIPTED_PHRASE_REQUEST' => 'Not sent: the reply asks the customer to say/write a specific sentence. Never do that. If he already said what he works, use his own earlier words as the quote (record_customer_data / start_application). If he did not, just ask "حضرتك بتشتغل إيه؟".',
+        'WORK_REFUSAL_NOT_SOURCED' => 'Not sent: the reply says his work is refused, but no tool said so. Call check_eligibility with work = his own words: say it is refused only when it returns occupation_not_accepted; if it returns ask_sector ask only "حكومي ولا خاص؟".',
+        'WORK_TYPE_TOLD' => 'Not sent: the reply tells him his type ("كعامل حر"). The type is for the tools only - never say it to the customer. Rewrite without it.',
+        'JOB_AS_NAME' => 'Not sent: you called him by his job ("يا أستاذ محاسب"). His work is not his name - use his name only if he wrote it or it is on his ID, otherwise يا باشا / يا غالي. Rewrite.',
+        'WORK_JUDGED' => 'Not sent: the reply judges his work ("بيسهل الإجراءات", "فرص القبول أعلى", "مقبول جداً"). Only the tools decide what his work means - say nothing about it being easier, better or accepted. Rewrite without it.',
         'BANNED_WORDING' => 'Not sent: the reply uses wording the owner banned - a name for yourself (never give yourself a name), "أهلاً بك", "حقك عليا", "من غير مقدم"/"بدون مقدم" (say what is paid at pickup instead) or the word "كتالوج" (say "عندنا" / "المتاح عندنا"). Rewrite without it.',
-        'HUMAN_REQUEST_IGNORED' => 'Not sent: he asked to talk to a person / to be called. That is always honoured at once: call handoff_to_human (reason customer_request, short note) in this step, then tell him a colleague from the showroom will contact him - no time promise, no "I only answer in writing".',
+        'HUMAN_REQUEST_IGNORED' => 'Not sent: he asked to talk to a person / to be called. That is always honoured at once: call handoff_to_human in this step (reason call_request when he asks for a call, customer_request when he asks for a person; short note), then tell him a colleague from the showroom will contact him - no time promise, no "I only answer in writing" - and still answer anything else he asked.',
         'QUOTE_GATED' => 'Not sent: the reply makes the installment numbers wait for an application, his ID or more data. Prices and installments never need an application or a document. Call get_installment_offer now (customer_type if he said his work, down_payment if he named one, months if he named a duration) and give him the numbers; ask for the ID only after, if he wants to apply.',
+        'DOCUMENT_LIST_INCOMPLETE' => 'Not sent: the application was just opened and the reply asks for only part of his papers. Send the WHOLE documents.list from the snapshot in this one message - every item by name (e.g. وش وضهر البطاقة + صورة المحل باليافطة + البطاقة الضريبية أو السجل التجاري) - then he sends them one by one. Nothing on the list is optional.',
         'META_TEXT' => 'Not sent: the reply contains a note in brackets or formal Arabic ("سيتم"، "يرجى"). Write only what a salesman would send, in Egyptian Arabic.',
         'SUMMARY_DUPLICATED' => 'Not sent: the stored summary is sent to him automatically right after your message - do not write your own summary or list his data. Just ask him in one or two short lines to check the summary below and confirm, or say what to fix.',
         'UNVERIFIED_NUMBER' => 'Not sent: the reply contains a number (a price, or a measured value like km/litre, hp, months, %) that no tool result or structured state contains. Prices must come from a tool call in THIS turn (the catalog index is for names only) - call get_motorcycle_details / calculate_installment first, or leave the number out. Never state specifications that are not in a tool result.',
@@ -314,7 +326,16 @@ class AgentRunner
             $hidden[] = 'identify_motorcycle_from_image';
         }
 
-        return array_values(array_filter($this->tools->declarations(), fn ($d) => ! in_array($d['name'], $hidden, true)));
+        // Google caches the request from its start (tools first, then the
+        // instructions), so the tools that come and go sit at the end: every
+        // turn then shares the cached tools + instructions prefix (owner
+        // 2026-10-02, paid key - cached tokens cost a tenth).
+        $optional = ['update_application_selection', 'submit_application', 'withdraw_application', 'process_document', 'identify_motorcycle_from_image'];
+        $tools = array_values(array_filter($this->tools->declarations(), fn ($d) => ! in_array($d['name'], $hidden, true)));
+        usort($tools, fn ($a, $b) => (int) in_array($a['name'], $optional, true) <=> (int) in_array($b['name'], $optional, true)
+            ?: array_search($a['name'], $optional, true) <=> array_search($b['name'], $optional, true));
+
+        return $tools;
     }
 
     private function callModel(string $system, array $contents, array $tools, bool $forceSendReply, bool $forceOtherTool = false): AiResponse

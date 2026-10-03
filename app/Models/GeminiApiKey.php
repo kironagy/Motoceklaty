@@ -12,6 +12,9 @@ class GeminiApiKey extends Model
         'name',
         'api_key',
         'is_active',
+        'is_paid',
+        'credit_usd',
+        'credit_since',
         'last_used_at',
         'cooldown_until',
         'last_error',
@@ -21,6 +24,8 @@ class GeminiApiKey extends Model
         'is_active' => 'boolean',
         'last_used_at' => 'datetime',
         'cooldown_until' => 'datetime',
+        'is_paid' => 'boolean',
+        'credit_since' => 'datetime',
     ];
 
     public function models(): HasMany

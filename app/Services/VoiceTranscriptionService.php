@@ -71,6 +71,7 @@ class VoiceTranscriptionService
                 TXT,
                 preferredModelCode: config('gemini.models.fast'),
                 options: [
+                    'purpose' => 'voice',
                     'image_base64' => base64_encode($bytes),
                     'image_mime' => $mime ?: 'audio/ogg',
                     'timeout' => 25,

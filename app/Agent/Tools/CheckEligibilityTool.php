@@ -73,7 +73,9 @@ class CheckEligibilityTool implements Tool
             $facts['work_statement'] = (string) $args['work'];
         }
 
-        if (array_key_exists('age', $args)) {
+        // "age": 0 came with a work question and the age rule failed him -
+        // the bot then made up "بتتحفظ على المهنة". No age = not checked.
+        if (array_key_exists('age', $args) && (int) $args['age'] > 0) {
             $facts['age'] = $args['age'];
         }
 
@@ -93,8 +95,14 @@ class CheckEligibilityTool implements Tool
 
         $result = $this->eligibility->evaluate($facts, $customerTypeId);
 
-        if ($say = app(\App\Domain\Applications\OccupationPolicy::class)->rejection($facts['work_statement'] ?? null)) {
-            $result['occupation_not_accepted'] = StartApplicationTool::occupationHint($say);
+        if (filled($facts['work_statement'] ?? null)
+            && ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, 'employee', $facts['work_statement']))) {
+            if ($problem['code'] === 'OCCUPATION_NOT_ACCEPTED') {
+                $result['occupation_not_accepted'] = $problem['hint'];
+            } elseif ($problem['code'] === 'ASK_SECTOR') {
+                // "انا مدرس" was told teachers are refused: a private school is fine.
+                $result['ask_sector'] = $problem['hint'].' Do not say his work is refused or accepted before he answers.';
+            }
         }
 
         return ToolResult::ok($result);

@@ -20,14 +20,15 @@ class SearchMotorcyclesTool implements Tool
     {
         return 'Find catalog motorcycles by structured filters or a name the AI extracted. '
             .'Use when the customer asks what is available, gives a budget/cc/brand, or names a model not '
-            .'obvious from the catalog index. Do not use when the ID is already known (use get_motorcycle_details).';
+            .'obvious from the catalog index. Do not use when the ID is already known (use get_motorcycle_details). '
+            .'Each item has its kind (سكوتر / موتوسيكل ...): offer only the kind he asked for.';
     }
 
     /** "ايه الموجود؟": no name, brand, size, price, color or offer filter. */
     private function isGeneric(array $args): bool
     {
         return array_intersect_key(array_filter($args, fn ($v) => $v !== null && $v !== '' && $v !== false),
-            array_flip(['name_query', 'brand', 'cc_min', 'cc_max', 'max_cash_price', 'max_installment_price', 'offers_only', 'color', 'sort'])) === [];
+            array_flip(['name_query', 'brand', 'kind', 'cc_min', 'cc_max', 'max_cash_price', 'max_installment_price', 'offers_only', 'color', 'sort'])) === [];
     }
 
     public function inputSchema(): array
@@ -37,6 +38,8 @@ class SearchMotorcyclesTool implements Tool
             'properties' => [
                 'name_query' => ['type' => 'string', 'maxLength' => 60],
                 'brand' => ['type' => 'string'],
+                'kind' => ['type' => 'string', 'enum' => \App\Domain\Catalog\CatalogService::KINDS,
+                    'description' => 'The kind of vehicle he asked for: scooter (سكوتر/اسكوتر), electric (سكوتر كهربا), motorcycle, tricycle (تروسيكل). Always set it when he said one.'],
                 'cc_min' => ['type' => 'integer', 'minimum' => 0],
                 'cc_max' => ['type' => 'integer', 'minimum' => 0],
                 'max_cash_price' => ['type' => 'number', 'minimum' => 0],

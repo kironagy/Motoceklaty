@@ -24,6 +24,10 @@ class GeminiProvider implements AiProvider
 {
     public function chat(AiRequest $request): AiResponse
     {
+        if ($request->purpose !== null && GeminiKeyManager::purpose() !== $request->purpose) {
+            return GeminiKeyManager::for($request->purpose, fn () => $this->chat($request));
+        }
+
         $modelCode = config('agent.model');
 
         if (! $modelCode) {
@@ -109,6 +113,7 @@ class GeminiProvider implements AiProvider
                     $json = $response->json();
                     $usedTokens = (int) data_get($json, 'usageMetadata.totalTokenCount', $estimatedTokens);
                     $manager->markUsed($modelRow, $usedTokens, $estimatedTokens);
+                    $manager->recordUsage($modelRow, (array) $json, 'bot');
 
                     return $this->parseResponse($json, $modelRow, $start);
                 }

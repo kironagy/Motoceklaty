@@ -7,7 +7,6 @@ use App\Domain\Applications\ApplicationService;
 use App\Domain\Installments\BestOfferService;
 use App\Domain\Installments\PlanResolver;
 use App\Domain\Installments\PlanResolutionException;
-use App\Domain\Conversations\CustomerStatements;
 use App\Domain\Applications\SnapshotService;
 use App\Models\Application;
 use App\Models\CustomerType;
@@ -79,23 +78,14 @@ class UpdateApplicationSelectionTool implements Tool
                 return ToolResult::error('UNKNOWN_CUSTOMER_TYPE');
             }
 
-            if (app(CustomerStatements::class)->messageContainingQuote($ctx->conversationId, (string) ($args['customer_type_quote'] ?? '')) === null) {
+            if (($quote = app(\App\Domain\Applications\WorkClassification::class)->statedQuote($ctx->conversationId, (string) ($args['customer_type_quote'] ?? ''))) === null) {
                 return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'A customer type change needs customer_type_quote with the customer\'s own words. Ask them first.');
             }
 
-            if (StartApplicationTool::saysNoWork((string) ($args['customer_type_quote'] ?? ''))) {
-                return ToolResult::error('APPLICANT_HAS_NO_WORK', StartApplicationTool::NO_WORK_HINT);
-            }
-            if ($customerType->key === 'business_owner' && ! StartApplicationTool::statesOwnership((string) ($args['customer_type_quote'] ?? ''))) {
-                return ToolResult::error('OWNERSHIP_NOT_STATED', StartApplicationTool::NOT_OWNER_HINT);
-            }
+            $args['customer_type_quote'] = $quote;
 
-            if ($say = app(\App\Domain\Applications\OccupationPolicy::class)->rejection((string) ($args['customer_type_quote'] ?? ''))) {
-                return ToolResult::error('OCCUPATION_NOT_ACCEPTED', StartApplicationTool::occupationHint($say));
-            }
-
-            if ($customerType->key === 'self_employed' && StartApplicationTool::saidInsured($ctx->conversationId)) {
-                return ToolResult::error('INSURED_IS_EMPLOYEE', StartApplicationTool::INSURED_HINT);
+            if ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, $customerType->key, (string) ($args['customer_type_quote'] ?? ''))) {
+                return ToolResult::error($problem['code'], $problem['hint']);
             }
         }
 

@@ -190,6 +190,29 @@ class ReplyGuard
             return 'WORK_TYPE_NOT_RECORDED';
         }
 
+        // "انا مدرس" got "جهات التمويل مش بتقبل شغل المدرسين" - a private
+        // school is accepted. Only the owner's rule (a tool) refuses work.
+        if (preg_match('/(?:بتتحفظ|تتحفظ|بيتحفظوا)|القرار (?:النهائي )?(?:بيكون |هيكون )?(?:عند|ليهم)|نقد(?:ّ)?م\s+ونشوف|(?:مش\s+(?:بتقبل|بيقبلوا|هتقبل|هيقبلوا)|مبتقبلش|مبيقبلوش|هيترفض|بيترفض|هيرفضوا|بيرفضوا)[^.؟?\n]{0,40}(?:شغل|وظيف|مهن|حكوم)|(?:شغل|وظيف|مهن|المدرسين|حكوم)[^.؟?\n]{0,60}(?:مش\s+(?:بتقبل|بيقبلوا|هتقبل)|مبتقبلش|هيترفض|بيترفض)/u', $replyText)
+            && ! preg_match('/OCCUPATION_NOT_ACCEPTED|occupation_not_accepted|APPLICANT_HAS_NO_WORK|FEMALE_FREE_INCOME_NOT_ACCEPTED|GENDER_NOT_ACCEPTED_FOR_TYPE|FOREIGNER_NO_INSTALLMENTS/', $toolResultsBlob)) {
+            return 'WORK_REFUSAL_NOT_SOURCED';
+        }
+
+        // "يعني حضرتك بتشتغل في الصيدلية كعامل حر": the type is for the tools only.
+        if (preg_match('/(?:ك|بصفتك|بصفته|بصفتها|هنسجلك|هسجلك|هنسجلها|هسجلها)\s*(?:"|«)?(?:عامل حر|موظف متأمن|موظف متامن|صاحب نشاط)/u', $replyText)) {
+            return 'WORK_TYPE_TOLD';
+        }
+
+        // Owner 2026-10-02: "انا محاسب" got "تمام يا أستاذ محاسب".
+        if (preg_match('/يا\s+(?:(?:أ|ا)ستاذ(?:ة|ه)?\s+|باشمهندس\s+)?(?:ال)?(?:محاسب|مدرس|معلم|ممرض|صيدلي|سواق|نجار|سباك|كهربائي|ميكانيكي|طيار|مندوب|موظف|صنايعي|فران|حداد|نقاش|مبيض|ترزي|حلاق|بياع|كاشير|محامي|مهندس|دليفري)(?:ة|ه)?(?!\p{L})/u', $replyText)) {
+            return 'JOB_AS_NAME';
+        }
+
+        // "معلمة ... ده بيسهل الأمور جداً" and "فرص القبول أعلى بكتير" before
+        // anything was checked: only the tools say what his work means.
+        if (preg_match('/(?:بيسهل|هيسهل|يسهل|بتسهل|هتسهل)\s+(?:ال)?(?:أمور|امور|إجراءات|اجراءات|موضوع|قبول|دنيا)|فرص(?:ة|ه)?\s+(?:ال)?قبول\s+(?:أعلى|اعلى|أكبر|اكبر)|(?:مقبول|مقبوله|مقبولة)\s+جدا/u', $replyText)) {
+            return 'WORK_JUDGED';
+        }
+
         // Lesson 33: "أمين الشرطة من المهن اللي جهات التمويل بتتحفظ عليها...
         // لو حابب نجرب" - the owner wants a plain "هيترفض".
         if ((str_contains($toolResultsBlob, 'OCCUPATION_NOT_ACCEPTED') || str_contains($toolResultsBlob, 'occupation_not_accepted'))
@@ -583,7 +606,7 @@ class ReplyGuard
      */
     private function withoutConditionalClauses(string $text): string
     {
-        return preg_replace('/(?:^|(?<=[\s،,.!؟?]))(?:ولو|لو|إذا|اذا|وإذا|وإن|إن|لما|في حالة|فى حالة|أول ما|اول ما|لحد ما|عشان)\s+[^،,.!؟?\n]*/u', ' ', $text);
+        return preg_replace('/(?:^|(?<=[\s،,.!؟?]))(?:ولو|لو|إذا|اذا|وإذا|وإن|إن|لما|في حالة|فى حالة|أول ما|اول ما|لحد ما|عشان)\s+[^،,.!؟?\n]*/u', ' ', $text) ?? $text; // null on broken UTF-8 crashed a turn
     }
 
     /**
@@ -1218,6 +1241,13 @@ class ReplyGuard
             return 'QUOTE_GATED';
         }
 
+        // 2026-10-03 simulator: a shop owner's application opened and he was
+        // asked only for "وش وضهر البطاقة" - the shop photo and the tax card
+        // came up one by one later. The owner: the whole list in one message.
+        if ($missing = $this->documentsLeftOutOfList($replyText, $outcomes)) {
+            return 'DOCUMENT_LIST_INCOMPLETE';
+        }
+
         // 748, 752, 735: our own summary went out and then the stored one -
         // the customer got his data twice. "(سيتم إرسال ملخص...)" too.
         if (preg_match('/\((?:سيتم|يرجى|ملاحظ)|يرجى\s|سيتم\s+إرسال/u', $replyText)) {
@@ -1229,6 +1259,52 @@ class ReplyGuard
         }
 
         return null;
+    }
+
+    /** The documents.list items a reply asking for papers right after opening the application leaves out. */
+    private function documentsLeftOutOfList(string $replyText, array $outcomes): array
+    {
+        $opened = null;
+
+        foreach ($outcomes as $o) {
+            if ($o['ok'] && $o['name'] === 'start_application' && ($o['data']['created'] ?? false) === true) {
+                $opened = $o['data']['snapshot']['documents'] ?? null;
+            }
+        }
+
+        $reply = \App\Support\ArabicTextNormalizer::normalize($replyText);
+
+        if (! is_array($opened) || ($opened['list_complete'] ?? false) !== true || ! preg_match('/بطاق|صوره|صور /u', $reply)) {
+            return [];
+        }
+
+        // normalized like the items ("بطاقة الرقم القومي" → "بطاقه رقم قومي")
+        $common = array_map(fn ($w) => \App\Support\ArabicTextNormalizer::normalize($w),
+            ['صوره', 'بطاقه', 'الرقم', 'القومي', 'الشخصيه', 'ضهر', 'لمده', 'شهور', 'اخر', 'الخاص', 'بتاع']);
+        $missing = [];
+
+        foreach ((array) ($opened['list'] ?? []) as $item) {
+            $words = array_filter(preg_split('/[\s\/()،,]+/u', \App\Support\ArabicTextNormalizer::normalize((string) $item)),
+                fn ($w) => mb_strlen($w) >= 4 && ! in_array($w, $common, true));
+
+            if ($words === []) {
+                continue; // the ID - "البطاقة" covers it
+            }
+
+            // "صورة المحل باليافطة" names the business place photo
+            $found = str_contains(implode(' ', $words), 'مكان') && preg_match('/محل|ورش|يافط|مطعم|مكان|نشاط/u', $reply);
+
+            foreach ($words as $word) {
+                $stem = preg_replace('/^(?:ال|لل)/u', '', $word);
+                $found = $found || mb_strpos($reply, mb_substr($stem, 0, max(3, mb_strlen($stem) - 1))) !== false;
+            }
+
+            if (! $found) {
+                $missing[] = (string) $item;
+            }
+        }
+
+        return $missing;
     }
 
     private function normalizeWhitespace(string $text): string

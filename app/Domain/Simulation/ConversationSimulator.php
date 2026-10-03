@@ -118,7 +118,7 @@ class ConversationSimulator
 
         // Handed off to staff: the real pipeline schedules no turn and the
         // bot stays silent (TurnScheduler), so the simulator does the same.
-        if ($conversation->status === 'awaiting_agent') {
+        if ($conversation->status === 'awaiting_agent' && ! \App\Domain\Handoff\HandoffService::botKeepsAnswering($conversation)) {
             return [
                 'customer_message' => $text, 'reply' => [], 'media' => [], 'latency_ms' => 0,
                 'tokens' => ['input' => null, 'output' => null], 'model' => null, 'guard_events' => [],

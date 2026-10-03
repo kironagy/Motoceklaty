@@ -40,6 +40,12 @@ class AiHealth extends Page
         ];
     }
 
+    /** The paid key's money: credit, spent, left (owner 2026-10-02). */
+    public function getMoney(): array
+    {
+        return AiCosts::paidKeySummaries();
+    }
+
     /**
      * Per-key quota breakdown behind the pooled total in the widget above.
      *

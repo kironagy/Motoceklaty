@@ -61,7 +61,9 @@ class ContextBuilder
         $l8 = $this->buildL8($conversation, $turn);
 
         $system = implode("\n\n", array_values(array_filter([
-            $l0['text'], $l0b['text'], $l1['text'], $l2['text'], $l3['text'], $l3b['text'], $l4['text'], $l5['text'], $l6['text'],
+            // The same text for every customer goes first, so Google's cache
+            // covers it on every call; lessons depend on the customer type.
+            $l0['text'], $l1['text'], $l2['text'], $l3['text'], $l3b['text'], $l0b['text'], $l4['text'], $l5['text'], $l6['text'],
         ], fn ($block) => $block !== null && trim($block) !== '')));
 
         $request = new AiRequest(
@@ -196,12 +198,16 @@ class ContextBuilder
         if ($handoff['status'] === 'awaiting_agent') {
             $handoff['reason'] = Handoff::where('conversation_id', $conversation->id)
                 ->whereNull('closed_at')->latest('opened_at')->value('reason');
+
+            if (\App\Domain\Handoff\HandoffService::botKeepsAnswering($conversation)) {
+                $handoff = ['status' => 'call_requested', 'note' => 'Staff were told to call him. Until they do, you answer him here as usual - every question, numbers, his application. Do not hand off again for the call and do not promise a time.'];
+            }
         } else {
             // Returned by the timeout with no staff reply: the agent should
             // pick the conversation up itself, not promise a colleague again.
             $last = Handoff::where('conversation_id', $conversation->id)->latest('opened_at')->first();
 
-            if ($last && $last->closed_at && $last->closed_by === null && $last->closed_at->gt(now()->subDay())) {
+            if ($last && $last->closed_at && $last->closed_by === null && $last->reason !== 'call_request' && $last->closed_at->gt(now()->subDay())) {
                 $handoff['last_handoff'] = 'returned_to_you_without_staff_reply';
             }
         }

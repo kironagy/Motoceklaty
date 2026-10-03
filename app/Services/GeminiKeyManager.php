@@ -10,6 +10,63 @@ use Illuminate\Support\Facades\DB;
 class GeminiKeyManager
 {
     /**
+     * Owner 2026-10-02: the paid key is for customers only. Every AI call
+     * says what it is for ("reply", "image", "simulator"...), and
+     * config('gemini.key_pools') says which keys that work may spend:
+     *   paid       - the paid key; the free keys only once it is finished
+     *   free_first - the free keys; the paid key only if they fail, so a
+     *                customer is never left waiting
+     *   free_only  - never the paid key (simulator and teaching, even a
+     *                document or a photo inside them)
+     *
+     * @var list<string>
+     */
+    private static array $purposes = [];
+
+    public static function for(?string $purpose, callable $callback): mixed
+    {
+        if ($purpose === null || $purpose === '') {
+            return $callback();
+        }
+
+        self::$purposes[] = $purpose;
+
+        try {
+            return $callback();
+        } finally {
+            array_pop(self::$purposes);
+        }
+    }
+
+    public static function purpose(): ?string
+    {
+        return self::$purposes === [] ? null : self::$purposes[array_key_last(self::$purposes)];
+    }
+
+    public static function pool(): string
+    {
+        if (array_intersect(self::$purposes, ['simulator', 'teaching']) !== []) {
+            return 'free_only';
+        }
+
+        $purpose = self::purpose() ?? 'other';
+
+        return (string) (config('gemini.key_pools.'.$purpose) ?? self::DEFAULT_POOLS[$purpose] ?? 'free_first');
+    }
+
+    /** Used when the config cache predates config('gemini.key_pools'). */
+    private const DEFAULT_POOLS = [
+        'reply' => 'paid', 'document' => 'paid', 'voice' => 'paid', 'work' => 'paid',
+        'simulator' => 'free_only', 'teaching' => 'free_only',
+    ];
+
+    /** Simulator and teaching conversations - never a real customer. */
+    public static function isTestPhone(?string $phone): bool
+    {
+        return str_starts_with((string) $phone, 'sim-');
+    }
+
+    /**
      * Atomically select a model and reserve its request/token allowance.
      *
      * Counters are incremented before the external request is sent. This keeps
@@ -32,9 +89,17 @@ class GeminiKeyManager
             $provider
         ) {
             $now = now();
+            $pool = self::pool();
+            $paidKeyIds = $pool === 'paid' ? $this->livePaidKeyIds($preferredModelCode, $embedding, $provider) : [];
 
             $model = GeminiApiKeyModel::query()
                 ->when($excludedIds !== [], fn ($query) => $query->whereNotIn('id', $excludedIds))
+                ->when($paidKeyIds !== [], fn ($query) => $query->whereIn('gemini_api_key_id', $paidKeyIds))
+                ->when($pool === 'free_only', fn ($query) => $query->whereHas('apiKey', fn ($key) => $key->where('is_paid', false)))
+                // free_first: free keys before the paid one, whatever their priority
+                ->when($pool === 'free_first', fn ($query) => $query->orderByRaw(
+                    '(select is_paid from gemini_api_keys where gemini_api_keys.id = gemini_api_key_models.gemini_api_key_id)'
+                ))
                 ->where('provider', $provider)
                 ->where('is_active', true)
                 ->whereColumn('requests_today', '<', 'rpd_limit')
@@ -110,6 +175,34 @@ class GeminiKeyManager
     }
 
     /**
+     * Owner 2026-10-02: replies go on the paid key only; the free keys work
+     * only once it is finished. A paid key still counts while it sits in a
+     * short cooldown (a busy second must not move the bot to a free key) -
+     * it is finished when it is switched off, its row for this model is off
+     * (a 403 from Google disables it) or its quota is gone for the day.
+     *
+     * @return list<int>
+     */
+    private function livePaidKeyIds(?string $preferredModelCode, ?bool $embedding, string $provider): array
+    {
+        $soon = now()->addMinutes(10);
+
+        return GeminiApiKeyModel::query()
+            ->where('provider', $provider)
+            ->where('is_active', true)
+            ->whereColumn('requests_today', '<', 'rpd_limit')
+            ->where(fn ($query) => $query->whereNull('cooldown_until')->orWhere('cooldown_until', '<=', $soon))
+            ->when($preferredModelCode, fn ($query) => $query->where('model_code', $preferredModelCode))
+            ->when(! is_null($embedding), fn ($query) => $query->where('is_embedding', $embedding))
+            ->whereHas('apiKey', fn ($query) => $query->where('is_paid', true)->where('is_active', true)
+                ->where(fn ($query) => $query->whereNull('cooldown_until')->orWhere('cooldown_until', '<=', $soon)))
+            ->distinct()
+            ->pluck('gemini_api_key_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    /**
      * @deprecated Use reserveAvailableModel() so availability and counters are atomic.
      */
     public function getAvailableModel(?string $preferredModelCode = null, int $estimatedTokens = 0, ?bool $embedding = null): ?GeminiApiKeyModel
@@ -125,6 +218,43 @@ class GeminiKeyManager
      * reflects real usage instead of a permanently-approximate estimate
      * (AI_WHATSAPP_BOT_MEMORY_INTELLIGENCE_AUDIT.md §15.3 G-2).
      */
+    /**
+     * Owner 2026-10-02: every call's tokens and cost, for the AI costs page.
+     * Only a paid key costs money; a free one is logged at zero.
+     */
+    public function recordUsage(GeminiApiKeyModel $model, array $json, string $source): void
+    {
+        try {
+            $usage = (array) ($json['usageMetadata'] ?? []);
+            $prompt = (int) ($usage['promptTokenCount'] ?? 0);
+            $cached = (int) ($usage['cachedContentTokenCount'] ?? 0);
+            $output = (int) ($usage['candidatesTokenCount'] ?? 0);
+            $thoughts = (int) ($usage['thoughtsTokenCount'] ?? 0);
+            $paid = (bool) GeminiApiKey::whereKey($model->gemini_api_key_id)->value('is_paid');
+            $cost = 0.0;
+
+            if ($paid && ($price = \App\Models\AiModelPrice::where('model_code', $model->model_code)->first())) {
+                $cost = (max(0, $prompt - $cached) * $price->input_per_million
+                    + $cached * $price->cached_per_million
+                    + ($output + $thoughts) * $price->output_per_million) / 1_000_000;
+            }
+
+            \App\Models\AiUsageLog::create([
+                'gemini_api_key_id' => $model->gemini_api_key_id,
+                'model_code' => $model->model_code,
+                'source' => self::purpose() ?? $source,
+                'is_paid' => $paid,
+                'input_tokens' => $prompt,
+                'cached_tokens' => $cached,
+                'output_tokens' => $output,
+                'thoughts_tokens' => $thoughts,
+                'cost_usd' => round($cost, 6),
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('AI usage log failed', ['error' => $e->getMessage()]);
+        }
+    }
+
     public function markUsed(GeminiApiKeyModel $model, int $usedTokens = 0, int $estimatedTokens = 0): void
     {
         $delta = $usedTokens - $estimatedTokens;

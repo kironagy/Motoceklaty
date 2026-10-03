@@ -29,7 +29,11 @@ class TranscribeVoiceMessage implements ShouldQueue
             return;
         }
 
-        $result = $transcriber->transcribe($media);
+        $phone = \App\Models\WhatsappConversation::whereKey($message->whatsapp_conversation_id)->value('phone');
+        $result = \App\Services\GeminiKeyManager::for(
+            \App\Services\GeminiKeyManager::isTestPhone($phone) ? 'simulator' : null,
+            fn () => $transcriber->transcribe($media),
+        );
 
         $message->update([
             'transcription_status' => $result->status,

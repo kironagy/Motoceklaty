@@ -31,6 +31,8 @@ final class AiRequest
         public readonly int $timeoutSeconds = 30,
         public readonly ?array $responseSchema = null,
         public readonly ?string $thinkingLevel = null,
+        // what the call is for - picks the keys (GeminiKeyManager::for)
+        public readonly ?string $purpose = null,
     ) {
     }
 }

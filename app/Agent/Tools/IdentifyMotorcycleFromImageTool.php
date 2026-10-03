@@ -76,6 +76,7 @@ class IdentifyMotorcycleFromImageTool implements Tool
 
         try {
             $response = $this->provider->chat(new AiRequest(
+                purpose: 'image',
                 system: "You identify a motorcycle photo against this catalog (id: name), one per line:\n{$catalogList}\n\n"
                     .'Identify the MAIN motorcycle only: the one in the centre / in focus / taking most of the frame. '
                     .'Set vehicle_count to how many motorcycles or scooters are visible (even partly). '
