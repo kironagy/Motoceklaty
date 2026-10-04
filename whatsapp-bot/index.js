@@ -795,6 +795,36 @@ app.get('/sessions/:botId/status', checkToken, (req, res) => {
     });
 });
 
+app.post('/sessions/:botId/logout', checkToken, async (req, res) => {
+    const botId = normalizeBotId(req.params.botId);
+
+    try {
+        const sock = sessions[botId];
+        if (sock) {
+            try {
+                await sock.logout();
+            } catch (e) {
+                try { sock.end(); } catch (_) {}
+            }
+        }
+
+        delete sessions[botId];
+        delete latestQr[botId];
+        statuses[botId] = 'logged_out';
+        delete starting[botId];
+
+        const sessionPath = path.join(__dirname, 'sessions', botId);
+        if (fs.existsSync(sessionPath)) {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+        }
+
+        return res.json({ ok: true, message: `Bot ${botId} logged out and session cleared` });
+    } catch (error) {
+        console.error(`Logout error for bot ${botId}:`, error?.message || error);
+        return res.status(500).json({ ok: false, error: error?.message || 'Logout failed' });
+    }
+});
+
 
 
 app.post('/chats/archive', checkToken, async (req, res) => {

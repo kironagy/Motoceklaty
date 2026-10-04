@@ -36,10 +36,11 @@ class GeminiApiKeyResource extends Resource
                         Forms\Components\Select::make('provider')
                             ->label('Provider')
                             ->options([
+                                'openai' => 'GPT (OpenAI) - gpt-5-nano',
                                 'gemini' => 'Gemini',
-                                'groq' => 'Groq',
                             ])
-                            ->default('gemini')
+                            ->default('openai')
+                            ->helperText('مفتاح GPT بيتضاف معاه gpt-5-nano. الموديل اللي البوت بيرد بيه بيتختار من إعدادات البوت.')
                             ->required()
                             ->native(false),
 
@@ -84,11 +85,13 @@ class GeminiApiKeyResource extends Resource
                     ->badge()
                     ->color(fn (?string $state): string => match ($state) {
                         'gemini' => 'info',
+                        'openai' => 'success',
                         'groq' => 'warning',
                         default => 'gray',
                     })
                     ->formatStateUsing(fn (?string $state): string => match ($state) {
                         'gemini' => 'Gemini',
+                        'openai' => 'GPT',
                         'groq' => 'Groq',
                         default => $state ?? '—',
                     })
@@ -136,6 +139,7 @@ class GeminiApiKeyResource extends Resource
                     ->label('Provider')
                     ->options([
                         'gemini' => 'Gemini',
+                        'openai' => 'GPT',
                         'groq' => 'Groq',
                     ]),
 

@@ -196,40 +196,50 @@ class WhatsappBotResource extends Resource
                         $token = config('services.whatsapp.bot_token');
                         $botId = (string) $record->id;
 
-                        Http::timeout(15)
-                            ->withHeaders([
-                                'X-BOT-TOKEN' => $token,
-                            ])
-                            ->post(static::getNodeUrl() . '/sessions/start', [
-                                'bot_id' => $botId,
-                            ]);
-
-                        $data = null;
-
-                        for ($i = 0; $i < 10; $i++) {
-                            sleep(1);
-
-                            $response = Http::timeout(15)
+                        try {
+                            Http::timeout(10)
                                 ->withHeaders([
                                     'X-BOT-TOKEN' => $token,
                                 ])
-                                ->get(static::getNodeUrl() . "/sessions/{$botId}/qr");
+                                ->post(static::getNodeUrl() . '/sessions/start', [
+                                    'bot_id' => $botId,
+                                ]);
 
-                            if (!$response->successful()) {
-                                continue;
+                            $data = null;
+
+                            for ($i = 0; $i < 10; $i++) {
+                                sleep(1);
+
+                                $response = Http::timeout(10)
+                                    ->withHeaders([
+                                        'X-BOT-TOKEN' => $token,
+                                    ])
+                                    ->get(static::getNodeUrl() . "/sessions/{$botId}/qr");
+
+                                if (!$response->successful()) {
+                                    continue;
+                                }
+
+                                $data = $response->json();
+
+                                if (!empty($data['qr']) || (($data['status'] ?? null) === 'connected')) {
+                                    break;
+                                }
                             }
+                        } catch (\Throwable $e) {
+                            Notification::make()
+                                ->title('خدمة الواتساب معطلة حالياً')
+                                ->body('تعذر الاتصال بسيرفر خدمة الواتساب. يرجى التأكد من تشغيل الخدمة والمحاولة مرة أخرى.')
+                                ->danger()
+                                ->send();
 
-                            $data = $response->json();
-
-                            if (!empty($data['qr']) || (($data['status'] ?? null) === 'connected')) {
-                                break;
-                            }
+                            return;
                         }
 
                         if (!$data) {
                             Notification::make()
                                 ->title('فشل توليد QR')
-                                ->body('لم يتم الوصول لخدمة الواتساب')
+                                ->body('لم يتم الوصول لخدمة الواتساب أو استغرق السيرفر وقتاً طويلاً.')
                                 ->danger()
                                 ->send();
 
@@ -276,67 +286,80 @@ class WhatsappBotResource extends Resource
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('إغلاق')
                     ->modalContent(function (WhatsappBot $record) {
-                        $response = Http::timeout(15)
-                            ->withHeaders([
-                                'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
-                            ])
-                            ->get(static::getNodeUrl() . "/sessions/{$record->id}/qr");
+                        try {
+                            $response = Http::timeout(10)
+                                ->withHeaders([
+                                    'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
+                                ])
+                                ->get(static::getNodeUrl() . "/sessions/{$record->id}/qr");
 
-                        if (!$response->successful()) {
-                            return new HtmlString('<div style="text-align:center;padding:20px;">فشل جلب QR من السيرفر.</div>');
+                            if (!$response->successful()) {
+                                return new HtmlString('<div style="text-align:center;padding:20px;color:#dc2626;font-weight:bold;">فشل جلب QR من السيرفر.</div>');
+                            }
+
+                            $data = $response->json();
+                            $qr = $data['qr'] ?? null;
+
+                            $record->update([
+                                'qr_code' => $qr,
+                                'session_status' => $data['status'] ?? $record->session_status,
+                            ]);
+
+                            if (!$qr) {
+                                return new HtmlString('<div style="text-align:center;padding:20px;">لا يوجد QR حاليًا. اضغط توليد QR وانتظر ثانيتين.</div>');
+                            }
+
+                            return new HtmlString(
+                                '<div style="text-align:center;padding:20px;">
+                    <img src="' . e($qr) . '" style="width:320px;height:320px;border-radius:16px;border:1px solid #ddd;padding:8px;background:white;" />
+                    <p style="margin-top:12px;font-weight:bold;">افتح واتساب &gt; Linked Devices &gt; Link a device</p>
+                </div>'
+                            );
+                        } catch (\Throwable $e) {
+                            return new HtmlString('<div style="text-align:center;padding:20px;color:#dc2626;font-weight:bold;">⚠️ خدمة الواتساب معطلة حالياً أو لا يمكن الاتصال بها. يرجى التأكد من تشغيل الخدمة.</div>');
                         }
-
-                        $data = $response->json();
-                        $qr = $data['qr'] ?? null;
-
-                        $record->update([
-                            'qr_code' => $qr,
-                            'session_status' => $data['status'] ?? $record->session_status,
-                        ]);
-
-                        if (!$qr) {
-                            return new HtmlString('<div style="text-align:center;padding:20px;">لا يوجد QR حاليًا. اضغط توليد QR وانتظر ثانيتين.</div>');
-                        }
-
-                        return new HtmlString(
-                            '<div style="text-align:center;padding:20px;">
-                <img src="' . e($qr) . '" style="width:320px;height:320px;border-radius:16px;border:1px solid #ddd;padding:8px;background:white;" />
-                <p style="margin-top:12px;font-weight:bold;">افتح واتساب &gt; Linked Devices &gt; Link a device</p>
-            </div>'
-                        );
                     }),
                 Tables\Actions\Action::make('check_status')
                     ->label('فحص الحالة')
                     ->icon('heroicon-o-arrow-path')
                     ->color('gray')
                     ->action(function (WhatsappBot $record) {
-                        $response = Http::timeout(15)
-                            ->withHeaders([
-                                'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
-                            ])
-                            ->get(static::getNodeUrl() . "/sessions/{$record->id}/status");
+                        try {
+                            $response = Http::timeout(10)
+                                ->withHeaders([
+                                    'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
+                                ])
+                                ->get(static::getNodeUrl() . "/sessions/{$record->id}/status");
 
-                        if (!$response->successful()) {
+                            if (!$response->successful()) {
+                                Notification::make()
+                                    ->title('فشل فحص الحالة')
+                                    ->body('سيرفر الواتساب لم يستجب بنجاح.')
+                                    ->danger()
+                                    ->send();
+
+                                return;
+                            }
+
+                            $data = $response->json();
+
+                            $record->update([
+                                'session_status' => $data['status'] ?? null,
+                                'connected_at' => ($data['status'] ?? null) === 'connected' ? now() : $record->connected_at,
+                                'qr_code' => ($data['status'] ?? null) === 'connected' ? null : $record->qr_code,
+                            ]);
+
                             Notification::make()
-                                ->title('فشل فحص الحالة')
+                                ->title('تم تحديث الحالة')
+                                ->success()
+                                ->send();
+                        } catch (\Throwable $e) {
+                            Notification::make()
+                                ->title('خدمة الواتساب معطلة حالياً')
+                                ->body('تعذر الاتصال بسيرفر خدمة الواتساب.')
                                 ->danger()
                                 ->send();
-
-                            return;
                         }
-
-                        $data = $response->json();
-
-                        $record->update([
-                            'session_status' => $data['status'] ?? null,
-                            'connected_at' => ($data['status'] ?? null) === 'connected' ? now() : $record->connected_at,
-                            'qr_code' => ($data['status'] ?? null) === 'connected' ? null : $record->qr_code,
-                        ]);
-
-                        Notification::make()
-                            ->title('تم تحديث الحالة')
-                            ->success()
-                            ->send();
                     }),
 
                 Tables\Actions\Action::make('logout')
@@ -345,11 +368,27 @@ class WhatsappBotResource extends Resource
                     ->color('danger')
                     ->requiresConfirmation()
                     ->action(function (WhatsappBot $record) {
-                        Http::timeout(15)
-                            ->withHeaders([
-                                'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
-                            ])
-                            ->post(static::getNodeUrl() . "/sessions/{$record->id}/logout");
+                        try {
+                            Http::timeout(10)
+                                ->withHeaders([
+                                    'X-BOT-TOKEN' => config('services.whatsapp.bot_token'),
+                                ])
+                                ->post(static::getNodeUrl() . "/sessions/{$record->id}/logout");
+                        } catch (\Throwable $e) {
+                            $record->update([
+                                'qr_code' => null,
+                                'session_status' => 'logged_out',
+                                'connected_at' => null,
+                            ]);
+
+                            Notification::make()
+                                ->title('تنبيه: خدمة الواتساب معطلة حالياً')
+                                ->body('تم تغيير حالة البوت محلياً ولكن تعذر الاتصال بسيرفر الواتساب.')
+                                ->warning()
+                                ->send();
+
+                            return;
+                        }
 
                         $record->update([
                             'qr_code' => null,

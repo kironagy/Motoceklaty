@@ -18,6 +18,23 @@ class AgentTurnProcessor implements TurnProcessor
             return ['messages' => []];
         }
 
+        // A colleague answered after the customer's last message (the turn
+        // waited out his quiet window): nothing new to answer - the bot
+        // carries on from the customer's next message.
+        if (self::staffAnsweredLast((int) $turn->whatsapp_conversation_id)) {
+            return ['messages' => []];
+        }
+
         return $this->runner->run($turn);
+    }
+
+    public static function staffAnsweredLast(int $conversationId): bool
+    {
+        $last = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversationId)
+            ->where(fn ($q) => $q->where('direction', 'incoming')->orWhereIn('sender_type', ['agent', 'human_phone']))
+            ->latest('id')
+            ->first(['direction', 'sender_type']);
+
+        return $last !== null && $last->direction === 'outgoing';
     }
 }

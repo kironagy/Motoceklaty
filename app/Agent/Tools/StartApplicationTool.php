@@ -52,7 +52,12 @@ class StartApplicationTool implements Tool
     }
 
     public const INSURED_HINT = 'He said he is insured (متأمن عليه): he applies as employee - self_employed is only for an employee who is NOT insured. '
-        .'If he has no salary slip yet, tell him it is needed and he can send it when he gets it. Never suggest another work type.';
+        .'If he has no salary slip yet, tell him it is needed and he can send it when he gets it. Only if he says he cannot get it at all, '
+        .'the last resort is the card-only route (route=card_only) on its own terms - never another work type on his word.';
+
+    public const ROUTE_DESCRIPTION = 'card_only = the last resort when he works but cannot bring the papers his work needs (salary slip, app '
+        .'screenshots, tax card...): he applies with his ID only, on the free-work terms (its own cap and installment - quote them with '
+        .'get_installment_offer customer_type=self_employed first). Only after he said he cannot bring them; never for a woman.';
 
     public const NOT_OWNER_HINT = 'business_owner only when he said he OWNS the place (صاحب/عندي محل/ورشتي...). '
         .'"شغال في ورشة/محل/مطعم" is working there, not owning it. Ask him "إنت صاحب المكان ولا شغال فيه؟" '
@@ -66,6 +71,7 @@ class StartApplicationTool implements Tool
             'properties' => [
                 'customer_type' => ['type' => 'string'],
                 'customer_type_quote' => ['type' => 'string', 'description' => 'The customer\'s own words (copied exactly from their message) that tell their work situation, e.g. "انا موظف في شركة" or "شغال على اوبر". If they have not said it, do not call this tool - ask them first.'],
+                'route' => ['type' => 'string', 'enum' => ['card_only'], 'description' => self::ROUTE_DESCRIPTION],
                 'motorcycle_id' => ['type' => 'integer'],
                 'different_motorcycle_confirmed' => ['type' => 'boolean', 'description' => 'true only when the customer clearly chose a model other than the one he was last quoted.'],
                 'plan_id' => ['type' => 'integer'],
@@ -83,6 +89,13 @@ class StartApplicationTool implements Tool
 
     public function execute(array $args, ToolContext $ctx): ToolResult
     {
+        $cardOnly = ($args['route'] ?? null) === 'card_only';
+
+        if ($cardOnly) {
+            $args['customer_type'] = 'self_employed';
+            $args['_work_type'] = 'other';
+        }
+
         $customerType = CustomerType::where('key', $args['customer_type'])->where('is_active', true)->first();
 
         if (! $customerType) {
@@ -101,8 +114,21 @@ class StartApplicationTool implements Tool
         // Owner 2026-10-03: his work is read by the AI from the conversation
         // (no job lists) - not working, refused work, government or private,
         // owner or worker, insured or not.
-        if ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, $customerType->key, (string) $args['customer_type_quote'])) {
+        if ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, $customerType->key, (string) $args['customer_type_quote'], $cardOnly)) {
             return ToolResult::error($problem['code'], $problem['hint']);
+        }
+
+        // QA 2026-10-04: opened with no motorcycle and no plan although he
+        // had just chosen the Boxer on 18 months - the quoted offer fills
+        // what the call left out.
+        $quoted = \App\Domain\Conversations\QuotedOffer::last($ctx->conversationId, isset($args['motorcycle_id']) ? (int) $args['motorcycle_id'] : null);
+
+        if ($quoted && ! isset($args['plan_id']) && ! isset($args['installment_system']) && ! isset($args['months'])) {
+            $args['motorcycle_id'] ??= $quoted['machine_id'];
+            $args['plan_id'] = $quoted['plan_id'];
+            $args['down_payment'] ??= $quoted['down_payment'];
+        } elseif (! isset($args['motorcycle_id']) && ($lastMotorcycle = \App\Domain\Conversations\QuotedMotorcycle::last($ctx->conversationId))) {
+            $args['motorcycle_id'] = $lastMotorcycle;
         }
 
         $machine = null;
@@ -146,11 +172,29 @@ class StartApplicationTool implements Tool
             return ToolResult::error($e->errorCode);
         }
 
+        // card-only on an application already open under his real type: the route switches it
+        if ($cardOnly && (int) $outcome['application']->customer_type_id !== (int) $customerType->id) {
+            try {
+                $this->applications->updateSelection($outcome['application'], null, null, null, $customerType);
+                \App\Domain\Applications\CardOnlyRoute::reprice($outcome['application']->refresh());
+                $outcome['application']->refresh();
+            } catch (ApplicationSelectionException $e) {
+                return ToolResult::error($e->errorCode);
+            }
+        }
+
         // "طلبات" came as customer_type delivery_app: he is self_employed
         // and the work type is saved with his own words.
         // "ترزي ملابس" with no work type from the model: the reading has it.
-        if (! filled($args['_work_type'] ?? null) && $customerType->key === 'self_employed') {
-            $args['_work_type'] = app(\App\Domain\Applications\WorkClassification::class)->workType($ctx->conversationId, (string) $args['customer_type_quote']);
+        $readType = $customerType->key === 'self_employed'
+            ? app(\App\Domain\Applications\WorkClassification::class)->workType($ctx->conversationId, (string) $args['customer_type_quote'])
+            : null;
+
+        // the reading wins for a day's pay (tuk-tuk is not an app rider), else fills a gap
+        if ($readType === 'other' && (app(\App\Domain\Applications\WorkClassification::class)->reading($ctx->conversationId)['daily_labour_no_trade'] ?? false)) {
+            $args['_work_type'] = 'other';
+        } elseif (! filled($args['_work_type'] ?? null)) {
+            $args['_work_type'] = $readType;
         }
 
         if (filled($args['_work_type'] ?? null) && $customerType->key === 'self_employed') {
@@ -165,6 +209,11 @@ class StartApplicationTool implements Tool
             } catch (\Throwable) {
                 // the snapshot still asks for the work type
             }
+        }
+
+        // the card-only route is also how a day's pay (tuk-tuk...) applies - staff see it the same way
+        if ($cardOnly || (app(\App\Domain\Applications\WorkClassification::class)->reading($ctx->conversationId)['daily_labour_no_trade'] ?? false)) {
+            \App\Domain\Applications\CardOnlyRoute::mark($outcome['application'], (string) $args['customer_type_quote']);
         }
 
         return ToolResult::ok([

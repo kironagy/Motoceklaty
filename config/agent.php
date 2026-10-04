@@ -14,6 +14,21 @@ return [
     'fallback_models' => env('AGENT_FALLBACK_MODELS'),
     'fallback_thinking_level' => env('AGENT_FALLBACK_THINKING_LEVEL', 'minimal'),
 
+    // Model that reads document photos (IDs, slips, screenshots, shop signs).
+    // QA 2026-10-04: gpt-5-nano missed a neon shop sign, read a manager's name
+    // off a letterhead as the employee's and did not know an Uber profile;
+    // a document is a few calls per customer, so a stronger reader is cheap.
+    // Empty = the conversation model.
+    'document_model' => env('AGENT_DOCUMENT_MODEL'),
+    'document_reasoning_effort' => env('AGENT_DOCUMENT_REASONING_EFFORT', 'low'),
+
+    // Voice notes: OpenAI transcription model (gpt-4o-mini-transcribe), with
+    // Gemini as the fallback when no OpenAI key works.
+    'voice_model' => env('AGENT_VOICE_MODEL', 'gpt-4o-mini-transcribe'),
+
+    // reasoning_effort for a GPT model (OpenAiProvider): minimal|low|medium|high
+    'openai_reasoning_effort' => env('AGENT_OPENAI_REASONING_EFFORT', 'minimal'),
+
     // Wall-clock cap for one provider call across keys and fallback models.
     'provider_budget_seconds' => env('AGENT_PROVIDER_BUDGET_SECONDS', 45),
 
@@ -217,7 +232,7 @@ return [
         // A staff message from the phone silences the bot in that chat for
         // this long (0 = never). The bot and a colleague used to answer the
         // same customer in the same minute.
-        'staff_pause_minutes' => env('AGENT_STAFF_PAUSE_MINUTES', 60),
+        'staff_pause_minutes' => env('AGENT_STAFF_PAUSE_MINUTES', 10),
     ],
 
     // T17: agent loop limits, all DEC-23 (still OPEN) - no defaults.

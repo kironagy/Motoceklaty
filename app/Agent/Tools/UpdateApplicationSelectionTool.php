@@ -48,6 +48,7 @@ class UpdateApplicationSelectionTool implements Tool
                 'down_payment' => ['type' => 'number', 'minimum' => 0],
                 'customer_type' => ['type' => 'string'],
                 'customer_type_quote' => ['type' => 'string', 'description' => 'Required with customer_type: the customer\'s exact words stating their work situation.'],
+                'route' => ['type' => 'string', 'enum' => ['card_only'], 'description' => StartApplicationTool::ROUTE_DESCRIPTION],
             ],
         ];
     }
@@ -59,6 +60,12 @@ class UpdateApplicationSelectionTool implements Tool
 
     public function execute(array $args, ToolContext $ctx): ToolResult
     {
+        $cardOnly = ($args['route'] ?? null) === 'card_only';
+
+        if ($cardOnly) {
+            $args['customer_type'] = 'self_employed';
+        }
+
         if (array_intersect_key($args, array_flip(['motorcycle_id', 'plan_id', 'installment_system', 'months', 'down_payment', 'customer_type'])) === []) {
             return ToolResult::error('INVALID_ARGUMENTS', 'At least one field must be given.');
         }
@@ -84,7 +91,7 @@ class UpdateApplicationSelectionTool implements Tool
 
             $args['customer_type_quote'] = $quote;
 
-            if ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, $customerType->key, (string) ($args['customer_type_quote'] ?? ''))) {
+            if ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, $customerType->key, (string) ($args['customer_type_quote'] ?? ''), $cardOnly)) {
                 return ToolResult::error($problem['code'], $problem['hint']);
             }
         }
@@ -148,6 +155,27 @@ class UpdateApplicationSelectionTool implements Tool
         }
 
         $application->refresh();
+
+        if ($cardOnly) {
+            \App\Domain\Applications\CardOnlyRoute::mark($application, (string) ($args['customer_type_quote'] ?? ''));
+
+            if (! isset($args['plan_id']) && ! isset($args['months']) && ! isset($args['down_payment'])) {
+                \App\Domain\Applications\CardOnlyRoute::reprice($application);
+                $application->refresh();
+            }
+
+            try {
+                app(\App\Domain\Applications\CustomerDataService::class)->record(
+                    $application->customer, $application,
+                    [['key' => 'work_type', 'value' => 'other', 'quote' => (string) ($args['customer_type_quote'] ?? '')]],
+                    $ctx->conversationId,
+                );
+                $application->refresh();
+            } catch (\Throwable) {
+                // the snapshot still asks for the work type
+            }
+        }
+
         $selectedPlan = $application->installment_plan_id
             ? InstallmentPlan::with('installmentSystem')->find($application->installment_plan_id)
             : null;

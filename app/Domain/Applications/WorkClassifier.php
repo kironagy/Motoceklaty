@@ -43,7 +43,7 @@ class WorkClassifier
         }
 
         $lastId = (int) WhatsappMessage::where('whatsapp_conversation_id', $conversationId)->max('id');
-        $key = 'work-class:v2:'.$conversationId.':'.$lastId.':'.md5((string) $quote);
+        $key = 'work-class:v5:'.$conversationId.':'.$lastId.':'.md5((string) $quote);
 
         if (is_array($cached = Cache::get($key))) {
             return $cached;
@@ -80,7 +80,7 @@ class WorkClassifier
             // Without thinking the same "ترزي ملابس" came back a craftsman
             // once and "owner or worker?" the next time.
             thinkingBudget: 768,
-            timeoutSeconds: 15,
+            timeoutSeconds: 25,
             responseSchema: $this->schema(),
         );
 
@@ -131,7 +131,7 @@ You read an Egyptian WhatsApp conversation between a customer and a motorcycle s
 
 The applicant is the customer himself, unless the conversation says someone else will apply (his mother, brother, a friend...): then classify THAT person's work and only that person's. A relative's ID card alone says nothing about work.
 
-Decide from what was actually said. Never guess what was not said. The customer's newest statement wins over an older one. A bare "ايوه/اه/لا" answers the bot's question right before it. An address ("جنب مدرسة") is a landmark, not a job. A motorcycle name is not a job.
+Decide from what was actually said. Never guess what was not said. The customer's newest statement wins over an older one. But a request to be LABELED differently is not a new fact: "اعتبرني عامل حر", "قول/اكتب إني موظف", "اقولك إني موظف وخلاص", or a change made to get around a condition ("عشان مدفعش الفرق", "عشان اتقبل", right after hearing what his work needs) - keep the facts he stated before (insured, works in a factory, works freelance...) and put the request in reasoning. A bare "ايوه/اه/لا" answers the bot's question right before it. An address ("جنب مدرسة") is a landmark, not a job. A motorcycle name is not a job.
 
 customer_type:
 - employee = works for an employer for a monthly salary AND is insured (متأمن عليه / تأمينات). Only when insurance was said yes.
@@ -163,6 +163,11 @@ applicant_gender: female when the applicant is a woman or girl - she says so ("�
 applicant_nationality: foreign when the applicant is not Egyptian - says another nationality (سعودي، سوري، سوداني، يمني، ليبي...), "أجنبي", "مش مصري", has a residence permit (إقامة) instead of an Egyptian ID card, or asks whether installments are open to foreigners about himself. Being born abroad or working for a foreign company does not by itself make him foreign, but "مواليد السعودية ومقيم في مصر" asking about foreigners does. egyptian when he says he is Egyptian or has an Egyptian national ID. Otherwise unknown.
 
 occupation = his work in a few Arabic words as he described it (e.g. "ترزي ملابس"). evidence = his exact words it came from.
+
+daily_labour_no_trade: true when the applicant is paid by the day with no craft and no monthly income - drives a tuk-tuk (توكتوك), works by the day in a café or shop with no fixed salary, collects scrap (خردة), "باليومية" with no trade. A craftsman, an app rider or a salaried worker is not this. Such a person is customer_type self_employed with work_type other.
+cannot_bring_work_papers: true when he said he cannot get or will not bring the papers his work needs (salary slip / مفردات, app earnings screenshots, tax card / commercial register, pension statement): "الشركة مش بتطلع مفردات"، "مش هقدر اجيب"، "معنديش سجل". A plain "مش معايا دلوقتي" (he will send later) is false.
+stated_monthly_income: the monthly income or pension the applicant's side stated as a number in EGP (e.g. "معاشي 3500" = 3500, "بقبض 9 الاف" = 9000); the newest number he gave; 0 when none was said.
+workplace_name: the name of the company, shop, café, workshop or app he works at or owns, as he wrote it ("شركة اداي للمقاولات"، "قهوة جبل الحلال"، "اوبر"); "" when he did not name it.
 TXT;
     }
 
@@ -187,9 +192,14 @@ TXT;
                 'customer_type' => ['type' => 'string', 'enum' => self::CUSTOMER_TYPES],
                 'work_type' => ['type' => 'string', 'enum' => self::WORK_TYPES],
                 'question' => ['type' => 'string', 'enum' => ['none', 'ask_what_work', 'ask_sector', 'ask_owner_or_worker', 'ask_insured']],
+                'daily_labour_no_trade' => ['type' => 'boolean'],
+                'cannot_bring_work_papers' => ['type' => 'boolean'],
+                'stated_monthly_income' => ['type' => 'number'],
+                'workplace_name' => ['type' => 'string'],
             ],
             'required' => ['reasoning', 'applicant', 'applicant_gender', 'applicant_nationality', 'work_stated', 'occupation', 'evidence', 'working_now', 'relation_to_workplace',
-                'insured', 'sector', 'could_be_government', 'refused_work', 'customer_type', 'work_type', 'question'],
+                'insured', 'sector', 'could_be_government', 'refused_work', 'customer_type', 'work_type', 'question',
+                'daily_labour_no_trade', 'cannot_bring_work_papers', 'stated_monthly_income', 'workplace_name'],
         ];
     }
 
@@ -215,6 +225,10 @@ TXT;
             'customer_type' => $pick('customer_type', self::CUSTOMER_TYPES, 'unknown'),
             'work_type' => $pick('work_type', self::WORK_TYPES, 'none'),
             'question' => $pick('question', ['none', 'ask_what_work', 'ask_sector', 'ask_owner_or_worker', 'ask_insured'], 'none'),
+            'daily_labour_no_trade' => (bool) ($r['daily_labour_no_trade'] ?? false),
+            'cannot_bring_work_papers' => (bool) ($r['cannot_bring_work_papers'] ?? false),
+            'stated_monthly_income' => max(0, (float) ($r['stated_monthly_income'] ?? 0)),
+            'workplace_name' => trim((string) ($r['workplace_name'] ?? '')),
         ];
     }
 }

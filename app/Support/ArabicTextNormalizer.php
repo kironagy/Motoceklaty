@@ -23,7 +23,9 @@ class ArabicTextNormalizer
 
         $text = str_replace(['أ', 'إ', 'آ'], 'ا', $text);
         $text = str_replace('ة', 'ه', $text);
-        $text = str_replace('ى', 'ي', $text);
+        // OCR gives the Persian forms ("علی", "ک") for the Arabic letters.
+        $text = str_replace(['ى', 'ی'], 'ي', $text);
+        $text = str_replace('ک', 'ك', $text);
         $text = str_replace('ؤ', 'و', $text);
         $text = str_replace('ئ', 'ي', $text);
 

@@ -95,6 +95,21 @@ class CheckEligibilityTool implements Tool
 
         $result = $this->eligibility->evaluate($facts, $customerTypeId);
 
+        // QA 2026-10-04: "١٩ سنه" was refused, then "لا انا ٢٢، اكتب ٢٢" got
+        // "أنت مؤهل للتقسيط". A stated age only screens; the ID decides.
+        if (isset($facts['age']) && ($result['status'] ?? null) === 'eligible') {
+            if ($this->ageRefusedEarlier($ctx->conversationId)) {
+                return ToolResult::ok([
+                    'status' => 'needs_id',
+                    'reasons' => [['code' => 'AGE_CHANGED_AFTER_REFUSAL']],
+                    'note' => 'He gave another age after his age was refused. The age is read from his national ID only: tell him '
+                        .'kindly that the age is taken from the ID card, and do not say he is eligible or open an application on his word.',
+                ]);
+            }
+
+            $result['note'] = 'Stated age only - his national ID decides. Do not tell him he is eligible or accepted; just go on.';
+        }
+
         if (filled($facts['work_statement'] ?? null)
             && ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, 'employee', $facts['work_statement']))) {
             if ($problem['code'] === 'OCCUPATION_NOT_ACCEPTED') {
@@ -106,6 +121,14 @@ class CheckEligibilityTool implements Tool
         }
 
         return ToolResult::ok($result);
+    }
+
+    private function ageRefusedEarlier(int $conversationId): bool
+    {
+        return \App\Models\AiTraceStep::where('tool_name', 'check_eligibility')
+            ->whereIn('trace_id', \App\Models\AiTrace::where('conversation_id', $conversationId)->select('id'))
+            ->where('result_redacted', 'like', '%AGE_OUT_OF_RANGE%')
+            ->exists();
     }
 
     private function financedAmount(Machine $machine, array $args): ?float

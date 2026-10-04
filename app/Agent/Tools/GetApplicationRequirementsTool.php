@@ -70,10 +70,18 @@ class GetApplicationRequirementsTool implements Tool
 
         $requirements = $this->requirements->requirementsFor($customerType, $facts);
 
-        return ToolResult::ok($requirements + [
+        // QA 2026-10-04: "المطلوب ايه؟" got nine data fields and "مفردات مختومة" -
+        // the answer is the papers, by their own names; the data is asked
+        // one step at a time once the application is open.
+        $papers = collect($requirements['documents'] ?? [])->where('required', true)->pluck('label')->values()->all();
+
+        return ToolResult::ok([
+            'documents' => $requirements['documents'] ?? [],
+            'say' => 'المطلوب: '.implode('، ', $papers).'. (Say these papers as written, nothing added; the address and phone are asked later one by one.)',
+            'fields_count' => count($requirements['fields'] ?? []),
             'facts_used' => $facts,
             'conditional' => $this->unresolvedConditional($customerType, $facts),
-        ]);
+        ] + array_diff_key($requirements, ['documents' => 1, 'fields' => 1]));
     }
 
     /** Facts already on the open application (e.g. work_type), so answers match the snapshot. */

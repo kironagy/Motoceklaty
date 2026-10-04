@@ -153,12 +153,17 @@ class HandoffService
                     return;
                 }
 
-                $staffReplied = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+                // Owner 2026-10-04: a colleague who answered and then went
+                // quiet left the customer with the bot silent for good. The
+                // window counts from his last message, not only from the
+                // handoff: still writing = his; quiet that long = the bot
+                // carries on after him (close() runs what the customer sent).
+                $lastStaffAt = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
                     ->whereIn('sender_type', ['agent', 'human_phone'])
                     ->where('created_at', '>=', $handoff->opened_at)
-                    ->exists();
+                    ->max('created_at');
 
-                if ($staffReplied) {
+                if ($lastStaffAt !== null && \Illuminate\Support\Carbon::parse($lastStaffAt)->gt(now()->subMinutes((int) config('agent.handoff.return_to_agent_after_minutes')))) {
                     return;
                 }
 

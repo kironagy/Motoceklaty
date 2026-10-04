@@ -3,7 +3,7 @@
 namespace App\Providers;
 
 use App\Agent\Providers\AiProvider;
-use App\Agent\Providers\GeminiProvider;
+use App\Agent\Providers\RoutingAiProvider;
 use App\Agent\Runtime\DisabledTurnProcessor;
 use App\Agent\Runtime\TurnProcessor;
 use App\Domain\Conversations\GeminiVoiceTranscriber;
@@ -29,8 +29,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->bind(AiProvider::class, GeminiProvider::class);
-        $this->app->bind(VoiceTranscriber::class, GeminiVoiceTranscriber::class);
+        // picks Gemini or OpenAI by the model name
+        $this->app->bind(AiProvider::class, RoutingAiProvider::class);
+        $this->app->bind(VoiceTranscriber::class, \App\Domain\Conversations\OpenAiVoiceTranscriber::class);
         $this->app->bind(OcrProvider::class, GoogleVisionOcr::class);
         $this->app->bind(TurnSchedulerHook::class, TurnScheduler::class);
         $this->app->bind(TurnProcessor::class, function ($app) {

@@ -44,6 +44,12 @@ class ReplyGuard
             return 'EMPTY_REPLY';
         }
 
+        // QA 2026-10-04: he sent the back of his ID and the reply asked him
+        // for "a clearer back" - the photo was never read.
+        if ($this->ignoresNewDocumentPhoto($conversation, $outcomes)) {
+            return 'DOCUMENT_PHOTO_NOT_PROCESSED';
+        }
+
         // Claims are judged on assertions only: "لو غيرت رأيك أنا موجود"
         // (if YOU change your mind) is not "I changed it". A goodbye was
         // blocked on that word four times until the real customer got the
@@ -193,7 +199,7 @@ class ReplyGuard
         // "انا مدرس" got "جهات التمويل مش بتقبل شغل المدرسين" - a private
         // school is accepted. Only the owner's rule (a tool) refuses work.
         if (preg_match('/(?:بتتحفظ|تتحفظ|بيتحفظوا)|القرار (?:النهائي )?(?:بيكون |هيكون )?(?:عند|ليهم)|نقد(?:ّ)?م\s+ونشوف|(?:مش\s+(?:بتقبل|بيقبلوا|هتقبل|هيقبلوا)|مبتقبلش|مبيقبلوش|هيترفض|بيترفض|هيرفضوا|بيرفضوا)[^.؟?\n]{0,40}(?:شغل|وظيف|مهن|حكوم)|(?:شغل|وظيف|مهن|المدرسين|حكوم)[^.؟?\n]{0,60}(?:مش\s+(?:بتقبل|بيقبلوا|هتقبل)|مبتقبلش|هيترفض|بيترفض)/u', $replyText)
-            && ! preg_match('/OCCUPATION_NOT_ACCEPTED|occupation_not_accepted|APPLICANT_HAS_NO_WORK|FEMALE_FREE_INCOME_NOT_ACCEPTED|GENDER_NOT_ACCEPTED_FOR_TYPE|FOREIGNER_NO_INSTALLMENTS/', $toolResultsBlob)) {
+            && ! preg_match('/OCCUPATION_NOT_ACCEPTED|occupation_not_accepted|APPLICANT_HAS_NO_WORK|FEMALE_FREE_INCOME_NOT_ACCEPTED|GENDER_NOT_ACCEPTED_FOR_TYPE|FOREIGNER_NO_INSTALLMENTS|STATED_INCOME_BELOW_MINIMUM/', $toolResultsBlob)) {
             return 'WORK_REFUSAL_NOT_SOURCED';
         }
 
@@ -486,10 +492,43 @@ class ReplyGuard
     private const KNOWN_FINANCE_BRANDS = ['فاليو', 'ڤاليو', 'valu', 'كونتكت', 'contact', 'souhoola', 'تساهيل', 'tasaheel',
         'مايلو', 'mylo', 'aman', 'halan', 'سوبر كاش'];
 
+    /** A photo arrived this turn, an application is open, and no tool looked at the photo. */
+    private function ignoresNewDocumentPhoto(WhatsappConversation $conversation, array $outcomes): bool
+    {
+        $looked = array_intersect(array_column($outcomes, 'name'), ['process_document', 'identify_motorcycle_from_image', 'handoff_to_human']);
+
+        if ($looked !== [] || ! $conversation->customer_id) {
+            return false;
+        }
+
+        $turnId = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'incoming')->latest('id')->value('turn_id');
+
+        $applicationIds = \App\Models\Application::where('customer_id', $conversation->customer_id)
+            ->whereIn('status', \App\Models\Application::ACTIVE_STATUSES)->pluck('id');
+
+        if (! $turnId || $applicationIds->isEmpty()) {
+            return false;
+        }
+
+        return \App\Models\MessageMedia::query()
+            ->whereHas('message', fn ($q) => $q->where('whatsapp_conversation_id', $conversation->id)
+                ->where('direction', 'incoming')->where('turn_id', $turnId))
+            ->whereIn('media_type', ['image', 'document'])
+            ->whereNotIn('id', \App\Models\ApplicationDocument::whereIn('application_id', $applicationIds)->whereNotNull('media_id')->select('media_id'))
+            ->get()
+            ->contains(fn (\App\Models\MessageMedia $m) => ! isset(($m->analysis ?? [])['band']) && ! isset(($m->analysis ?? [])['not_a_document']));
+    }
+
     private function namesUnsourcedFinanceCompany(string $replyText, string $toolResultsBlob): bool
     {
         $reply = \App\Support\ArabicTextNormalizer::normalize($replyText);
-        $sources = \App\Support\ArabicTextNormalizer::normalize($toolResultsBlob);
+        // QA 2026-10-04: a customer who picked مايلو (one of our own
+        // systems, named by a tool a turn earlier) had every reply naming it
+        // blocked, got the fallback twice and was handed off. The systems we
+        // work with are sourced by definition.
+        $sources = \App\Support\ArabicTextNormalizer::normalize($toolResultsBlob.' '
+            .\App\Models\InstallmentSystem::where('is_active', true)->pluck('name')->implode(' '));
 
         foreach (self::KNOWN_FINANCE_BRANDS as $brand) {
             $brand = \App\Support\ArabicTextNormalizer::normalize($brand);
@@ -741,12 +780,33 @@ class ReplyGuard
         $required = (array) (app(\App\Domain\Applications\SnapshotService::class)->for($application)['documents']['required'] ?? []);
         $beyondId = array_diff($required, ['national_id_front', 'national_id_back']);
 
+        // Owner 2026-10-04: "تقديم بالبطاقة فقط" is a real last resort for a
+        // working man who said he cannot bring his work's papers - offering
+        // it then is not a waiver. Read lazily: only a sentence about the ID
+        // alone needs it.
+        $lastResort = null;
+        $cardOnlyAllowed = function () use (&$lastResort, $conversation, $application): bool {
+            if ($lastResort === null) {
+                $r = app(\App\Domain\Applications\WorkClassification::class)->reading($conversation->id);
+                $lastResort = \App\Domain\Applications\CardOnlyRoute::on($application)
+                    || ($r !== null && $r['cannot_bring_work_papers'] && ($r['applicant_gender'] ?? null) !== 'female');
+            }
+
+            return $lastResort;
+        };
+
         foreach (preg_split('/(?<=[.!؟?\n])/u', $replyText) as $sentence) {
-            if (preg_match('/مش\s+(?:هينفع|ينفع|هنقدر|نقدر)|لازم/u', $sentence)) {
+            if (preg_match('/مش\s+(?:هينفع|ينفع|هنقدر|نقدر|كفاي[ةه])|لازم/u', $sentence)) {
                 continue;
             }
 
-            if ($beyondId !== [] && preg_match('/(?<!مش\s)(?:بال)?بطاق[ةه]\s+(?:بس|فقط)/u', $sentence)) {
+            // QA 2026-10-04: "تحب أصفلك المحل بالكلام عشان نكمل؟" - a
+            // description offered in place of the shop photo.
+            if (preg_match('/(?:[اأتن]?وصف|اوصفلك|أوصفلك|تصفلي|اصفلك|أصفلك)\S*.{0,25}بالكلام|بالكلام\s+بدل/u', $sentence)) {
+                return true;
+            }
+
+            if ($beyondId !== [] && preg_match('/(?<!مش\s)(?:بال)?بطاق[ةه]\s+(?:بس|فقط)/u', $sentence) && ! $cardOnlyAllowed()) {
                 return true;
             }
 
@@ -754,7 +814,7 @@ class ReplyGuard
             // application still needs the salary slip: the switch
             // (documents.if_unavailable) was never made, so it would stall.
             if ($beyondId !== [] && preg_match('/(?:نكم[ّ]?ل|هنكم[ّ]?ل|نقد[ّ]?م|هنقد[ّ]?م|نمشي|هنمشي)\S*\s+(?:\S+\s+){0,2}?بالبطاق[ةه]/u', $sentence)
-                && ! $this->namesAnyDocument($sentence, $beyondId)) {
+                && ! $this->namesAnyDocument($sentence, $beyondId) && ! $cardOnlyAllowed()) {
                 return true;
             }
 
@@ -822,7 +882,16 @@ class ReplyGuard
 
     private function mayApplyThroughSomeoneElse(WhatsappConversation $conversation, string $toolResultsBlob): bool
     {
-        if (str_contains($toolResultsBlob, 'not_eligible') || str_contains($toolResultsBlob, 'AGE_OUT_OF_RANGE')) {
+        if (str_contains($toolResultsBlob, 'not_eligible') || str_contains($toolResultsBlob, 'AGE_OUT_OF_RANGE')
+            || str_contains($toolResultsBlob, 'APPLICANT_HAS_NO_WORK')) {
+            return true;
+        }
+
+        // QA 2026-10-04: "ما انا مش شغال اصلا عشان كده صاحبي هيقدم" was
+        // refused three times - the reading of his work knows he is not working.
+        $r = app(\App\Domain\Applications\WorkClassification::class)->reading($conversation->id);
+
+        if ($r !== null && (in_array($r['working_now'], ['no', 'not_yet'], true) || $r['applicant'] === 'someone_else')) {
             return true;
         }
 
@@ -927,6 +996,11 @@ class ReplyGuard
     private function containsInternalKey(string $replyText): bool
     {
         if (preg_match('/\b[a-z]+(?:_[a-z0-9]+)+\b/', $replyText)) {
+            return true;
+        }
+
+        // QA 2026-10-04: "ده اختيار تقسيط لـ H250 (ID 10)" and "upfront 16,500".
+        if (preg_match('/\b(?:id|plan_id|media_id)\s*[:#=]?\s*\d+|\b(?:snapshot|customer_type|media_id|plan_id)\b/i', $replyText)) {
             return true;
         }
 
@@ -1158,6 +1232,48 @@ class ReplyGuard
      * opened replies to "متاح تقسيط مكن" and "وهدفع مقدم ولا لا" - nobody had
      * said السلام عليكم. The salam is answered only in the turn he said it.
      */
+    /** pattern => replacement, applied to every reply before the guards */
+    private const WORDING_FIXES = [
+        '/تقرّ?ط/u' => 'تقسّط',
+        '/(?<!\p{L})عايب(?!\p{L})/u' => 'عايز',
+        '/(?<!\p{L})تشري(?!\p{L})/u' => 'تشتري',
+        '/(?<!\p{L})(?:ال)?تطبيق\s+(?:ال)?تقسيط/u' => 'طلب التقسيط',
+        '/(?:نفتح|افتح|أفتح|هفتح)(?:لك)?\s+(?:ال)?تطبيق(?!\p{L})/u' => 'نبدأ الطلب',
+        '/\s*(?:لل|ل)مسنين/u' => '',
+        '/(?:ال)?(?:بطاق[ةه]|هوي[ةه])\s+(?:ال)?وطني[ةه]/u' => 'البطاقة',
+        '/\bdriving\s+licen[cs]e\b/iu' => 'الرخصة',
+        '/\bupfront\b/iu' => 'وقت الاستلام',
+        '/\bfront\b/iu' => 'الوش',
+        '/\bback\b/iu' => 'الضهر',
+        '/\bmismatch\b/iu' => 'مش مطابق',
+        '/(مفردات(?:\s+(?:ال)?مرتب)?)\s+(?:(?:حديث[ةه]|جديد[ةه])\s+)?و?(?:مختوم[ةه]|حديث[ةه])(?:\s+(?:من\s+جه[ةه]\s+(?:ال)?عمل|و?مختوم[ةه]))?/u' => '$1',
+        '/طريه\s+البطاق/u' => 'طريقة البطاق',
+    ];
+
+    /**
+     * Wording the owner bans that needs no new model call to fix: emoji,
+     * **bold** and stray markdown headers are removed in place - a retry
+     * resends the whole context for a character the code can drop.
+     */
+    public function tidy(array $args): array
+    {
+        $args['messages'] = array_values(array_filter(array_map(function ($m) {
+            $m = preg_replace('/[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{FE0F}\x{200D}]/u', '', (string) $m);
+            $m = preg_replace('/\*\*(.+?)\*\*/u', '$1', $m);
+            $m = preg_replace('/^#{1,6}\s+/mu', '', $m);
+            // QA 2026-10-04 (table 2): misspellings, English terms and a hurtful
+            // word the model kept writing - corrected here, no new model call.
+            $m = preg_replace(array_keys(self::WORDING_FIXES), array_values(self::WORDING_FIXES), $m);
+            // "يا صاحب المحل" / "يا أستاذ محاسب": his job is not his name (JOB_AS_NAME) -
+            // said as "يا باشا" here instead of a whole new model call.
+            $m = preg_replace('/يا\s+(?:(?:أ|ا)ستاذ(?:ة|ه)?\s+|باشمهندس\s+)?(?:(?:ال)?(?:محاسب|مدرس|معلم|ممرض|صيدلي|سواق|نجار|سباك|كهربائي|ميكانيكي|طيار|مندوب|موظف|صنايعي|فران|حداد|نقاش|مبيض|ترزي|حلاق|بياع|كاشير|محامي|مهندس|دليفري)(?:ة|ه)?|صاحب\s+(?:ال)?(?:محل|ورش[ةه]|قهو[ةه]|مطعم|نشاط|مكان))(?!\p{L})/u', 'يا باشا', $m);
+
+            return trim(preg_replace('/[ \t]{2,}/u', ' ', $m));
+        }, (array) ($args['messages'] ?? [])), fn ($m) => $m !== ''));
+
+        return $args;
+    }
+
     public function withoutUnpromptedSalam(array $args, WhatsappConversation $conversation, int $turnId): array
     {
         $messages = array_values((array) ($args['messages'] ?? []));

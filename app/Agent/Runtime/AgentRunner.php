@@ -67,13 +67,16 @@ class AgentRunner
         \Illuminate\Support\Facades\DB::table('whatsapp_message_jobs')
             ->where('id', $turn->id)->whereNull('trace_id')->update(['trace_id' => $trace->id]);
 
-        $request = $this->context->build($turn);
-        $contents = $request->contents;
-        $toolDeclarations = $this->toolsFor($activeApplication !== null, $turn);
-
         $ctx = new ToolContext(
             $customer->id, $conversation->id, $activeApplication?->id, $turn->id, $trace->id, new TurnResultBuilder()
         );
+
+        // read first, so the context shows each photo as its result, not as the image again
+        $preread = $activeApplication ? $this->prereadDocuments($turn, $ctx) : null;
+
+        $request = $this->context->build($turn);
+        $contents = $request->contents;
+        $toolDeclarations = $this->toolsFor($activeApplication !== null, $turn);
 
         $modelCalls = 0;
         $toolCallCount = 0;
@@ -86,6 +89,16 @@ class AgentRunner
         $safeReplyTried = false;
         $started = microtime(true);
         $lastResponse = null;
+
+        // QA 2026-10-04 (one question = one call): a photo sent to an open
+        // application cost a model call to ask for process_document, its
+        // result, then the reply - and a guard retry when the model skipped
+        // it. The photos are read before the first call; the model answers
+        // from the result in one step.
+        if ($preread !== null) {
+            $outcomes[] = $preread['outcome'];
+            $contents[] = $preread['content'];
+        }
 
         try {
             while (true) {
@@ -120,7 +133,7 @@ class AgentRunner
                     $toolCallCount++;
 
                     if ($toolCall['name'] === 'send_reply') {
-                        $toolCall['args'] = $this->guard->withoutUnpromptedSalam($toolCall['args'], $conversation, (int) $turn->id);
+                        $toolCall['args'] = $this->guard->tidy($this->guard->withoutUnpromptedSalam($toolCall['args'], $conversation, (int) $turn->id));
                         $violation = $this->guard->check($toolCall['args'], $conversation, $request->system, $contents, $outcomes);
 
                         if ($violation !== null) {
@@ -203,6 +216,13 @@ class AgentRunner
                             $toolDeclarations = $this->toolsFor(true, $turn);
                         }
                     }
+                    // Each write tool returns the whole application snapshot; with
+                    // three tools in a turn all three rode along on every later
+                    // call. Only the newest one is the truth - older copies go.
+                    if (isset($result['data']['snapshot'])) {
+                        $contents = $this->withoutOlderSnapshots($contents);
+                    }
+
                     $contents[] = $this->toolResultContent($toolCall['id'], $toolCall['name'], $result);
 
                     if ($toolCall['name'] === 'send_reply' && ($result['ok'] ?? false)) {
@@ -293,6 +313,7 @@ class AgentRunner
         'INTEREST_DENIED' => 'Not sent: the reply says there is no interest/no increase. That is false - the installment price is higher than cash. Never deny it. If he asks about interest, give the cash price and what he pays in total from get_installment_offer (the breakdown line), and explain the difference only from price_difference_policy.',
         'SCRIPTED_PHRASE_REQUEST' => 'Not sent: the reply asks the customer to say/write a specific sentence. Never do that. If he already said what he works, use his own earlier words as the quote (record_customer_data / start_application). If he did not, just ask "حضرتك بتشتغل إيه؟".',
         'WORK_REFUSAL_NOT_SOURCED' => 'Not sent: the reply says his work is refused, but no tool said so. Call check_eligibility with work = his own words: say it is refused only when it returns occupation_not_accepted; if it returns ask_sector ask only "حكومي ولا خاص؟".',
+        'DOCUMENT_PHOTO_NOT_PROCESSED' => 'Not sent: he sent a photo this turn and the reply ignores it. Call process_document with the media_id shown next to it as "[صورة مرفقة - media_id: N]" (identify_motorcycle_from_image if it is a motorcycle photo), then answer from that result only.',
         'WORK_TYPE_TOLD' => 'Not sent: the reply tells him his type ("كعامل حر"). The type is for the tools only - never say it to the customer. Rewrite without it.',
         'JOB_AS_NAME' => 'Not sent: you called him by his job ("يا أستاذ محاسب"). His work is not his name - use his name only if he wrote it or it is on his ID, otherwise يا باشا / يا غالي. Rewrite.',
         'WORK_JUDGED' => 'Not sent: the reply judges his work ("بيسهل الإجراءات", "فرص القبول أعلى", "مقبول جداً"). Only the tools decide what his work means - say nothing about it being easier, better or accepted. Rewrite without it.',
@@ -402,6 +423,60 @@ class AgentRunner
         ];
     }
 
+    /**
+     * This turn's photos that no tool read yet, read now through the same
+     * tool (traced, guarded). A photo that is not a document (a motorcycle,
+     * a selfie) is left for the model - nothing is recorded for it.
+     *
+     * @return array{outcome: array, content: array}|null
+     */
+    private function prereadDocuments(object $turn, ToolContext $ctx): ?array
+    {
+        $mediaIds = \App\Models\MessageMedia::query()
+            ->whereHas('message', fn ($q) => $q->where('whatsapp_conversation_id', $ctx->conversationId)
+                ->where('direction', 'incoming')->where('turn_id', $turn->id))
+            ->whereIn('media_type', ['image', 'document'])
+            ->whereNotIn('id', \App\Models\ApplicationDocument::where('application_id', $ctx->activeApplicationId)->whereNotNull('media_id')->select('media_id'))
+            ->get()
+            ->reject(fn ($m) => isset(($m->analysis ?? [])['band']) || isset(($m->analysis ?? [])['not_a_document']))
+            ->pluck('id')
+            ->take(4)
+            ->all();
+
+        if ($mediaIds === []) {
+            return null;
+        }
+
+        $result = $this->tools->execute('process_document', ['media_ids' => $mediaIds, '_preread' => true], $ctx);
+
+        return [
+            'outcome' => [
+                'name' => 'process_document',
+                'ok' => (bool) ($result['ok'] ?? false),
+                'data' => ($result['ok'] ?? false) ? (array) ($result['data'] ?? []) : (array) ($result['error'] ?? []),
+            ],
+            'content' => ['role' => 'user', 'parts' => [['type' => 'text', 'text' => "## الصور اللي بعتها في الرسالة دي اتقرت خلاص (process_document - ما تناديهاش تاني عليها)\n```json\n"
+                .json_encode($result, JSON_UNESCAPED_UNICODE)."\n```\nرد عليه من النتيجة دي."]]],
+        ];
+    }
+
+    private function withoutOlderSnapshots(array $contents): array
+    {
+        foreach ($contents as $i => $content) {
+            if (($content['role'] ?? null) !== 'tool') {
+                continue;
+            }
+
+            foreach ($content['parts'] as $j => $part) {
+                if (isset($part['result']['data']['snapshot'])) {
+                    $contents[$i]['parts'][$j]['result']['data']['snapshot'] = 'superseded - the newest tool result has the current snapshot';
+                }
+            }
+        }
+
+        return $contents;
+    }
+
     private function toolResultContent(string $id, string $name, array $result): array
     {
         return ['role' => 'tool', 'parts' => [['type' => 'tool_result', 'id' => $id, 'name' => $name, 'result' => $result]]];
@@ -466,7 +541,7 @@ class AgentRunner
         }
 
         if (in_array($step['type'] ?? null, ['field', 'document'], true) && filled($step['label'] ?? null)) {
-            return "تمام يا باشا 👌 عشان نكمّل طلبك، ابعتلي: {$step['label']}";
+            return "تمام يا باشا، عشان نكمّل طلبك ابعتلي {$step['label']}";
         }
 
         return 'معلش يا باشا، ممكن توضحلي تقصد إيه بالظبط عشان أرد عليك صح؟';

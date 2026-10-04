@@ -10,6 +10,7 @@ class GeminiApiKeyModel extends Model
 {
     protected $fillable = [
         'gemini_api_key_id',
+        'provider',
         'display_name',
         'model_code',
         'category',

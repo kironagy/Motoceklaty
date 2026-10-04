@@ -60,7 +60,7 @@ class GeminiProvider implements AiProvider
         throw new AiProviderException('No Gemini model configured.', retryable: true);
     }
 
-    private function chatWith(AiRequest $request, string $modelCode, bool $isFallback, float $deadline = INF): AiResponse
+    public function chatWith(AiRequest $request, string $modelCode, bool $isFallback, float $deadline = INF): AiResponse
     {
         $manager = app(GeminiKeyManager::class);
         $maxTransientFailovers = max(0, (int) config('gemini.rate_limits.max_transient_failovers', 2));

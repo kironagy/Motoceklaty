@@ -38,11 +38,11 @@ class FinancingCapPolicy
     /** One sentence the agent can say as is - the reason behind the bigger down payment. */
     public function explanation(float $cap, ?int $customerTypeId): string
     {
-        $label = $customerTypeId !== null ? \App\Models\CustomerType::whereKey($customerTypeId)->value('label') : null;
-
-        // the owner's wording: above the cap, the difference is paid in cash and the rest is financed
-        return ($label ? "بما إن شغلك {$label}، " : '').'أقصى مبلغ بيتقسط '.number_format($cap).' جنيه والمكنة أعلى من كده، '
-            .'فالفرق بيتدفع كاش في الأول مع المصاريف الإدارية، والباقي بيتقسط.';
+        // the owner's wording: above the cap, the difference is paid in cash and the rest is financed.
+        // The cap figure and his type stay internal (instructions §5, WORK_TYPE_TOLD): the customer
+        // hears the reason and his own numbers (cash_due_upfront), not "أقصى تمويل 60,000 لعامل حر".
+        return 'على حسب نوع شغلك جهة التمويل بتمول لحد مبلغ معين، والمكنة دي أعلى منه، '
+            .'فجزء من تمنها بيتدفع كاش وقت الاستلام مع المصاريف الإدارية، والباقي بيتقسط.';
     }
 
     /** The customer-type cap and the system's own cap (dashboard), whichever is tighter. */

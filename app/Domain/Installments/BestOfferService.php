@@ -31,11 +31,12 @@ class BestOfferService
      *                          cash_due_upfront: float, monthly_payment: float, total_cost: float, cap: ?float}>
      *                          best offer per duration, shortest first
      */
-    public function offers(Machine $machine, ?int $customerTypeId, ?string $governorate = null, ?int $months = null, ?float $downPayment = null, bool $noUpfront = false): array
+    public function offers(Machine $machine, ?int $customerTypeId, ?string $governorate = null, ?int $months = null, ?float $downPayment = null, bool $noUpfront = false, ?int $systemId = null): array
     {
         $systems = $machine->installmentSystems()
             ->with(['installmentPlans' => fn ($q) => $q->where('is_active', true)])
             ->get()
+            ->filter(fn ($system) => $systemId === null || (int) $system->id === $systemId)
             ->filter(fn ($system) => $system->acceptsCustomer($customerTypeId, $governorate))
             ->filter(fn ($system) => (bool) $system->no_upfront_only === $noUpfront);
 

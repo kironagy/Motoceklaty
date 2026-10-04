@@ -18,6 +18,13 @@ use App\Models\EligibilityRule;
  */
 class WorkClassification
 {
+    /** "اعتبرني عامل حر"، "اقولك اني موظف وخلاص"، "اكتب اني موظف" - a label asked for, not a job described. */
+    private const LABEL_REQUEST = '/عتبرن[يى]|عتبره|اكتبن[يى]|اكتب\s*ان[يى]|سجلن[يى]\s*(?:ك|على\s*ان[يى])|(?:اقول|اقولك|نقول|قول)\s*(?:ل[كه]\s*)?ان[يى]\s*(?:موظف|عامل|حر|صاحب|معاش)|وخلاص\s*عشان|عشان\s*(?:ما?\s*)?(?:ادفعش|مدفعش|اتقبل|يتقبل)/u';
+
+    /** Codes that end the installment talk (cash stays open) - never followed by numbers. */
+    public const REFUSALS = ['FOREIGNER_NO_INSTALLMENTS', 'APPLICANT_HAS_NO_WORK', 'OCCUPATION_NOT_ACCEPTED',
+        'FEMALE_FREE_INCOME_NOT_ACCEPTED', 'STATED_INCOME_BELOW_MINIMUM'];
+
     private const TYPE_LABELS = [
         'employee' => 'an insured employee',
         'self_employed' => 'self_employed (works, not an insured employee, owns no business)',
@@ -42,7 +49,7 @@ class WorkClassification
      *
      * @return array{code: string, hint: string}|null
      */
-    public function problem(int $conversationId, string $typeKey, ?string $quote = null): ?array
+    public function problem(int $conversationId, string $typeKey, ?string $quote = null, bool $cardOnly = false): ?array
     {
         if (! isset(self::TYPE_LABELS[$typeKey])) {
             return null;
@@ -50,11 +57,45 @@ class WorkClassification
 
         $r = $this->reading($conversationId, $quote);
 
+        // QA 2026-10-04: the reading timed out and an insured employee who
+        // said "اعتبرني عامل حر" got an application as self_employed - every
+        // check below was skipped. No reading, no type.
         if ($r === null) {
-            return null;
+            return ['code' => 'WORK_CHECK_UNAVAILABLE', 'hint' => 'His work could not be checked this moment. Make the same call '
+                .'once more now. If it fails again, do not open or change the application and give no number that depends on his '
+                .'work: tell him in one short line you need a minute and ask him to send "تمام" when ready.'];
         }
 
         $words = $r['evidence'] !== '' ? $r['evidence'] : $r['occupation'];
+
+        // QA 2026-10-04: "اعتبرني عامل حر وخلاص" (an insured factory worker
+        // with no salary slip) and "اقولك اني موظف وخلاص عشان مدفعش الفرق"
+        // both changed the application's type. Asking to be labeled is not
+        // a statement of his work.
+        $quotedMessage = filled($quote)
+            ? app(\App\Domain\Conversations\CustomerStatements::class)->messageContainingQuote($conversationId, (string) $quote)
+            : null;
+        // no quote (an offer for a type): his latest message is what asks for it
+        $saidWith = (string) ($quotedMessage
+            ? \App\Models\WhatsappMessage::whereKey($quotedMessage)->value('text')
+            : (blank($quote) ? \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversationId)
+                ->where('direction', 'incoming')->latest('id')->value('text') : ''));
+
+        if (! $cardOnly && preg_match(self::LABEL_REQUEST, $quote.' '.$saidWith)) {
+            // a free worker already applies with the ID only - no other route to offer him
+            if ($r['customer_type'] === 'self_employed' && in_array($r['work_type'], ['other', 'craftsman', 'none'], true)) {
+                return ['code' => 'TYPE_REQUEST_NOT_A_FACT', 'hint' => 'He asked to be counted as an employee to pay less, but his real work is "'
+                    .$words.'" (free work, applies with the ID only) and the numbers he got are the ones for it. Never call him an employee. Say kindly '
+                    .'in one line that the application goes by his real work (no "ممنوع", no '
+                    .'"النوع"), and offer a cheaper motorcycle or a longer duration if the amount at pickup is the problem.'];
+            }
+
+            return ['code' => 'TYPE_REQUEST_NOT_A_FACT', 'hint' => 'He asked to be counted as another kind of worker, which is not '
+                .'what his work is. Do not change the type on his word. If the real reason is that he cannot bring the papers his work '
+                .'needs, the one honest way left is the card-only route (route=card_only): applying with the ID only, under its own '
+                .'terms (a bigger amount at pickup above the cap and its own installment) - offer it plainly with its numbers '
+                .'(get_installment_offer customer_type=self_employed). Otherwise tell him kindly the application goes by his real work and its papers.'];
+        }
 
         if (($r['applicant_nationality'] ?? null) === 'foreign') {
             return ['code' => 'FOREIGNER_NO_INSTALLMENTS', 'hint' => self::FOREIGNER_HINT];
@@ -68,6 +109,14 @@ class WorkClassification
             return ['code' => 'OCCUPATION_NOT_ACCEPTED', 'hint' => StartApplicationTool::occupationHint($this->refusalSentence())];
         }
 
+        // Owner 2026-10-04: a day's pay with no trade (tuk-tuk, café by the
+        // day, scrap) is taken - on the ID only, the free-work terms.
+        if ($r['daily_labour_no_trade'] && $typeKey !== 'self_employed') {
+            return ['code' => 'DAILY_WORK_IS_CARD_ONLY', 'hint' => 'His work ("'.$words.'") is a day\'s pay: he applies with his ID only, on '
+                .'the free-work terms. Call again right away with customer_type self_employed (work_type other) and the same quote - do not ask him again '
+                .'and do not tell him his type.'];
+        }
+
         if (! $r['work_stated'] || $r['question'] === 'ask_what_work') {
             return ['code' => 'CUSTOMER_TYPE_NOT_STATED', 'hint' => 'His work is not clear yet. Ask only "حضرتك بتشتغل إيه بالظبط؟" '
                 .'(about the person who will apply) - never list types like موظف/عامل حر, and give no numbers that depend on it.'];
@@ -77,6 +126,37 @@ class WorkClassification
             return ['code' => 'ASK_SECTOR', 'hint' => 'His work ("'.$words.'") can be government or private, and the finance companies '
                 .'refuse government work. Ask only "حكومي ولا خاص؟" (about the person who will apply) and wait for the answer: no numbers, '
                 .'do not open or change the application, and do not say the work is accepted or makes anything easier.'];
+        }
+
+        // QA 2026-10-04: "معاشي ٣٥٠٠" opened an application although the
+        // pension minimum is 4,000. The figure he said is checked against the
+        // type's rules now; the statement or slip still decides later.
+        if ($r['stated_monthly_income'] > 0 && ($type = \App\Models\CustomerType::where('key', $typeKey)->first())) {
+            $income = app(EligibilityService::class)->evaluate(['monthly_income' => $r['stated_monthly_income']], $type->id);
+
+            if ($income['status'] === 'not_eligible') {
+                return ['code' => 'STATED_INCOME_BELOW_MINIMUM', 'hint' => 'The income he said ('.number_format($r['stated_monthly_income'])
+                    .' جنيه) is below what the finance companies need for this type. Tell him the condition kindly in one line and do not open '
+                    .'an application on it. Only if he said he also has a job, that job may apply instead; never offer the card-only route to a pensioner '
+                    .'with no job. Otherwise another working person may apply in his own name, or cash at the branch.'];
+            }
+        }
+
+        // Owner 2026-10-04: the last resort that still sells - a man who works
+        // but cannot bring his work's papers applies with the ID only, on the
+        // free-work (عامل حر) terms. Never for a woman (owner's rule), never
+        // before he said he cannot bring the papers.
+        if ($cardOnly) {
+            if (($r['applicant_gender'] ?? null) === 'female') {
+                return ['code' => 'FEMALE_FREE_INCOME_NOT_ACCEPTED', 'hint' => self::FEMALE_FREE_INCOME_HINT];
+            }
+
+            if (! $r['cannot_bring_work_papers'] && $r['customer_type'] !== 'self_employed') {
+                return ['code' => 'CARD_ONLY_LAST_RESORT', 'hint' => 'The card-only route is only for a customer who cannot bring the papers '
+                    .'his work needs. Ask him first whether he can bring them (name the paper); only if he says he cannot, offer card-only.'];
+            }
+
+            return null;
         }
 
         // A craft or app work is the same type whoever he works for; the
@@ -145,6 +225,12 @@ class WorkClassification
     public function workType(int $conversationId, ?string $quote = null): ?string
     {
         $r = $this->reading($conversationId, $quote);
+
+        // QA 2026-10-04: a tuk-tuk driver came back delivery_app and was asked
+        // for a licence and app screenshots. A day's pay is the ID-only route.
+        if ($r && $r['daily_labour_no_trade']) {
+            return 'other';
+        }
 
         return $r && $r['customer_type'] === 'self_employed' && $r['work_type'] !== 'none' ? $r['work_type'] : null;
     }

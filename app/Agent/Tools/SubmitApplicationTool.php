@@ -72,8 +72,11 @@ class SubmitApplicationTool implements Tool
         // verbatim from the DB, right after the AI's own message.
         $ctx->outbound->addTrailingMessage($result['review_text']);
 
-        return ToolResult::error('CUSTOMER_CONFIRMATION_REQUIRED', 'NOT submitted yet. The stored summary is being sent to the customer after your message - '
-            .'ask them to check it and confirm (or say what to correct). Submit with confirm=true only after their confirmation. Summary: '
-            .json_encode($result['review'], JSON_UNESCAPED_UNICODE));
+        // QA 2026-10-04: the line before the summary said "ناقص الرقم القومي ونوع
+        // الشغل" while the summary showed them recorded (✓), and an "اه" after
+        // it got "عايز أقدّم دلوقتي؟" twice more.
+        return ToolResult::error('CUSTOMER_CONFIRMATION_REQUIRED', 'NOT submitted yet. The stored summary goes to him right after your message. '
+            .'Your message: ONE short line only, e.g. "ده ملخص طلبك، راجعه ولو كله تمام قولّي اه" - list nothing, never say something is missing '
+            .'(✓ means recorded). His next message accepting it (اه، تمام، ماشي، صح، قدم) = call submit_application confirm=true at once, no other question.');
     }
 }

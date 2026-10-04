@@ -29,7 +29,7 @@ class MentionedMotorcycle
     ];
 
     /** Category words that name no single brand. */
-    private const GENERIC = ['scooter', 'scooters', 'electric', 'max', 'sport', 'classic', 'light', 'road', 'music', 'tiger', 'اصلي', 'استيراد'];
+    private const GENERIC = ['scooter', 'scooters', 'electric', 'max', 'sport', 'classic', 'light', 'road', 'music', 'tiger', 'اصلي', 'استيراد', 'فرز', 'تاني', 'تانى'];
 
     /** Words that mean he wants something else than what he named. */
     private const ASKS_ALTERNATIVE = '/زي|شبه|بديل|غير|تاني[هة]?|مثل|نفس|احسن من|ارخص من|اقل من|مقارن|قارن|ولا/u';
@@ -42,11 +42,29 @@ class MentionedMotorcycle
         foreach (self::currentTurnTexts($conversationId) as $raw) {
             $text = ArabicTextNormalizer::normalize($raw);
 
-            if (! preg_match('/\d/', $text) || preg_match(self::ASKS_ALTERNATIVE, $text)) {
+            if (preg_match(self::ASKS_ALTERNATIVE, $text)) {
                 continue;
             }
 
             $tokens = preg_split('/[^\p{L}\p{N}]+/u', $text, -1, PREG_SPLIT_NO_EMPTY);
+
+            // QA 2026-10-04: "البوكسر ١٥٠" (no brand word) opened the application
+            // on "بلسر ١٥٠" - same brand, same number. A model word he wrote
+            // (بوكسر، بلسر، كيت...) must be in the motorcycle's own name.
+            $modelWords = self::modelWords();
+            $named = array_values(array_filter($tokens, fn ($t) => isset($modelWords[$t])));
+            $machineWords = self::letterTokens((string) $machine->name);
+
+            if ($named !== [] && array_intersect($named, $machineWords) === []) {
+                return "The customer wrote \"{$raw}\", but motorcycle {$machine->id} \"".trim($machine->name).'" is another model. '
+                    .'Use the model he named (search_motorcycles with his own words) and its id.';
+            }
+
+            // brand and number checks need a number he wrote ("دايو 4")
+            if (! preg_match('/\d/', $text)) {
+                continue;
+            }
+
             $brands = [];
             $numbers = [];
 
@@ -68,7 +86,12 @@ class MentionedMotorcycle
 
             $brandNames = Brand::whereIn('id', array_unique($brands))->pluck('name')->map(fn ($n) => trim($n))->implode(' / ');
 
-            if (! in_array((int) $machine->brand_id, $brands, true)) {
+            // QA 2026-10-04: "Keeway keet 150" is filed under the brand
+            // "Scooters" - the brand he named is in the model's own name.
+            $nameHasBrand = collect(self::letterTokens((string) $machine->name))
+                ->contains(fn ($token) => array_intersect($vocabulary[$token] ?? [], $brands) !== []);
+
+            if (! in_array((int) $machine->brand_id, $brands, true) && ! $nameHasBrand) {
                 return "The customer wrote \"{$raw}\" ({$brandNames}), but motorcycle {$machine->id} \"".trim($machine->name).'" is another brand. '
                     .'Find the model he named (search_motorcycles with his own words) and use its id. If we do not carry it, tell him '
                     .'"للأسف مش متوفرة عندنا حاليا" - never quote, show or open another model in its place unless he asks for one.';
@@ -110,6 +133,30 @@ class MentionedMotorcycle
         }
 
         return array_values(array_unique($ids));
+    }
+
+    /** @return array<string, true> distinctive words of our active model names (no brands, no category words) */
+    private static function modelWords(): array
+    {
+        static $words = null;
+
+        if ($words !== null) {
+            return $words;
+        }
+
+        $brandWords = self::vocabulary();
+        $generic = array_flip(array_map([ArabicTextNormalizer::class, 'normalize'], self::GENERIC));
+        $words = [];
+
+        foreach (Machine::where('is_active', true)->pluck('name') as $name) {
+            foreach (self::letterTokens((string) $name) as $token) {
+                if (! isset($brandWords[$token]) && ! isset($generic[$token])) {
+                    $words[$token] = true;
+                }
+            }
+        }
+
+        return $words;
     }
 
     /** @return string[] what the customer sent since the last reply */

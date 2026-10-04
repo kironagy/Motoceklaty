@@ -93,6 +93,7 @@ class RecordCustomerDataTool implements Tool
             'conflicts' => $result['conflicts'],
             'snapshot' => $application ? $this->snapshots->for($application->refresh()) : null,
         ];
+        $data['ask_next'] = \App\Domain\Applications\SnapshotService::askNext($data['snapshot']);
 
         // Nothing saved is not a success: the model used to reply "سجلت"
         // on a result whose saved list was empty.

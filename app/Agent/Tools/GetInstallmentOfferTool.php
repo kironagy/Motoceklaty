@@ -88,7 +88,10 @@ class GetInstallmentOfferTool implements Tool
             // with no question. Above the cap he is asked the owner's question
             // first; below it the numbers come without his type.
             if (! $ctx->activeApplicationId && ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, $customerType->key))) {
-                if ($this->cappedWorkTypes($machine) !== null) {
+                // QA 2026-10-04: a girl on free income was quoted 5,993 a month
+                // and asked "تقدّمي؟" before the refusal came. A refusal comes
+                // before any number, whatever the price.
+                if ($this->cappedWorkTypes($machine) !== null || in_array($problem['code'], \App\Domain\Applications\WorkClassification::REFUSALS, true)) {
                     return ToolResult::error($problem['code'], $problem['hint']);
                 }
 
@@ -98,6 +101,25 @@ class GetInstallmentOfferTool implements Tool
 
         // The owner: above the freelancer cap (60,000) the offer depends on
         // his work, so the work comes first; below it the numbers come first.
+        // QA 2026-10-04: "شغال دليفري على اوبر" and "انا عندي قهوه" were
+        // followed by calls with no customer_type, and the customer was asked
+        // his work two and three times. The work he already said is read here.
+        if ($customerTypeId === null && ! isset($args['customer_type']) && $this->cappedWorkTypes($machine) !== null) {
+            $classification = app(\App\Domain\Applications\WorkClassification::class);
+            $reading = $classification->reading($ctx->conversationId);
+            $stated = $reading && $reading['work_stated'] && $reading['customer_type'] !== 'unknown'
+                ? CustomerType::where('key', $reading['customer_type'])->where('is_active', true)->first()
+                : null;
+
+            if ($stated) {
+                if ($problem = $classification->problem($ctx->conversationId, $stated->key)) {
+                    return ToolResult::error($problem['code'], $problem['hint']);
+                }
+
+                $customerTypeId = $stated->id;
+            }
+        }
+
         if ($customerTypeId === null && ($capLabels = $this->cappedWorkTypes($machine)) !== null) {
             return ToolResult::error('ASK_WORK_FIRST', 'Before any installment number, tell him the cash price ('
                 .number_format((float) $machine->cash_price).' جنيه) and ask only "حضرتك بتشتغل إيه؟" - for this motorcycle the '
@@ -124,7 +146,19 @@ class GetInstallmentOfferTool implements Tool
         $governorate = $args['governorate'] ?? null;
         $noUpfront = ($args['no_upfront'] ?? false) === true;
 
-        $offers = $this->offers->offers($machine, $customerTypeId, $governorate, $months, $downPayment, $noUpfront);
+        // QA 2026-10-04: he picked مايلو for two years and was quoted the
+        // cheapest other company's fees and installment, while his
+        // application held the مايلو plan. A chosen company is priced as is.
+        $chosenSystemId = $ctx->activeApplicationId
+            ? Application::with('installmentPlan')->whereKey($ctx->activeApplicationId)->where('machine_id', $machine->id)->first()?->installmentPlan?->installment_system_id
+            : null;
+        $offers = $chosenSystemId
+            ? $this->offers->offers($machine, $customerTypeId, $governorate, $months, $downPayment, $noUpfront, (int) $chosenSystemId)
+            : [];
+
+        if ($offers === []) {
+            $offers = $this->offers->offers($machine, $customerTypeId, $governorate, $months, $downPayment, $noUpfront);
+        }
 
         // A 62-year-old was offered 3 years; the last installment must fall
         // by the age limit (eligibility rule max_age_at_end).
@@ -178,6 +212,14 @@ class GetInstallmentOfferTool implements Tool
 
         $shown = $asked === [] ? $offers : array_values(array_filter($offers, fn ($o) => in_array($o['months'], $asked, true)));
 
+        // One duration named = what he is weighing: remembered, and an open
+        // application with no plan yet takes it (he chose before applying).
+        if (count($shown) === 1) {
+            $offer = ['machine_id' => $machine->id, 'months' => $shown[0]['months'], 'plan_id' => $shown[0]['plan_id'], 'down_payment' => (float) $shown[0]['down_payment']];
+            \App\Domain\Conversations\QuotedOffer::remember($ctx->conversationId, $offer);
+            $this->fillEmptySelection($ctx, $offer);
+        }
+
         if ($shown === []) {
             return ToolResult::error('DURATION_NOT_AVAILABLE', 'No plan for '.implode(', ', $asked).' months. Available durations: '
                 .implode(', ', array_column($offers, 'months')).' - offer the closest ones.');
@@ -219,6 +261,28 @@ class GetInstallmentOfferTool implements Tool
      * opened as عامل حر, got a 15,000 down payment. While his work is not
      * known, a motorcycle above a work-type cap is not quoted at all.
      */
+    private function fillEmptySelection(ToolContext $ctx, array $offer): void
+    {
+        $application = $ctx->activeApplicationId ? Application::find($ctx->activeApplicationId) : null;
+
+        if (! $application || $application->installment_plan_id || ! $application->isActive() || $application->status !== 'collecting'
+            || ($application->machine_id && (int) $application->machine_id !== (int) $offer['machine_id'])) {
+            return;
+        }
+
+        try {
+            app(\App\Domain\Applications\ApplicationService::class)->updateSelection(
+                $application,
+                \App\Models\Machine::find($offer['machine_id']),
+                \App\Models\InstallmentPlan::with('installmentSystem')->find($offer['plan_id']),
+                $offer['down_payment'],
+                null,
+            );
+        } catch (\Throwable) {
+            // the snapshot still lists the plan as not chosen
+        }
+    }
+
     private function cappedWorkTypes(Machine $machine): ?string
     {
         $price = (float) ($machine->installment_price ?: $machine->cash_price);

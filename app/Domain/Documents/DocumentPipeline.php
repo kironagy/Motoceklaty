@@ -102,7 +102,11 @@ class DocumentPipeline
             $ocrText = '';
         }
 
-        $classification = $this->classify($media, $ocrText, $activeTypes);
+        // QA 2026-10-04: a real shop front under a lit neon sign came back
+        // "not a document" while the application was waiting for exactly
+        // that photo. What he still owes is the likeliest reading.
+        $owed = $this->owedDocuments($application);
+        $classification = $this->classify($media, $ocrText, $activeTypes, $owed);
 
         if (! $classification) {
             $document = $this->recordDocument($application, $media, null, $expectedTypeKey, 'failed', null, null, [], [['code' => 'OCR_UNAVAILABLE']]);
@@ -130,6 +134,19 @@ class DocumentPipeline
         $issues = $this->validate(
             $application, $documentType, $detectedTypeKey, $expectedTypeKey, $legibility, $extractedFields, $activeTypes
         );
+
+        // QA 2026-10-04: a lit sign "أكلات المعلم" was read "اكل البلد" and the
+        // shop was refused against its own tax card. A name that does not match
+        // is read once more, carefully - the stored name is never shown to the
+        // reader, so a different shop still fails.
+        if ($documentType && array_intersect(array_column($issues, 'code'), ['NAME_MISMATCH', 'BUSINESS_NAME_MISMATCH', 'TAXPAYER_NAME_MISMATCH']) !== []) {
+            $reread = $this->fillMissingFields($media, $ocrText, $documentType, $extractedFields, 'high');
+            $retry = $this->validate($application, $documentType, $detectedTypeKey, $expectedTypeKey, $legibility, $reread, $activeTypes);
+
+            if (count($retry) < count($issues)) {
+                [$issues, $extractedFields] = [$retry, $reread];
+            }
+        }
 
         $status = $issues === [] ? 'accepted' : 'rejected';
         $appliedFields = [];
@@ -228,7 +245,17 @@ class DocumentPipeline
     }
 
     /** @return array{0: ?string, 1: string, 2: float, 3: array}|null */
-    private function classify(MessageMedia $media, string $ocrText, \Illuminate\Support\Collection $activeTypes): ?array
+    /** @return string[] document keys this application still waits for */
+    private function owedDocuments(Application $application): array
+    {
+        try {
+            return (array) (app(\App\Domain\Applications\SnapshotService::class)->for($application)['documents']['missing'] ?? []);
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    private function classify(MessageMedia $media, string $ocrText, \Illuminate\Support\Collection $activeTypes, array $owed = []): ?array
     {
         // extraction_fields is never enforced here (Gemini's `fields` schema
         // below has no per-type shape to keep the prompt type-agnostic) -
@@ -270,7 +297,9 @@ class DocumentPipeline
                     .'A field that is not visible on this image is left out - never write "null" or a guess. '
                     .'A person\'s full name may be printed across several lines (e.g. the first name alone on the line above the rest): '
                     .'join all name lines in reading order. '
-                    .'Today is '.now()->toDateString().' - resolve relative periods ("آخر 30 يوم", "this month", a month name without a year) against it; dates as YYYY-MM-DD.'."\n\n"
+                    .'Today is '.now()->toDateString().' - resolve relative periods ("آخر 30 يوم", "this month", a month name without a year) against it; dates as YYYY-MM-DD.'
+                    .($owed !== [] ? "\nThis customer was just asked for: ".implode(', ', $owed).' - a photo that fits one of these (even a shop front with a lit or stylised sign, '
+                        .'or a screenshot in another language) is most likely it; still never force a type it is not.' : '')."\n\n"
                     ."OCR text:\n{$ocrText}",
                 contents: [
                     ['role' => 'user', 'parts' => [
@@ -311,13 +340,14 @@ class DocumentPipeline
         $raw = implode('', $response->textParts);
         $parsed = json_decode($raw, true) ?? $this->salvage($raw);
         $activeKeys = $activeTypes->pluck('key')->all();
-        $detectedTypeKey = $parsed['document_type_key'] ?? null;
+        $detectedTypeKey = is_string($parsed['document_type_key'] ?? null) ? strtolower(trim($parsed['document_type_key'])) : null;
 
         if (! in_array($detectedTypeKey, $activeKeys, true)) {
             $detectedTypeKey = null;
         }
 
         $fields = $this->withoutEmptyValues(is_array($parsed['fields'] ?? null) ? $parsed['fields'] : []);
+        $detectedTypeKey = $this->nationalIdSide($detectedTypeKey, $ocrText, $activeKeys);
 
         if ($detectedTypeKey !== null) {
             $type = $activeTypes->firstWhere('key', $detectedTypeKey);
@@ -325,6 +355,19 @@ class DocumentPipeline
             // back with an app_name, which is not this document's to carry.
             $fields = array_intersect_key($fields, array_flip($type->allFields()));
             $fields = $this->fillMissingFields($media, $ocrText, $type, $fields);
+
+            // QA 2026-10-04: a letter printed "13/9/20246" was read as 2024 -
+            // a year before the hire date on the same paper - and rejected as
+            // expired. A date that contradicts the document is read once more.
+            if (($issued = $fields['salary_slip_date'] ?? $fields['pension_statement_date'] ?? null) && ($hired = $fields['hire_date'] ?? null)
+                && strtotime((string) $issued) && strtotime((string) $hired) && strtotime((string) $issued) < strtotime((string) $hired)) {
+                $fields = $this->fillMissingFields($media, $ocrText."\n\nNOTE: the issue date you read ({$issued}) is before the hire date ({$hired}) "
+                    .'on the same paper - that cannot be. Read the issue date again (a typo in the year is likely).', $type, $fields);
+            }
+
+            if ($detectedTypeKey === 'national_id_front') {
+                $fields = $this->withFirstNameLine($fields, $ocrText);
+            }
         }
 
         return [
@@ -336,6 +379,72 @@ class DocumentPipeline
     }
 
     /**
+     * QA 2026-10-04: three clear ID backs in a row came back as fronts and
+     * were rejected for "no name", so no customer could finish. The side of
+     * an Egyptian ID is printed on it: the front says "بطاقة تحقيق الشخصية",
+     * only the back says "البطاقة سارية حتى". The OCR text settles it.
+     */
+    private function nationalIdSide(?string $typeKey, string $ocrText, array $activeKeys): ?string
+    {
+        if ($ocrText === '' || ! in_array($typeKey, ['national_id_front', 'national_id_back'], true)) {
+            return $typeKey;
+        }
+
+        $text = \App\Support\ArabicTextNormalizer::normalize($ocrText);
+        $front = str_contains($text, \App\Support\ArabicTextNormalizer::normalize('تحقيق الشخصية'));
+        $back = (bool) preg_match('/'.\App\Support\ArabicTextNormalizer::normalize('سارية').'\s*'.\App\Support\ArabicTextNormalizer::normalize('حتى').'/u', $text);
+
+        $side = match (true) {
+            $back && ! $front => 'national_id_back',
+            $front && ! $back => 'national_id_front',
+            default => $typeKey,
+        };
+
+        return in_array($side, $activeKeys, true) ? $side : $typeKey;
+    }
+
+    /**
+     * QA 2026-10-04: "يوسف" / "سلام" / "حسن" - the first name printed alone
+     * on the line above the rest of the name - was dropped from every ID
+     * front, and the next document then failed NAME_MISMATCH against the
+     * short name. In the OCR text the first name is the one-word line just
+     * before the name line (the card's header lines may sit in between).
+     */
+    private function withFirstNameLine(array $fields, string $ocrText): array
+    {
+        if (blank($fields['full_name'] ?? null) || $ocrText === '') {
+            return $fields;
+        }
+
+        $norm = fn (string $s) => trim(preg_replace('/\s+/u', ' ', \App\Support\ArabicTextNormalizer::normalize($s)));
+        $name = $norm((string) $fields['full_name']);
+        $lines = array_values(array_filter(array_map('trim', preg_split('/\R/u', $ocrText)), fn ($l) => $l !== ''));
+        $header = [$norm('جمهورية مصر العربية'), $norm('بطاقة تحقيق الشخصية')];
+
+        foreach ($lines as $i => $line) {
+            if ($norm($line) !== $name) {
+                continue;
+            }
+
+            for ($j = $i - 1; $j >= 0; $j--) {
+                if (in_array($norm($lines[$j]), $header, true)) {
+                    continue;
+                }
+
+                if (preg_match('/^\p{Arabic}{2,15}$/u', $lines[$j]) && ! str_starts_with($name, $norm($lines[$j]).' ')) {
+                    $fields['full_name'] = $lines[$j].' '.$fields['full_name'];
+                }
+
+                break;
+            }
+
+            break;
+        }
+
+        return $fields;
+    }
+
+    /**
      * The one generic classify call reliably returns the fields every ID
      * carries (name, national_id) but skips or misreads type-specific ones:
      * a clearly printed driving license end date ("نهاية الترخيص") came back
@@ -343,7 +452,7 @@ class DocumentPipeline
      * employer, and "٦٬٧٧٥" read as 6075. Once the type is known, one
      * focused, typed call reads all of its fields; its values win.
      */
-    private function fillMissingFields(MessageMedia $media, string $ocrText, DocumentType $type, array $fields): array
+    private function fillMissingFields(MessageMedia $media, string $ocrText, DocumentType $type, array $fields, ?string $effort = null): array
     {
         $all = $type->allFields();
 
@@ -359,6 +468,9 @@ class DocumentPipeline
                     .'(check it against the OCR text), converting Arabic-Indic digits to 0-9; an amount is the one the field '
                     .'description names (e.g. net = صافي), without currency or thousands separators. Dates as YYYY-MM-DD. '
                     .'Today is '.now()->toDateString().' - resolve relative periods against it. '
+                    .'A date printed with a typo (a 5-digit year like 20246, a missing digit) is read as the date it plainly means from the '
+                    .'other dates on the document and today - an issue date can never be before the hire date on the same paper. '
+                    .'The person\'s name is the person the document is about (the employee, the pensioner), never a manager or signer in the letterhead. '
                     .'Use an empty string only if the value is truly not on the document.'."\n\n"
                     ."OCR text:\n{$ocrText}",
                 contents: [
@@ -370,6 +482,7 @@ class DocumentPipeline
                 temperature: 0.1,
                 maxOutputTokens: 1024,
                 thinkingBudget: 0,
+                thinkingLevel: $effort,
                 responseSchema: [
                     'type' => 'object',
                     'properties' => collect($all)->mapWithKeys(fn ($key) => [$key => DocumentFields::schema($key)])->all(),
@@ -414,7 +527,9 @@ class DocumentPipeline
             return $fields;
         }
 
-        preg_match_all('/(?<!\d)(?:\d[ \-]?){13}\d(?!\d)/', $parser->normalizeDigits($ocrText), $runs);
+        // per line: the parser's normalisation drops separators, and the card
+        // number line ("KP1248958") was glued onto the ID number below it
+        preg_match_all('/(?<!\d)(?:\d[ \-]?){13}\d(?!\d)/', implode("\n", array_map(fn ($line) => $parser->normalizeDigits($line), preg_split('/\R/u', $ocrText))), $runs);
         $valid = array_values(array_unique(array_filter(
             array_map(fn ($run) => preg_replace('/\D/', '', $run), $runs[0]),
             fn ($id) => $parser->parse($id)['valid']
@@ -431,6 +546,14 @@ class DocumentPipeline
 
         if ($known && $read !== '' && levenshtein($read, (string) $known) <= 2) {
             return ['national_id' => (string) $known] + $fields;
+        }
+
+        // The model's reading may be further off than the OCR's own 14 digits
+        // ("4040723016719" read, "40407230106719" printed, one ٣ misread as ٤).
+        foreach (array_map(fn ($run) => preg_replace('/\D/', '', $run), $runs[0]) as $ocrRead) {
+            if ($known && strlen($ocrRead) === 14 && levenshtein($ocrRead, (string) $known) <= 2) {
+                return ['national_id' => (string) $known] + $fields;
+            }
         }
 
         return $fields;
@@ -488,8 +611,13 @@ class DocumentPipeline
         }
 
         if ($expectedTypeKey && $detectedTypeKey !== $expectedTypeKey) {
-            $requiredKeys = collect($this->requirements->requirementsFor($application->customerType)['documents'])
-                ->where('required', true)->pluck('key');
+            // QA 2026-10-04: an Uber earnings screenshot sent with the model's
+            // guess "delivery_app_profile" was rejected WRONG_DOCUMENT - the
+            // list here was the bare type's (ID only), not this application's
+            // (delivery work: license, earnings, profile).
+            $requiredKeys = collect(app(\App\Domain\Applications\SnapshotService::class)->for($application)['documents']['required'] ?? [])
+                ->merge(collect($this->requirements->requirementsFor($application->customerType)['documents'])->where('required', true)->pluck('key'))
+                ->unique();
             $alreadyAccepted = ApplicationDocument::where('application_id', $application->id)
                 ->where('status', 'accepted')->pluck('detected_type_key');
 
@@ -503,10 +631,6 @@ class DocumentPipeline
 
         if ($legibility === 'unreadable') {
             return [['code' => 'UNREADABLE']];
-        }
-
-        if ($legibility === 'poor') {
-            return [['code' => 'BLURRY_DOCUMENT']];
         }
 
         $issues = [];
@@ -550,6 +674,13 @@ class DocumentPipeline
             if ($violation) {
                 $issues[] = $violation;
             }
+        }
+
+        // QA 2026-10-04: a sharp ID back, every field read and valid (the
+        // number matching the front), was rejected "blurry" on the model's
+        // own "poor". A poor photo is only a reason when it cost a field.
+        if ($legibility === 'poor' && $issues !== []) {
+            return [['code' => 'BLURRY_DOCUMENT']];
         }
 
         // Eligibility (e.g. age) is not a property of the document: a valid

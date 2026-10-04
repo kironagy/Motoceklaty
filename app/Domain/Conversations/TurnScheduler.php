@@ -28,11 +28,15 @@ class TurnScheduler implements TurnSchedulerHook
             return;
         }
 
-        // A colleague is writing to this customer from the phone: the bot
-        // answering in the same minute contradicted him (the customer got
-        // two different questions at once). The customer's messages stay
-        // in the history for the bot once the pause is over.
+        // A colleague is writing to this customer: the bot answering in the
+        // same minute contradicted him (two different questions at once).
+        // Owner 2026-10-04: the bot used to go quiet for good - now his
+        // message waits in a turn that runs when the colleague's quiet
+        // window ends (each staff message pushes it further), and the bot
+        // carries on after him with the whole chat in front of it.
         if (self::staffActive($conversation)) {
+            $this->deferUntilStaffQuiet($message, $conversation);
+
             return;
         }
 
@@ -87,7 +91,7 @@ class TurnScheduler implements TurnSchedulerHook
     /** Staff wrote from the phone: the bot stays quiet for a while and drops what it was about to say. */
     public function staffTookOver(\App\Models\WhatsappConversation $conversation): void
     {
-        $minutes = (int) config('agent.handoff.staff_pause_minutes', 60);
+        $minutes = (int) config('agent.handoff.staff_pause_minutes', 10);
 
         if ($minutes <= 0) {
             return;
@@ -97,10 +101,35 @@ class TurnScheduler implements TurnSchedulerHook
             'staff_active_until' => now()->addMinutes($minutes)->toIso8601String(),
         ]);
 
+        // What the bot was writing is stale - the colleague spoke. What the
+        // customer said and nobody answered yet waits for the quiet window.
         DB::table('whatsapp_message_jobs')
             ->where('whatsapp_conversation_id', $conversation->id)
-            ->whereIn('status', ['pending', 'processing'])
+            ->whereIn('status', ['processing', 'generated'])
             ->update(['status' => 'skipped', 'error' => 'STAFF_TOOK_OVER', 'locked_at' => null, 'updated_at' => now()]);
+
+        DB::table('whatsapp_message_jobs')
+            ->where('whatsapp_conversation_id', $conversation->id)
+            ->where('status', 'pending')
+            ->update(['process_after' => $conversation->state['staff_active_until'], 'updated_at' => now()]);
+    }
+
+    /** The customer's message joins (or opens) a turn that runs once staff have been quiet for the window. */
+    private function deferUntilStaffQuiet(WhatsappMessage $message, \App\Models\WhatsappConversation $conversation): void
+    {
+        $until = \Illuminate\Support\Carbon::parse($conversation->state['staff_active_until']);
+
+        $pending = DB::table('whatsapp_message_jobs')
+            ->where('whatsapp_conversation_id', $conversation->id)
+            ->where('status', 'pending')
+            ->orderByDesc('id')
+            ->lockForUpdate()
+            ->first();
+
+        $turnId = $pending?->id ?? $this->createTurn($message, 0);
+
+        DB::table('whatsapp_message_jobs')->where('id', $turnId)->update(['process_after' => $until, 'updated_at' => now()]);
+        $message->update(['turn_id' => $turnId]);
     }
 
     public static function staffActive(\App\Models\WhatsappConversation $conversation): bool

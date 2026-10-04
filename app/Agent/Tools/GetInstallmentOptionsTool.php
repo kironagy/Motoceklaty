@@ -76,6 +76,12 @@ class GetInstallmentOptionsTool implements Tool
             }
 
             $customerTypeId = $customerType->id;
+
+            // QA 2026-10-04: "اقولك اني موظف وخلاص عشان مدفعش الفرق" got
+            // three employee plans. A type his words do not support is not priced.
+            if (! $ctx->activeApplicationId && ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, $customerType->key))) {
+                return ToolResult::error($problem['code'], $problem['hint']);
+            }
         }
 
         $systems = $this->options->forMachine($machine);

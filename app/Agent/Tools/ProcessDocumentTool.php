@@ -64,8 +64,52 @@ class ProcessDocumentTool implements Tool
             'INVALID_FORMAT' => 'مقدرتش أقرا '.$label($issue['field'] ?? null).' كامل من الصورة - صوّرها تاني من قريب والكارت كله في الصورة.',
             'MISSING_DATA' => $label($issue['field'] ?? null).' مش ظاهر في الصورة - محتاجين صورة للمستند كله.',
             'WRONG_DOCUMENT' => 'دي مش الورقة المطلوبة دلوقتي.',
+            'NAME_MISMATCH', 'ID_MISMATCH' => 'البيانات اللي في الورقة دي مش زي البطاقة اللي اتبعتت قبل كده - الورقة دي بتاعة مين؟',
             default => null,
         };
+    }
+
+    /**
+     * QA 2026-10-04: "الاسكرينات اتقبلت... ابعت سكرين أرباح ٣ شهور" - he could
+     * not tell which month was missing. The months in, and the ones left.
+     */
+    private function earningsMonths(array $snapshot): array
+    {
+        $partial = $snapshot['documents']['partial']['delivery_app_earnings'] ?? null;
+
+        if (! $partial || ($partial['satisfied'] ?? false) || empty($partial['periods'])) {
+            return [];
+        }
+
+        $names = [1 => 'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+        $have = [];
+
+        foreach ($partial['periods'] as $period) {
+            [$from, $to] = array_map('trim', explode('→', (string) $period) + [1 => '']);
+
+            for ($m = \Illuminate\Support\Carbon::parse($from)->startOfMonth(); $to !== '' && $m->lte(\Illuminate\Support\Carbon::parse($to)); $m->addMonth()) {
+                $have[$m->format('Y-m')] = $names[(int) $m->format('n')];
+            }
+        }
+
+        $latest = \Illuminate\Support\Carbon::parse($partial['latest_end'] ?? now())->startOfMonth();
+        $missing = [];
+
+        for ($i = 2; $i >= 0; $i--) {
+            $month = $latest->copy()->subMonths($i);
+            $have[$month->format('Y-m')] ?? $missing[] = $names[(int) $month->format('n')];
+        }
+
+        return ['earnings_months' => 'Say it like this: "وصلني '.implode(' و', $have).($missing !== [] ? '، فاضل سكرين '.implode(' و', $missing) : '').'".'];
+    }
+
+    /** "دي بطاقة ابويا بالغلط"، "اللي فاتت مش بتاعتي"، "دي بطاقتي انا" in this turn's message. */
+    private function saysEarlierWasWrong(ToolContext $ctx): bool
+    {
+        $text = (string) \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $ctx->conversationId)
+            ->where('direction', 'incoming')->where('turn_id', $ctx->turnId)->pluck('text')->implode(' ');
+
+        return (bool) preg_match('/غلط|مش\s*بتاعت|مش\s*بتاعي|بطاق[تة]ي\s*انا|دي\s*بطاق[تة]ي|بتاع[ةه]?\s*(?:ابويا|ابوي|امي|اخويا|اختي|صاحبي|مراتي|حد\s*تاني)|بطاق[ةه]\s*(?:ابويا|ابوي|امي|اخويا|اختي|صاحبي|مراتي)/u', $text);
     }
 
     public function execute(array $args, ToolContext $ctx): ToolResult
@@ -96,9 +140,28 @@ class ProcessDocumentTool implements Tool
                 .'attachment, answer from the snapshot (documents.accepted / partial) - do not tell the customer an image failed.');
         }
 
+        // QA 2026-10-04: he sent the back of his ID and a work letter; the
+        // model passed the id of the front sent earlier, and the back was
+        // never read - yet he was told "الضهر اتقبل". This turn's own photos
+        // are always read, whatever ids came in.
+        $mediaIds = array_values(array_unique(array_merge(
+            array_map('intval', $args['media_ids']),
+            MessageMedia::query()
+                ->whereHas('message', fn ($q) => $q->where('whatsapp_conversation_id', $ctx->conversationId)
+                    ->where('direction', 'incoming')->where('turn_id', $ctx->turnId))
+                ->whereIn('media_type', ['image', 'document'])
+                ->whereNotIn('id', \App\Models\ApplicationDocument::where('application_id', $application->id)->whereNotNull('media_id')->select('media_id'))
+                ->get()
+                ->reject(fn (MessageMedia $m) => isset(($m->analysis ?? [])['band']))
+                ->pluck('id')
+                ->all()
+        )));
+
         $results = [];
 
-        foreach ($args['media_ids'] as $mediaId) {
+        $requested = array_map('intval', $args['media_ids']);
+
+        foreach ($mediaIds as $mediaId) {
             $media = MessageMedia::with('message')->find($mediaId);
 
             if (! $media || $media->message?->whatsapp_conversation_id !== $ctx->conversationId || $media->message?->direction !== 'incoming') {
@@ -107,12 +170,50 @@ class ProcessDocumentTool implements Tool
                 continue;
             }
 
-            $results[] = $this->pipeline->process($media, $application, $expected, ($args['replaces_previous'] ?? false) === true);
+            // the model's expected type is for the ids it passed, not this turn's other photos
+            $results[] = $this->pipeline->process($media, $application, in_array((int) $mediaId, $requested, true) ? $expected : null, ($args['replaces_previous'] ?? false) === true);
+        }
+
+        // QA 2026-10-04: front and back in one message, the back read first
+        // with one digit misread (٣ as ٤) - rejected, because the front that
+        // settles such a reading was not accepted yet. Read it again after.
+        if (collect($results)->contains(fn ($r) => ($r['accepted'] ?? false) && ($r['detected_type'] ?? null) === 'national_id_front')) {
+            foreach ($results as $i => $r) {
+                $misread = collect($r['issues'] ?? [])->contains(fn ($issue) => ($issue['code'] ?? null) === 'INVALID_FORMAT' && ($issue['field'] ?? null) === 'national_id');
+
+                if (! ($r['accepted'] ?? false) && ($r['detected_type'] ?? null) === 'national_id_back' && $misread) {
+                    $results[$i] = $this->pipeline->process(MessageMedia::find($r['media_id']), $application->refresh(), $expected);
+                }
+            }
         }
 
         // Simulation 676: a number read wrong became "الصورة مش واضحة" - the
         // reason he is given is the real one, worded here, not guessed.
         $results = array_map(fn (array $r) => ($r['accepted'] ?? false) ? $r : $r + ['reason_for_customer' => $this->reason($r['issues'] ?? [])], $results);
+
+        // QA 2026-10-04: he said the first ID was his father's by mistake
+        // and sent his own - the model never set replaces_previous, his own ID
+        // was rejected against his father's and he kept being told he is 64.
+        // When his message says the earlier one was wrong, the new ID replaces
+        // it (front first), and every check runs against the new person.
+        if (($args['replaces_previous'] ?? false) !== true && $this->saysEarlierWasWrong($ctx) && collect($results)->contains(fn ($r) => ($r['detected_type'] ?? null) === 'national_id_front'
+            && in_array('ID_MISMATCH', array_column($r['issues'] ?? [], 'code'), true))) {
+            $ordered = collect($results)->sortBy(fn ($r) => ($r['detected_type'] ?? null) === 'national_id_front' ? 0 : 1)->pluck('media_id');
+            $results = $ordered->map(fn ($id) => $this->pipeline->process(MessageMedia::find($id), $application->refresh(), null, true))->values()->all();
+            $replacedIdentity = true;
+        }
+
+        // QA 2026-10-04: "دي بطاقة ابويا، دي بطاقتي انا" - his own ID was
+        // rejected against his father's, and he kept being told he is 64.
+        $results = array_map(function (array $r) {
+            $codes = array_column($r['issues'] ?? [], 'code');
+
+            return ($r['detected_type'] ?? null) === 'national_id_front' && in_array('NAME_MISMATCH', $codes, true) && in_array('ID_MISMATCH', $codes, true)
+                ? $r + ['different_person' => 'This ID is another person than the ID on file (name and number differ). If he said the earlier '
+                    .'ID was not his / was a relative\'s, call process_document again now with these media_ids and replaces_previous=true - '
+                    .'the earlier ID and everything read from it stop counting. Otherwise ask him whose ID this is. Never mix the two.']
+                : $r;
+        }, $results);
 
         // The job printed on his ID is one the finance companies refuse.
         $results = array_map(function (array $r) {
@@ -121,9 +222,42 @@ class ProcessDocumentTool implements Tool
             return $say ? $r + ['occupation_not_accepted' => StartApplicationTool::occupationHint($say)] : $r;
         }, $results);
 
+        // Read before the model's call: a photo that is no document at all
+        // (a motorcycle, a selfie) is not recorded as a rejected paper - it
+        // is handed back to the model to look at.
+        $notDocuments = [];
+
+        if (($args['_preread'] ?? false) === true) {
+            foreach ($results as $i => $r) {
+                if (($r['detected_type'] ?? null) === null && in_array('DOCUMENT_NOT_SUPPORTED', array_column($r['issues'] ?? [], 'code'), true)) {
+                    \App\Models\ApplicationDocument::whereKey($r['document_id'] ?? 0)->delete();
+                    $media = MessageMedia::find($r['media_id']);
+                    $media?->update(['analysis' => array_merge($media->analysis ?? [], ['not_a_document' => true])]);
+                    $notDocuments[] = $r['media_id'];
+                    unset($results[$i]);
+                }
+            }
+
+            $results = array_values($results);
+        }
+
+        // QA 2026-10-04: after the swap the reply still asked "the name differs,
+        // confirm it's yours" and spoke of the father's age.
+        if ($replacedIdentity ?? false) {
+            $results = array_map(fn ($r) => array_diff_key($r, ['note' => 1, 'differs_from_file' => 1, 'different_person' => 1]), $results);
+        }
+
         return ToolResult::ok([
             'results' => $results,
-            'snapshot' => $this->snapshots->for($application->refresh()),
+        ] + ($notDocuments !== [] ? ['not_documents' => 'media '.implode(', ', $notDocuments).' is not a document - if it is a motorcycle, '
+            .'call identify_motorcycle_from_image; otherwise answer what he wrote with it.'] : [])
+          + (($months = $this->earningsMonths($snapshot = $this->snapshots->for($application->refresh()))) !== []
+              ? ['ask_next' => 'First tell him which months arrived and which is missing: '.$months['earnings_months'].' Ask for that screenshot; the rest can wait.'] + $months
+              : ['ask_next' => \App\Domain\Applications\SnapshotService::askNext($snapshot)])
+          + (($replacedIdentity ?? false) ? ['identity_replaced' => 'The earlier ID (another person) and everything read from it no longer count; '
+            .'his own ID is on file now. Say in one line that his ID is in, do not ask him to confirm the name, and forget the earlier person\'s '
+            .'age or name - go on from next_step.'] : []) + [
+            'snapshot' => $snapshot,
         ]);
     }
 }

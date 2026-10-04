@@ -68,6 +68,13 @@ class SnapshotService
 
         $eligibility = $this->eligibility->evaluate($facts, $customerType->id);
 
+        // QA 2026-10-04: after his father's ID was replaced by his own, the
+        // bot kept telling a 21-year-old he is 64 - from its own old messages.
+        // The age on the ID that counts now is stated here, every turn.
+        if (isset($facts['age'])) {
+            $eligibility['applicant_age_now'] = (int) $facts['age'];
+        }
+
         $identityConflicts = $this->identityConflicts($application);
 
         foreach ($identityConflicts as $key) {
@@ -157,6 +164,19 @@ class SnapshotService
      */
     private function guidance(Application $application, array $missingFields, array $invalid, array $documents, array $selectionMissing, array $eligibility, bool $canSubmit): array
     {
+        // QA 2026-10-04: a 64-year-old was told "مش متاح" and in the same
+        // reply asked for the back of his ID and his pension statement, then
+        // offered "موديل تاني يناسب عمرك". Not eligible ends the paperwork.
+        if ($eligibility['status'] === 'not_eligible') {
+            $codes = array_column($eligibility['reasons'] ?? [], 'code');
+
+            return ['next_step' => ['type' => 'not_eligible', 'reasons' => $codes,
+                'why' => 'He cannot get installments ('.implode(', ', $codes).'). Tell him kindly in one or two lines, plainly and without '
+                    .'blaming words, that the installment is not possible by the finance companies\' conditions, and offer cash at the branch '
+                    .'(get_branch_information). Ask for no more papers or data; no other model or duration changes it.'
+                    .(in_array('AGE_OUT_OF_RANGE', $codes, true) ? ' Another working person aged 21-62 may apply in his own name if he wants.' : '')]];
+        }
+
         $fieldLabels = RequirementField::whereIn('key', array_merge($missingFields, array_column($invalid, 'key')))->pluck('label', 'key');
         $documentLabels = \App\Models\DocumentType::whereIn('key', $documents['missing'])->pluck('label', 'key');
         $idMissing = in_array('national_id_front', $documents['missing'], true);
@@ -323,6 +343,8 @@ class SnapshotService
         return $documentRows
             ->filter(fn ($d) => in_array($d->status, ['rejected', 'failed'], true))
             ->filter(fn ($d) => ! in_array($d->detected_type_key ?? $d->expected_type_key, $acceptedKeys, true))
+            // the same photo read again later and accepted is not still "rejected"
+            ->reject(fn ($d) => $d->media_id && $documentRows->contains(fn ($o) => $o->media_id === $d->media_id && $o->status === 'accepted'))
             ->unique(fn ($d) => $d->detected_type_key ?? $d->expected_type_key ?? 'unknown')
             ->map(fn ($d) => array_filter([
                 'type' => $d->detected_type_key ?? $d->expected_type_key,
@@ -401,7 +423,10 @@ class SnapshotService
     {
         $hints = collect($requiredDocuments)
             ->whereIn('key', $missingKeys)
-            ->mapWithKeys(fn ($d) => [$d['key'] => $d['description'] ?? $d['label']])
+            // QA 2026-10-04: the whole reader description (~400 tokens) rode
+            // along every turn. The first sentence says what the paper is.
+            ->mapWithKeys(fn ($d) => [$d['key'] => \Illuminate\Support\Str::limit(
+                preg_split('/(?<=[.:؛])\s/u', (string) ($d['description'] ?? $d['label']))[0], 160)])
             ->all();
 
         return $hints === [] ? [] : ['missing_hints' => $hints];
@@ -415,19 +440,41 @@ class SnapshotService
      * uninsured employee with no slip applies as self_employed; the bot
      * never used it. This says how, where the bot looks for the slip.
      */
+    /**
+     * QA 2026-10-04: after a message that filled the whole address the reply
+     * still listed the address as missing - read off older messages. The one
+     * thing to say next, said plainly with the write tool's result.
+     */
+    public static function askNext(?array $snapshot): ?string
+    {
+        $step = $snapshot['next_step'] ?? null;
+
+        return match ($step['type'] ?? null) {
+            null => null,
+            'submit' => 'Everything is in: call submit_application now.',
+            'not_eligible' => 'Not eligible: say so kindly and offer cash; ask for nothing else.',
+            default => 'Confirm in a few words what was just saved, then ask ONLY for: '.($step['label'] ?? $step['key'] ?? '')
+                .(isset($step['ask_together']) ? ' (with: '.implode('، ', (array) $step['ask_together']).')' : '')
+                .'. Nothing else is missing - do not list other items.',
+        };
+    }
+
     private function ifUnavailable(CustomerType $customerType, array $missingDocuments): array
     {
-        if ($customerType->key !== 'employee' || ! in_array('salary_slip', $missingDocuments, true)) {
+        // The ID itself has no substitute; everything his work needs beyond it may.
+        $workPapers = array_values(array_diff($missingDocuments, ['national_id_front', 'national_id_back']));
+
+        if ($workPapers === []) {
             return [];
         }
 
-        return ['if_unavailable' => ['salary_slip' => 'Only when he says his company does not issue it or he cannot get it. '
-            .'If he has not said whether he is insured, ask only "متأمن عليك؟". '
-            .'Not insured: switch now with update_application_selection customer_type=self_employed (customer_type_quote = his own words about where he works) '
-            .'and record_customer_data work_type=other - then the ID and his work address are all that is needed. '
-            .'Tell him simply "مفيش مشكلة، نكمّل بالبطاقة وعنوان شغلك" and ask the next step - do not name work types or say you changed his type. '
-            .'Insured: he sends the slip when he gets it. '
-            .'Never offer a substitute (bank statement, contract, insurance print, a company letter) - none exist - and a missing slip is no reason to suggest someone else applies in his name.']];
+        $labels = \App\Models\DocumentType::whereIn('key', $workPapers)->pluck('label')->implode('، ');
+
+        // Owner 2026-10-04: "the important thing is that he applies" - the
+        // last resort for a working man who cannot bring these papers.
+        return ['if_unavailable' => 'Only when he says he cannot get '.$labels.' at all (not "later"): the last resort is the card-only route - '
+            .'quote its numbers with get_installment_offer customer_type=self_employed, and when he agrees call update_application_selection '
+            .'route=card_only with his own words. Never offered to a woman, never a made-up substitute paper, never someone else in his name for it.'];
     }
 
     private function acceptedDocumentKeys(Application $application): array

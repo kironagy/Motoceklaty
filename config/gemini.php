@@ -180,6 +180,27 @@ return [
             ],
         ],
 
+        // Owner 2026-10-04: GPT keys next to Gemini's; the bot works on gpt-5-nano only.
+        // Limits are OpenAI's tier 1; raise them in the key's models list.
+        'openai' => [
+            'label' => 'OpenAI (GPT)',
+            'base_url' => 'https://api.openai.com/v1',
+            'default_task' => 'sales_reply',
+
+            'default_models' => [
+                [
+                    'display_name' => 'GPT-5 Nano',
+                    'model_code' => 'gpt-5-nano',
+                    'category' => 'GPT',
+                    'rpm_limit' => 500,
+                    'rpd_limit' => 100000,
+                    'tps_limit' => 3000000,
+                    'priority' => 0,
+                    'is_embedding' => false,
+                ],
+            ],
+        ],
+
         'groq' => [
             'label' => 'Groq',
             'base_url' => 'https://api.groq.com/openai/v1',

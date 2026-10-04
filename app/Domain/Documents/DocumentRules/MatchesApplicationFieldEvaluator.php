@@ -39,7 +39,11 @@ class MatchesApplicationFieldEvaluator implements DocumentRuleEvaluator
         $matches = match (true) {
             // A shop sign reads "مطعم الأمل" where the tax card says "مطعم
             // الامل للمأكولات": the same business, one name inside the other.
-            ($params['match'] ?? null) === 'contains' => $this->containsEither($normalizedExtracted, $normalizedStored),
+            // QA 2026-10-04: a lit neon sign "أكلات المعلم" read "اكلات العالم"
+            // against the tax card's "اكلات المعلم" - one letter pair off. A
+            // rule may set a similarity floor for such reads (DB params).
+            ($params['match'] ?? null) === 'contains' => $this->containsEither($normalizedExtracted, $normalizedStored)
+                || (isset($params['similarity']) && $this->charSimilarity($normalizedExtracted, $normalizedStored) >= (float) $params['similarity']),
             // A salary slip prints "محمد احمد علي" for the ID's "محمد احمد
             // علي حسن": the same person, fewer names - not a mismatch.
             ($params['match'] ?? null) === 'name_tokens' => $this->sameOrShorterName((string) $extractedValue, (string) $storedValue),
@@ -86,6 +90,25 @@ class MatchesApplicationFieldEvaluator implements DocumentRuleEvaluator
         return $tokensA !== [] && ($tokensA === NameTokens::of($b)
             || NameTokens::isStrictSubset($a, $b)
             || NameTokens::isStrictSubset($b, $a));
+    }
+
+    /** Letter-level similarity of two normalized Arabic strings, 0.0-1.0 (similar_text counts bytes, not letters). */
+    private function charSimilarity(string $a, string $b): float
+    {
+        $a = \App\Support\ArabicTextNormalizer::normalize($a);
+        $b = \App\Support\ArabicTextNormalizer::normalize($b);
+        $letters = [];
+        $encode = function (string $s) use (&$letters): string {
+            return implode('', array_map(function ($c) use (&$letters) {
+                $letters[$c] ??= chr(33 + count($letters) % 90);
+
+                return $letters[$c];
+            }, mb_str_split($s)));
+        };
+
+        similar_text($encode($a), $encode($b), $percent);
+
+        return $percent / 100;
     }
 
     /** 0.0-1.0, not similar_text()'s native 0-100 percent - the threshold is a fraction. */

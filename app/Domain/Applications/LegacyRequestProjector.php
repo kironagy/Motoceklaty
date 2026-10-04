@@ -124,7 +124,7 @@ class LegacyRequestProjector
             'work_landmark' => $applicant['work_landmark'] ?? null,
             'salary_amount' => $legacyWorkStatus === 'employee' ? $income : null,
             'pension_amount' => $legacyWorkStatus === 'pension' ? $income : null,
-            'free_work_name' => $applicant['business_name'] ?? (self::WORK_TYPE_LABELS[$applicant['work_type'] ?? ''] ?? null),
+            'free_work_name' => $this->workPlaceName($application, $applicant, $facts) ?? (self::WORK_TYPE_LABELS[$applicant['work_type'] ?? ''] ?? null),
             'free_work_address' => $applicant['work_address'] ?? null,
 
             'salary_issue_date' => $this->date($facts['salary_slip']['salary_slip_date'] ?? null),
@@ -159,7 +159,34 @@ class LegacyRequestProjector
             $attributes = array_merge($attributes, $split);
         }
 
+        // Owner 2026-10-04: staff could not see where he works. The name of
+        // the company/shop leads the full work address.
+        if (($place = $this->workPlaceName($application, $applicant, $facts)) !== null && filled($attributes['work_address'] ?? null)
+            && ! str_contains((string) $attributes['work_address'], $place)) {
+            $attributes['work_address'] = $place.' - '.$attributes['work_address'];
+        }
+
         return array_merge($attributes, $this->documents($application));
+    }
+
+    /**
+     * Where he works, from the most reliable source first: the business name
+     * on file, the employer on his salary slip, the business on his tax card
+     * or sign, then what he said in the chat (the AI reading of his work).
+     */
+    private function workPlaceName(Application $application, array $applicant, array $facts): ?string
+    {
+        $name = $applicant['business_name']
+            ?? $facts['salary_slip']['employer_name']
+            ?? $facts['tax_card']['business_name']
+            ?? $facts['business_place_photo']['business_name']
+            ?? null;
+
+        if (blank($name) && $application->origin_conversation_id) {
+            $name = app(WorkClassification::class)->reading((int) $application->origin_conversation_id)['workplace_name'] ?? null;
+        }
+
+        return filled($name) ? trim((string) $name) : null;
     }
 
     /**
@@ -439,8 +466,12 @@ class LegacyRequestProjector
             $lines[] = 'نوع الشغل: '.(self::WORK_TYPE_LABELS[$applicant['work_type']] ?? $applicant['work_type']);
         }
 
-        if (isset($applicant['business_name'])) {
-            $lines[] = "اسم النشاط: {$applicant['business_name']}";
+        if (($place = $this->workPlaceName($application, $applicant, $facts)) !== null) {
+            $lines[] = "مكان الشغل: {$place}";
+        }
+
+        if (CardOnlyRoute::on($application)) {
+            $lines[] = 'تقديم بالبطاقة فقط (مسار العمل الحر) - العميل قال إنه مش هيقدر يجيب أوراق شغله';
         }
 
         if (isset($applicant['monthly_income'])) {

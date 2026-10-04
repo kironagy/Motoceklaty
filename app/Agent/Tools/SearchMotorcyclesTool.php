@@ -53,6 +53,13 @@ class SearchMotorcyclesTool implements Tool
         ];
     }
 
+    private function customerSaidScooter(int $conversationId): bool
+    {
+        return \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversationId)
+            ->where('direction', 'incoming')->latest('id')->limit(6)->pluck('text')
+            ->contains(fn ($t) => preg_match('/[اإ]?سكوت[رير]|scooter|فيسبا|vespa/iu', (string) $t));
+    }
+
     public function permission(): string
     {
         return 'READ';
@@ -64,8 +71,27 @@ class SearchMotorcyclesTool implements Tool
             return ToolResult::error('INVALID_ARGUMENTS', 'cc_min must be <= cc_max');
         }
 
+        // QA 2026-10-04: "عايز مكنة اشتغل عليها دليفري" got four scooters - in
+        // Egypt "مكنة" is a motorcycle. Scooters only when he said scooter.
+        if (($args['kind'] ?? null) === 'scooter' && ! $this->customerSaidScooter($ctx->conversationId)) {
+            $args['kind'] = 'motorcycle';
+        }
+
         $result = $this->catalog->search($args);
         $interest = \App\Domain\Conversations\CustomerInterest::class;
+
+        // QA 2026-10-04: "اللايفان ده" - the Lifan 150 scooter just listed -
+        // was searched as kind=motorcycle and he was told "مش عندنا". A model
+        // he names is looked up whatever kind the model guessed; its real
+        // kind comes back on the item.
+        // Same for a guessed brand: "Keeway keet 150" is filed under "Scooters".
+        if (filled($args['name_query'] ?? null) && (filled($args['kind'] ?? null) || filled($args['brand'] ?? null)) && $result['items'] === []) {
+            $anyKind = $this->catalog->search(array_diff_key($args, ['kind' => true, 'brand' => true]));
+
+            if ($anyKind['items'] !== []) {
+                $result = $anyKind + ['note_kind' => 'This model is a '.($anyKind['items'][0]['kind'] ?? '').' - not the kind searched. Say its kind plainly.'];
+            }
+        }
 
         // A model we do not carry: what he gets instead is the same kind and
         // size, and that is remembered for a later "ايه الموجود؟".

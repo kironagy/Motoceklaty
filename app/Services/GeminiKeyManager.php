@@ -89,7 +89,9 @@ class GeminiKeyManager
             $provider
         ) {
             $now = now();
-            $pool = self::pool();
+            // The pools split Gemini's free and paid keys. GPT has no free
+            // keys, so the simulator may spend a GPT key too (owner 2026-10-04).
+            $pool = $provider === 'gemini' ? self::pool() : 'any';
             $paidKeyIds = $pool === 'paid' ? $this->livePaidKeyIds($preferredModelCode, $embedding, $provider) : [];
 
             $model = GeminiApiKeyModel::query()

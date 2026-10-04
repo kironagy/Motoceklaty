@@ -68,7 +68,7 @@ class AddressSplitter
                 maxOutputTokens: 600,
                 thinkingBudget: 0,
                 // Runs inside the submission transaction - never hold it long.
-                timeoutSeconds: 15,
+                timeoutSeconds: 25,
                 responseSchema: [
                     'type' => 'object',
                     'properties' => collect(self::PARTS)->mapWithKeys(fn ($p) => [$p => ['type' => 'string']])->all(),

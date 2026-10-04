@@ -21,8 +21,7 @@ class SendReplyTool implements Tool
     public function description(): string
     {
         return 'Deliver the reply to the customer. This is the only way a turn ends normally. '
-            .'awaiting is guidance for the next turn, not a step machine - application truth always '
-            .'comes from the application snapshot.';
+            .'What his application still needs always comes from the snapshot (next_step).';
     }
 
     public function inputSchema(): array
@@ -42,19 +41,6 @@ class SendReplyTool implements Tool
                     'minItems' => 0,
                     'maxItems' => 3,
                     'items' => ['type' => 'integer'],
-                ],
-                'awaiting' => [
-                    'type' => 'array',
-                    'minItems' => 0,
-                    'maxItems' => 5,
-                    'items' => [
-                        'type' => 'object',
-                        'required' => ['kind', 'key'],
-                        'properties' => [
-                            'kind' => ['type' => 'string', 'enum' => ['field', 'document', 'confirmation']],
-                            'key' => ['type' => 'string'],
-                        ],
-                    ],
                 ],
             ],
             'required' => ['messages'],
@@ -83,13 +69,11 @@ class SendReplyTool implements Tool
 
         $awaiting = $args['awaiting'] ?? [];
 
-        foreach ($awaiting as $item) {
-            // T11's field registry / document types aren't built yet; until
-            // then only a bare confirmation is accepted (plan T06 §6).
-            if ($item['kind'] !== 'confirmation') {
-                return ToolResult::error('UNKNOWN_AWAITING_KEY', "Unsupported awaiting kind before T11: {$item['kind']}");
-            }
-        }
+        // QA 2026-10-04: the schema offered field/document kinds the code then
+        // refused - a reply with the customer's whole status was lost to
+        // UNKNOWN_AWAITING_KEY. What he still owes is the snapshot's next_step;
+        // the parameter is no longer offered and a stray one is ignored.
+        $awaiting = array_values(array_filter((array) $awaiting, fn ($item) => ($item['kind'] ?? null) === 'confirmation' && filled($item['key'] ?? null)));
 
         if (! empty($args['quote_wa_message_id'])) {
             $quoteExists = WhatsappMessage::query()

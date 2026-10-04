@@ -28,8 +28,11 @@ class AgentSettings
     {
         return [
             'enabled' => ['run', 'البوت شغال', 'bool', 'لو اتقفل البوت مش هيرد على أي رسالة واتساب جديدة.'],
-            'model' => ['run', 'الموديل الأساسي', 'string', 'اسم موديل Gemini اللي بيرد على العملاء، مثال: gemini-3.1-flash-lite'],
-            'fallback_models' => ['run', 'موديلات احتياطية', 'csv', 'بتتجرب بالترتيب لو الموديل الأساسي واقع.'],
+            'model' => ['run', 'الموديل الأساسي', 'string', 'الموديل اللي بيرد على العملاء: gpt-5-nano أو gpt-5-mini (محتاج مفتاح GPT) أو gemini-3.1-flash-lite.'],
+            'fallback_models' => ['run', 'موديلات احتياطية', 'csv', 'بتتجرب بالترتيب لو الموديل الأساسي واقع. ممكن تخلط GPT و Gemini.'],
+            'document_model' => ['run', 'موديل قراءة المستندات', 'string', 'الموديل اللي بيقرا صور البطاقة والمفردات والسكرينات واليافطة: gpt-5-mini (أدق) - فاضي = نفس موديل الرد.'],
+            'voice_model' => ['run', 'موديل تفريغ الصوت', 'string', 'gpt-4o-mini-transcribe (الافتراضي) أو gpt-4o-transcribe - ولو مفيش مفتاح GPT شغال بيرجع لـ Gemini.'],
+            'openai_reasoning_effort' => ['run', 'تفكير موديل GPT', 'string', 'minimal (الأسرع، ثانية أو اتنين) أو low أو medium (أذكى بس أبطأ وأغلى).'],
             'provider_budget_seconds' => ['run', 'أقصى وقت لنداء الموديل (ثانية)', 'int', null],
 
             'runtime.max_model_calls' => ['limits', 'أقصى عدد نداءات للموديل في الرد الواحد', 'int', 'كل نداء أداة بيحتاج نداء موديل بعده. 6 رقم كويس.'],
@@ -47,6 +50,7 @@ class AgentSettings
             'handoff.max_failed_turns' => ['handoff', 'حوّل لموظف بعد كام رد فاشل', 'int', null],
             'handoff.waiting_message' => ['handoff', 'رسالة الانتظار وقت التحويل لموظف', 'text', 'بتتبعت للعميل لو كتب والموظف لسه ما ردش.'],
             'handoff.waiting_ack_interval_minutes' => ['handoff', 'متكررش رسالة الانتظار قبل (دقيقة)', 'int', null],
+            'handoff.staff_pause_minutes' => ['handoff', 'البوت يستنى بعد رسالة الموظف (دقيقة)', 'int', 'لما موظف يكتب للعميل، البوت يسكت المدة دي من آخر رسالة للموظف وبعدها يكمل ورا الموظف على أي رسالة جديدة من العميل.'],
             'handoff.return_to_agent_after_minutes' => ['handoff', 'رجّع المحادثة للبوت لو الموظف ما ردش خلال (دقيقة)', 'int', 'فاضي = المحادثة تفضل مع الموظف لحد ما يقفلها.'],
             'fallback.message' => ['handoff', 'رسالة لو البوت وقع', 'text', 'الرسالة الوحيدة اللي السيستم يبعتها من نفسه لما الموديل مش متاح.'],
 

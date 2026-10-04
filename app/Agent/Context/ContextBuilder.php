@@ -257,7 +257,7 @@ class ContextBuilder
             ->latest('id')
             ->limit(10)
             ->get()
-            ->filter(fn (MessageMedia $m) => ! isset(($m->analysis ?? [])['band']))
+            ->filter(fn (MessageMedia $m) => ! isset(($m->analysis ?? [])['band']) && ! isset(($m->analysis ?? [])['not_a_document']))
             ->map(fn (MessageMedia $m) => [
                 'media_id' => $m->id,
                 'sent_at' => $m->message?->created_at?->toIso8601String(),
@@ -476,6 +476,19 @@ class ContextBuilder
                     // media_id argument, but the model only ever sees the raw image
                     // bytes below - with no id anywhere in its context it has no way
                     // to reference this image in a tool call. Surface it as text.
+                    // QA 2026-10-04: every ID card and screenshot was sent to
+                    // the model again on every later turn (image tokens each
+                    // time). A photo already read is its result, not its pixels.
+                    $read = \App\Models\ApplicationDocument::where('media_id', $media->id)->latest('id')->first(['detected_type_key', 'status']);
+
+                    if ($read !== null) {
+                        $idNote = "[صورة مستند اتقرت - media_id: {$media->id} - ".($read->detected_type_key ?? 'غير معروف')." - {$read->status}]";
+                        $parts[] = ['type' => 'text', 'text' => $idNote];
+                        $tokens += TokenEstimator::estimate($idNote);
+
+                        continue;
+                    }
+
                     $idNote = "[صورة مرفقة - media_id: {$media->id}]";
                     $parts[] = ['type' => 'text', 'text' => $idNote];
                     $tokens += TokenEstimator::estimate($idNote);
