@@ -1086,6 +1086,12 @@ class ReplyGuard
 
         // Replayed 2026-10-04: "وتطلع لك نتيجته مع القسط في الأداة"; history:
         // "السيستم مش قادر يقرأ اسم التطبيق". The customer talks to a salesman.
+        // "اتغير وضعك وبقيت سواق اوبر في النظام" (server, gpt-5-nano) - "نظام
+        // التقسيط" is fine, "the system" on its own is our machinery
+        if (preg_match('/(?<!\p{L})(?:في|ف|على|ع)\s+(?:ال)?(?:نظام|سيستم)(?=\s*(?:[.،,!؟?\n]|$))/u', $replyText)) {
+            return true;
+        }
+
         if (preg_match('/(?<!\p{L})(?:ال)?(?:أداة|اداة|أدوات|ادوات|سيستم|ذاكر[ةه] العميل|برومبت|التعليمات اللي (?:ماشي|ماشيين|ماشيه|بمشي|بنمشي|بشتغل|بنشتغل)\S*)(?!\p{L})/u', $replyText)) {
             return true;
         }

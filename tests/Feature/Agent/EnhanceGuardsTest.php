@@ -106,6 +106,8 @@ class EnhanceGuardsTest extends TestCase
     {
         $this->assertSame('INTERNAL_KEY_IN_REPLY', $this->check('المبلغ ده بيتحسب حسب سعر المكنة وتطلع لك نتيجته مع القسط في الأداة.'));
         $this->assertSame('INTERNAL_KEY_IN_REPLY', $this->check('السيستم مش قادر يقرأ الصورة، ابعتها تاني.'));
+        $this->assertSame('INTERNAL_KEY_IN_REPLY', $this->check('تمام، اتغير وضعك وبقيت سواق اوبر في النظام.'));
+        $this->assertNull($this->check('على نظام التقسيط ده بتدفع المصاريف وقت الاستلام.'));
     }
 
     public function test_an_invented_review_time_is_refused(): void
