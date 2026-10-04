@@ -166,6 +166,13 @@ class ReplyGuard
             return 'UNRECORDED_PROMISE';
         }
 
+        // Server 2026-10-04 (simulator 930): "جيلكم من فيديو تيك توك... بالبطاقة
+        // بس" got "التقسيط بالكارت موجود... نفتح لك الطلب؟" - whether the ID
+        // alone is enough depends on his work, which nobody knew yet.
+        if ($this->promisesCardOnlyBeforeWork($assertions, $conversation, $outcomes, $args)) {
+            return 'CARD_ONLY_BEFORE_WORK';
+        }
+
         // Replayed conversation 302: "الهوجن ٤ عندنا بنسختين" with no lookup
         // - there are three. How many versions we carry is catalog data.
         if (preg_match('/(?:بنسختين|نسختين|بتلات نسخ|تلات نسخ|كذا نسخ[ةه]|أكتر من نسخ[ةه]|اكتر من نسخ[ةه]|\d\s*نسخ|كذا نوع|نوعين)/u', $replyText)
@@ -1035,6 +1042,37 @@ class ReplyGuard
         return ! str_contains($sources, $duration[0] ?? $m[0]);
     }
 
+    private function promisesCardOnlyBeforeWork(string $assertions, WhatsappConversation $conversation, array $outcomes, array $args = []): bool
+    {
+        if (! preg_match('/(?:بال)?بطاق[ةه]\s+(?:بس|فقط|لوحده|لوحدها)|(?:بال)?بطاق[ةه]\s+(?:\S+\s+){0,2}?(?:موجود|متاح|ينفع|شغال)|التقديم\s+بالبطاق[ةه]/u', $assertions)) {
+            return false;
+        }
+
+        // his work is known: an open application, a tool that read it, or his own words in memory
+        if ($conversation->customer_id && Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->exists()) {
+            return false;
+        }
+
+        foreach ($outcomes as $outcome) {
+            if ($outcome['ok'] && in_array($outcome['name'], ['get_installment_offer', 'check_eligibility', 'get_application_requirements'], true)
+                && preg_match('/customer_type|work_type|occupation/u', (string) json_encode($outcome['data']))) {
+                return false;
+            }
+        }
+
+        // said in this same message: the job the reply is saving, in his words
+        foreach ((array) ($args['memory']['facts'] ?? []) as $fact) {
+            if (($fact['key'] ?? null) === 'job' && filled($fact['quote'] ?? null)
+                && app(\App\Domain\Conversations\CustomerStatements::class)->messageContainingQuote($conversation->id, (string) $fact['quote']) !== null) {
+                return false;
+            }
+        }
+
+        $job = $conversation->customer_id ? (app(\App\Domain\Memory\CustomerMemory::class)->get((int) $conversation->customer_id)['facts']['job'] ?? null) : null;
+
+        return ($job['source'] ?? null) !== 'customer_statement';
+    }
+
     private function claimsStockOrCheck(string $assertions): bool
     {
         return (bool) preg_match(
@@ -1376,6 +1414,9 @@ class ReplyGuard
         '/\bmismatch\b/iu' => 'مش مطابق',
         '/(مفردات(?:\s+(?:ال)?مرتب)?)\s+(?:(?:حديث[ةه]|جديد[ةه])\s+)?و?(?:مختوم[ةه]|حديث[ةه])(?:\s+(?:من\s+جه[ةه]\s+(?:ال)?عمل|و?مختوم[ةه]))?/u' => '$1',
         '/طريه\s+البطاق/u' => 'طريقة البطاق',
+        // "التقسيط بالكارت" (server, gpt-5-nano) - the card is البطاقة
+        '/(?<!\p{L})بالكارت(?!\p{L})/u' => 'بالبطاقة',
+        '/(?<!\p{L})الكارت(?!\p{L})/u' => 'البطاقة',
         // a salesman does not call a customer "my daughter / my son"
         '/(?<!\p{L})يا\s+(?:بنتي|بنيتي|ابني|إبني|ابنى)(?!\p{L})/u' => 'يا فندم',
     ];

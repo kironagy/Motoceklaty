@@ -322,4 +322,17 @@ class CustomerMemoryTest extends TestCase
 
         $this->assertSame('ديدي', $method->invoke(app(\App\Domain\Documents\DocumentPipeline::class), $application));
     }
+
+    public function test_a_reply_in_parts_goes_out_as_one_message(): void
+    {
+        // owner 2026-10-04: "بيرد عليا برسالتين وتلاتة"
+        [$conversation, $customer] = $this->customer();
+        $this->says($conversation, 'عندك حاجه في حدود ٤٠ الف ؟', 1);
+        $ctx = $this->ctx($conversation, $customer);
+
+        (new SendReplyTool())->execute(['messages' => ['في حدود ٤٠ ألف عندنا اختيارين:', "• هوجن ٤ فرز تاني ٤٠,٠٠٠\n• دايو ٤ ٣٩,٥٠٠", 'تحب تقسيط ولا كاش؟']], $ctx);
+
+        $this->assertSame(["في حدود ٤٠ ألف عندنا اختيارين:\n• هوجن ٤ فرز تاني ٤٠,٠٠٠\n• دايو ٤ ٣٩,٥٠٠\n\nتحب تقسيط ولا كاش؟"], $ctx->outbound->toArray()['messages']);
+        $this->assertCount(2, SendReplyTool::asOneMessage([str_repeat('أ', 900), str_repeat('ب', 900)]));
+    }
 }

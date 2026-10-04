@@ -231,6 +231,23 @@ class EnhanceGuardsTest extends TestCase
         $this->assertSame('DOCUMENT_NOT_REQUIRED', $this->check('ممكن تبعتلي كشف حساب بنكي بدل المفردات.'));
     }
 
+    public function test_the_card_only_answer_waits_for_his_work(): void
+    {
+        // simulator 930 on the server
+        $this->message('incoming', 'انا جيلكم من فيديو تيك توك كنتم بتقولو فيه تقسيط بالبطاقه بس');
+        $this->assertSame('CARD_ONLY_BEFORE_WORK', $this->check('أيوة، التقسيط بالبطاقة موجود، عايز نفتح لك الطلب دلوقتي؟'));
+
+        // the same reply is fine once he said what he works, in this very message
+        $this->message('incoming', 'انا شغال على توكتوك');
+        $args = ['messages' => ['أيوه، شغلك بيقدّم بالبطاقة بس.'], 'memory' => ['facts' => [['key' => 'job', 'value' => 'سواق توكتوك', 'quote' => 'شغال على توكتوك']]]];
+        $this->assertNull(app(ReplyGuard::class)->check($args, $this->conversation, '', [], []));
+    }
+
+    public function test_the_card_is_called_the_card(): void
+    {
+        $this->assertSame(['التقسيط بالبطاقة موجود.'], app(ReplyGuard::class)->tidy(['messages' => ['التقسيط بالكارت موجود.']])['messages']);
+    }
+
     public function test_nudges_have_a_lifetime_cap_per_application(): void
     {
         $this->assertSame(3, ApplicationNudgeService::MAX_PER_APPLICATION);

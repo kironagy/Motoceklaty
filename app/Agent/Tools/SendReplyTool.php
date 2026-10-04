@@ -20,7 +20,7 @@ class SendReplyTool implements Tool
 
     public function description(): string
     {
-        return 'Deliver the reply to the customer. This is the only way a turn ends normally. '
+        return 'Deliver the reply to the customer. This is the only way a turn ends normally. Write it as ONE message (it is sent as one). '
             .'What his application still needs always comes from the snapshot (next_step). '
             .'`memory`: only what changed this turn, never a copy of what is already in his memory.';
     }
@@ -144,6 +144,11 @@ class SendReplyTool implements Tool
 
         $this->rememberSafely($args['memory'] ?? null, $ctx);
 
+        // Owner 2026-10-04: "بيرد عليا برسالتين وتلاتة" - a salesman sends one
+        // message. The parts go out as one, a blank line between them; only a
+        // reply too long for one message stays split.
+        $messages = self::asOneMessage($messages);
+
         $ctx->outbound->addMessages($messages);
         $ctx->outbound->setQuote($args['quote_wa_message_id'] ?? null);
         $ctx->outbound->setFocus($focusIds);
@@ -160,6 +165,25 @@ class SendReplyTool implements Tool
         $conversation->save();
 
         return ToolResult::ok(['accepted' => true]);
+    }
+
+    /** @param  string[]  $messages */
+    public static function asOneMessage(array $messages, int $maxChars = 1200): array
+    {
+        $parts = array_values(array_filter(array_map(fn ($m) => trim((string) $m), $messages), fn ($m) => $m !== ''));
+
+        if (count($parts) < 2) {
+            return $parts;
+        }
+
+        // a heading line ("عندنا ٣ اختيارات:") belongs on top of its list
+        $joined = '';
+
+        foreach ($parts as $part) {
+            $joined .= $joined === '' ? $part : (preg_match('/[:：]\s*$/u', $joined) ? "\n" : "\n\n").$part;
+        }
+
+        return mb_strlen($joined) <= $maxChars ? [$joined] : $parts;
     }
 
     /** A memory problem is logged, never a lost reply. */
