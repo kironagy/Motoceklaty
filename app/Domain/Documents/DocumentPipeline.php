@@ -177,9 +177,13 @@ class DocumentPipeline
         // the work he stated, and "بدون عمل" goes on the file for staff.
         if (filled($extractedFields['occupation'] ?? null)) {
             $result['occupation_on_id'] = (string) $extractedFields['occupation'];
-            $result['occupation_check'] = 'Compare with the work he said. If it says بدون عمل / لا يعمل / طالب or a different job, do not say it is fine: tell him kindly it needs proof of his work and do not change his type without an accepted proof document.';
+            // Owner 2026-10-04: a job title on the ID makes the salary slip
+            // compulsory; "بدون عمل" / "طالب" is no problem at all.
+            $result['occupation_check'] = \App\Domain\Applications\IdOccupation::isNoJob((string) $extractedFields['occupation'])
+                ? 'The ID shows no job - that is no problem: do not ask him to prove his work because of it, and he needs no salary slip. Carry on with his application.'
+                : 'The ID shows a job title. If he is an employee, the salary slip is compulsory (or برنت التأمينات) - never anything else and never the card-only route.';
 
-            if (preg_match('/بدون عمل|بدون|لا يعمل|لايعمل|عاطل/u', (string) $extractedFields['occupation'])) {
+            if (\App\Domain\Applications\IdOccupation::isNoJob((string) $extractedFields['occupation'])) {
                 \App\Models\ApplicationEvent::create([
                     'application_id' => $application->id,
                     'type' => 'id_without_occupation',

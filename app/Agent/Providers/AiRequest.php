@@ -33,6 +33,9 @@ final class AiRequest
         public readonly ?string $thinkingLevel = null,
         // what the call is for - picks the keys (GeminiKeyManager::for)
         public readonly ?string $purpose = null,
+        // what the call does inside the turn (main, understanding, reviewer,
+        // work, document...) - the ai_calls label (rebuild OBS-002)
+        public readonly ?string $label = null,
     ) {
     }
 }

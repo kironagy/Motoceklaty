@@ -219,6 +219,17 @@ class CustomerDataService
     /** The work address is the residence address, and he never said he works where he lives. */
     private function copiesResidence(?Application $application, array $fields, string $workAddress, int $conversationId): bool
     {
+        // Simulator 2026-10-05: "القهوة القليوبيه الخصوص شارع السعاده..." was
+        // refused three times - his café is on his own street. He named the
+        // workplace in the very message, so it is his work address.
+        $place = '/(?<!\p{L})(?:ال)?(?:قهو[ةه]|كافيه|محل|ورش[ةه]|مطعم|شرك[ةه]|مصنع|مخزن|عياد[ةه]|صيدلي[ةه]|شغل|شغلي)(?!\p{L})/u';
+        $squash = fn (string $v) => preg_replace('/[\s\p{P}]+/u', '', \App\Support\ArabicTextNormalizer::normalize($v));
+        $named = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversationId)->where('direction', 'incoming')
+            ->pluck('text')->contains(fn ($t) => preg_match($place, (string) $t) && str_contains($squash((string) $t), $squash($workAddress)));
+        if ($named) {
+            return false;
+        }
+
         $residence = collect($fields)->firstWhere('key', 'address')['value']
             ?? ($application ? ApplicationData::where('application_id', $application->id)->where('party', 'applicant')
                 ->where('field_key', 'address')->value('value') : null);

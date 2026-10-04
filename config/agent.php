@@ -54,6 +54,14 @@ return [
     // only with the reply). A message that lands while a reply is being
     // written still supersedes it (TurnScheduler), and the customer sees
     // no "seen" meanwhile - so a short window only catches a quick burst.
+    // Owner 2026-10-04 ("بياع مصري شاطر"): the code reads and saves what the
+    // customer wrote before the reply (TurnUnderstanding), and a second look
+    // checks each draft for misreadings, invented facts and false claims
+    // (ReplyReviewer). Both are extra model calls; tests with scripted
+    // provider answers switch them off.
+    'understanding' => ['enabled' => (bool) env('AGENT_UNDERSTANDING_ENABLED', true)],
+    'reviewer' => ['enabled' => (bool) env('AGENT_REVIEWER_ENABLED', true), 'effort' => env('AGENT_REVIEWER_EFFORT', 'low')],
+
     'turns' => [
         'debounce_seconds' => env('AGENT_TURNS_DEBOUNCE_SECONDS', 3),
         'media_debounce_seconds' => env('AGENT_TURNS_MEDIA_DEBOUNCE_SECONDS', 5),

@@ -32,8 +32,17 @@ class ReplyGuard
     /**
      * @param  array<int, array{name: string, ok: bool, data: array}>  $outcomes  every tool call of this turn, in order
      */
+    /** What exactly the last refusal found (which model, which missing item) - added to its hint. */
+    private ?string $detail = null;
+
+    public function lastDetail(): ?string
+    {
+        return $this->detail;
+    }
+
     public function check(array $args, WhatsappConversation $conversation, string $system, array $contents, array $outcomes): ?string
     {
+        $this->detail = null;
         $replyText = implode(' ', $args['messages'] ?? []);
         $succeeded = array_column(array_filter($outcomes, fn ($o) => $o['ok'] && $this->changedSomething($o)), 'name');
         $toolResultsBlob = json_encode(array_column($outcomes, 'data'), JSON_UNESCAPED_UNICODE) ?: '';
@@ -114,6 +123,16 @@ class ReplyGuard
             return 'DATA_OVERCLAIMED';
         }
 
+        // Conversation 865 (owner 2026-10-04): "255 شارع السودان بجوار
+        // الرازي" came back as "تمام، العنوان الشغل: ... 255 شارع السودان
+        // بجوار الرازي" five times - nothing was ever saved, so it was asked
+        // again and again. His words are recorded, never read back to him.
+        if (($echo = $this->echoesCustomer($conversation, $replyText)) && ! in_array('submit_application', array_column($outcomes, 'name'), true)) {
+            return array_intersect($succeeded, self::WRITE_TOOLS) === [] && $this->applicationHasMissingFields($conversation)
+                ? 'DATA_NOT_RECORDED'
+                : 'ECHOES_CUSTOMER';
+        }
+
         // "وlـحظة" / "تشפّي": a Latin letter inside an Arabic word, or a
         // letter from a script no customer here writes, is a model glitch
         // (seen from the fallback model under load), never real wording -
@@ -121,6 +140,12 @@ class ReplyGuard
         if (preg_match('/\p{Arabic}[A-Za-z]+\p{Arabic}|[\p{Hebrew}\p{Cyrillic}\p{Han}\p{Hangul}\p{Thai}\p{Devanagari}]/u', $replyText)
             || $this->latinGluedToArabic($replyText)) {
             return 'GARBLED_TEXT';
+        }
+
+        // Owner 2026-10-04: "landmark" asked of a customer - English is not
+        // allowed here. Only motorcycle and brand names stay in Latin.
+        if ($this->hasEnglishWord($replyText)) {
+            return 'ENGLISH_WORD';
         }
 
         if (($code = $this->conversationFailure($replyText, $conversation, $outcomes)) !== null) {
@@ -155,9 +180,26 @@ class ReplyGuard
             return 'WITHDRAWAL_CLAIMED_NOT_DONE';
         }
 
-        if ($this->claimsOpenedApplication($assertions) && ! in_array('start_application', $succeeded, true)
-            && ! Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->exists()) {
-            return 'APPLICATION_CLAIMED_NOT_OPENED';
+        // "فتحتلك الطلب" / "بدأتلك الطلب" is only true in the turn that opened
+        // it. Said to a customer whose application was open since yesterday
+        // (3 times in the 2026-10-04 runs) the right words are "طلبك مفتوح".
+        if ($this->claimsOpenedApplication($assertions) && ! $this->openedThisTurn($outcomes)) {
+            return $this->activeApplication($conversation) !== null ? 'APPLICATION_ALREADY_OPEN_CLAIMED' : 'APPLICATION_CLAIMED_NOT_OPENED';
+        }
+
+        // "فتحتلك الطلب على LIFAN على سنة" - the application was on Keeway.
+        if (($set = $this->selectionClaimedNotSet($assertions, $conversation)) !== null) {
+            $this->detail = $set;
+
+            return 'SELECTION_CLAIMED_NOT_SET';
+        }
+
+        // "تمام كده كملنا التسجيل" with the work landmark still missing: he
+        // stopped sending and the application stalled.
+        if (($left = $this->completionOverclaimed($assertions, $replyText, $conversation)) !== null) {
+            $this->detail = $left;
+
+            return 'COMPLETION_OVERCLAIMED';
         }
 
         // "المكنة محجوزة باسمك", "بتخلص في نفس اليوم", "بضمان المعرض":
@@ -215,6 +257,15 @@ class ReplyGuard
         // customers waiting for photos that never came.
         if (! in_array('send_motorcycle_images', $succeeded, true) && $this->claimsImagesSent($assertions)) {
             return 'IMAGES_CLAIMED_NOT_SENT';
+        }
+
+        // "بعتلك صور كيواي وليفان" when only the Lifan went out (the Keeway
+        // call came back MOTORCYCLE_DIFFERS_FROM_LAST_QUOTED) - 4 times in
+        // the 2026-10-04 runs. Every model named with the photos was sent.
+        if (($unsent = $this->imagesClaimedForUnsentModel($assertions, $outcomes)) !== null) {
+            $this->detail = $unsent;
+
+            return 'IMAGES_CLAIMED_FOR_UNSENT_MODEL';
         }
 
         // "هحولك لزميل" / "زميلي هيتابع معاك" with no handoff: nobody was
@@ -336,6 +387,12 @@ class ReplyGuard
             return 'UNSOURCED_REASON';
         }
 
+        // The same invented reasons came back word for word in the 2026-10-04
+        // runs ("قرار جهات التمويل", "البطاقة هتملى بياناتك أوتوماتيك").
+        if ($this->usesInventedReasonPhrase($replyText, $system.' '.$toolResultsBlob, $conversation, $succeeded)) {
+            return 'INVENTED_REASON_PHRASE';
+        }
+
         // "مع مين التقسيط؟" got "أمان وفاليو وكونتكت" - two companies we do
         // not work with, named from general knowledge.
         if ($this->namesUnsourcedFinanceCompany($replyText, $toolResultsBlob)) {
@@ -347,12 +404,42 @@ class ReplyGuard
             return 'REPEATED_QUESTION';
         }
 
+        // Simulator 2026-10-04: "ابعت وش وضهر البطاقة وصورة الورشة والضريبية"
+        // in four replies running - he had not asked again.
+        if (! $this->openedThisTurn($outcomes) && $this->relistsDocuments($conversation, $replyText)) {
+            return 'DOCUMENTS_RELISTED';
+        }
+
         if ($this->isDuplicateOfRecentReply($conversation, $replyText)) {
             return 'DUPLICATE_REPLY';
         }
 
+        // Conversation 855 (owner 2026-10-04): "30% بدون مصاريف على سنتين
+        // ممكن" - no plan has that; each duration has its own rate (سنة 20،
+        // سنة ونص 30، سنتين 40، 3 سنين 60). Percentages are small numbers
+        // the number check lets through, so they are checked against the
+        // real plans here.
+        if ($this->percentWithWrongDuration($replyText)) {
+            return 'PERCENT_DURATION_MISMATCH';
+        }
+
+        // Owner 2026-10-04: "خليه يتكلم بالمصري العامي مش لغة عربية".
+        if (preg_match('/(?<!\p{L})(?:سوف|لديك|لدينا|لديكم|يمكنك|يمكنكم|بإمكانك|بامكانك|يرجى|نرجو|الذي|التي|اللذان|أود|اود|عزيزي|حضرتكم|اختَر|أحد الخيارين|احد الخيارين|هل)(?!\p{L})/u', $replyText)) {
+            return 'FORMAL_ARABIC';
+        }
+
         if ($this->hasUnverifiedNumber($replyText, $system, $toolResultsBlob, $contents, ! $this->customerBringsAPrice($conversation))) {
             return 'UNVERIFIED_NUMBER';
+        }
+
+        // after the numbers: a price with the name gets the lookup hint first.
+        // "باجاج بوكسر 150" and "دايو 2" offered with no lookup - the model
+        // named them from memory. A model is named from this turn's tools,
+        // his state, or his own words.
+        if (($model = $this->modelNotLookedUp($replyText, $system, $toolResultsBlob, $contents, $conversation)) !== null) {
+            $this->detail = $model;
+
+            return 'MODEL_NOT_LOOKED_UP';
         }
 
         return null;
@@ -751,7 +838,7 @@ class ReplyGuard
         'pension_statement' => '/كشف\s+(?:ال)?معاش/u',
         'delivery_app_earnings' => '/(?:ا?سكرين|screen)\S*\s+(?:\S+\s+){0,3}?(?:أرباح|ارباح|الأرباح|الارباح)|(?:أرباح|ارباح)\S*\s+(?:من\s+)?(?:ال)?تطبيق/u',
         'driving_license' => '/رخص[ةه]\s*(?:ال)?(?:قياد[ةه]|سواق[ةه])|(?:صور[ةه]|وش|ضهر)\s+(?:ال)?رخص[ةه]/u',
-        'business_place_photo' => '/صور[ةه]?\s+(?:\S+\s+)?(?:ال)?(?:مكان|ورش[ةه]|محل|نشاط|يافط[ةه])/u',
+        'business_place_photo' => '/صور[ةه]?\s+(?:\S+\s+)?(?:ال|ل|لل)?(?:مكان|ورش[ةه]|ورشت|محل|نشاط|يافط[ةه])/u',
         'tax_card' => '/بطاق[ةه]\s+ضريبي[ةه]|سجل\s+تجاري/u',
         'delivery_app_profile' => '/(?:ا?سكرين|صور[ةه])\S*\s+(?:\S+\s+){0,2}?(?:ال)?بروفايل|البروفايل/u',
         // owner 2026-10-04: the employee's paper when his company gives no salary slip
@@ -759,16 +846,30 @@ class ReplyGuard
         // never required of anyone
         // A warehouse worker with no salary slip was offered a bank
         // statement, then "صورة العقد" - none exist.
-        '' => '/كشف\s+حساب|صور[ةه]\s+(?:ال)?عقد|عقد\s+(?:ال)?(?:ورش[ةه]|محل|إيجار|ايجار|شغل)|إيصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|ايصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|فاتور[ةه]\s+(?:ال)?(?:كهرب|ميا[هه]|غاز)/u',
+        '' => '/كشف\s+حساب|صور[ةه]\s+(?:ال)?عقد|عقد\s+(?:ال)?(?:ورش[ةه]|محل|إيجار|ايجار|شغل)|إيصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|ايصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|فاتور[ةه]\s+(?:ال)?(?:كهرب|ميا[هه]|غاز)|فواتير|إيصالات|ايصالات|تقارير\s+ضريبي|إشعارات\s+(?:ال)?ضريب|اشعارات\s+(?:ال)?ضريب|معاش\s+تقاعدي/u',
     ];
 
     private function asksForUnrequiredDocument(string $replyText, WhatsappConversation $conversation, array $outcomes): bool
     {
         $allowed = $this->allowedDocuments($conversation, $outcomes);
+        $asking = '/ابعت|تبعت|تجيب|محتاج|محتاجين|مطلوب|المطلوب|هنحتاج|بنحتاج|نحتاج|لازم|هات|جهز|بديل|بدائل|بدايل|مقبول/u';
+        $negated = '/مش\s+(?:محتاج|مطلوب|لازم|شرط|مقبول)|ممنوع|من غير\s+(?:\S+\s+)?(?:مفردات|سكرين|رخص)/u';
+
+        // Conversation 731 (request 4391): "في بدائل مقبولة: • كشف حساب بنكي
+        // • فواتير..." - each paper on its own bullet line, the asking word
+        // only in the heading. A paper nobody accepts is caught anywhere in
+        // a reply that asks for something.
+        if (preg_match($asking, $replyText)) {
+            foreach (preg_split('/(?<=[.!؟?\n])/u', $replyText) as $line) {
+                if (preg_match(self::DOCUMENT_WORDS[''], $line) && ! preg_match($negated, $line)) {
+                    return true;
+                }
+            }
+        }
 
         foreach (preg_split('/(?<=[.!؟?\n])/u', $replyText) as $sentence) {
-            if (! preg_match('/ابعت|تبعت|تجيب|محتاج|محتاجين|مطلوب|المطلوب|هنحتاج|بنحتاج|نحتاج|لازم|هات|جهز|بديل/u', $sentence)
-                || preg_match('/مش\s+(?:محتاج|مطلوب|لازم|شرط)|ممنوع|من غير\s+(?:\S+\s+)?(?:مفردات|سكرين|رخص)/u', $sentence)) {
+            if (! preg_match($asking, $sentence)
+                || preg_match($negated, $sentence)) {
                 continue;
             }
 
@@ -976,7 +1077,10 @@ class ReplyGuard
     private function claimsDocumentReceived(string $assertions): bool
     {
         return (bool) preg_match('/(?:البطاق[ةه]|الصور[ةه]?|صورة البطاق[ةه]|المستند|الورق[ةه]?|الإيصال|الايصال|الفاتور[ةه]|الرخص[ةه]|وش البطاق[ةه]|ضهر البطاق[ةه]|ظهر البطاق[ةه])\s+(?:\S+\s+){0,2}?و?(?:وصلت|وصلتني|وصلني|اتسجلت|اتقبلت|اتحفظت|اتقرت)'
-            .'|(?:^|\s)و?(?:وصلتني|وصلني|استلمت|اتقبلت)\s+(?:\S+\s+)?(?:ال)?(?:بطاق[ةه]|صور|ورق|مستند)/u', $assertions);
+            .'|(?:^|\s)و?(?:وصلتني|وصلني|استلمت|اتقبلت)\s+(?:\S+\s+)?(?:ال)?(?:بطاق[ةه]|صور|ورق|مستند)'
+            // "تمام وصلت الصور" / "البطاقة تمام" while process_document had failed
+            .'|(?:^|\s)و?(?:وصلت|وصلوا|وصلو|اتقبلوا|اتقبلو)\s+(?:\S+\s+)?(?:ال)?(?:بطاق[ةه]|صور|ورق|مستند)'
+            .'|(?:البطاق[ةه]|الصور[ةه]?)\s+(?:وصلت\s+)?(?:تمام|سليم[ةه]|مقبول[ةه]|اتقبلت)(?!\p{L})/u', $assertions);
     }
 
     private function documentAccepted(array $outcomes): bool
@@ -1000,7 +1104,227 @@ class ReplyGuard
 
     private function claimsOpenedApplication(string $assertions): bool
     {
-        return (bool) preg_match('/(?:^|\s)و?(?:فتحت|فتحتلك|فتحنالك|عملتلك)\s+(?:\S+\s+)?(?:ال)?طلب|(?:الطلب|طلبك)\s+(?:\S+\s+)?اتفتح|(?:تم|اتم)\s+فتح\s+(?:ال)?طلب/u', $assertions);
+        // "بدأتلك الطلب" / "هابدأ معاكي طلب" said the same and were not caught
+        return (bool) preg_match('/(?:^|\s)و?(?:فتحت|فتحتلك|فتحنا|فتحنالك|عملتلك|بدأت|بدات|بدأتلك|بداتلك|بدأنا|بدانا|هبدألك|هبدالك|هابدألك|هابدالك|هبدأ|هبدا|هابدأ|هابدا)(?:\s+(?:معاك|معاكي|معاكى|مع\s+حضرتك))?\s+(?:\S+\s+)?(?:ال)?طلب'
+            .'|(?:الطلب|طلبك)\s+(?:\S+\s+)?اتفتح|(?:تم|اتم)\s+فتح\s+(?:ال)?طلب/u', $assertions);
+    }
+
+    /** start_application opened (or brought back) the application in this turn. */
+    private function openedThisTurn(array $outcomes): bool
+    {
+        foreach ($outcomes as $outcome) {
+            if ($outcome['name'] === 'start_application' && $outcome['ok']
+                && (($outcome['data']['created'] ?? false) === true || isset($outcome['data']['reopened']))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function activeApplication(WhatsappConversation $conversation): ?Application
+    {
+        return $conversation->customer_id
+            ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->latest('id')->first()
+            : null;
+    }
+
+    /** The model and duration the reply ties the application to, when the application (after this turn's tools) is not on them. */
+    private function selectionClaimedNotSet(string $assertions, WhatsappConversation $conversation): ?string
+    {
+        // only "الطلب/طلبك ... على X": a model or duration said next to the application
+        if (! preg_match_all('/(?:الطلب|طلبك|طلب)\s+(?:\S+\s+){0,3}?(?:على|علي|ع|بـ|ب)\s+([^،,.!؟?\n]+)/u', $assertions, $m)) {
+            return null;
+        }
+
+        $application = $this->activeApplication($conversation);
+
+        if (! $application) {
+            return null;
+        }
+
+        $application->loadMissing('installmentPlan', 'machine.brand');
+        $months = $application->installmentPlan?->months !== null ? (int) $application->installmentPlan->months : null;
+        $wrong = false;
+
+        foreach ($m[1] as $said) {
+            $said = implode(' ', array_slice(preg_split('/\s+/u', trim($said)), 0, 5));
+
+            foreach (app(CatalogMentions::class)->words($said) as $machineIds) {
+                $wrong = $wrong || ! in_array((int) $application->machine_id, $machineIds, true);
+            }
+
+            $durations = $this->durationsIn($said);
+            $wrong = $wrong || ($durations !== [] && ! in_array($months, $durations, true));
+        }
+
+        if (! $wrong) {
+            return null;
+        }
+
+        $machine = $application->machine ? trim($application->machine->brand?->name.' '.$application->machine->name) : null;
+
+        return 'The application is set to: '.($machine ?? 'no motorcycle yet').', '.($months ? $months.' months' : 'no duration yet').'.';
+    }
+
+    /**
+     * "كملنا التسجيل" / "كل حاجة جاهزة" while the application still has
+     * blockers. "البيانات كملت" is judged on the data alone, and a reply that
+     * names what is left ("فاضل البطاقة") is not claiming everything is in.
+     */
+    private function completionOverclaimed(string $assertions, string $replyText, WhatsappConversation $conversation): ?string
+    {
+        $data = preg_match('/(?:كملنا|كمّلنا|خلصنا|خلّصنا)\s+(?:ال)?(?:تسجيل|بيانات)|(?:البيانات|بياناتك)\s+(?:(?!مش\s)\S+\s+)?(?:كملت|كمّلت|اكتملت|خلصت|جاهز[ةه]|كامل[ةه])/u', $assertions);
+        $all = ! $data && preg_match('/(?:كده|كدا)\s+(?:كملنا|كمّلنا|خلصنا|خلّصنا)(?!\p{L})|(?:كملنا|خلصنا)\s+(?:ال)?(?:طلب|ورق|كل\s+حاج[ةه])|(?:طلبك|الطلب|ورقك|الورق)\s+(?:(?!مش\s)\S+\s+)?(?:جاهز|كمل|اكتمل|خلص|كامل)|كل\s+حاج[ةه]\s+(?:(?!مش\s)\S+\s+)?(?:تمام|جاهز[ةه]|كملت|خلصت|كامل[ةه])/u', $assertions);
+
+        if (! $data && ! $all) {
+            return null;
+        }
+
+        // a reply that names what is left or asks for it is not claiming everything is in
+        if ($all && preg_match('/(?:^|\s)(?:فاضل|ناقص|باقي|لسه|محتاج\S*|ابعت\S*|هات)(?!\p{L})/u', $replyText)) {
+            return null;
+        }
+
+        $application = $this->activeApplication($conversation);
+
+        if (! $application) {
+            return null;
+        }
+
+        try {
+            $snapshot = app(\App\Domain\Applications\SnapshotService::class)->for($application);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $blockers = array_values(array_filter((array) ($snapshot['blockers'] ?? []), fn ($b) => ! $data || ($b['type'] ?? null) === 'field'));
+
+        if ($blockers === []) {
+            return null;
+        }
+
+        $first = $blockers[0];
+        $label = match ($first['type'] ?? null) {
+            'field' => RequirementField::where('key', $first['key'])->value('label'),
+            'document' => DocumentType::where('key', $first['key'])->value('label'),
+            default => null,
+        } ?? ($snapshot['next_step']['label'] ?? $first['key']);
+
+        return 'Still missing: '.$label.' (and '.(count($blockers) - 1).' more).';
+    }
+
+    /** The models a photos claim names that no send_motorcycle_images sent this turn. */
+    private function imagesClaimedForUnsentModel(string $assertions, array $outcomes): ?string
+    {
+        $sent = [];
+        $sentNames = [];
+
+        foreach ($outcomes as $outcome) {
+            if ($outcome['name'] === 'send_motorcycle_images' && $outcome['ok']) {
+                $sent[] = (int) ($outcome['data']['motorcycle_id'] ?? 0);
+                $sentNames[] = (string) ($outcome['data']['motorcycle'] ?? '');
+            }
+        }
+
+        if ($sent === []) {
+            return null;
+        }
+
+        $claim = '/(?:^|\s)(?:دي|ودي|اهي|أهي|هتلاقي|هتوصلك)\s+(?:ال)?صور|(?<![\p{L}])(?:بعت|بعتت)(?:ل|لك|لحضرتك)\s+(?:ال)?صور/u';
+
+        foreach (preg_split('/(?<=[.!؟?\n])/u', $assertions) as $sentence) {
+            if (! preg_match($claim, $sentence) || preg_match($this->offerPattern(), $sentence)) {
+                continue;
+            }
+
+            foreach (app(CatalogMentions::class)->words($sentence) as $word => $machineIds) {
+                if (array_intersect($machineIds, $sent) === []) {
+                    return 'You sent photos of '.implode(' and ', array_filter($sentNames))." only - \"{$word}\" was not sent.";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** A catalog model the reply names that no tool this turn, his state or his own words mention. */
+    private function modelNotLookedUp(string $replyText, string $system, string $toolResultsBlob, array $contents, WhatsappConversation $conversation): ?string
+    {
+        $catalog = app(CatalogMentions::class);
+        $named = $catalog->fullNames($replyText);
+
+        if ($named === []) {
+            return null;
+        }
+
+        $customerText = implode(' ', array_map(
+            fn ($c) => implode(' ', array_column(array_filter($c['parts'], fn ($p) => ($p['type'] ?? null) === 'text'), 'text')),
+            // a model our earlier reply named passed this same check when it went out
+            array_filter($contents, fn ($c) => in_array($c['role'] ?? null, ['user', 'model'], true))
+        ));
+
+        $application = $this->activeApplication($conversation);
+        $known = array_map('intval', array_filter([$application?->machine_id, \App\Domain\Conversations\QuotedMotorcycle::last($conversation->id)]));
+
+        // the catalog index is for resolving names, not a lookup
+        $sources = $catalog->normalize($toolResultsBlob.' '.$this->removeBlock($system, '## فهرس الكتالوج').' '.$customerText.' '.$this->customerTextSinceLastReply($conversation));
+
+        foreach ($named as $machineId) {
+            if (in_array($machineId, $known, true)) {
+                continue;
+            }
+
+            $sourced = false;
+
+            foreach ($catalog->namesOf($machineId) as $name) {
+                $sourced = $sourced || preg_match('/(?<![\p{L}\p{N}])'.preg_quote($name, '/').'(?![\p{L}\p{N}])/u', $sources);
+            }
+
+            if (! $sourced) {
+                return 'Not looked up this turn: '.($catalog->namesOf($machineId)[0] ?? $machineId).'.';
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Reasons and promises the bot invented word for word, again and again.
+     * Each is fine when the owner's guidance or a tool result says it.
+     */
+    private const INVENTED_REASON_PHRASES = [
+        'finance_decides' => '/قرار(?:ات)?\s+(?:ال)?جه(?:ات|[ةه])\s+(?:ال)?تمويل|(?:ال)?جه(?:ات|[ةه])\s+(?:ال)?تمويل\s+(?:هي|هى)?\s*(?:اللي|الي)\s+(?:بتحدد|بيحدد|بتقرر|بيقرر|تحدد|تقرر)/u',
+        'rate_fixed' => '/(?:ال)?نسب[ةه]\s+(?:(?!مش\s)\S+\s+)?ثابت[ةه]/u',
+        'card_fills_itself' => '/(?:ال)?بطاق[ةه]\s+(?:\S+\s+){0,2}?(?:هتملى|بتملى|هتملا|بتملا|هتملي|بتملي|هتسجل|بتسجل)\s+(?:\S+\s+){0,2}?(?:أوتوماتيك|اوتوماتيك|أتوماتيك|اتوماتيك|لوحد[هـ]?ا|لوحده|تلقائي)/u',
+        'branch_will_call' => '/(?:ال)?فرع\s+(?:\S+\s+)?(?:هيتواصل|هيكلمك|هيكلمكم|هيكلمكي|هيتصل|هيرن)/u',
+        'sign_at_branch' => '/(?<!\p{L})(?:هتوقع|هتوقّع|هتمضي|هتمضى|هتيجي\s+تمضي|تيجي\s+تمضي|توقع|تمضي)\s+(?:\S+\s+){0,3}?(?:في|ف|فى)\s+(?:ال)?فرع/u',
+        'no_papers_for_cash' => '/(?:مفيش|مافيش|من\s+غير|بدون)\s+(?:أي\s+|اي\s+)?(?:ورق|أوراق|اوراق)\s+(?:لل|ل|على\s+(?:ال)?|ع\s*(?:ال)?)كاش/u',
+    ];
+
+    private function usesInventedReasonPhrase(string $replyText, string $sources, WhatsappConversation $conversation, array $succeeded): bool
+    {
+        foreach (preg_split('/(?<=[.!؟?\n])/u', $replyText) as $sentence) {
+            foreach (self::INVENTED_REASON_PHRASES as $phrase => $pattern) {
+                if (! preg_match($pattern, $sentence) || preg_match($pattern, $sources)) {
+                    continue;
+                }
+
+                // after a real handoff a colleague from the showroom does call him
+                if ($phrase === 'branch_will_call' && (in_array('handoff_to_human', $succeeded, true) || $conversation->status === 'awaiting_agent')) {
+                    continue;
+                }
+
+                // signing at the branch after the approval / at pickup is true
+                if ($phrase === 'sign_at_branch' && preg_match('/بعد\s+(?:ال)?موافق|(?:وقت|عند|لما)\s+(?:ال)?(?:استلام|تستلم)/u', $sentence)) {
+                    continue;
+                }
+
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** A promise no record backs: a reservation, a time frame, a warranty or a guarantor. */
@@ -1021,6 +1345,16 @@ class ReplyGuard
             }
         }
 
+        // "الضمان مكتوب على الورقة 6 شهور": a warranty period in the same
+        // sentence is a fact - a source has to give that warranty and that number.
+        foreach (preg_split('/(?<=[.!؟?\n])/u', $replyText) as $sentence) {
+            if (preg_match('/ضمان/u', $sentence)
+                && preg_match_all('/(\d+)\s*(?:يوم|أيام|ايام|شهر|شهور|أشهر|اشهر|سن[ةه]|سنين|سنوات|ساع[ةه]|ساعات)(?!\p{L})/u', $this->westernDigits($sentence), $periods)
+                && (! str_contains($normalizedSources, 'ضمان') || array_diff(array_map('floatval', $periods[1]), $this->extractNumbers($sources)) !== [])) {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -1031,6 +1365,12 @@ class ReplyGuard
     private function inventsTimeFrame(string $assertions, string $sources): bool
     {
         $span = '(?:يوم|يومين|ايام|أيام|اسبوع|أسبوع|اسبوعين|أسبوعين|اسابيع|أسابيع|ساع[ةه]|ساعتين|ساعات|شهر|شهرين)';
+
+        // "الموافقة 24-72 ساعة": a range with no lead word
+        if (preg_match('/\d+\s*[-–]\s*\d+\s*'.$span.'(?!\p{L})/u', $this->westernDigits($assertions), $range)
+            && ! str_contains($this->westernDigits($sources), $range[0])) {
+            return true;
+        }
 
         if (! preg_match('/(?:عاد[ةه]ً?|بياخد|هياخد|بتاخد|هتاخد|بيستغرق|المد[ةه]|مد[ةه]|في\s+خلال|خلال|من|لحد|لغاي[ةه])\s+(?:\S+\s+){0,4}?(?:\d+\s*)?'.$span.'(?!\p{L})/u', $assertions, $m)) {
             return false;
@@ -1230,6 +1570,132 @@ class ReplyGuard
         return false;
     }
 
+    /**
+     * Four words in a row from what he wrote since the last reply, repeated
+     * back to him ("355 شارع السودان بجوار").
+     */
+    private function echoesCustomer(WhatsappConversation $conversation, string $replyText): bool
+    {
+        $lastOutgoingId = (int) WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')->max('id');
+
+        $said = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'incoming')
+            ->where('id', '>', $lastOutgoingId)
+            ->pluck('text')->filter()->implode(' ');
+
+        $theirs = $this->echoWords($said);
+
+        if (count($theirs) < 4) {
+            return false;
+        }
+
+        $shingles = [];
+
+        for ($i = 0; $i + 4 <= count($theirs); $i++) {
+            $shingles[implode(' ', array_slice($theirs, $i, 4))] = true;
+        }
+
+        $ours = $this->echoWords($replyText);
+
+        for ($i = 0; $i + 4 <= count($ours); $i++) {
+            if (isset($shingles[implode(' ', array_slice($ours, $i, 4))])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @return string[] words with punctuation, و- and digit styles evened out */
+    private function echoWords(string $text): array
+    {
+        $text = strtr($text, ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9', 'أ' => 'ا', 'إ' => 'ا', 'آ' => 'ا', 'ة' => 'ه', 'ى' => 'ي']);
+        $words = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($text), -1, PREG_SPLIT_NO_EMPTY);
+
+        return array_values(array_filter(array_map(fn ($w) => preg_replace('/^و(?=\p{L}{2})/u', '', $w), $words), fn ($w) => $w !== ''));
+    }
+
+    private function applicationHasMissingFields(WhatsappConversation $conversation): bool
+    {
+        $application = $conversation->customer_id
+            ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->latest('id')->first()
+            : null;
+
+        if (! $application) {
+            return false;
+        }
+
+        try {
+            return (app(\App\Domain\Applications\SnapshotService::class)->for($application)['fields']['missing'] ?? []) !== [];
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /** A Latin word that is not part of a motorcycle or brand name we sell. */
+    private function hasEnglishWord(string $replyText): bool
+    {
+        // Links (branch maps) and model codes in capitals (HLX, VLR) are not wording.
+        $text = preg_replace('~https?://\S+~i', ' ', $replyText);
+        preg_match_all('/(?<![A-Za-z0-9_])[A-Za-z]{2,}(?![A-Za-z_])/u', $text, $all);
+        $matches = [array_values(array_filter($all[0], fn ($w) => ! preg_match('/^[A-Z]{2,5}$/', $w)))];
+
+        if ($matches[0] === []) {
+            return false;
+        }
+
+        // Cached for ten minutes: the workers live for days, the catalog changes.
+        $allowed = \Illuminate\Support\Facades\Cache::remember('reply_guard.latin_names', 600, fn () => collect(\App\Models\Machine::query()->pluck('name'))
+            ->merge(\App\Models\Brand::query()->pluck('name'))
+            ->flatMap(fn ($name) => preg_match_all('/[A-Za-z]+/', (string) $name, $m) ? $m[0] : [])
+            ->merge(['score', 'cc', 'km'])
+            ->map(fn ($w) => mb_strtolower($w))
+            ->unique()->flip()->all());
+
+        foreach ($matches[0] as $word) {
+            if (! isset($allowed[mb_strtolower($word)])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Two or more of the same documents our last reply already asked for, and he did not ask what is needed. */
+    private function relistsDocuments(WhatsappConversation $conversation, string $replyText): bool
+    {
+        $named = fn (string $text) => array_keys(array_filter(self::DOCUMENT_WORDS, fn ($p, $k) => $k !== '' && preg_match($p, $text), ARRAY_FILTER_USE_BOTH));
+        $ours = $named($replyText);
+
+        // the ID is named "البطاقة" with no other document word
+        if (preg_match('/(?:وش|ضهر|ظهر)\s+(?:ال)?بطاق[ةه]/u', $replyText)) {
+            $ours[] = 'national_id';
+        }
+
+        if (count($ours) < 2) {
+            return false;
+        }
+
+        $lastOutgoingId = (int) WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'outgoing')->max('id');
+        $previous = (string) WhatsappMessage::whereKey($lastOutgoingId)->value('text');
+        $asked = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'incoming')
+            ->where('id', '>', $lastOutgoingId)->pluck('text')->filter()->implode(' ');
+
+        // "عايز اقدم": the list is the answer, not a repeat (it looped with DOCUMENT_LIST_INCOMPLETE and the reviewer)
+        if (preg_match('/مطلوب|المطلوب|محتاج(?:ين)?\s+(?:إيه|ايه)|(?:ال)?(?:ورق|اوراق|أوراق|مستندات)|(?:عايز|عاوز|عايزه|عاوزه|ممكن)\s+(?:ا|أ|ن)?قد[ّ]?م|نقد[ّ]?م/u', $asked)) {
+            return false;
+        }
+
+        $before = $named($previous);
+
+        if (preg_match('/(?:وش|ضهر|ظهر)\s+(?:ال)?بطاق[ةه]/u', $previous)) {
+            $before[] = 'national_id';
+        }
+
+        return array_diff($ours, $before) === [];
+    }
+
     private function isDuplicateOfRecentReply(WhatsappConversation $conversation, string $replyText): bool
     {
         $normalized = $this->normalizeWhitespace($replyText);
@@ -1260,8 +1726,73 @@ class ReplyGuard
      * names only, so it is deliberately NOT a source here - "Lifan 150 بـ
      * 53,000" was quoted straight from it with no lookup at all. The rest
      * of the system prompt (structured state, approved business memory),
-     * what the customer wrote and earlier replies in the history are sources.
+     * and what the customer wrote are sources - our own earlier replies are not.
      */
+    /** A percentage said with a duration no active plan has it for. */
+    private function percentWithWrongDuration(string $replyText): bool
+    {
+        $text = strtr($replyText, ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9', '٪' => '%', '٫' => '.']);
+
+        if (! preg_match('/\d\s*(?:%|في\s?المي[ةه]|بالمي[ةه])/u', $text)) {
+            return false;
+        }
+
+        $plans = \App\Models\InstallmentPlan::query()->where('is_active', true)
+            ->whereHas('installmentSystem', fn ($q) => $q->where('is_active', true))
+            ->get(['months', 'interest_percent']);
+        $fees = \App\Models\InstallmentSystem::where('is_active', true)->pluck('administrative_fees')->map(fn ($f) => (float) $f)->all();
+        $any = array_merge($plans->pluck('interest_percent')->map(fn ($p) => (float) $p)->all(), $fees);
+
+        foreach (preg_split('/(?<=[.!؟?\n،,:])\s*|\s+(?:أو|او|ولا|و)\s+(?=\S*\s*\d)/u', $text) as $part) {
+            preg_match_all('/(\d+(?:\.\d+)?)\s*(?:%|في\s?المي[ةه]|بالمي[ةه])/u', $part, $m);
+
+            if ($m[1] === []) {
+                continue;
+            }
+
+            $months = $this->durationsIn($part);
+
+            foreach ($m[1] as $percent) {
+                $percent = (float) $percent;
+                $allowed = count($months) === 1
+                    ? array_merge($plans->where('months', $months[0])->pluck('interest_percent')->map(fn ($p) => (float) $p)->all(), $fees)
+                    : $any;
+
+                if (! in_array($percent, $allowed, true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /** @return int[] the plan durations a sentence names, in months */
+    private function durationsIn(string $text): array
+    {
+        $found = [];
+        $text = preg_replace_callback('/(\d+)\s*(?:شهر|شهور|أشهر|اشهر)/u', function ($m) use (&$found) {
+            $found[] = (int) $m[1];
+
+            return ' ';
+        }, $text);
+        $patterns = [
+            18 => '/(?:ال)?سن[ةه]\s+ونص/u',
+            36 => '/(?:تلت|ثلاث|تلات|3)\s*(?:سنين|سنوات)/u',
+            24 => '/(?:ال)?سنتين/u',
+            12 => '/(?<!\p{L})(?:ال)?سن[ةه](?!\p{L})/u',
+        ];
+
+        foreach ($patterns as $months => $pattern) {
+            if (preg_match($pattern, $text)) {
+                $found[] = $months;
+                $text = preg_replace($pattern, ' ', $text);
+            }
+        }
+
+        return array_values(array_unique($found));
+    }
+
     private function hasUnverifiedNumber(string $replyText, string $system, string $toolResultsBlob, array $contents, bool $earlierRepliesCount = true): bool
     {
         return $this->unverifiedNumbers($replyText, $system, $toolResultsBlob, $contents, $earlierRepliesCount) !== [];
@@ -1315,16 +1846,15 @@ class ReplyGuard
     {
         $minValue = config('agent.guard.number_min_value');
         $sourcedSystem = $this->removeBlock($system, '## فهرس الكتالوج');
-        // What the customer wrote, and what was already said to them: a
-        // price in an earlier reply passed this same check when it went out,
-        // so repeating it ("تقصد الفرز التاني بـ 40,000؟") is not a new
-        // claim. Blocking it burned the turn's budget on re-lookups.
+        // What the customer wrote. Our own earlier replies used to count too
+        // (to save re-lookups), and that is how a stale 50,000 and fees of
+        // 3,220 / 2,730 were repeated in the 2026-10-04 runs: a figure is
+        // sourced by a tool of this turn, the state, or the customer only.
         $customerText = implode(' ', array_map(
             fn ($c) => implode(' ', array_column(array_filter($c['parts'], fn ($p) => ($p['type'] ?? null) === 'text'), 'text')),
-            // When he brings a price, neither his figure nor our earlier one
-            // is a source - agreeing with "بقت 35 ألف" is as invented as
-            // repeating a stale price. Only a lookup now answers it.
-            array_filter($contents, fn ($c) => $earlierRepliesCount && in_array($c['role'] ?? null, ['user', 'model'], true))
+            // When he brings a price his figure is no source either -
+            // agreeing with "بقت 35 ألف" is invented. Only a lookup now answers it.
+            array_filter($contents, fn ($c) => $earlierRepliesCount && ($c['role'] ?? null) === 'user')
         ));
 
         $haystackNumbers = $this->extractNumbers($toolResultsBlob.' '.$sourcedSystem.' '.$customerText);
@@ -1418,6 +1948,17 @@ class ReplyGuard
         // "التقسيط بالكارت" (server, gpt-5-nano) - the card is البطاقة
         '/(?<!\p{L})بالكارت(?!\p{L})/u' => 'بالبطاقة',
         '/(?<!\p{L})الكارت(?!\p{L})/u' => 'البطاقة',
+        // simulator 2026-10-05: "(FINANCING_CAP_EXCEEDED)" and "فرز تاني #7" (a machine id) went to customers;
+        // a request number has four digits or more and stays
+        '/\s*\(?\b[A-Z]{2,}(?:_[A-Z0-9]+)+\b\)?/u' => '',
+        '/\s*#\d{1,3}(?!\d)/u' => '',
+        // فصحى the code can say in Egyptian - no model call for one word (FORMAL_ARABIC)
+        '/(?<!\p{L})هل\s+/u' => '',
+        '/(?<!\p{L})لديك(?!\p{L})/u' => 'عندك',
+        '/(?<!\p{L})لدينا(?!\p{L})/u' => 'عندنا',
+        '/(?<!\p{L})يمكنك(?!\p{L})/u' => 'تقدر',
+        '/(?<!\p{L})(?:الذي|التي)(?!\p{L})/u' => 'اللي',
+        '/(?<!\p{L})سوف\s+/u' => 'ه',
         // a salesman does not call a customer "my daughter / my son"
         '/(?<!\p{L})يا\s+(?:بنتي|بنيتي|ابني|إبني|ابنى)(?!\p{L})/u' => 'يا فندم',
     ];
@@ -1433,6 +1974,8 @@ class ReplyGuard
             $m = preg_replace('/[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{FE0F}\x{200D}]/u', '', (string) $m);
             $m = preg_replace('/\*\*(.+?)\*\*/u', '$1', $m);
             $m = preg_replace('/^#{1,6}\s+/mu', '', $m);
+            // "تمام — بدأتلك الطلب": a dash reads like a document, not a salesman.
+            $m = preg_replace('/\s*[—–]\s*/u', '، ', $m);
             // QA 2026-10-04 (table 2): misspellings, English terms and a hurtful
             // word the model kept writing - corrected here, no new model call.
             $m = preg_replace(array_keys(self::WORDING_FIXES), array_values(self::WORDING_FIXES), $m);
@@ -1539,8 +2082,157 @@ class ReplyGuard
         return mb_strlen(implode(' ', $messages)) >= 20 ? ['messages' => $messages] + $args : $args;
     }
 
+    /**
+     * Owner 2026-10-05 (95% clean): misses the code can mend are mended here,
+     * with no model call - each refusal was a whole new call and a "not clean"
+     * reply for a sentence that only had to go. What cannot be mended in
+     * place is still refused by check().
+     */
+    public function autofix(array $args, WhatsappConversation $conversation, array $outcomes): array
+    {
+        $messages = array_values(array_filter(array_map('strval', (array) ($args['messages'] ?? [])), fn ($m) => trim($m) !== ''));
+
+        if ($messages === [] || ($args['no_reply'] ?? false) === true) {
+            return $args;
+        }
+
+        $succeeded = array_column(array_filter($outcomes, fn ($o) => $o['ok'] && $this->changedSomething($o)), 'name');
+        $saved = array_intersect($succeeded, self::WRITE_TOOLS) !== [];
+        $submitted = in_array('submit_application', array_column($outcomes, 'name'), true);
+        $askedForSaved = $this->savedItemsAsked($conversation);
+
+        $fixed = $this->mapSentences($messages, function (string $sentence) use ($conversation, $saved, $submitted, $askedForSaved, $outcomes): ?string {
+            // his own words read back, after they were saved (DATA_NOT_RECORDED still refuses when nothing was)
+            if (! $submitted && ($saved || ! $this->applicationHasMissingFields($conversation)) && $this->echoesCustomer($conversation, $sentence)) {
+                return null;
+            }
+
+            // asking again for what is already on his application (the reviewer caught "رقمك؟" after he sent it)
+            if ($askedForSaved !== null && $askedForSaved($sentence)) {
+                return null;
+            }
+
+            // the same papers our last message asked for (DOCUMENTS_RELISTED)
+            if (! $this->openedThisTurn($outcomes) && count($this->documentsNamed($sentence)) >= 2 && $this->relistsDocuments($conversation, $sentence)) {
+                return 'ابعتهم وقت ما يبقوا معاك.';
+            }
+
+            return $sentence;
+        });
+
+        // the closing question our last message also ended with (REPEATED_QUESTION)
+        if ($this->repeatsLastClosingQuestion($conversation, implode("\n", $fixed))) {
+            $last = count($fixed) - 1;
+            $sentences = preg_split('/(?<=[.!؟?\n])/u', $fixed[$last], -1, PREG_SPLIT_NO_EMPTY);
+            array_pop($sentences);
+            $fixed[$last] = trim(implode('', $sentences));
+            $fixed = array_values(array_filter($fixed, fn ($m) => $m !== ''));
+        }
+
+        // only when what is left still says something - otherwise check() asks for a rewrite
+        if (mb_strlen(implode(' ', $fixed)) < 12 || $fixed === $messages) {
+            return $args;
+        }
+
+        return ['messages' => $fixed] + $args;
+    }
+
+    /** @param callable(string): ?string $fix  null drops the sentence */
+    private function mapSentences(array $messages, callable $fix): array
+    {
+        $out = [];
+
+        foreach ($messages as $message) {
+            $kept = [];
+
+            foreach (preg_split('/(?<=[.!؟?\n])/u', $message, -1, PREG_SPLIT_NO_EMPTY) as $sentence) {
+                if (trim($sentence) === '') {
+                    $kept[] = $sentence;
+
+                    continue;
+                }
+
+                $new = $fix($sentence);
+
+                if ($new !== null && ! in_array(trim($new), array_map('trim', $kept), true)) {
+                    $kept[] = $new === $sentence ? $sentence : ' '.$new;
+                }
+            }
+
+            $text = trim(implode('', $kept));
+
+            if ($text !== '') {
+                $out[] = $text;
+            }
+        }
+
+        return $out;
+    }
+
+    /** Ways of asking for an item, by the key it is saved under. */
+    private const ASKS_FOR = [
+        'phone' => '/رقم\s+(?:ال)?(?:تليفون|تلفون|موبايل|فون)|رقمك|رقم\s+حضرتك/u',
+        'address' => '/عنوان\s+(?:ال)?(?:سكن|بيت)|عنوانك|ساكن\s+فين|ساكنة\s+فين/u',
+        'work_address' => '/عنوان\s+(?:ال)?(?:شغل|شركة|شركه|محل)/u',
+        'national_id_front' => '/(?:وش|صور[ةه])\s+(?:ال)?بطاق/u',
+        'national_id_back' => '/(?:ضهر|ظهر)\s+(?:ال)?بطاق/u',
+    ];
+
+    /** A test "does this sentence ask for something already on his application", or null when nothing is. */
+    private function savedItemsAsked(WhatsappConversation $conversation): ?callable
+    {
+        $application = $this->activeApplication($conversation);
+
+        if (! $application) {
+            return null;
+        }
+
+        try {
+            $snapshot = app(\App\Domain\Applications\SnapshotService::class)->for($application);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $invalid = array_column((array) ($snapshot['fields']['invalid'] ?? []), 'key');
+        $have = array_diff(array_merge(
+            (array) ($snapshot['fields']['collected'] ?? []),
+            array_diff((array) ($snapshot['documents']['required'] ?? []), (array) ($snapshot['documents']['missing'] ?? [])),
+        ), $invalid);
+        $patterns = array_intersect_key(self::ASKS_FOR, array_flip(array_map('strval', $have)));
+
+        if ($patterns === []) {
+            return null;
+        }
+
+        return function (string $sentence) use ($patterns): bool {
+            if (! preg_match('/ابعت|محتاج|ممكن|هات|[؟?]/u', $sentence)) {
+                return false;
+            }
+
+            foreach ($patterns as $pattern) {
+                if (preg_match($pattern, $sentence)) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+    }
+
+    /** @return string[] the document keys a text names (the ID as one) */
+    private function documentsNamed(string $text): array
+    {
+        $named = array_keys(array_filter(self::DOCUMENT_WORDS, fn ($p, $k) => $k !== '' && preg_match($p, $text), ARRAY_FILTER_USE_BOTH));
+
+        if (preg_match('/(?:وش|ضهر|ظهر)\s+(?:ال)?بطاق[ةه]/u', $text)) {
+            $named[] = 'national_id';
+        }
+
+        return $named;
+    }
+
     /** What the customer wrote since our last reply. */
-    private function customerTextSinceLastReply(WhatsappConversation $conversation): string
+    public function customerTextSinceLastReply(WhatsappConversation $conversation): string
     {
         $lastOut = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
             ->where('direction', 'outgoing')->whereIn('sender_type', ['bot', 'human', 'human_phone', 'staff'])->max('id');

@@ -44,7 +44,7 @@ class EnhanceGuardsTest extends TestCase
     public function test_a_question_about_earlier_applications_is_not_a_submission_claim(): void
     {
         // refused 212 times in four days, each one a wasted model call
-        $this->assertNull($this->check('كده بياناتك تمام، فاضل بس حاجة أخيرة: هل قدّمت طلب تقسيط في أي معرض تاني قبل كده؟'));
+        $this->assertNull($this->check('كده بياناتك تمام، فاضل بس حاجة أخيرة: قدّمت طلب تقسيط في أي معرض تاني قبل كده؟'));
     }
 
     public function test_a_real_submission_claim_is_still_caught(): void
@@ -83,11 +83,13 @@ class EnhanceGuardsTest extends TestCase
 
     public function test_a_phone_number_is_not_a_price_he_brings(): void
     {
-        $contents = [['role' => 'model', 'parts' => [['type' => 'text', 'text' => 'القسط 4,700 جنيه في الشهر']]]];
-        $this->message('outgoing', 'القسط 4,700 جنيه في الشهر');
+        // his own budget stays a source when the next thing he sends is his phone
+        $contents = [['role' => 'user', 'parts' => [['type' => 'text', 'text' => 'ميزانيتي 40,000']]]];
+        $this->message('incoming', 'ميزانيتي 40,000');
+        $this->message('outgoing', 'تمام، ابعتلي رقمك.');
         $this->message('incoming', '01033527924');
 
-        $this->assertNull($this->check('تمام، والقسط زي ما قلتلك 4,700 جنيه في الشهر.', $contents));
+        $this->assertNull($this->check('تمام، على ميزانية 40,000 عندنا اختيارات كتير.', $contents));
     }
 
     public function test_an_invented_reason_for_admin_fees_is_refused(): void
@@ -255,5 +257,78 @@ class EnhanceGuardsTest extends TestCase
     {
         $this->assertSame(3, ApplicationNudgeService::MAX_PER_APPLICATION);
         $this->assertSame(12, ApplicationNudgeService::MIN_GAP_HOURS);
+    }
+
+    public function test_his_address_read_back_to_him_is_refused(): void
+    {
+        // conversation 865: the address came back five times and was never saved
+        $this->message('outgoing', 'ابعتلي عنوان الشغل ورقم العقار وعلامة مميزة جنبه');
+        $this->message('incoming', '٢٥٥ شارع السودان بجوار الرازي للسمعيات و عادل للسيارات');
+
+        $this->assertSame('ECHOES_CUSTOMER', $this->check('تمام، العنوان الشغل: الجيزة، الهرم، 255 شارع السودان بجوار الرازي للسمعيات وعادل للسيارات. ابعت صورة البطاقة.'));
+        $this->assertNull($this->check('تمام. فاضل صورة مكان الشغل، تبعتهالي؟'));
+    }
+
+    public function test_english_words_are_refused_except_model_names(): void
+    {
+        \App\Models\Brand::forceCreate(['name' => 'Hojan', 'image' => 'x.png']);
+        \Illuminate\Support\Facades\Cache::forget('reply_guard.latin_names');
+
+        $this->assertSame('ENGLISH_WORD', $this->check('فيه علامة مميزة تستخدمها ك landmark؟'));
+        $this->assertSame('ENGLISH_WORD', $this->check('تمام يا باشا، ok نكمل؟'));
+        $this->assertSame('ENGLISH_WORD', $this->check('ابعتلي الـ location بتاع الشغل'));
+        $this->assertNull($this->check('الـ Hojan L250 والـ HLX موجودين.'));
+    }
+
+    public function test_made_up_substitutes_for_the_salary_slip_are_refused(): void
+    {
+        // request 4391: the real reply, papers on bullet lines under the heading
+        $reply = "تمام، في بدائل مقبولة لإثبات الدخل لو مفردات المرتب مش متاحة:\n• كشف حساب بنكي آخر 3 شهور\n• معاش تقاعدي\n• فواتير دخل من نشاطك الحر أو عقد/ إيصالات عملاء\n• تقارير ضريبية أو إشعارات ضريبة الدخل\n\nلو تحب، ابعت أي واحدة منهم ونكمل الإجراءات على طول.";
+
+        $this->assertSame('DOCUMENT_NOT_REQUIRED', $this->check($reply));
+        $this->assertNull($this->check('مفردات المرتب لازمة، ولو الشركة مش بتطلعها ابعتلي برنت التأمينات بداله.'));
+    }
+
+    public function test_the_job_on_the_id_decides_the_salary_slip(): void
+    {
+        $this->assertTrue(\App\Domain\Applications\IdOccupation::isNoJob('بدون عمل'));
+        $this->assertTrue(\App\Domain\Applications\IdOccupation::isNoJob('طالب'));
+        $this->assertFalse(\App\Domain\Applications\IdOccupation::isNoJob('مهندس بشركة المقاولون العرب'));
+        $this->assertFalse(\App\Domain\Applications\IdOccupation::isNoJob(null));
+    }
+
+    public function test_a_rate_said_with_the_wrong_duration_is_refused(): void
+    {
+        // conversation 855, owner: "٣٠ ع السنه ونص ٤٠ سنتين ٦٠ تلت سنين مع ٧٪ مصاريف"
+        \App\Models\InstallmentSystem::create(['name' => 'أمان', 'pricing_mode' => 'standard', 'administrative_fees' => 7,
+            'plans' => [['months' => 12, 'interest' => 20], ['months' => 18, 'interest' => 30], ['months' => 24, 'interest' => 40], ['months' => 36, 'interest' => 60]]]);
+        \App\Models\InstallmentSystem::create(['name' => 'أمان بدون مصاريف', 'pricing_mode' => 'standard', 'administrative_fees' => 0,
+            'plans' => [['months' => 12, 'interest' => 30], ['months' => 24, 'interest' => 60]]]);
+        $this->assertSame(4, \App\Models\InstallmentPlan::where('installment_system_id', \App\Models\InstallmentSystem::first()->id)->count());
+
+        $this->assertSame('PERCENT_DURATION_MISMATCH', $this->check('تمام، 30% بدون مصاريف على سنتين ممكن. نحسب القسط؟'));
+        $this->assertSame('PERCENT_DURATION_MISMATCH', $this->check('الفايدة 20% على سنتين.'));
+        $options = [['name' => 'get_installment_options', 'ok' => true, 'data' => ['systems' => [['admin_fee_percent' => 7, 'plans' => [['months' => 12, 'interest_percent' => 20], ['months' => 18, 'interest_percent' => 30], ['months' => 24, 'interest_percent' => 40]]]]]]];
+        $this->assertNull($this->check('على سنة 20% مع 7% مصاريف إدارية، وعلى سنتين 40%.', [], $options));
+        $this->assertNull($this->check('على سنة ونص الفايدة 30% مع 7% مصاريف إدارية.', [], $options));
+    }
+
+    public function test_formal_arabic_is_refused(): void
+    {
+        $this->assertSame('FORMAL_ARABIC', $this->check('لو حابب نكمل، اختَر أحد الخيارين وأحسب لك القسط.'));
+        $this->assertSame('FORMAL_ARABIC', $this->check('هل لديك صورة البطاقة؟'));
+        $this->assertNull($this->check('لو حابب نكمل، قولي تختار أنهي واحد وأحسبلك القسط.'));
+    }
+
+    public function test_the_same_documents_are_not_listed_again_unasked(): void
+    {
+        $this->message('outgoing', 'تمام، ابعت وش وضهر البطاقة وصورة مكان الورشة والبطاقة الضريبية.');
+        $this->message('incoming', 'جمبو الرازي للسمعيات');
+
+        $this->assertSame('DOCUMENTS_RELISTED', $this->check('تمام يا باشا، فاضل وش وضهر البطاقة وصورة مكان الورشة والبطاقة الضريبية.'));
+        $this->assertNull($this->check('تمام يا باشا، ابعتهم وقت ما يبقوا معاك.'));
+
+        $this->message('incoming', 'هو المطلوب ايه تاني؟');
+        $this->assertNull($this->check('وش وضهر البطاقة وصورة مكان الورشة والبطاقة الضريبية بس.'));
     }
 }

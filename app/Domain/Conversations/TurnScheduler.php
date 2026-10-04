@@ -59,6 +59,17 @@ class TurnScheduler implements TurnSchedulerHook
             return;
         }
 
+        // Conversation 714: a turn past its max wait but not picked up yet
+        // (every worker busy) got a second turn beside it, and the customer
+        // got two replies asking the same question one second apart. It
+        // still answers everything he sent - just without waiting longer.
+        if ($pending) {
+            DB::table('whatsapp_message_jobs')->where('id', $pending->id)->update(['updated_at' => now()]);
+            $message->update(['turn_id' => $pending->id]);
+
+            return;
+        }
+
         // A reply still being generated - or generated but not yet
         // delivered (WhatsApp down, retry pending) - is stale once the
         // customer has said something new.

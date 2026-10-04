@@ -34,15 +34,19 @@ class ReplyGuardGapsTest extends TestCase
         $this->assertSame('HANDOFF_CLAIMED_NOT_DONE', $this->check('ولا يهمك يا غالي، ثواني ويكون معاك حد من الزملاء في المعرض يتابع معاك فورًا.'));
     }
 
-    public function test_repeating_a_price_the_bot_already_gave_is_not_unverified(): void
+    public function test_repeating_a_price_the_bot_already_gave_needs_a_lookup_this_turn(): void
     {
+        // 2026-10-04 runs: a stale 50,000 and fees of 3,220 / 2,730 were
+        // repeated from our own earlier replies - they are no source any more.
         $contents = [
             ['role' => 'user', 'parts' => [['type' => 'text', 'text' => 'عايز اقسط هوجن 4']]],
             ['role' => 'model', 'parts' => [['type' => 'text', 'text' => 'هوجن 4 استيراد فرز تاني بـ 40,000 كاش، والاستيراد بـ 50,000 كاش']]],
             ['role' => 'user', 'parts' => [['type' => 'text', 'text' => 'انا موظف حكومه']]],
         ];
 
-        $this->assertNull($this->check('تمام. تقصد الفرز التاني بـ 40,000 ولا الاستيراد بـ 50,000؟', $contents));
+        $this->assertSame('UNVERIFIED_NUMBER', $this->check('تمام. تقصد الفرز التاني بـ 40,000 ولا الاستيراد بـ 50,000؟', $contents));
+        $this->assertNull(app(ReplyGuard::class)->check(['messages' => ['تمام. تقصد الفرز التاني بـ 40,000 ولا الاستيراد بـ 50,000؟']], $this->conversation(), '', $contents,
+            [['name' => 'search_motorcycles', 'ok' => true, 'data' => ['results' => [['cash_price' => 40000], ['cash_price' => 50000]]]]]));
     }
 
     public function test_a_new_price_is_still_unverified(): void

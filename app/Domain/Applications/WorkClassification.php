@@ -105,7 +105,10 @@ class WorkClassification
             return ['code' => 'APPLICANT_HAS_NO_WORK', 'hint' => StartApplicationTool::NO_WORK_HINT];
         }
 
-        if ($r['refused_work'] || $r['sector'] === 'government') {
+        // Simulation 2026-10-04: a retired postal manager was refused as
+        // "government work". The refused jobs are what he does now - a
+        // pension from a government job is what the pension type is for.
+        if (($r['refused_work'] || $r['sector'] === 'government') && $r['customer_type'] !== 'pension') {
             return ['code' => 'OCCUPATION_NOT_ACCEPTED', 'hint' => StartApplicationTool::occupationHint($this->refusalSentence())];
         }
 

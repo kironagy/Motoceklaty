@@ -114,15 +114,19 @@ class SnapshotService
             $resolved = app(StaffDecisionService::class)->resolved($application);
             $blockers = $resolved ? [] : [['type' => 'staff_request', 'key' => $staffRequest['document'] ?? 'data', 'code' => 'PENDING']];
             $canSubmit = $resolved;
-            $staffStep = $resolved
-                ? ['type' => 'submit', 'why' => 'what staff asked for is in - call submit_application (confirm=true); it goes straight back to the same request under review, no summary needed. Tell him it went back for review.']
-                : (($staffRequest['type'] ?? null) === 'document'
-                    ? ['type' => 'document', 'key' => $staffRequest['document'], 'label' => $staffRequest['label'] ?? $staffRequest['document'],
-                        'why' => 'staff paused his submitted request and need this document again'.(filled($staffRequest['reason'] ?? null) ? ' ('.$staffRequest['reason'].')' : '')
-                            .'. Ask ONLY for this, process it with process_document. Nothing else is needed.']
-                    : ['type' => 'staff_request', 'key' => 'data', 'label' => 'تصحيح البيانات',
-                        'why' => 'staff paused his submitted request to correct data: '.($staffRequest['reason'] ?? '')
-                            .'. Ask him for the correct value(s) and save them with record_customer_data. Nothing else is needed.']);
+            $staffStep = match (true) {
+                $resolved => ['type' => 'submit', 'why' => 'what staff asked for is in - call submit_application (confirm=true); it goes straight back to the same request under review, no summary needed. Tell him it went back for review.'],
+                ($staffRequest['type'] ?? null) === 'document' => ['type' => 'document', 'key' => $staffRequest['document'], 'label' => $staffRequest['label'] ?? $staffRequest['document'],
+                    'why' => 'staff paused his submitted request and need this document again'.(filled($staffRequest['reason'] ?? null) ? ' ('.$staffRequest['reason'].')' : '')
+                        .'. Ask ONLY for this, process it with process_document. Nothing else is needed.'],
+                // Staff wrote only the reason ("ضهر البطاقه", "مطلوب مفردات مرتب").
+                ($staffRequest['type'] ?? null) === 'reason' => ['type' => 'staff_request', 'key' => 'reason', 'label' => (string) ($staffRequest['reason'] ?? ''),
+                    'why' => 'staff paused his submitted request and wrote what is missing: "'.($staffRequest['reason'] ?? '')
+                        .'". Explain it to him in plain words and get exactly that: a document -> process_document, data -> record_customer_data. Nothing else is needed.'],
+                default => ['type' => 'staff_request', 'key' => 'data', 'label' => 'تصحيح البيانات',
+                    'why' => 'staff paused his submitted request to correct data: '.($staffRequest['reason'] ?? '')
+                        .'. Ask him for the correct value(s) and save them with record_customer_data. Nothing else is needed.'],
+            };
         }
 
         return [
@@ -144,7 +148,7 @@ class SnapshotService
                 'values' => $this->nonSensitiveValues($collectedRows),
             ] + $this->missingFieldHints($requirementsSnapshot['fields']['missing']),
             'documents' => $documents + $this->missingDocumentHints($requirements['documents'], $documents['missing'])
-                + $this->ifUnavailable($customerType, $documents['missing']),
+                + $this->ifUnavailable($customerType, $documents['missing'], $application),
             'eligibility' => $eligibility,
             'can_submit' => $canSubmit,
             'blockers' => $blockers,
@@ -453,13 +457,15 @@ class SnapshotService
             null => null,
             'submit' => 'Everything is in: call submit_application now.',
             'not_eligible' => 'Not eligible: say so kindly and offer cash; ask for nothing else.',
-            default => 'Confirm in a few words what was just saved, then ask ONLY for: '.($step['label'] ?? $step['key'] ?? '')
+            // "Confirm what was saved" had the model read his data back to him
+            // (owner: never) and the reviewer then asked for it.
+            default => 'Say "تمام" (never repeat what he sent) and ask ONLY for: '.($step['label'] ?? $step['key'] ?? '')
                 .(isset($step['ask_together']) ? ' (with: '.implode('، ', (array) $step['ask_together']).')' : '')
                 .'. Nothing else is missing - do not list other items.',
         };
     }
 
-    private function ifUnavailable(CustomerType $customerType, array $missingDocuments): array
+    private function ifUnavailable(CustomerType $customerType, array $missingDocuments, Application $application): array
     {
         // The ID itself has no substitute; everything his work needs beyond it may.
         $workPapers = array_values(array_diff($missingDocuments, ['national_id_front', 'national_id_back']));
@@ -472,6 +478,22 @@ class SnapshotService
 
         // Owner 2026-10-04: no salary slip from the company = the insurance
         // print instead; only with neither, the card-only route.
+        // Owner 2026-10-04: the job on the back of his ID decides. A job title
+        // = the salary slip is compulsory; "بدون عمل" / "طالب" = no salary
+        // slip asked of him, he applies with his ID.
+        $occupation = in_array('salary_slip', $workPapers, true) ? IdOccupation::of($application) : null;
+
+        if ($occupation !== null && IdOccupation::isNoJob($occupation)) {
+            return ['if_unavailable' => 'His ID says "'.$occupation.'" - no job on it, so he does not need a salary slip. If he has none, do not push for it or ask for any other paper: '
+                .'offer the card-only route right away - quote its numbers with get_installment_offer customer_type=self_employed, and when he agrees call update_application_selection '
+                .'route=card_only with his own words. Never offered to a woman.'];
+        }
+
+        if ($occupation !== null) {
+            return ['if_unavailable' => 'His ID shows a job ("'.$occupation.'"), so the salary slip is compulsory. The only substitute is برنت التأمينات (his social-insurance print). '
+                .'No card-only route and no other paper - never a bank statement, invoices or anything else.'];
+        }
+
         if (in_array('salary_slip', $workPapers, true)) {
             return ['if_unavailable' => 'If his company does not give a salary slip: ask for برنت التأمينات (his social-insurance print, from the التأمينات office or app) instead - it counts as the salary slip. '
                 .'Only when he says he cannot get either of them at all (not "later"): the last resort is the card-only route - quote its numbers with get_installment_offer customer_type=self_employed, '

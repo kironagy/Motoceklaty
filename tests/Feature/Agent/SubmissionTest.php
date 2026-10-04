@@ -519,7 +519,7 @@ class SubmissionTest extends TestCase
 
         $text = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('sender_type', 'system')->latest('id')->value('text');
         $this->assertStringContainsString('مبروك', $text);
-        $this->assertStringContainsString('أقرب فرع', $text);
+        $this->assertStringContainsString('المعرض', $text);
     }
 
     public function test_a_paused_request_asks_him_for_the_fix_and_goes_back_to_the_same_request(): void
@@ -624,6 +624,70 @@ class SubmissionTest extends TestCase
         $this->assertStringContainsString('#'.$request->id, $text);
         $this->assertStringContainsString('ما وافقتش', $text);
         $this->assertStringContainsString('السبب: عليه أقساط متأخرة في الاستعلام', $text);
+    }
+
+    public function test_an_iscore_rejection_is_final_with_no_next_steps(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200)]);
+        [$application, $conversation] = $this->completeApplication();
+        $this->submitConfirmed($conversation, $application);
+        $request = InstallmentRequest::find($application->refresh()->installment_request_id);
+
+        $request->update(['status' => 'rejected', 'checks_report' => 'مرفوض قبل كدا ايسكور']);
+
+        $text = $this->lastSystemText($conversation);
+        $this->assertStringContainsString('#'.$request->id, $text);
+        $this->assertStringContainsString('I-Score', $text);
+        $this->assertStringContainsString('قرار نهائي', $text);
+        $this->assertStringNotContainsString('ايسكور', $text);
+
+        $mine = app(\App\Domain\Applications\CustomerRequestStatus::class)->for($conversation->customer, $conversation);
+        $this->assertSame($request->id, $mine[0]['request_number']);
+        $this->assertStringContainsString('Final', $mine[0]['note']);
+    }
+
+    public function test_a_pause_with_only_a_reason_has_the_bot_get_it_from_him(): void
+    {
+        Http::fake(['*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200)]);
+        [$application, $conversation] = $this->completeApplication();
+        $this->submitConfirmed($conversation, $application);
+        $request = InstallmentRequest::find($application->refresh()->installment_request_id);
+
+        \Illuminate\Support\Carbon::setTestNow(now()->addMinute());
+        $request->update(['status' => 'paused', 'checks_report' => 'مطلوب مفردات مرتب وشكرا']);
+        \Illuminate\Support\Carbon::setTestNow();
+
+        $application->refresh();
+        $this->assertSame('needs_more_info', $application->status);
+        $this->assertSame('reason', $application->staff_request['type']);
+        $snapshot = app(\App\Domain\Applications\SnapshotService::class)->for($application);
+        $this->assertSame('reason', $snapshot['next_step']['key']);
+
+        $text = $this->lastSystemText($conversation);
+        $this->assertStringContainsString('مطلوب مفردات مرتب', $text);
+        $this->assertStringNotContainsString('شكرا', $text);
+
+        $mine = app(\App\Domain\Applications\CustomerRequestStatus::class)->for($conversation->customer, $conversation);
+        $this->assertSame('متوقف على حاجة ناقصة', $mine[0]['status']);
+        $this->assertArrayNotHasKey('notes', $mine[0]);
+    }
+
+    public function test_a_decision_on_a_logged_out_number_is_sent_from_the_connected_one(): void
+    {
+        [$application, $conversation] = $this->completeApplication();
+        $this->submitConfirmed($conversation, $application);
+        $request = InstallmentRequest::find($application->refresh()->installment_request_id);
+        $live = \App\Models\WhatsappBot::create(['name' => 'live', 'mode' => 'live', 'whatsapp_phone_number_id' => 'live-1', 'staff_id' => Staff::create(['name' => 'L', 'email' => 'l'.uniqid().'@x.com', 'password' => 'secret'])->id]);
+
+        Http::fake([
+            '*/status' => Http::response(['ok' => true, 'sessions' => [['bot_id' => (string) $live->id, 'connected' => true]]], 200),
+            '*' => Http::response(['ok' => true, 'wa_message_id' => 'abc'], 200),
+        ]);
+
+        $request->update(['status' => 'approved']);
+
+        $this->assertSame($live->id, (int) $conversation->refresh()->whatsapp_bot_id);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/send-message') && $r['bot_id'] === (string) $live->id);
     }
 
     public function test_the_submit_reply_must_carry_the_request_number(): void

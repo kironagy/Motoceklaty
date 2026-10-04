@@ -40,7 +40,16 @@ class SendWhatsappStatusNotification implements ShouldQueue
             || ($this->customerAction !== null && (string) $request->customer_action !== $this->customerAction)) {
             return;
         }
-        $conversation = $request->whatsappConversation;
+        // His chat's number may be logged out: send from a connected one.
+        $conversation = app(\App\Domain\Conversations\BotSessions::class)->liveConversation($request->whatsappConversation);
+
+        if (! $conversation) {
+            Log::warning('SendWhatsappStatusNotification: no WhatsApp number connected', ['installment_request_id' => $request->id]);
+            $this->release(300);
+
+            return;
+        }
+
         $jid = $this->recipientJid($request, $conversation);
 
         if (! $jid) {
@@ -80,32 +89,31 @@ class SendWhatsappStatusNotification implements ShouldQueue
         ]);
     }
 
+    /**
+     * The chat he talks to the bot on - the same jid the bot replies to.
+     * Owner 2026-10-04: never the phone typed in the form (request 4449's
+     * decision went to the form number, not his chat).
+     */
     private function recipientJid(InstallmentRequest $request, object $conversation): ?string
     {
-        $conversationPhone = trim((string) $conversation->phone);
+        $jid = trim((string) ($conversation->customer?->jid ?? ''));
 
-        if ($conversationPhone === '') {
+        if ($jid !== '' && str_contains($jid, '@')) {
+            return $jid;
+        }
+
+        $phone = trim((string) $conversation->phone);
+
+        if ($phone === '') {
             return null;
         }
 
-        // Keep an explicitly stored JID intact, including WhatsApp LID values.
-        if (str_contains($conversationPhone, '@')) {
-            return $conversationPhone;
+        if (str_contains($phone, '@')) {
+            return $phone;
         }
 
-        // Older conversations stored a numeric LID without its @lid suffix.
-        // In that case, use the customer's registered Egyptian phone number.
-        if (preg_match('/^\d{15}$/', $conversationPhone)) {
-            $phone = preg_replace('/\D+/', '', (string) $request->applicant_phone);
-
-            if (preg_match('/^01[0125]\d{8}$/', $phone)) {
-                return '20' . substr($phone, 1) . '@s.whatsapp.net';
-            }
-
-            return null;
-        }
-
-        return $conversationPhone . '@s.whatsapp.net';
+        // A numeric LID stored without its suffix.
+        return $phone.(preg_match('/^\d{14,15}$/', $phone) && ! str_starts_with($phone, '20') ? '@lid' : '@s.whatsapp.net');
     }
 
     /** Worded per status and per what staff need from the customer. */

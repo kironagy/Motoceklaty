@@ -13,7 +13,9 @@ use Illuminate\Support\Facades\Log;
 
 class InstallmentRequestObserver
 {
-    private const NOTIFIABLE_STATUSES = ['approved', 'rejected', 'paused', 'canceled'];
+    // Owner 2026-10-04: every change the customer should know about reaches
+    // him on WhatsApp. new / new_request / transferred are internal steps.
+    private const NOTIFIABLE_STATUSES = ['pending', 'work_check', 'approved', 'rejected', 'paused', 'delivered', 'canceled'];
 
     public function updated(InstallmentRequest $model): void
     {
@@ -50,11 +52,10 @@ class InstallmentRequestObserver
 
         $decisions->logDecision($model, $status, $reason);
 
-        // Request 4400: "متوقف مؤقتًا", "محتاج تصحيح" and "ألف مبروك" reached
-        // the customer inside four minutes while staff clicked through
-        // statuses. Sent after a short wait, and only if still current.
-        SendWhatsappStatusNotification::dispatch($model->id, $status, $reason, (string) $model->customer_action)
-            ->delay(now()->addMinutes((int) config('agent.notifications.status_delay_minutes', 3)));
+        // Owner 2026-10-04: the customer hears the moment staff change it.
+        // If staff click on to another status, the job still skips a
+        // status that is no longer current.
+        SendWhatsappStatusNotification::dispatch($model->id, $status, $reason, (string) $model->customer_action);
     }
 
     /**

@@ -150,6 +150,7 @@ could_be_government: true when this exact job is commonly done in BOTH governmen
 A pensioner: working_now yes, customer_type pension.
 refused_work: true when his work is in this refused list (the finance companies refuse it) - judge the meaning, any wording: government work of any kind, army/police/military, lawyers. The owner's words for it: {$refused}.
 working_now: yes / no (not working, housewife, unemployed, student only) / not_yet (about to start) / unknown.
+  not_yet ONLY when he clearly says he has not started ("لسه هشتغل", "هبدأ الشهر الجاي", "مش شغال لسه"). "عايز موتوسيكل اشتغل بيه على ديدي" / "عشان الشغل" says what the motorcycle is for, not that he is not working: unknown (the salesman asks), or yes with the job if he names one ("شغال على ديدي").
 work_stated: true when the applicant's actual work (or pension, or not working) was said.
 
 question - the ONE thing to ask before his type can be used, in this order:

@@ -116,6 +116,8 @@ class SendMotorcycleImagesTool implements Tool
         return ToolResult::ok([
             // name it exactly so in the reply - two brands share model names
             'motorcycle' => trim(($machine?->brand?->name ? $machine->brand->name.' ' : '').trim((string) $machine?->name)),
+            // which photos really went out - a reply naming another model is checked against it
+            'motorcycle_id' => (int) $args['motorcycle_id'],
             'queued_count' => count($images['paths']),
             // what the customer is about to see, photo by photo - talk about these colors,
             // e.g. two photos رمادي + أبيض means both colors are available

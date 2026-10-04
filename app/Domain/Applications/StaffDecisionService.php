@@ -56,7 +56,10 @@ class StaffDecisionService
         $action = (string) $request->customer_action;
         $documentType = $action !== '' ? DocumentType::where('key', $action)->first() : null;
 
-        if (! $application || (! $documentType && $action !== self::ACTION_DATA)) {
+        // No specific action picked: staff wrote only the reason ("ضهر
+        // البطاقه", "مطلوب مفردات مرتب"). The bot reads it with the customer
+        // and gets him to send what it names. A branch visit needs no bot.
+        if (! $application || $action === self::ACTION_BRANCH || (! $documentType && $action !== self::ACTION_DATA && trim((string) $reason) === '')) {
             return;
         }
 
@@ -76,7 +79,7 @@ class StaffDecisionService
         }
 
         $application->update(['staff_request' => [
-            'type' => $documentType ? 'document' : 'data',
+            'type' => $documentType ? 'document' : ($action === self::ACTION_DATA ? 'data' : 'reason'),
             'document' => $documentType?->key,
             'label' => $documentType?->label,
             'reason' => $reason,
@@ -112,8 +115,15 @@ class StaffDecisionService
                 ->exists();
         }
 
-        return ApplicationData::where('application_id', $application->id)->where('updated_at', '>=', $since)->exists()
+        $dataChanged = ApplicationData::where('application_id', $application->id)->where('updated_at', '>=', $since)->exists()
             || CustomerAttribute::where('customer_id', $application->customer_id)->where('updated_at', '>=', $since)->exists();
+
+        if (($staffRequest['type'] ?? null) === 'reason') {
+            return $dataChanged || ApplicationDocument::where('application_id', $application->id)
+                ->where('status', 'accepted')->where('created_at', '>=', $since)->exists();
+        }
+
+        return $dataChanged;
     }
 
     /**
@@ -137,12 +147,28 @@ class StaffDecisionService
 
         if ($request) {
             $attributes = $this->projector->attributes($application, $request->work_status ?: (string) $application->customerType?->legacy_work_status);
-            $columns = ($staffRequest['type'] ?? null) === 'document'
-                ? array_intersect_key($attributes, array_flip($this->projector->documentColumns((string) $staffRequest['document'])))
-                : array_filter($attributes, fn ($value, $column) => preg_match('/^(applicant|work|guarantor|free_work)_/', $column)
-                    && ! str_ends_with($column, '_image') && $value !== null && $value !== '', ARRAY_FILTER_USE_BOTH);
+            $type = $staffRequest['type'] ?? null;
+            $dataColumns = array_filter($attributes, fn ($value, $column) => preg_match('/^(applicant|work|guarantor|free_work)_/', $column)
+                && ! str_ends_with($column, '_image') && $value !== null && $value !== '', ARRAY_FILTER_USE_BOTH);
+            $since = \Illuminate\Support\Carbon::parse($staffRequest['requested_at'] ?? now());
+            $newDocumentColumns = $type === 'reason'
+                ? ApplicationDocument::where('application_id', $application->id)->where('status', 'accepted')
+                    ->where('created_at', '>=', $since)->with('documentType')->get()
+                    ->flatMap(fn (ApplicationDocument $d) => $this->projector->documentColumns((string) $d->documentType?->key))
+                    ->all()
+                : [];
 
-            $what = ($staffRequest['type'] ?? null) === 'document' ? ($staffRequest['label'] ?? $staffRequest['document']) : 'تصحيح البيانات';
+            $columns = match ($type) {
+                'document' => array_intersect_key($attributes, array_flip($this->projector->documentColumns((string) $staffRequest['document']))),
+                'reason' => array_intersect_key($attributes, array_flip($newDocumentColumns)) + $dataColumns,
+                default => $dataColumns,
+            };
+
+            $what = match ($type) {
+                'document' => $staffRequest['label'] ?? $staffRequest['document'],
+                'reason' => 'المطلوب: '.($staffRequest['reason'] ?? ''),
+                default => 'تصحيح البيانات',
+            };
 
             $request->forceFill($columns + [
                 'status' => $staffRequest['previous_status'] ?: 'pending',
@@ -168,32 +194,51 @@ class StaffDecisionService
     /** The WhatsApp message for a status staff just set, or null for none. */
     public function message(InstallmentRequest $request, string $status, ?string $reason): ?string
     {
-        $reason = trim((string) $reason);
+        // Staff sign-offs ("وشكرا") are for each other, not the customer.
+        $reason = trim((string) preg_replace('/[\s.،,]*(و\s*)?شكر[اًا]?[\s.!]*$/u', '', trim((string) $reason)));
         $name = trim((string) strtok(trim((string) $request->applicant_name), ' ')) ?: 'يا فندم';
         $to = $name === 'يا فندم' ? $name : "يا {$name}";
         $action = (string) $request->customer_action;
         $documentType = $action !== '' ? DocumentType::where('key', $action)->first() : null;
 
+        $machine = trim((string) $request->machine?->name) ?: null;
+        $on = $machine ? " على {$machine}" : '';
+
         return match ($status) {
-            'approved' => "ألف مبروك {$to} 🎉\nطلب التقسيط بتاعك رقم #{$request->id} اتوافق عليه.\n"
-                .'شرّفنا في أقرب فرع ليك عشان تمضي العقد وتستلم مكنتك. لو محتاج عنوان أقرب فرع قولي إنت ساكن فين وأنا أبعتهولك.',
+            'approved' => "ألف مبروك {$to} 🎉\nطلب التقسيط بتاعك رقم #{$request->id}{$on} اتوافق عليه.\n"
+                .'شرّفنا في المعرض عشان تمضي العقد وتستلم مكنتك. لو محتاج عنوان المعرض قولي وأنا أبعتهولك.',
             'paused' => match (true) {
                 $documentType !== null => "{$to}، طلبك رقم #{$request->id} واقف على حاجة بسيطة: "
                     .($reason !== '' ? $reason : $documentType->label.' مش واضحة').".\n"
                     ."ابعتلي {$documentType->label} تاني هنا، بصورة واضحة في نور كويس ومن غير انعكاس، وأنا أكمّل الطلب على طول.",
                 $action === self::ACTION_DATA => "{$to}، طلبك رقم #{$request->id} محتاج تصحيح في البيانات"
                     .($reason !== '' ? ": {$reason}" : '').".\nابعتلي البيانات الصح هنا وأنا أعدّلها وأكمّل الطلب.",
-                $action === self::ACTION_BRANCH => "{$to}، طلبك رقم #{$request->id} محتاج تشرّفنا في الفرع"
-                    .($reason !== '' ? ": {$reason}" : '').".\nلو محتاج عنوان أقرب فرع قولي إنت ساكن فين.",
-                default => "{$to}، طلبك رقم #{$request->id} متوقف مؤقتًا"
-                    .($reason !== '' ? ": {$reason}" : '').".\nلو عندك أي سؤال ابعتلي هنا.",
+                $action === self::ACTION_BRANCH => "{$to}، طلبك رقم #{$request->id} محتاج تشرّفنا في المعرض"
+                    .($reason !== '' ? ": {$reason}" : '').".\nلو محتاج عنوان المعرض قولي.",
+                $reason !== '' => "{$to}، طلبك رقم #{$request->id} واقف على حاجة ناقصة: {$reason}.\n"
+                    .'ابعتلي المطلوب هنا وأنا أكمّل الطلب على طول، ولو مش فاهم المطلوب قولي وأنا أوضحلك.',
+                default => "{$to}، طلبك رقم #{$request->id} متوقف مؤقتًا.\nلو عندك أي سؤال ابعتلي هنا.",
             },
-            'rejected' => "للأسف {$to}، جهة التمويل ما وافقتش على طلب التقسيط رقم #{$request->id}"
-                .($reason !== '' ? ".\nالسبب: {$reason}" : '').".\nلو حابب تشتري كاش أو نشوف حل تاني، أنا موجود معاك.",
+            // Owner 2026-10-04: a credit (I-Score) refusal is final - no
+            // next steps, no "let's find another way".
+            'rejected' => self::isCreditRejection($reason)
+                ? "للأسف {$to}، طلب التقسيط رقم #{$request->id} اترفض من جهة التمويل بسبب الاستعلام الائتماني (I-Score).\n"
+                    .'ده قرار نهائي من جهة التمويل ومفيش خطوات تانية على الطلب ده.'
+                : "للأسف {$to}، جهة التمويل ما وافقتش على طلب التقسيط رقم #{$request->id}"
+                    .($reason !== '' ? ".\nالسبب: {$reason}" : '').".\nلو عندك أي سؤال أنا موجود معاك.",
             'canceled' => "{$to}، طلب التقسيط رقم #{$request->id} اتلغى"
                 .($reason !== '' ? ".\nالسبب: {$reason}" : '').".\nلو حابب تبدأ طلب جديد أو عندك أي سؤال، أنا موجود.",
+            'pending' => "{$to}، طلبك رقم #{$request->id}{$on} دخل مرحلة الاستعلام دلوقتي.\nأول ما يطلع الرد هبلغك هنا على طول.",
+            'work_check' => "{$to}، طلبك رقم #{$request->id} في مرحلة الاستعلام عن الشغل دلوقتي.\nأول ما يطلع الرد هبلغك هنا على طول.",
+            'delivered' => "مبروك عليك المكنة {$to} 🏍️\nربنا يجعلها فاتحة خير عليك، ولو احتجت أي حاجة أنا موجود.",
             default => null,
         };
+    }
+
+    /** "مرفوض قبل كدا ايسكور", "حاله ائتمانيه مرفوضه" - a credit-bureau refusal. */
+    public static function isCreditRejection(?string $reason): bool
+    {
+        return (bool) preg_match('/(اي|أي|إي|ا)\s*-?\s*سكور|i\s*-?\s*score|ائتمان|إئتمان|ايتمان/iu', (string) $reason);
     }
 
     public function logDecision(InstallmentRequest $request, string $status, ?string $reason): void

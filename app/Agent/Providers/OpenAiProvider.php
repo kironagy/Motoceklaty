@@ -2,6 +2,7 @@
 
 namespace App\Agent\Providers;
 
+use App\Agent\Tracing\AiCalls;
 use App\Models\GeminiApiKeyModel;
 use App\Services\GeminiKeyManager;
 use Illuminate\Http\Client\ConnectionException;
@@ -67,12 +68,14 @@ class OpenAiProvider
             }
 
             $triedIds[] = $modelRow->id;
+            $attemptStart = microtime(true);
 
             try {
                 $response = Http::timeout((int) max(3, min($request->timeoutSeconds, $remaining)))
                     ->withToken($modelRow->apiKey->api_key)
                     ->post(self::URL, $payload);
             } catch (ConnectionException $e) {
+                AiCalls::record($request, 'openai', $modelCode, count($triedIds), [], (int) round((microtime(true) - $attemptStart) * 1000), 'connection');
                 $manager->markError($modelRow, $e->getMessage(), 30);
                 $manager->refundReservation($modelRow);
 
@@ -92,11 +95,13 @@ class OpenAiProvider
                     'candidatesTokenCount' => $usage['output_tokens'],
                     'thoughtsTokenCount' => $usage['thoughts_tokens'],
                 ]], 'bot');
+                AiCalls::record($request, 'openai', $modelCode, count($triedIds), $usage, (int) round((microtime(true) - $attemptStart) * 1000), 'ok', data_get($json, 'choices.0.message'));
 
                 return $this->parseResponse($json, $usage, $modelRow, $start);
             }
 
             $status = $response->status();
+            AiCalls::record($request, 'openai', $modelCode, count($triedIds), [], (int) round((microtime(true) - $attemptStart) * 1000), 'http_'.$status);
             $body = $response->body();
             $type = (string) data_get($response->json(), 'error.type');
 

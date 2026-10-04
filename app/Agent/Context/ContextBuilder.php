@@ -227,6 +227,13 @@ class ContextBuilder
                 .'search_motorcycles - it returns this size first. Never list other sizes or kinds unless he asks for them.';
         }
 
+        // "طلبي وصل لفين؟" - his submitted requests, customer-safe fields only.
+        $requests = app(\App\Domain\Applications\CustomerRequestStatus::class)->for($customer, $conversation);
+
+        if ($requests !== []) {
+            $payload['my_requests'] = $requests;
+        }
+
         $unprocessed = $this->unprocessedMedia($conversation, $turnId);
 
         if ($unprocessed !== []) {

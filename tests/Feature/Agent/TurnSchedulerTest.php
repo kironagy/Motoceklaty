@@ -78,17 +78,22 @@ class TurnSchedulerTest extends TestCase
         $this->assertSame(3, DB::table('whatsapp_messages')->where('turn_id', $turnId)->count());
     }
 
-    public function test_message_after_max_wait_starts_a_new_turn(): void
+    public function test_a_turn_not_picked_up_yet_answers_every_message_once(): void
     {
+        // conversation 714: a second turn beside it meant two replies
         $bot = $this->bot();
         Carbon::setTestNow('2026-01-01 10:00:00');
 
         $this->send($bot, $bot->id.'_wa1', 'واحد');
-        Carbon::setTestNow('2026-01-01 10:00:20'); // past the 15s max wait
+        $processAfter = DB::table('whatsapp_message_jobs')->value('process_after');
+        Carbon::setTestNow('2026-01-01 10:00:20'); // past the 15s max wait, every worker still busy
 
         $this->send($bot, $bot->id.'_wa2', 'اتنين');
 
-        $this->assertSame(2, DB::table('whatsapp_message_jobs')->count());
+        $this->assertSame(1, DB::table('whatsapp_message_jobs')->count());
+        $turnId = DB::table('whatsapp_message_jobs')->value('id');
+        $this->assertSame(2, DB::table('whatsapp_messages')->where('turn_id', $turnId)->count());
+        $this->assertSame($processAfter, DB::table('whatsapp_message_jobs')->value('process_after'));
     }
 
     public function test_awaiting_agent_conversation_gets_no_turn(): void

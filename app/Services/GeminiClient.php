@@ -148,6 +148,7 @@ class GeminiClient
                     $payload['tools'] = $options['tools'];
                 }
 
+                $attemptStart = microtime(true);
                 $response = Http::timeout($options['timeout'] ?? 25)
                     ->post(
                         "https://generativelanguage.googleapis.com/v1beta/models/{$modelRow->model_code}:generateContent?key={$modelRow->apiKey->api_key}",
@@ -176,6 +177,12 @@ class GeminiClient
 
                     $manager->markUsed($modelRow, $usedTokens, $estimatedTokens);
                     $manager->recordUsage($modelRow, (array) $json, (string) ($options['usage_source'] ?? 'tools'));
+                    \App\Agent\Tracing\AiCalls::record(new \App\Agent\Providers\AiRequest(label: (string) ($options['label'] ?? $options['usage_source'] ?? 'tools')), 'gemini', $modelRow->model_code, 1, [
+                        'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
+                        'cached_tokens' => (int) data_get($json, 'usageMetadata.cachedContentTokenCount', 0),
+                        'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0),
+                        'thoughts_tokens' => (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
+                    ], (int) round((microtime(true) - $attemptStart) * 1000), 'ok');
 
                     return [
                         'ok' => true,
@@ -195,6 +202,7 @@ class GeminiClient
 
                 $body = $response->body();
                 $status = $response->status();
+                \App\Agent\Tracing\AiCalls::record(new \App\Agent\Providers\AiRequest(label: (string) ($options['label'] ?? $options['usage_source'] ?? 'tools')), 'gemini', $modelRow->model_code, 1, [], (int) round((microtime(true) - $attemptStart) * 1000), 'http_'.$status);
 
                 if ($this->isInvalidApiKeyError($status, $body)) {
                     $modelRow->apiKey?->update([

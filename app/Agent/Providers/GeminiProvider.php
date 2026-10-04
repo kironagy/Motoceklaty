@@ -2,6 +2,7 @@
 
 namespace App\Agent\Providers;
 
+use App\Agent\Tracing\AiCalls;
 use App\Models\GeminiApiKeyModel;
 use App\Services\GeminiAlertService;
 use App\Services\GeminiKeyManager;
@@ -100,6 +101,7 @@ class GeminiProvider implements AiProvider
             }
 
             $triedIds[] = $modelRow->id;
+            $attemptStart = microtime(true);
 
             try {
                 $response = Http::timeout((int) max(3, min($request->timeoutSeconds, $remaining)))
@@ -114,11 +116,18 @@ class GeminiProvider implements AiProvider
                     $usedTokens = (int) data_get($json, 'usageMetadata.totalTokenCount', $estimatedTokens);
                     $manager->markUsed($modelRow, $usedTokens, $estimatedTokens);
                     $manager->recordUsage($modelRow, (array) $json, 'bot');
+                    AiCalls::record($request, 'gemini', $modelRow->model_code, count($triedIds), [
+                        'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
+                        'cached_tokens' => (int) data_get($json, 'usageMetadata.cachedContentTokenCount', 0),
+                        'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0),
+                        'thoughts_tokens' => (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
+                    ], (int) round((microtime(true) - $attemptStart) * 1000), 'ok', data_get($json, 'candidates.0.content'));
 
                     return $this->parseResponse($json, $modelRow, $start);
                 }
 
                 $status = $response->status();
+                AiCalls::record($request, 'gemini', $modelRow->model_code, count($triedIds), [], (int) round((microtime(true) - $attemptStart) * 1000), 'http_'.$status);
                 $body = $response->body();
 
                 if ($this->isInvalidApiKeyError($status, $body)) {
@@ -208,6 +217,7 @@ class GeminiProvider implements AiProvider
                     retryable: false,
                 );
             } catch (ConnectionException $e) {
+                AiCalls::record($request, 'gemini', $modelRow->model_code, count($triedIds), [], (int) round((microtime(true) - $attemptStart) * 1000), 'connection');
                 $manager->markError($modelRow, $e->getMessage(), 30);
                 $manager->refundReservation($modelRow);
                 $transientFailures++;

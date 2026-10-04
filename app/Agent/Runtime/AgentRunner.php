@@ -74,7 +74,17 @@ class AgentRunner
         // read first, so the context shows each photo as its result, not as the image again
         $preread = $activeApplication ? $this->prereadDocuments($turn, $ctx) : null;
 
+        // His facts are saved by the code before the reply is written, so
+        // the reply model neither forgets them nor reads them back to him.
+        $understood = config('agent.understanding.enabled')
+            ? app(TurnUnderstanding::class)->understand($turn, $conversation, $customer, $activeApplication)
+            : null;
+
         $request = $this->context->build($turn);
+        $request = new AiRequest(
+            system: $request->system."\n\n".TurnUnderstanding::note($understood, $conversation->refresh()),
+            contents: $request->contents,
+        );
         $contents = $request->contents;
         $toolDeclarations = $this->toolsFor($activeApplication !== null, $turn);
 
@@ -87,6 +97,7 @@ class AgentRunner
         $forceToolNext = false;
         $forceSendNext = false;
         $safeReplyTried = false;
+        $reviews = 0;
         $started = microtime(true);
         $lastResponse = null;
 
@@ -98,6 +109,12 @@ class AgentRunner
         if ($preread !== null) {
             $outcomes[] = $preread['outcome'];
             $contents[] = $preread['content'];
+        }
+
+        // What the understanding saved is a save of this turn: "تمام، سجلت
+        // العنوان" after it was refused as DATA_CLAIMED_NOT_SAVED.
+        if (($understood['saved'] ?? []) !== []) {
+            $outcomes[] = $this->understandingOutcome($understood['saved']);
         }
 
         try {
@@ -133,11 +150,17 @@ class AgentRunner
                     $toolCallCount++;
 
                     if ($toolCall['name'] === 'send_reply') {
-                        $toolCall['args'] = $this->guard->withoutRepeatedOffer(
+                        $toolCall['args'] = $this->guard->autofix($this->guard->withoutRepeatedOffer(
                             $this->guard->tidy($this->guard->withoutUnpromptedSalam($toolCall['args'], $conversation, (int) $turn->id)),
                             $conversation,
-                        );
+                        ), $conversation, $outcomes);
+
+                        // The code checks first: they cost nothing, and a draft with a
+                        // wrong number or a false claim never waits for the reviewer.
                         $violation = $this->guard->check($toolCall['args'], $conversation, $request->system, $contents, $outcomes);
+                        $passedChecks = $violation === null;
+                        $detail = $this->guard->lastDetail();
+                        $rescued = null;
 
                         if ($violation !== null) {
                             $guardEvents[] = ['code' => $violation, 'args' => $toolCall['args']];
@@ -155,7 +178,9 @@ class AgentRunner
 
                             // Out of tries, a repeated question or wording is still a
                             // true answer - better than handing the customer off.
-                            if ($exhausted && in_array($violation, self::SOFT_VIOLATIONS, true)) {
+                            // Simulator 2026-10-05: DOCUMENTS_RELISTED refused the same true
+                            // reply seven times until the turn ran out. Style is asked twice, never more.
+                            if (($exhausted || $this->countCode($guardEvents, $violation) >= 2) && in_array($violation, self::SOFT_VIOLATIONS, true)) {
                                 $violation = null;
                             }
                         }
@@ -178,7 +203,7 @@ class AgentRunner
                                 $forceSendNext = true;
                                 $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => [
                                     'code' => $violation,
-                                    'detail' => (self::GUARD_HINTS[$violation] ?? '').' FINAL TRY: send a short reply with NO numbers at all and no claims - '
+                                    'detail' => (self::GUARD_HINTS[$violation] ?? '').($detail !== null ? ' '.$detail : '').' FINAL TRY: send a short reply with NO numbers at all and no claims - '
                                         .'answer his message in words, or ask him one short question. Do not promise that a colleague will follow up.',
                                 ]]);
 
@@ -199,12 +224,33 @@ class AgentRunner
 
                             $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => [
                                 'code' => $violation,
-                                'detail' => (self::GUARD_HINTS[$violation] ?? '').($lastTry
+                                'detail' => (self::GUARD_HINTS[$violation] ?? '').($detail !== null ? ' '.$detail : '').($lastTry
                                     ? ' LAST TRY: send the reply now in different words, leaving out any number you cannot point to in a tool result.'
                                     : ''),
                             ]]);
 
                             continue;
+                        }
+
+                        // Then the owner's eye, on what the code cannot read: a
+                        // misunderstanding or an invented reason. Twice at most,
+                        // never once the turn is out of time.
+                        if ($passedChecks && config('agent.reviewer.enabled') && ($toolCall['args']['no_reply'] ?? false) !== true
+                            && $this->worthReviewing($conversation)
+                            && $reviews < 2 && ! $limitReached) {
+                            $reviews++;
+                            $review = app(ReplyReviewer::class)->review($toolCall['args'], $conversation, $turn, $outcomes, $request->system);
+
+                            if ($review['verdict'] === 'redo') {
+                                $guardEvents[] = ['code' => 'REVIEW_REDO', 'args' => $toolCall['args'] + ['problems' => $review['problems']]];
+                                $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => [
+                                    'code' => 'REVIEW_REDO',
+                                    'detail' => 'Not sent - the owner reviewed it: '.implode(' ', $review['problems'])
+                                        .' Fix exactly this (call the tool you need first), then send_reply again.',
+                                ]]);
+
+                                continue;
+                            }
                         }
                     }
 
@@ -230,6 +276,12 @@ class AgentRunner
                         // NO_ACTIVE_APPLICATION.
                         if ($toolCall['name'] === 'start_application' && isset($result['data']['application_id'])) {
                             $ctx = $ctx->withActiveApplication((int) $result['data']['application_id']);
+
+                            // What he said before it opened goes on it now.
+                            if (config('agent.understanding.enabled') && $customer && ($opened = Application::find((int) $result['data']['application_id']))
+                                && ($flushed = app(TurnUnderstanding::class)->flushPending($conversation->refresh(), $customer, $opened)) !== []) {
+                                $outcomes[] = $this->understandingOutcome($flushed);
+                            }
                             $toolDeclarations = $this->toolsFor(true, $turn);
                         }
                     }
@@ -288,7 +340,7 @@ class AgentRunner
      * photos were queued for a customer who had just said goodbye.
      */
     /** Style problems only - nothing false is said. */
-    private const SOFT_VIOLATIONS = ['REPEATED_QUESTION', 'DUPLICATE_REPLY', 'WORK_TYPES_LISTED', 'HANDOFF_TIME_PROMISED', 'REQUEST_NUMBER_MISSING'];
+    private const SOFT_VIOLATIONS = ['DOCUMENTS_RELISTED', 'FORMAL_ARABIC', 'ECHOES_CUSTOMER', 'REPEATED_QUESTION', 'DUPLICATE_REPLY', 'WORK_TYPES_LISTED', 'HANDOFF_TIME_PROMISED', 'REQUEST_NUMBER_MISSING', 'APPLICATION_ALREADY_OPEN_CLAIMED'];
 
     private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER', 'BRANCH_NOT_SOURCED', 'TOTAL_NOT_SOURCED', 'AGE_NOT_CHECKED', 'VERSIONS_NOT_LOOKED_UP'];
 
@@ -302,6 +354,12 @@ class AgentRunner
         'UNSOURCED_FINANCE_COMPANY' => 'Not sent: the reply names a finance company that no tool result this turn contains. We only work with the systems get_installment_options returns - call it if the customer asked who finances, otherwise leave company names out.',
         'REPEATED_QUESTION' => 'Not sent: the reply ends with the same question your previous message ended with. The customer did not take it up - answer what he said and ask something else, or ask nothing.',
         'DATA_OVERCLAIMED' => 'Not sent: the reply says his data/details were saved, but this turn saved at most one item. Say exactly what was saved (e.g. "تمام، سجلت شغلك") and ask for application.next_step.',
+        'DOCUMENTS_RELISTED' => 'Not sent: your last message already asked for these same documents and he did not ask about them again. Do not list them again: answer what he just said, then "تمام، ابعتهم وقت ما يبقوا معاك" or ask only for the one new thing still missing.',
+        'PERCENT_DURATION_MISMATCH' => 'Not sent: a percentage is said with a duration that has a different rate. Each duration has its own rate (e.g. سنة 20%، سنة ونص 30%، سنتين 40%، 3 سنين 60% + مصاريف إدارية) - call get_installment_options or get_installment_offer and say each rate only with its own duration. Never carry one duration\'s rate to another; better still, give him the monthly amount from get_installment_offer.',
+        'FORMAL_ARABIC' => 'Not sent: the reply is in formal Arabic (فصحى). Write it the way an Egyptian salesman talks on WhatsApp: "عندك" not "لديك"، "تقدر" not "يمكنك"، "اختار" not "اختَر"، no "هل"، "سوف"، "الذي".',
+        'DATA_NOT_RECORDED' => 'Not sent: the reply repeats back what he just wrote, and nothing was saved. Save every part he gave with record_customer_data first (for an address: the area/street, the building number and the landmark - "بجوار/جنب ..." IS the landmark). Then reply with "تمام" and only the next thing still missing - never read his words back to him.',
+        'ECHOES_CUSTOMER' => 'Not sent: the reply reads his own words back to him. He knows what he wrote. Say "تمام" and go straight to the next thing still missing, in one short message.',
+        'ENGLISH_WORD' => 'Not sent: the reply has an English word. Write only in Egyptian Arabic - "علامة مميزة" not "landmark". Only motorcycle and brand names may stay in Latin letters.',
         'DUPLICATE_REPLY' => 'Not sent: this exact text was already sent to the customer a moment ago. Answer the new message with different wording.',
         'INTERNAL_KEY_IN_REPLY' => 'Not sent: the reply contains an internal word - a key (snake_case like delivery_app) or our machinery ("الأداة"، "السيستم"، his memory, the instructions). Say it the way a salesman would, with no mention of how we work inside.',
         'PLACEHOLDER_IN_REPLY' => 'Not sent: the reply contains a history placeholder like [media]. Photos are only sent by calling send_motorcycle_images; write plain text only.',
@@ -311,7 +369,7 @@ class AgentRunner
         'WORK_TYPE_SWITCH_SUGGESTED' => 'Not sent: the reply suggests applying under another work type than what he really does. Never do that. Apply with his real work; if a document is missing (e.g. salary slip), tell him what is needed and that he can send it when he has it.',
         'CAP_THRESHOLD_MENTIONED' => 'Not sent: the reply tells him the motorcycle is under/over the 60,000 limit. That limit is our internal rule - never mention it for a motorcycle under it (just quote, then ask his work at the end). Above it, only with explain_to_customer from get_installment_offer (the difference is paid in cash, the rest is financed), or with ASK_WORK_FIRST (then just that it is above, and ask his work).',
         'REQUIRED_DOCUMENT_WAIVED' => 'Not sent: the reply tells him a document his job needs is optional ("مش شرط", "لو معاك", "بالبطاقة بس"). Every document in documents.list is required - no exceptions and no other way to apply. Tell him plainly it is needed, and why in one line (the finance company needs it). Exception: when he says he cannot get a document, do what documents.if_unavailable says for it.',
-        'DOCUMENT_NOT_REQUIRED' => 'Not sent: the reply asks for a document this customer does not need (e.g. a workshop contract, a utility bill, app earnings for a non-app job). Ask only for what the snapshot (documents.required / next_step) or get_application_requirements lists.',
+        'DOCUMENT_NOT_REQUIRED' => 'Not sent: the reply asks for a document this customer does not need (e.g. a workshop contract, a utility bill, app earnings for a non-app job). Ask only for what the snapshot (documents.required / next_step) or get_application_requirements lists. The only substitute for مفردات المرتب is برنت التأمينات - never a bank statement, invoices, receipts or tax papers.',
         'HANDOFF_TIME_PROMISED' => 'Not sent: the reply promises when a colleague will answer ("ثواني", "حالا", "فوراً", "للمرة الأخيرة"). Nobody controls that. Say a colleague will answer, with no time - and keep helping him yourself with what you can answer.',
         'OCCUPATION_SOFTENED' => 'Not sent: his work is one the finance companies refuse. Tell him plainly that the request will be refused (the sentence from the tool result) - no "بتتحفظ", no offer to try or apply, no asking for another income source. You may offer the cash price.',
         'TOTAL_REFUSED' => 'Not sent: the reply refuses to give the total. The total is in every offer: call get_installment_offer for his motorcycle and duration and send that offer\'s `breakdown` (what he pays at pickup + installments = the total in the end).',
@@ -343,7 +401,13 @@ class AgentRunner
         'DOCUMENT_LIST_INCOMPLETE' => 'Not sent: the application was just opened and the reply asks for only part of his papers. Send the WHOLE documents.list from the snapshot in this one message - every item by name (e.g. وش وضهر البطاقة + صورة المحل باليافطة + البطاقة الضريبية أو السجل التجاري) - then he sends them one by one. Nothing on the list is optional.',
         'META_TEXT' => 'Not sent: the reply contains a note in brackets or formal Arabic ("سيتم"، "يرجى"). Write only what a salesman would send, in Egyptian Arabic.',
         'SUMMARY_DUPLICATED' => 'Not sent: the stored summary is sent to him automatically right after your message - do not write your own summary or list his data. Just ask him in one or two short lines to check the summary below and confirm, or say what to fix.',
-        'UNVERIFIED_NUMBER' => 'Not sent: the reply contains a number (a price, or a measured value like km/litre, hp, months, %) that no tool result or structured state contains. Prices must come from a tool call in THIS turn (the catalog index is for names only) - call get_motorcycle_details / calculate_installment first, or leave the number out. Never state specifications that are not in a tool result.',
+        'UNVERIFIED_NUMBER' => 'Not sent: the reply contains a number (a price, a fee, or a measured value like km/litre, hp, months, %) that no tool result of this turn, structured state or customer message contains. Call the tool again this turn (get_motorcycle_details / get_installment_offer / calculate_installment) - numbers from your earlier messages do not count - or leave the number out. Never state specifications that are not in a tool result.',
+        'IMAGES_CLAIMED_FOR_UNSENT_MODEL' => 'Not sent: the reply says photos of a model went out that send_motorcycle_images did not send this turn. Say only which photos were sent, or call send_motorcycle_images for the other model first (if it failed, tell him why from its result).',
+        'APPLICATION_ALREADY_OPEN_CLAIMED' => 'Not sent: his application was already open before this turn - you did not open it now. Do not say "فتحتلك/بدأتلك الطلب"; say "طلبك مفتوح" and ask for snapshot next_step only.',
+        'SELECTION_CLAIMED_NOT_SET' => 'Not sent: the reply ties his application to a motorcycle or duration it is not set to. Call update_application_selection first (if he chose it), or say only what is set.',
+        'COMPLETION_OVERCLAIMED' => 'Not sent: the reply says everything is done/ready, but the application still has missing items (snapshot blockers). Do not say it is complete - say "تمام" and ask for the next missing item only.',
+        'MODEL_NOT_LOOKED_UP' => 'Not sent: the reply names a motorcycle that no tool returned this turn, his state does not hold and he did not mention. Call search_motorcycles / get_motorcycle_details for it first, or leave that model out.',
+        'INVENTED_REASON_PHRASE' => 'Not sent: the reply gives a reason, procedure or promise nobody recorded ("قرار جهات التمويل"، "النسبة ثابتة"، "البطاقة هتملى البيانات لوحدها"، "الفرع هيكلمك"، "هتمضي في الفرع"، "مفيش ورق للكاش"). Remove that sentence; say only what the tools and the guidance say.',
     ];
 
     /**
@@ -428,7 +492,8 @@ class AgentRunner
     }
 
     /** Claims a single sentence carries - dropping that sentence leaves the rest true. */
-    private const SENTENCE_RESCUABLE = ['STOCK_OR_CHECK_CLAIMED', 'UNRECORDED_PROMISE', 'AVAILABILITY_PROMISE', 'VERSIONS_NOT_LOOKED_UP', 'UNSOURCED_REASON', 'CAP_THRESHOLD_MENTIONED', 'WORK_TYPE_TOLD', 'WORK_JUDGED', 'BANNED_WORDING', 'INTERNAL_KEY_IN_REPLY'];
+    private const SENTENCE_RESCUABLE = ['ENGLISH_WORD', 'STOCK_OR_CHECK_CLAIMED', 'UNRECORDED_PROMISE', 'AVAILABILITY_PROMISE', 'VERSIONS_NOT_LOOKED_UP', 'UNSOURCED_REASON', 'CAP_THRESHOLD_MENTIONED', 'WORK_TYPE_TOLD', 'WORK_JUDGED', 'BANNED_WORDING', 'INTERNAL_KEY_IN_REPLY',
+        'IMAGES_CLAIMED_FOR_UNSENT_MODEL', 'APPLICATION_ALREADY_OPEN_CLAIMED', 'MODEL_NOT_LOOKED_UP', 'INVENTED_REASON_PHRASE'];
 
     /** The reply minus every sentence that alone triggers $violation, if the rest passes every guard. */
     private function withoutViolatingSentences(array $args, string $violation, WhatsappConversation $conversation, string $system, array $contents, array $outcomes): ?array
@@ -456,6 +521,25 @@ class AgentRunner
         $rescued = ['messages' => $messages] + $args;
 
         return $this->guard->check($rescued, $conversation, $system, $contents, $outcomes) === null ? $rescued : null;
+    }
+
+    /**
+     * The reviewer reads for what code cannot: an ignored question or
+     * something he told us. A plain "تمام", a phone number or a photo has
+     * neither - 2026-10-05 it ran on every reply and cost a third of the bill.
+     */
+    private function worthReviewing(WhatsappConversation $conversation): bool
+    {
+        $said = $this->guard->customerTextSinceLastReply($conversation);
+
+        return mb_strlen(trim($said)) >= 4 && (bool) preg_match('/[؟?]|(?<!\p{L})(?:ينفع|ممكن|ازاي|إزاي|ليه|ليش|كام|بكام|امتى|إمتى|فين|مين|ايه|إيه|هو|هي|يعني|طب|طيب|بس|لو)(?!\p{L})'
+            .'|(?:مش|مبيطلعوش|مبتطلعش|معنديش|معيش|مفيش|ماعنديش|مش معايا|مش بتطلع|مش بيطلع)/u', $said);
+    }
+
+    /** A save the understanding made, shown to the checks like any write tool's. */
+    private function understandingOutcome(array $saved): array
+    {
+        return ['name' => 'record_customer_data', 'ok' => true, 'data' => ['saved' => array_keys($saved), 'source' => 'turn_understanding']];
     }
 
     private function modelToolCallContent(AiResponse $response): array
@@ -593,6 +677,16 @@ class AgentRunner
 
         if (in_array($step['type'] ?? null, ['field', 'document'], true) && filled($step['label'] ?? null)) {
             return "تمام يا باشا، عشان نكمّل طلبك ابعتلي {$step['label']}";
+        }
+
+        // Conversation 857: "خلاص خلينا في الهوجن L250 على سنتين" with
+        // everything in got "ممكن توضحلي تقصد إيه؟" - he was perfectly clear.
+        if (($step['type'] ?? null) === 'submit') {
+            return 'تمام يا باشا، كده طلبك جاهز. أقدّمهولك دلوقتي؟';
+        }
+
+        if ($application) {
+            return 'تمام يا باشا، معاك. نكمّل طلبك؟';
         }
 
         return 'معلش يا باشا، ممكن توضحلي تقصد إيه بالظبط عشان أرد عليك صح؟';
