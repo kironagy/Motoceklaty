@@ -49,10 +49,15 @@ return [
     // engineering defaults - see the Decision Register. 3s split 93 bursts
     // in three days (a second message 3-10s after the first got its own
     // reply); the owner asked for one reply per burst, so 8s.
+    // Owner 2026-10-04: start on the message at once and let the wait sit
+    // before the "seen" instead (whatsapp-bot: the read receipt goes out
+    // only with the reply). A message that lands while a reply is being
+    // written still supersedes it (TurnScheduler), and the customer sees
+    // no "seen" meanwhile - so a short window only catches a quick burst.
     'turns' => [
-        'debounce_seconds' => env('AGENT_TURNS_DEBOUNCE_SECONDS', 8),
-        'media_debounce_seconds' => env('AGENT_TURNS_MEDIA_DEBOUNCE_SECONDS', 10),
-        'max_wait_seconds' => env('AGENT_TURNS_MAX_WAIT_SECONDS', 25),
+        'debounce_seconds' => env('AGENT_TURNS_DEBOUNCE_SECONDS', 3),
+        'media_debounce_seconds' => env('AGENT_TURNS_MEDIA_DEBOUNCE_SECONDS', 5),
+        'max_wait_seconds' => env('AGENT_TURNS_MAX_WAIT_SECONDS', 15),
         // Not decision-gated: how long a turn waits for a pending voice
         // transcription (DEC-08) before claiming anyway.
         'transcript_wait_seconds' => env('AGENT_TURNS_TRANSCRIPT_WAIT_SECONDS', 10),

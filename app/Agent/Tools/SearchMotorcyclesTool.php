@@ -28,7 +28,7 @@ class SearchMotorcyclesTool implements Tool
     private function isGeneric(array $args): bool
     {
         return array_intersect_key(array_filter($args, fn ($v) => $v !== null && $v !== '' && $v !== false),
-            array_flip(['name_query', 'brand', 'kind', 'cc_min', 'cc_max', 'max_cash_price', 'max_installment_price', 'offers_only', 'color', 'sort'])) === [];
+            array_flip(['name_query', 'brand', 'kind', 'cc_min', 'cc_max', 'max_cash_price', 'min_cash_price', 'max_installment_price', 'offers_only', 'color', 'sort'])) === [];
     }
 
     public function inputSchema(): array
@@ -42,7 +42,8 @@ class SearchMotorcyclesTool implements Tool
                     'description' => 'The kind of vehicle he asked for: scooter (سكوتر/اسكوتر), electric (سكوتر كهربا), motorcycle, tricycle (تروسيكل). Always set it when he said one.'],
                 'cc_min' => ['type' => 'integer', 'minimum' => 0],
                 'cc_max' => ['type' => 'integer', 'minimum' => 0],
-                'max_cash_price' => ['type' => 'number', 'minimum' => 0],
+                'max_cash_price' => ['type' => 'number', 'minimum' => 0, 'description' => 'His budget ("في حدود 60" = 60000; "60 او 65" = 65000). Results come nearest the budget first.'],
+                'min_cash_price' => ['type' => 'number', 'minimum' => 0, 'description' => 'Only for a range he gave ("من 50 لـ 60" = 50000).'],
                 'max_installment_price' => ['type' => 'number', 'minimum' => 0],
                 'offers_only' => ['type' => 'boolean'],
                 'color' => ['type' => 'string', 'description' => 'Color the customer asked for, in their words (e.g. الحمرا, اسود, blue).'],
@@ -53,11 +54,27 @@ class SearchMotorcyclesTool implements Tool
         ];
     }
 
-    private function customerSaidScooter(int $conversationId): bool
+    /**
+     * "عايز مكنة للدليفري" is a motorcycle: scooters are turned into
+     * motorcycles only when he said مكنة/موتوسيكل and never scooter. A girl
+     * who said neither ("أنا بنت، عايزة حاجة شكلها حلو") lost every scooter
+     * to the old rule (scooter only if the word scooter was written).
+     */
+    private function scooterContradictsHisWords(int $conversationId): bool
     {
+        return $this->saidKind($conversationId, 'motorcycle') && ! $this->saidKind($conversationId, 'scooter');
+    }
+
+    /** His last messages name this kind of vehicle (or work that means it). */
+    private function saidKind(int $conversationId, string $kind): bool
+    {
+        $pattern = $kind === 'scooter'
+            ? '/[اإ]?سكوت[رير]|scooter|فيسبا|vespa/iu'
+            : '/(?<!\p{L})(?:ال)?(?:مكن[ةه]|مكنه|موتوسيكل|موتسيكل|موتوسكل|متسكل|دليفري|ديليفري|توصيل|طلبات|اوبر|أوبر)(?!\p{L})/u';
+
         return \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversationId)
             ->where('direction', 'incoming')->latest('id')->limit(6)->pluck('text')
-            ->contains(fn ($t) => preg_match('/[اإ]?سكوت[رير]|scooter|فيسبا|vespa/iu', (string) $t));
+            ->contains(fn ($t) => preg_match($pattern, (string) $t));
     }
 
     public function permission(): string
@@ -67,13 +84,29 @@ class SearchMotorcyclesTool implements Tool
 
     public function execute(array $args, ToolContext $ctx): ToolResult
     {
+        // gpt-5-nano fills every optional filter: cc_max 0, brand "", min
+        // price 0. "cc_max: 0" alone emptied the search and a girl with a
+        // 65,000 budget was told nothing fits. An empty or zero filter is no filter.
+        $args = array_filter($args, fn ($v) => $v !== null && $v !== '' && $v !== 0 && $v !== 0.0 && $v !== '0');
+
+        // A kind is kept only when his words say it: "أنا بنت، عايزة حاجة
+        // شكلها حلو" was searched as motorcycles only.
+        if (($args['kind'] ?? null) === 'motorcycle' && ! filled($args['name_query'] ?? null) && ! $this->saidKind($ctx->conversationId, 'motorcycle')) {
+            unset($args['kind']);
+        }
+
+        // a budget means nearest the budget, not the cheapest under it
+        if (isset($args['max_cash_price']) && ($args['sort'] ?? null) === 'cheapest') {
+            unset($args['sort']);
+        }
+
         if (isset($args['cc_min'], $args['cc_max']) && $args['cc_min'] > $args['cc_max']) {
             return ToolResult::error('INVALID_ARGUMENTS', 'cc_min must be <= cc_max');
         }
 
         // QA 2026-10-04: "عايز مكنة اشتغل عليها دليفري" got four scooters - in
         // Egypt "مكنة" is a motorcycle. Scooters only when he said scooter.
-        if (($args['kind'] ?? null) === 'scooter' && ! $this->customerSaidScooter($ctx->conversationId)) {
+        if (($args['kind'] ?? null) === 'scooter' && $this->scooterContradictsHisWords($ctx->conversationId)) {
             $args['kind'] = 'motorcycle';
         }
 

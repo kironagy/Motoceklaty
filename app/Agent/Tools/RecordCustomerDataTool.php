@@ -95,6 +95,17 @@ class RecordCustomerDataTool implements Tool
         ];
         $data['ask_next'] = \App\Domain\Applications\SnapshotService::askNext($data['snapshot']);
 
+        // Server 2026-10-04: 7 of 15 requests reached the dashboard with no
+        // governorate or area. An address line with neither (and no district
+        // that tells it) gets one short question for just that part.
+        foreach ($fields as $field) {
+            if (in_array($field['key'], ['address', 'work_address'], true) && in_array($field['key'], $result['saved'], true)
+                && app(\App\Domain\Applications\AddressParser::class)->placeIn((string) $field['value']) === [null, null]) {
+                $data['address_missing_place'] = ($field['key'] === 'address' ? 'His home' : 'His work').' address has no governorate/area. '
+                    .'Ask only that, in a few words ("في أنهي محافظة ومنطقة؟"), then save the same field again with his words added.';
+            }
+        }
+
         // Nothing saved is not a success: the model used to reply "سجلت"
         // on a result whose saved list was empty.
         if ($result['saved'] === []) {

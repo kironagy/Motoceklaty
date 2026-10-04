@@ -13,7 +13,7 @@ use Illuminate\Console\Command;
  */
 class SyncBotRequests extends Command
 {
-    protected $signature = 'requests:sync-bot';
+    protected $signature = 'requests:sync-bot {--rebuild : rebuild the address parts, work details and notes of requests staff have not touched yet} {--id=* : only these request ids}';
 
     protected $description = 'Mark bot-submitted installment requests as bot requests and fill their empty customer data';
 
@@ -21,12 +21,17 @@ class SyncBotRequests extends Command
     {
         $count = 0;
 
+        $rebuild = (bool) $this->option('rebuild');
+
         InstallmentRequest::withTrashed()
             ->whereNotNull('application_id')
+            ->when($this->option('id'), fn ($q, $ids) => $q->whereIn('id', $ids))
             ->with('application')
-            ->chunkById(100, function ($requests) use ($projector, &$count) {
+            ->chunkById(100, function ($requests) use ($projector, &$count, $rebuild) {
                 foreach ($requests as $request) {
-                    $projector->refresh($request);
+                    // a request staff already worked on keeps what they wrote
+                    $untouched = $request->status_updated_by === null && $request->staff_id === null;
+                    $projector->refresh($request, $rebuild && $untouched ? LegacyRequestProjector::BOT_TEXT_COLUMNS : []);
                     $count++;
                 }
             });

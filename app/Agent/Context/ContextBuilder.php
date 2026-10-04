@@ -55,6 +55,7 @@ class ContextBuilder
         $l3 = $this->buildL3();
         $l3b = $this->buildL3b();
         $l4 = $this->buildL4($conversation, $customer, $snapshot, $turn->id);
+        $l4m = $customer ? app(\App\Domain\Memory\CustomerMemory::class)->forPrompt($customer->id, $conversation->id) : null;
         $l5 = $this->buildL5($application);
         $l6 = $this->buildL6($conversation);
         $l7 = $this->buildL7($conversation, $turn);
@@ -63,7 +64,7 @@ class ContextBuilder
         $system = implode("\n\n", array_values(array_filter([
             // The same text for every customer goes first, so Google's cache
             // covers it on every call; lessons depend on the customer type.
-            $l0['text'], $l1['text'], $l2['text'], $l3['text'], $l3b['text'], $l0b['text'], $l4['text'], $l5['text'], $l6['text'],
+            $l0['text'], $l1['text'], $l2['text'], $l3['text'], $l3b['text'], $l0b['text'], $l4['text'], $l4m, $l5['text'], $l6['text'],
         ], fn ($block) => $block !== null && trim($block) !== '')));
 
         $request = new AiRequest(
@@ -80,6 +81,7 @@ class ContextBuilder
             'l3_count' => $l3['count'],
             'l3b_count' => $l3b['count'],
             'l4_present' => true,
+            'memory_tokens' => $l4m === null ? 0 : TokenEstimator::estimate($l4m),
             'l5_count' => $l5['count'],
             'l6_present' => $l6['text'] !== null,
             'l7_count' => count($l7['contents']),

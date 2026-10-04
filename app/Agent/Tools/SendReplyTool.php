@@ -21,7 +21,51 @@ class SendReplyTool implements Tool
     public function description(): string
     {
         return 'Deliver the reply to the customer. This is the only way a turn ends normally. '
-            .'What his application still needs always comes from the snapshot (next_step).';
+            .'What his application still needs always comes from the snapshot (next_step). '
+            .'`memory`: only what changed this turn, never a copy of what is already in his memory.';
+    }
+
+    /** Facts the customer may tell about himself - CustomerMemory::FACT_KEYS. */
+    private function memorySchema(): array
+    {
+        return [
+            'type' => 'object',
+            'description' => 'Update his memory with what THIS turn taught you (omit when nothing new).',
+            'properties' => [
+                'facts' => [
+                    'type' => 'array',
+                    'maxItems' => 6,
+                    'description' => 'Things he said about himself. quote = his exact words; a guess without his words is stored as unconfirmed.',
+                    'items' => [
+                        'type' => 'object',
+                        'required' => ['key', 'value', 'quote'],
+                        'properties' => [
+                            'key' => ['type' => 'string', 'enum' => \App\Domain\Memory\CustomerMemory::FACT_KEYS],
+                            'value' => ['type' => 'string'],
+                            'quote' => ['type' => 'string'],
+                        ],
+                    ],
+                ],
+                'motorcycles' => [
+                    'type' => 'array',
+                    'maxItems' => 4,
+                    'description' => 'mentioned = just named; asked_about = asked price/specs/photos ("بكام؟" is NOT a choice); compared; interested = "عايز X"; preferred; selected = decided ("خلاص هاخد X"); rejected = "مش عايز X". selected/rejected need his words in quote.',
+                    'items' => [
+                        'type' => 'object',
+                        'required' => ['stage'],
+                        'properties' => [
+                            'id' => ['type' => 'integer'],
+                            'name' => ['type' => 'string'],
+                            'stage' => ['type' => 'string', 'enum' => \App\Domain\Memory\CustomerMemory::STAGES],
+                            'quote' => ['type' => 'string'],
+                        ],
+                    ],
+                ],
+                'topic' => ['type' => 'string', 'description' => 'A few Arabic words: what you are talking about now.'],
+                'open_question' => ['type' => 'string', 'description' => 'What is still open: what he asked that you could not answer, or what you wait from him. Empty string when nothing.'],
+                'objections' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'His hesitations still standing (e.g. "القسط عالي"). Empty array when none.'],
+            ],
+        ];
     }
 
     public function inputSchema(): array
@@ -31,7 +75,7 @@ class SendReplyTool implements Tool
             'properties' => [
                 'messages' => [
                     'type' => 'array',
-                    'minItems' => 1,
+                    'minItems' => 0,
                     'maxItems' => 3,
                     'items' => ['type' => 'string', 'maxLength' => (int) config('agent.reply.max_chars', 700)],
                 ],
@@ -42,6 +86,8 @@ class SendReplyTool implements Tool
                     'maxItems' => 3,
                     'items' => ['type' => 'integer'],
                 ],
+                'no_reply' => ['type' => 'boolean', 'description' => 'true (with messages: []) only when his message needs no answer at all - a thanks, an emoji or "تمام" after the conversation already ended. Anything with a question or new information gets a reply.'],
+                'memory' => $this->memorySchema(),
             ],
             'required' => ['messages'],
         ];
@@ -86,7 +132,19 @@ class SendReplyTool implements Tool
             }
         }
 
-        $ctx->outbound->addMessages($args['messages']);
+        $messages = array_values(array_filter((array) ($args['messages'] ?? []), fn ($m) => trim((string) $m) !== ''));
+
+        // Silence is the model's call, but only for a short closing word: a
+        // question or new information always gets an answer.
+        if ($messages === []) {
+            if (! ($args['no_reply'] ?? false) || ! self::mayStaySilent($ctx)) {
+                return ToolResult::error('REPLY_REQUIRED', 'His message needs an answer - write the reply in messages. no_reply is only for a thanks/emoji/"تمام" after the conversation already ended.');
+            }
+        }
+
+        $this->rememberSafely($args['memory'] ?? null, $ctx);
+
+        $ctx->outbound->addMessages($messages);
         $ctx->outbound->setQuote($args['quote_wa_message_id'] ?? null);
         $ctx->outbound->setFocus($focusIds);
         $ctx->outbound->finish();
@@ -102,5 +160,47 @@ class SendReplyTool implements Tool
         $conversation->save();
 
         return ToolResult::ok(['accepted' => true]);
+    }
+
+    /** A memory problem is logged, never a lost reply. */
+    private function rememberSafely(mixed $memory, ToolContext $ctx): void
+    {
+        if (! is_array($memory) || $memory === []) {
+            return;
+        }
+
+        try {
+            app(\App\Domain\Memory\CustomerMemory::class)->applyModelUpdate($ctx->customerId, $ctx->conversationId, $memory);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Customer memory update failed', ['conversation_id' => $ctx->conversationId, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Every customer message of this turn is a short text with no question
+     * and no media, and our previous message was not a question left open.
+     */
+    public static function mayStaySilent(ToolContext $ctx): bool
+    {
+        $messages = WhatsappMessage::where('whatsapp_conversation_id', $ctx->conversationId)
+            ->where('turn_id', $ctx->turnId)->where('direction', 'incoming')->get(['type', 'text', 'transcript']);
+
+        if ($messages->isEmpty()) {
+            return false;
+        }
+
+        foreach ($messages as $message) {
+            $text = trim((string) ($message->text ?? $message->transcript ?? ''));
+
+            if (! in_array($message->type, ['text', 'sticker', 'reaction'], true) || mb_strlen($text) > 25 || preg_match('/[؟?]/u', $text)) {
+                return false;
+            }
+        }
+
+        $lastBot = WhatsappMessage::where('whatsapp_conversation_id', $ctx->conversationId)
+            ->where('direction', 'outgoing')->where(fn ($q) => $q->whereNull('turn_id')->orWhere('turn_id', '!=', $ctx->turnId))
+            ->latest('id')->value('text');
+
+        return $lastBot !== null && ! preg_match('/[؟?]\s*$/u', trim((string) $lastBot));
     }
 }

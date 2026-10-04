@@ -86,6 +86,21 @@ class AgentRunnerTest extends TestCase
         $this->assertSame(['أهلًا بيك!'], $result['messages']);
     }
 
+    public function test_the_same_refusal_twice_drops_only_the_bad_sentence(): void
+    {
+        // replayed 2026-10-04: "أجهز لك معاينة" refused until the wall clock ran out
+        $conversation = $this->conversation();
+        $fake = $this->fake();
+        $reply = ['messages' => ['أكيد، أجهز لك معاينة في أقرب فرع ونأكد الموديل واللون.', 'قوليلي مدينتك عشان أبعتلك أقرب فرع ومواعيده.']];
+        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => $reply]]));
+        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => $reply]]));
+
+        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
+
+        $this->assertSame(['قوليلي مدينتك عشان أبعتلك أقرب فرع ومواعيده.'], $result['messages']);
+        $this->assertCount(2, $fake->requests());
+    }
+
     public function test_chained_tool_calls_across_model_calls(): void
     {
         $conversation = $this->conversation();

@@ -61,6 +61,8 @@ class LegacyRequestProjector
     /** document type key => [column, directory, is_array_column] */
     private const DOCUMENT_COLUMNS = [
         'salary_slip' => ['salary_slip_file', 'installments/salary_slips', false],
+        // the employee's salary proof when his company gives no slip
+        'insurance_print' => ['salary_slip_file', 'installments/salary_slips', false],
         'pension_statement' => ['pension_statement_file', 'installments/pension', false],
         'tax_card' => ['tax_card_file', 'installments/business', false],
         'business_place_photo' => ['place_video', 'installments/business', true],
@@ -124,7 +126,9 @@ class LegacyRequestProjector
             'work_landmark' => $applicant['work_landmark'] ?? null,
             'salary_amount' => $legacyWorkStatus === 'employee' ? $income : null,
             'pension_amount' => $legacyWorkStatus === 'pension' ? $income : null,
-            'free_work_name' => $this->workPlaceName($application, $applicant, $facts) ?? (self::WORK_TYPE_LABELS[$applicant['work_type'] ?? ''] ?? null),
+            // Owner 2026-10-04: "اسم العمل" said "شغل حر" for every freelancer -
+            // staff need what he actually does, and where.
+            'free_work_name' => $this->jobTitle($application, $applicant, $facts),
             'free_work_address' => $applicant['work_address'] ?? null,
 
             'salary_issue_date' => $this->date($facts['salary_slip']['salary_slip_date'] ?? null),
@@ -178,6 +182,7 @@ class LegacyRequestProjector
     {
         $name = $applicant['business_name']
             ?? $facts['salary_slip']['employer_name']
+            ?? $facts['insurance_print']['employer_name']
             ?? $facts['tax_card']['business_name']
             ?? $facts['business_place_photo']['business_name']
             ?? null;
@@ -204,17 +209,25 @@ class LegacyRequestProjector
         }
 
         $parts = $this->addresses->split($stored, $this->evidenceMessages($application, array_keys($fields)), $prefix === 'work' ? 'work' : 'home');
+        $lineKey = array_search('street', $fields, true);
+        $line = (string) ($values[$lineKey] ?? '');
+        $parser = app(AddressParser::class);
 
+        // The AI split runs once, inside the submission, and fails when the
+        // provider is busy: the marker words and the district list still
+        // divide the line (server: 7 of 15 requests had no governorate).
         if ($parts === []) {
-            return [];
+            $parts = $line !== '' ? $parser->parse($line) : [];
+
+            if ($parts === [] || ! isset($parts['street'])) {
+                $parts['street'] = $line;
+            }
         }
 
         // Request 4276: the split made the street "مميز" and moved "الجامعة
         // الروسية" out of the address into the landmark. What the customer
         // gave field by field is kept as he gave it; the AI only divides the
         // address line itself, and only if no word of it is lost.
-        $lineKey = array_search('street', $fields, true);
-
         foreach ($fields as $storedKey => $part) {
             if ($storedKey !== $lineKey) {
                 unset($parts[$part]);
@@ -225,11 +238,29 @@ class LegacyRequestProjector
             }
         }
 
-        // A split that lost a word of his line is not trusted at all - its
-        // governorate too: a Maadi work address kept "الجيزة" from the home.
-        if ($lineKey && filled($values[$lineKey] ?? null) && ! $this->coversLine((string) $values[$lineKey], $parts)) {
+        // A split that lost a word of his line is not trusted - its governorate
+        // neither: a Maadi work address kept "الجيزة" from the home. What the
+        // marker words and the district list read off the line itself is kept
+        // (server: "34 شارع الشرفاء العشرين فيصل" lost Giza and فيصل this way).
+        if ($lineKey && $line !== '' && ! $this->coversLine($line, $parts)) {
             unset($parts['area'], $parts['branch_street'], $parts['governorate']);
-            $parts['street'] = (string) $values[$lineKey];
+            $parts['street'] = $line;
+
+            // only the district named in it - the line itself stays the street
+            [$governorate, $district] = $parser->placeIn($line);
+
+            foreach (array_filter(['governorate' => $governorate, 'area' => $district]) as $part => $value) {
+                $parts[$part] = $value;
+            }
+        }
+
+        // the governorate he did not name, from a district in his line or in the area
+        if (! isset($parts['governorate'])) {
+            $governorate = $parser->placeIn($line)[0] ?? (isset($parts['area']) ? $parser->governorateOf((string) $parts['area']) : null);
+
+            if ($governorate !== null) {
+                $parts['governorate'] = $governorate;
+            }
         }
 
         $columns = [];
@@ -250,9 +281,17 @@ class LegacyRequestProjector
                 isset($parts['landmark']) ? "علامة مميزة: {$parts['landmark']}" : null,
             ]) ?? ($columns['applicant_address'] ?? null);
         } else {
-            $columns['work_address'] = $this->joinAddress([
-                $parts['street'] ?? null, $parts['area'] ?? null, $parts['governorate'] ?? null,
-            ]) ?? ($values['work_address'] ?? null);
+            // "شارع الهرم - الهرم - الجيزة": a part already in the street is not repeated
+            $street = (string) ($parts['street'] ?? '');
+
+            if ($street !== '' && str_contains((string) ($values['work_address'] ?? ''), 'شارع '.$street) && ! str_starts_with($street, 'شارع')) {
+                $street = 'شارع '.$street;
+            }
+
+            $columns['work_address'] = $this->joinAddress(array_map(
+                fn ($part) => $part !== null && $street !== '' && $part !== $street && str_contains($street, (string) $part) ? null : $part,
+                [$street !== '' ? $street : null, $parts['area'] ?? null, $parts['governorate'] ?? null],
+            )) ?? ($values['work_address'] ?? null);
         }
 
         return array_filter($columns, fn ($v) => $v !== null && $v !== '');
@@ -307,7 +346,16 @@ class LegacyRequestProjector
     }
 
     /** Re-applies the mapping to an already projected request (backfill). */
-    public function refresh(InstallmentRequest $request): void
+    /** Columns the bot itself writes from the chat - safe to rebuild while staff have not touched the request. */
+    public const BOT_TEXT_COLUMNS = [
+        'applicant_address', 'applicant_governorate', 'applicant_area', 'applicant_street', 'applicant_branch_street',
+        'applicant_building_number', 'applicant_floor', 'applicant_apartment', 'applicant_landmark',
+        'work_address', 'work_governorate', 'work_area', 'work_street', 'work_branch_street', 'work_building_number', 'work_landmark',
+        'free_work_name', 'free_work_address', 'notes',
+    ];
+
+    /** @param  string[]  $overwrite  columns to rebuild even when already filled */
+    public function refresh(InstallmentRequest $request, array $overwrite = []): void
     {
         $application = $request->application;
 
@@ -321,10 +369,19 @@ class LegacyRequestProjector
         $attributes = array_filter(
             $attributes,
             fn ($value, $column) => $column === 'request_type'
+                || in_array($column, $overwrite, true)
                 || blank($request->getAttribute($column))
                 || (str_ends_with($column, '_age_ok') && ! $request->getAttribute($column)),
             ARRAY_FILTER_USE_BOTH
         );
+
+        // a rebuilt column the new projection leaves empty is emptied too (the
+        // whole line used to sit in the street column)
+        foreach ($overwrite as $column) {
+            if (! array_key_exists($column, $attributes)) {
+                $attributes[$column] = null;
+            }
+        }
 
         $request->forceFill($attributes)->saveQuietly();
     }
@@ -462,24 +519,29 @@ class LegacyRequestProjector
             $lines[] = "الموتوسيكل: {$machine}";
         }
 
-        if (isset($applicant['work_type'])) {
-            $lines[] = 'نوع الشغل: '.(self::WORK_TYPE_LABELS[$applicant['work_type']] ?? $applicant['work_type']);
-        }
+        $lines[] = '— بيانات الشغل —';
 
-        if (($place = $this->workPlaceName($application, $applicant, $facts)) !== null) {
-            $lines[] = "مكان الشغل: {$place}";
+        foreach ($this->workProfile($application, $applicant, $facts) as $label => $value) {
+            $lines[] = "{$label}: {$value}";
         }
 
         if (CardOnlyRoute::on($application)) {
             $lines[] = 'تقديم بالبطاقة فقط (مسار العمل الحر) - العميل قال إنه مش هيقدر يجيب أوراق شغله';
         }
 
-        if (isset($applicant['monthly_income'])) {
-            $lines[] = "الدخل الشهري: {$applicant['monthly_income']}";
-        }
-
         if (isset($applicant['residence_ownership'])) {
             $lines[] = 'السكن: '.(self::RESIDENCE_LABELS[$applicant['residence_ownership']] ?? $applicant['residence_ownership']);
+        }
+
+        // what else he told the bot about himself, with nothing guessed
+        $said = $this->statedFacts($application);
+
+        if ($said !== []) {
+            $lines[] = '— قاله العميل في المحادثة —';
+
+            foreach ($said as $label => $value) {
+                $lines[] = "{$label}: {$value}";
+            }
         }
 
         // Staff see what the bot read off each document, not only the file.
@@ -501,6 +563,76 @@ class LegacyRequestProjector
         }
 
         return implode("\n", $lines);
+    }
+
+    private const RELATION_LABELS = ['owner' => 'صاحب المكان', 'works_for_someone' => 'شغال عند حد', 'independent' => 'شغال لحسابه'];
+
+    /** "صنايعي خراط وعجان - فرن بلدي": what he does, then where. */
+    private function jobTitle(Application $application, array $applicant, array $facts): ?string
+    {
+        $profile = $this->workProfile($application, $applicant, $facts);
+        $job = $profile['المهنة'] ?? $profile['الشغل بكلامه'] ?? (self::WORK_TYPE_LABELS[$applicant['work_type'] ?? ''] ?? null);
+        $place = $profile['مكان الشغل'] ?? null;
+
+        if ($job === null) {
+            return $place;
+        }
+
+        return $place !== null && ! str_contains($job, $place) ? "{$job} - {$place}" : $job;
+    }
+
+    /**
+     * Everything known about his work, each from where it was read: his own
+     * words (the chat), the AI reading of them, his memory, and documents.
+     *
+     * @return array<string, string> label => value
+     */
+    private function workProfile(Application $application, array $applicant, array $facts): array
+    {
+        $reading = $application->origin_conversation_id
+            ? (app(WorkClassification::class)->reading((int) $application->origin_conversation_id) ?? [])
+            : [];
+        $memory = $application->customer_id ? app(\App\Domain\Memory\CustomerMemory::class)->get((int) $application->customer_id)['facts'] : [];
+        $stated = fn (string $key) => ($memory[$key]['source'] ?? null) === 'customer_statement' ? trim((string) $memory[$key]['value']) : null;
+
+        $income = $applicant['monthly_income'] ?? ($facts['salary_slip']['monthly_income'] ?? null)
+            ?? (($reading['stated_monthly_income'] ?? 0) > 0 ? (string) $reading['stated_monthly_income'] : null) ?? $stated('monthly_income');
+
+        $profile = [
+            'نوع العميل' => trim((string) $application->customerType?->label) ?: null,
+            'المهنة' => filled($reading['occupation'] ?? null) ? $reading['occupation'] : $stated('job'),
+            'الشغل بكلامه' => filled($reading['evidence'] ?? null) ? '«'.$reading['evidence'].'»' : (isset($memory['job']['quote']) ? '«'.$memory['job']['quote'].'»' : null),
+            'نوع الشغل' => self::WORK_TYPE_LABELS[$applicant['work_type'] ?? ''] ?? null,
+            'مكان الشغل' => $this->workPlaceName($application, $applicant, $facts) ?? $stated('workplace'),
+            'علاقته بالمكان' => self::RELATION_LABELS[$reading['relation_to_workplace'] ?? ''] ?? null,
+            'متأمن عليه' => match ($reading['insured'] ?? null) { 'yes' => 'أيوه', 'no' => 'لأ', default => $stated('insured') },
+            'القطاع' => match ($reading['sector'] ?? null) { 'government' => 'حكومي', 'private' => 'خاص', default => null },
+            'الدخل الشهري' => $income !== null ? (string) $income : null,
+            'عنوان الشغل' => $applicant['work_address'] ?? null,
+        ];
+
+        return array_filter($profile, fn ($v) => $v !== null && trim((string) $v) !== '');
+    }
+
+    /** @return array<string, string> facts he stated in the chat that the request has no column for */
+    private function statedFacts(Application $application): array
+    {
+        if (! $application->customer_id) {
+            return [];
+        }
+
+        $labels = ['has_driving_license' => 'الرخصة', 'usage' => 'هيستخدم الموتوسيكل في', 'preferred_duration' => 'المدة اللي عايزها',
+            'down_payment' => 'المقدم اللي يقدر عليه', 'monthly_budget' => 'القسط اللي يقدر عليه', 'applicant' => 'مين بيقدّم', 'age' => 'السن (بكلامه)'];
+        $facts = app(\App\Domain\Memory\CustomerMemory::class)->get((int) $application->customer_id)['facts'];
+        $out = [];
+
+        foreach ($labels as $key => $label) {
+            if (($facts[$key]['source'] ?? null) === 'customer_statement' && filled($facts[$key]['value'] ?? null)) {
+                $out[$label] = (string) $facts[$key]['value'];
+            }
+        }
+
+        return $out;
     }
 
     /** The phone the customer typed, when it differs from the WhatsApp number. */

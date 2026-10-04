@@ -68,6 +68,9 @@ class InstallmentTest extends TestCase
         $conversation = WhatsappConversation::create(['whatsapp_bot_id' => $bot->id, 'phone' => '2011', 'status' => 'open']);
         $trace = AiTrace::create(['conversation_id' => $conversation->id, 'turn_id' => 1, 'status' => 'running']);
 
+        // the companies are listed only when he asks who finances (owner's rule)
+        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'بتقسطوا مع مين؟']);
+
         return new ToolContext(1, $conversation->id, null, 1, $trace->id, new TurnResultBuilder());
     }
 

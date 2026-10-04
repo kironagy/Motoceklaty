@@ -110,6 +110,13 @@ class CheckEligibilityTool implements Tool
             $result['note'] = 'Stated age only - his national ID decides. Do not tell him he is eligible or accepted; just go on.';
         }
 
+        // Replayed 2026-10-04: "سبت التدريس وبشتغل سواق اوبر" was checked for
+        // his work and answered "عندك عمرك كام؟" - the missing age in the
+        // result read as a question to ask. The age comes from his ID.
+        if (! isset($facts['age'])) {
+            $result['age_note'] = 'No age was checked - that is fine. Do not ask his age for this; it is read from his national ID if he applies.';
+        }
+
         if (filled($facts['work_statement'] ?? null)
             && ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, 'employee', $facts['work_statement']))) {
             if ($problem['code'] === 'OCCUPATION_NOT_ACCEPTED') {

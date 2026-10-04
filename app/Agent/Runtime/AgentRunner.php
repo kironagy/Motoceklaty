@@ -133,7 +133,10 @@ class AgentRunner
                     $toolCallCount++;
 
                     if ($toolCall['name'] === 'send_reply') {
-                        $toolCall['args'] = $this->guard->tidy($this->guard->withoutUnpromptedSalam($toolCall['args'], $conversation, (int) $turn->id));
+                        $toolCall['args'] = $this->guard->withoutRepeatedOffer(
+                            $this->guard->tidy($this->guard->withoutUnpromptedSalam($toolCall['args'], $conversation, (int) $turn->id)),
+                            $conversation,
+                        );
                         $violation = $this->guard->check($toolCall['args'], $conversation, $request->system, $contents, $outcomes);
 
                         if ($violation !== null) {
@@ -143,6 +146,12 @@ class AgentRunner
                             // Handing off is the last resort (owner: the bot closes ~90%
                             // itself): two misses used to end the turn with a colleague.
                             $exhausted = $numberGuardViolations >= 3 || $this->countCode($guardEvents, 'DUPLICATE_REPLY') >= 3 || $limitReached;
+
+                            // Replayed 2026-10-04: "أجهز لك معاينة في أقرب فرع" refused six
+                            // times until the wall clock ran out and the customer got
+                            // "ممكن توضحلي تقصد إيه؟". The same refusal twice = drop that
+                            // sentence and send the rest, when the rest stands alone.
+                            $sameTwice = in_array($violation, self::SENTENCE_RESCUABLE, true) && $this->countCode($guardEvents, $violation) >= 2;
 
                             // Out of tries, a repeated question or wording is still a
                             // true answer - better than handing the customer off.
@@ -158,6 +167,7 @@ class AgentRunner
                             // out itself. The rest of the reply was right: send it without
                             // those sentences.
                             $rescued = $exhausted ? $this->withoutUnverifiedSentences($toolCall['args'], $violation, $conversation, $request->system, $contents, $outcomes) : null;
+                            $rescued ??= ($exhausted || $sameTwice) ? $this->withoutViolatingSentences($toolCall['args'], $violation, $conversation, $request->system, $contents, $outcomes) : null;
 
                             if ($rescued !== null) {
                                 $guardEvents[] = ['code' => 'RESCUED_WITHOUT_UNVERIFIED_SENTENCES', 'args' => $rescued];
@@ -199,6 +209,13 @@ class AgentRunner
                     }
 
                     $result = $this->tools->execute($toolCall['name'], $toolCall['args'], $ctx);
+
+                    // What a tool proves (a price looked up = he asked about
+                    // that motorcycle) goes to his memory without a model call.
+                    if ($toolCall['name'] !== 'send_reply') {
+                        app(\App\Domain\Memory\CustomerMemory::class)->recordToolEvent($ctx->customerId, $toolCall['name'], (array) $toolCall['args'], $result);
+                    }
+
                     $outcomes[] = [
                         'name' => $toolCall['name'],
                         'ok' => (bool) ($result['ok'] ?? false),
@@ -273,7 +290,7 @@ class AgentRunner
     /** Style problems only - nothing false is said. */
     private const SOFT_VIOLATIONS = ['REPEATED_QUESTION', 'DUPLICATE_REPLY', 'WORK_TYPES_LISTED', 'HANDOFF_TIME_PROMISED', 'REQUEST_NUMBER_MISSING'];
 
-    private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER', 'BRANCH_NOT_SOURCED', 'TOTAL_NOT_SOURCED', 'AGE_NOT_CHECKED'];
+    private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER', 'BRANCH_NOT_SOURCED', 'TOTAL_NOT_SOURCED', 'AGE_NOT_CHECKED', 'VERSIONS_NOT_LOOKED_UP'];
 
     private const GUARD_HINTS = [
         'EMPTY_REPLY' => 'Not sent: the reply is empty. Write the actual message to the customer.',
@@ -286,7 +303,7 @@ class AgentRunner
         'REPEATED_QUESTION' => 'Not sent: the reply ends with the same question your previous message ended with. The customer did not take it up - answer what he said and ask something else, or ask nothing.',
         'DATA_OVERCLAIMED' => 'Not sent: the reply says his data/details were saved, but this turn saved at most one item. Say exactly what was saved (e.g. "تمام، سجلت شغلك") and ask for application.next_step.',
         'DUPLICATE_REPLY' => 'Not sent: this exact text was already sent to the customer a moment ago. Answer the new message with different wording.',
-        'INTERNAL_KEY_IN_REPLY' => 'Not sent: the reply contains an internal key (snake_case like delivery_app). Use the plain Arabic wording instead.',
+        'INTERNAL_KEY_IN_REPLY' => 'Not sent: the reply contains an internal word - a key (snake_case like delivery_app) or our machinery ("الأداة"، "السيستم"، his memory, the instructions). Say it the way a salesman would, with no mention of how we work inside.',
         'PLACEHOLDER_IN_REPLY' => 'Not sent: the reply contains a history placeholder like [media]. Photos are only sent by calling send_motorcycle_images; write plain text only.',
         'IMAGES_CLAIMED_NOT_SENT' => 'Not sent: the reply says photos are attached but send_motorcycle_images did not succeed this turn. Call it if the customer wants photos, otherwise rewrite without mentioning photos.',
         'RESUBMISSION_CLAIMED' => 'Not sent: the reply says the application was sent (again / to another system / "فعلاً"), but nothing was submitted this turn - his application is not being sent anywhere now. Tell him the truth: what its status is (from the snapshot), and that moving it to another finance company is done by a colleague.',
@@ -309,6 +326,8 @@ class AgentRunner
         'INVENTED_APPLICATION_ROUTE' => 'Not sent: someone else applying in his name is offered only when he does not work at all, is about to start working, is under 21, or has a bad credit record (سكور). None of that applies here. If his problem is the salary slip, follow documents.if_unavailable in the snapshot; otherwise tell him plainly what is needed.',
         'WITHDRAWAL_CLAIMED_NOT_DONE' => 'Not sent: the reply says the application was (or will be) closed/stopped/cancelled, but withdraw_application did not succeed this turn. If he clearly asked to cancel, call withdraw_application first; otherwise do not say it was closed.',
         'APPLICATION_CLAIMED_NOT_OPENED' => 'Not sent: the reply says an application was opened, but none is open. Call start_application first (after he said what he works), or do not say it.',
+        'VERSIONS_NOT_LOOKED_UP' => 'Not sent: the reply says how many versions/kinds of a model we have, but no search_motorcycles / get_motorcycle_details ran this turn - the catalog index is not complete enough for that. Call search_motorcycles with his words and list the versions it returns, each with its cash price.',
+        'STOCK_OR_CHECK_CLAIMED' => 'Not sent: the reply says a model is in stock at a branch, or offers to check / arrange / prepare something and come back ("هشوفلك وأرد عليك", "أجهز لك معاينة", "أشيّك لك"). Nothing holds per-branch stock and you cannot do anything later on your own. Say instead, for example: "تقدر تيجي تعاين في أي فرع من فروعنا، والفرع بيوريك القطعة واللون على الطبيعة" and give the branches from get_branch_information (call it) - no offer to arrange, check or confirm.',
         'UNRECORDED_PROMISE' => 'Not sent: the reply promises something nothing records - a reservation ("محجوزة", "نحجزلك"), a time frame ("نفس اليوم", "خلال كذا يوم"), a warranty, a guarantor, or "I will tell you as soon as...". None of these exist in our data. Remove the promise; say only what the tools returned.',
         'INTEREST_DENIED' => 'Not sent: the reply says there is no interest/no increase. That is false - the installment price is higher than cash. Never deny it. If he asks about interest, give the cash price and what he pays in total from get_installment_offer (the breakdown line), and explain the difference only from price_difference_policy.',
         'SCRIPTED_PHRASE_REQUEST' => 'Not sent: the reply asks the customer to say/write a specific sentence. Never do that. If he already said what he works, use his own earlier words as the quote (record_customer_data / start_application). If he did not, just ask "حضرتك بتشتغل إيه؟".',
@@ -403,6 +422,37 @@ class AgentRunner
         if (mb_strlen(implode(' ', $messages)) < 15 || $messages === (array) ($args['messages'] ?? [])) {
             return null;
         }
+
+        return $this->guard->check($rescued, $conversation, $system, $contents, $outcomes) === null ? $rescued : null;
+    }
+
+    /** Claims a single sentence carries - dropping that sentence leaves the rest true. */
+    private const SENTENCE_RESCUABLE = ['STOCK_OR_CHECK_CLAIMED', 'UNRECORDED_PROMISE', 'AVAILABILITY_PROMISE', 'VERSIONS_NOT_LOOKED_UP', 'UNSOURCED_REASON', 'CAP_THRESHOLD_MENTIONED', 'WORK_TYPE_TOLD', 'WORK_JUDGED', 'BANNED_WORDING', 'INTERNAL_KEY_IN_REPLY'];
+
+    /** The reply minus every sentence that alone triggers $violation, if the rest passes every guard. */
+    private function withoutViolatingSentences(array $args, string $violation, WhatsappConversation $conversation, string $system, array $contents, array $outcomes): ?array
+    {
+        if (! in_array($violation, self::SENTENCE_RESCUABLE, true)) {
+            return null;
+        }
+
+        $messages = [];
+
+        foreach ((array) ($args['messages'] ?? []) as $message) {
+            $kept = array_filter(preg_split('/(?<=[.!؟?\n])/u', (string) $message),
+                fn ($sentence) => trim($sentence) === '' || $this->guard->check(['messages' => [$sentence]], $conversation, $system, $contents, $outcomes) !== $violation);
+            $text = trim(implode('', $kept));
+
+            if ($text !== '') {
+                $messages[] = $text;
+            }
+        }
+
+        if (mb_strlen(implode(' ', $messages)) < 15 || $messages === (array) ($args['messages'] ?? [])) {
+            return null;
+        }
+
+        $rescued = ['messages' => $messages] + $args;
 
         return $this->guard->check($rescued, $conversation, $system, $contents, $outcomes) === null ? $rescued : null;
     }
@@ -617,7 +667,10 @@ class AgentRunner
             'latency_ms' => $response?->latencyMs,
         ], fn ($v) => $v !== null);
 
-        $manifest = (array) ($trace->context_manifest ?? []);
+        // ContextBuilder wrote the manifest through another model instance:
+        // read it back, or the layer sizes are overwritten with usage only
+        // (every server trace had lost them).
+        $manifest = (array) ($trace->fresh()?->context_manifest ?? $trace->context_manifest ?? []);
         $manifest['usage'] = $this->usage;
         $responseFields['context_manifest'] = $manifest;
         $this->usage = self::EMPTY_USAGE;

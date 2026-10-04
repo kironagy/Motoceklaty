@@ -20,6 +20,16 @@ class ApplicationNudgeService
 {
     public const MAX_PER_SILENCE = 2;
 
+    /**
+     * Server history 2026-09-26..10-04: 414 nudges, up to 44 in one
+     * conversation - every reply from the customer started a new silence,
+     * and a lost state started the count again. Whatever happens, one
+     * application gets at most this many, never two within MIN_GAP_HOURS.
+     */
+    public const MAX_PER_APPLICATION = 3;
+
+    public const MIN_GAP_HOURS = 12;
+
     public function __construct(
         private readonly SnapshotService $snapshots,
         private readonly DeliveryService $delivery,
@@ -101,13 +111,18 @@ class ApplicationNudgeService
             return false;
         }
 
-        // A reply from the customer starts a new silence.
-        if (($nudges['application_id'] ?? null) !== $application->id
-            || ($lastCustomerAt && isset($nudges['last_at']) && Carbon::parse($lastCustomerAt)->gt(Carbon::parse($nudges['last_at'])))) {
-            $nudges = ['application_id' => $application->id, 'count' => 0];
+        // A reply from the customer starts a new silence - the application's
+        // own total and the last nudge time carry over.
+        if (($nudges['application_id'] ?? null) !== $application->id) {
+            $nudges = ['application_id' => $application->id, 'count' => 0, 'total' => 0];
+        } elseif ($lastCustomerAt && isset($nudges['last_at']) && Carbon::parse($lastCustomerAt)->gt(Carbon::parse($nudges['last_at']))) {
+            $nudges['count'] = 0;
         }
 
-        if ($nudges['count'] >= self::MAX_PER_SILENCE) {
+        $total = max((int) ($nudges['total'] ?? 0), $this->sentFor($conversation->id, $application));
+
+        if ($nudges['count'] >= self::MAX_PER_SILENCE || $total >= self::MAX_PER_APPLICATION
+            || (isset($nudges['last_at']) && Carbon::parse($nudges['last_at'])->gt(now()->subHours(self::MIN_GAP_HOURS)))) {
             return false;
         }
 
@@ -124,10 +139,21 @@ class ApplicationNudgeService
 
         $this->delivery->deliverForConversation($conversation, ['messages' => [$text]], 'bot');
 
-        $state['application_nudges'] = ['application_id' => $application->id, 'count' => $nudges['count'] + 1, 'last_at' => now()->toIso8601String()];
+        // re-read: the delivery may have written the state meanwhile
+        $state = $conversation->fresh()->state ?? [];
+        $state['application_nudges'] = ['application_id' => $application->id, 'count' => $nudges['count'] + 1, 'total' => $total + 1, 'last_at' => now()->toIso8601String()];
         $conversation->update(['state' => $state]);
 
         return true;
+    }
+
+    /** Nudges already in the chat for this application - the record, not the state. */
+    private function sentFor(int $conversationId, Application $application): int
+    {
+        return WhatsappMessage::where('whatsapp_conversation_id', $conversationId)->where('direction', 'outgoing')
+            ->where('created_at', '>=', $application->created_at)
+            ->where(fn ($q) => $q->where('text', 'like', 'لسه معايا؟%')->orWhere('text', 'like', 'لو لسه حابب%'))
+            ->count();
     }
 
     public function message(Application $application, int $alreadySent): ?string

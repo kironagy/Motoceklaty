@@ -38,6 +38,12 @@ class ReplyGuard
         $succeeded = array_column(array_filter($outcomes, fn ($o) => $o['ok'] && $this->changedSomething($o)), 'name');
         $toolResultsBlob = json_encode(array_column($outcomes, 'data'), JSON_UNESCAPED_UNICODE) ?: '';
 
+        // Staying silent on a closing "تمام"/emoji is checked by send_reply
+        // itself (SendReplyTool::mayStaySilent) - there is no text to judge.
+        if (trim($replyText) === '' && ($args['no_reply'] ?? false) === true) {
+            return null;
+        }
+
         // send_reply(messages: [""]) was accepted and the customer who had
         // just sent their details by voice got nothing back.
         if (trim($replyText) === '') {
@@ -78,7 +84,11 @@ class ReplyGuard
         // but only offered when he does not work at all, is about to start,
         // is under 21 or has a bad credit record. A warehouse worker short
         // of a salary slip was told "هات قريب أو صاحب يقدم باسمه" instead.
-        if (! $this->mayApplyThroughSomeoneElse($conversation, $toolResultsBlob) && preg_match('/(?:حد|شخص|قريب|صاحب|قرايبك|أصحابك|اصحابك)\s+(?:\S+\s+){0,6}?و?(?:يقد[ّ]?م|يتقد[ّ]?م|تقد[ّ]?م)\s+(?:\S+\s+){0,3}?باسم|(?:نقد[ّ]?م|يقد[ّ]?م|تقد[ّ]?م)\s+(?:\S+\s+){0,2}?باسم\s+(?:حد|شخص)|باسم\s+(?:حد|شخص)\s+تاني/u', $replyText)) {
+        // The text first: the work reading behind mayApplyThroughSomeoneElse
+        // is a paid model call, and asked first it ran on every reply
+        // (ENHANCE-Ai: a second model call in almost every turn).
+        if (preg_match('/(?:حد|شخص|قريب|صاحب|قرايبك|أصحابك|اصحابك)\s+(?:\S+\s+){0,6}?و?(?:يقد[ّ]?م|يتقد[ّ]?م|تقد[ّ]?م)\s+(?:\S+\s+){0,3}?باسم|(?:نقد[ّ]?م|يقد[ّ]?م|تقد[ّ]?م)\s+(?:\S+\s+){0,2}?باسم\s+(?:حد|شخص)|باسم\s+(?:حد|شخص)\s+تاني/u', $replyText)
+            && ! $this->mayApplyThroughSomeoneElse($conversation, $toolResultsBlob)) {
             return 'INVENTED_APPLICATION_ROUTE';
         }
 
@@ -156,6 +166,26 @@ class ReplyGuard
             return 'UNRECORDED_PROMISE';
         }
 
+        // Replayed conversation 302: "الهوجن ٤ عندنا بنسختين" with no lookup
+        // - there are three. How many versions we carry is catalog data.
+        if (preg_match('/(?:بنسختين|نسختين|بتلات نسخ|تلات نسخ|كذا نسخ[ةه]|أكتر من نسخ[ةه]|اكتر من نسخ[ةه]|\d\s*نسخ|كذا نوع|نوعين)/u', $replyText)
+            && array_intersect(array_column(array_filter($outcomes, fn ($o) => $o['ok']), 'name'), ['search_motorcycles', 'get_motorcycle_details']) === []) {
+            return 'VERSIONS_NOT_LOOKED_UP';
+        }
+
+        // Conversation 852: "هشوفلك حالا المتاح في الفرعين... ثواني وهرد
+        // عليكي" then "اتأكدتلك، متاح في عين شمس وجسر السويس" - nothing
+        // holds stock per branch and nobody checked. Nothing the bot can do
+        // later is "I'll check and come back".
+        // offering to check ("أشيّك لك؟") is as empty as saying it was checked
+        if ($this->claimsStockOrCheck($this->withoutConditionalClausesOnly($replyText))) {
+            return 'STOCK_OR_CHECK_CLAIMED';
+        }
+
+        if ($this->inventsTimeFrame($assertions, $toolResultsBlob.' '.$system)) {
+            return 'UNRECORDED_PROMISE';
+        }
+
         // "مفيش فوايد" - the customer did the sum and found 30-50% more.
         if ($this->deniesInterest($replyText)) {
             return 'INTEREST_DENIED';
@@ -169,7 +199,7 @@ class ReplyGuard
 
         // The owner: the bot never gives itself a name, and never "أهلاً بك",
         // "حقك عليا", "من غير مقدم" or "الكتالوج" (an internal word).
-        if (preg_match('/(?:معاك|أنا|انا|اسمي)\s+(?:ال)?حاوي|أهلاً بك|أهلا بك|اهلاً بك|اهلا بك|حقك عليا|حقك عليّا|كتالوج|كاتالوج|كتلوج|catalog|(?:من غير|بدون|مفيش|مافيش)\s+(?:(?:أي|اي|عندنا|خالص|فيه|فيها)\s+){0,2}مقد[مّ]/u', $replyText)) {
+        if (preg_match('/(?:معاك|أنا|انا|اسمي)\s+(?:ال)?حاوي|(?:أهلاً|أهلا|اهلاً|اهلا)\s+(?:بك|بيك|بيكي|بكي)(?!\p{L})|حقك عليا|حقك عليّا|كتالوج|كاتالوج|كتلوج|catalog|(?:من غير|بدون|مفيش|مافيش)\s+(?:(?:أي|اي|عندنا|خالص|فيه|فيها)\s+){0,2}مقد[مّ]/u', $replyText)) {
             return 'BANNED_WORDING';
         }
 
@@ -313,7 +343,7 @@ class ReplyGuard
             return 'DUPLICATE_REPLY';
         }
 
-        if ($this->hasUnverifiedNumber($replyText, $system, $toolResultsBlob, $contents)) {
+        if ($this->hasUnverifiedNumber($replyText, $system, $toolResultsBlob, $contents, ! $this->customerBringsAPrice($conversation))) {
             return 'UNVERIFIED_NUMBER';
         }
 
@@ -328,7 +358,10 @@ class ReplyGuard
     /** "بيغطي تكاليف التمويل والتشغيل" / "مقابل الورق": a reason for the price gap or the fees. */
     private function explainsPriceDifferenceOrFees(string $text): bool
     {
-        $reasonWords = '/مقابل\s+(?:ال)?(?:إجراءات|اجراءات|ورق|تمويل|خدمات|تكلف[ةه]|تسهيلات|فتح ملف|دراس[ةه])|تمويل خارجي|جه[ةه] تمويل|تكلف[ةه]|تكاليف|التشغيل|(?:ال)?خدمات|ضريب[ةه]|ضرايب|ضرائب|فوايد|فوائد|تأمين|التأمين/u';
+        // Conversation 302 replayed 2026-10-04: "المصاريف الإدارية دي الرسوم
+        // اللي جهة التمويل بتفرضها عشان فتح الملف وتسجيل العقد... وتدفعها
+        // ضمن أول قسط" - a reason nobody recorded and the wrong time to pay.
+        $reasonWords = '/مقابل\s+(?:ال)?(?:إجراءات|اجراءات|ورق|تمويل|خدمات|تكلف[ةه]|تسهيلات|فتح ملف|دراس[ةه])|تمويل خارجي|جه[ةه] (?:ال)?تمويل\s+(?:\S+\s+)?(?:بتفرض|بتاخد|بتحط|بتطلب)|فتح (?:ال)?ملف|تسجيل (?:ال)?عقد|تقييم (?:ال)?طلب|رسوم|(?:ضمن|مع) (?:أول|اول) قسط|تكلف[ةه]|تكاليف|التشغيل|(?:ال)?خدمات|ضريب[ةه]|ضرايب|ضرائب|فوايد|فوائد|تأمين|التأمين/u';
         $aboutGap = '/الفرق|فرق|أغلى|اغلى|أزيد|ازيد|أكتر من الكاش|اكتر من الكاش|بيغطي|مقابل|المصاريف|مصاريف/u';
 
         foreach (preg_split('/(?<=[.!؟?\n])/u', $text) as $sentence) {
@@ -643,9 +676,22 @@ class ReplyGuard
      * ..."), up to the next clause break. What is left is what the reply
      * asserts as having happened.
      */
+    private function withoutConditionalClausesOnly(string $text): string
+    {
+        return preg_replace('/(?:^|(?<=[\s،,.!؟?]))(?:ولو|لو|إذا|اذا|وإذا|وإن|إن|في حالة|فى حالة)\s+[^،,.!؟?\n]*/u', ' ', $text) ?? $text;
+    }
+
     private function withoutConditionalClauses(string $text): string
     {
-        return preg_replace('/(?:^|(?<=[\s،,.!؟?]))(?:ولو|لو|إذا|اذا|وإذا|وإن|إن|لما|في حالة|فى حالة|أول ما|اول ما|لحد ما|عشان)\s+[^،,.!؟?\n]*/u', ' ', $text) ?? $text; // null on broken UTF-8 crashed a turn
+        $text = preg_replace('/(?:^|(?<=[\s،,.!؟?]))(?:ولو|لو|إذا|اذا|وإذا|وإن|إن|لما|في حالة|فى حالة|أول ما|اول ما|لحد ما|عشان)\s+[^،,.!؟?\n]*/u', ' ', $text) ?? $text; // null on broken UTF-8 crashed a turn
+
+        // A question is not a claim: "هل قدّمت طلب تقسيط في معرض تاني قبل
+        // كده؟" was refused 212 times in four days as "the application was
+        // submitted" - each refusal one more full model call.
+        // Only the asking clause goes: "سجلت رقمك، تحب نكمل؟" still claims.
+        $text = preg_replace('/(?:^|(?<=[.!؟?\n]))\s*هل\s[^.!؟?\n]*[؟?]/u', ' ', $text) ?? $text;
+
+        return preg_replace('/(?:^|(?<=[.!؟?\n،,]))[^.!؟?\n،,]*[؟?]/u', ' ', $text) ?? $text;
     }
 
     /**
@@ -700,10 +746,12 @@ class ReplyGuard
         'business_place_photo' => '/صور[ةه]?\s+(?:\S+\s+)?(?:ال)?(?:مكان|ورش[ةه]|محل|نشاط|يافط[ةه])/u',
         'tax_card' => '/بطاق[ةه]\s+ضريبي[ةه]|سجل\s+تجاري/u',
         'delivery_app_profile' => '/(?:ا?سكرين|صور[ةه])\S*\s+(?:\S+\s+){0,2}?(?:ال)?بروفايل|البروفايل/u',
+        // owner 2026-10-04: the employee's paper when his company gives no salary slip
+        'insurance_print' => '/برنت\s+(?:ال)?(?:تأمينات|تامينات|تأمين|تامين)|بيان\s+تأميني/u',
         // never required of anyone
         // A warehouse worker with no salary slip was offered a bank
-        // statement, then "صورة العقد", then an insurance print - none exist.
-        '' => '/كشف\s+حساب|برنت\s+(?:ال)?(?:تأمينات|تامينات)|صور[ةه]\s+(?:ال)?عقد|عقد\s+(?:ال)?(?:ورش[ةه]|محل|إيجار|ايجار|شغل)|إيصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|ايصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|فاتور[ةه]\s+(?:ال)?(?:كهرب|ميا[هه]|غاز)/u',
+        // statement, then "صورة العقد" - none exist.
+        '' => '/كشف\s+حساب|صور[ةه]\s+(?:ال)?عقد|عقد\s+(?:ال)?(?:ورش[ةه]|محل|إيجار|ايجار|شغل)|إيصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|ايصال\s+(?:ال)?(?:مرافق|كهرب|ميا[هه]|غاز)|فاتور[ةه]\s+(?:ال)?(?:كهرب|ميا[هه]|غاز)/u',
     ];
 
     private function asksForUnrequiredDocument(string $replyText, WhatsappConversation $conversation, array $outcomes): bool
@@ -823,7 +871,10 @@ class ReplyGuard
             }
 
             foreach ($required as $key) {
-                if (isset(self::DOCUMENT_WORDS[$key]) && preg_match(self::DOCUMENT_WORDS[$key], $sentence)) {
+                // "لو الشركة مش بتطلع مفردات، ابعت برنت التأمينات" offers the
+                // accepted equivalent, it does not waive the paper
+                if (isset(self::DOCUMENT_WORDS[$key]) && preg_match(self::DOCUMENT_WORDS[$key], $sentence)
+                    && ! $this->namesAnyDocument($sentence, \App\Domain\Documents\DocumentEquivalents::FOR[$key] ?? [])) {
                     return true;
                 }
             }
@@ -851,7 +902,7 @@ class ReplyGuard
             ->where('requirement_type', 'document')->where('is_required', false)
             ->with('documentType')->get()->pluck('documentType.key')->filter()->all();
 
-        return array_values(array_unique(array_merge($required, $optional, $fromTools)));
+        return \App\Domain\Documents\DocumentEquivalents::acceptable(array_values(array_unique(array_merge($required, $optional, $fromTools))));
     }
 
     private function promisesColleagueSoon(string $replyText): bool
@@ -965,6 +1016,40 @@ class ReplyGuard
         return false;
     }
 
+    /**
+     * Replayed 2026-10-04: "مدة التقديم عادةً من يومين لغاية أسبوع" - no
+     * time is recorded anywhere; the truthful answer is that there is none.
+     */
+    private function inventsTimeFrame(string $assertions, string $sources): bool
+    {
+        $span = '(?:يوم|يومين|ايام|أيام|اسبوع|أسبوع|اسبوعين|أسبوعين|اسابيع|أسابيع|ساع[ةه]|ساعتين|ساعات|شهر|شهرين)';
+
+        if (! preg_match('/(?:عاد[ةه]ً?|بياخد|هياخد|بتاخد|هتاخد|بيستغرق|المد[ةه]|مد[ةه]|في\s+خلال|خلال|من|لحد|لغاي[ةه])\s+(?:\S+\s+){0,4}?(?:\d+\s*)?'.$span.'(?!\p{L})/u', $assertions, $m)) {
+            return false;
+        }
+
+        // A duration a tool gave is fine. "مفيش مدة ثابتة" has no span in it,
+        // and saying it first does not excuse "عادةً بين يومين لحد أسبوع" after.
+        preg_match('/(?:\d+\s*)?'.$span.'(?!\p{L})/u', $m[0], $duration);
+
+        return ! str_contains($sources, $duration[0] ?? $m[0]);
+    }
+
+    private function claimsStockOrCheck(string $assertions): bool
+    {
+        return (bool) preg_match(
+            '/(?:^|\s)و?(?:ه|ح|هن|ن)(?:شوف|تأكد|تاكد|سأل|سال|راجع|كلم|تابع|تحقق|اتحقق)(?:لك|لِك|ك|ي|لكم)?\s+(?:\S+\s+){0,5}?(?:و(?:ه|أ|ا|ن)?(?:رد|رجع|بلغ|قول|رتب))'
+            .'|(?:^|\s)و?(?:ه|ح|هن|ن)(?:تحقق|اتحقق|تأكد|تاكد|شوف)\s+(?:\S+\s+){0,2}?(?:من\s+)?(?:ال)?(?:توافر|توفر|متاح|موجود)'
+            .'|(?:ن|ه|هن|أ|ا)(?:رتب|حجز|جهز)(?:لك|لِك|ك)?\s+(?:\S+\s+){0,2}?(?:معاين[ةه]|ميعاد|موعد)'
+            .'|ثواني\s+و(?:ه|ح)?(?:رد|رجع|بلغ|قول)'
+            .'|(?:اتأكدت|اتاكدت|اتأكدتلك|اتاكدتلك|سألت|سالت)\s+(?:\S+\s+){0,3}?(?:متاح|موجود|في\s+(?:ال)?فرع)'
+            .'|(?:متاح|متوفر|موجود)(?:[ةه]|ين)?\s+(?:\S+\s+){0,2}?(?:في|فى|ف)\s+(?:ال)?(?:فرع|فروع|فرعين|كل\s+(?:ال)?فروع)'
+            .'|(?:في|فى|ف)\s+(?:ال)?(?:فرع|فروع|فرعين)\s+(?:\S+\s+){0,1}?(?:متاح|متوفر|موجود)'
+            .'|(?:^|\s)و?(?:أ|ا|ه|ن|هن)?شي[ّ]?ك(?:لك|لِك|ك|هالك|هولك)?(?!\p{L})/u',
+            $assertions
+        );
+    }
+
     private function deniesInterest(string $replyText): bool
     {
         return (bool) preg_match('/(?:مفيش|مافيش|من غير|بدون|بلا|مش بنحسب\S*|ملهاش|مالهاش|معندناش|مفيهاش)\s+(?:\S+\s+){0,2}?(?:فوايد|فوائد|فايد[ةه]|فائد[ةه])/u', $replyText);
@@ -999,8 +1084,14 @@ class ReplyGuard
             return true;
         }
 
+        // Replayed 2026-10-04: "وتطلع لك نتيجته مع القسط في الأداة"; history:
+        // "السيستم مش قادر يقرأ اسم التطبيق". The customer talks to a salesman.
+        if (preg_match('/(?<!\p{L})(?:ال)?(?:أداة|اداة|أدوات|ادوات|سيستم|ذاكر[ةه] العميل|برومبت|التعليمات اللي (?:ماشي|ماشيين|ماشيه|بمشي|بنمشي|بشتغل|بنشتغل)\S*)(?!\p{L})/u', $replyText)) {
+            return true;
+        }
+
         // QA 2026-10-04: "ده اختيار تقسيط لـ H250 (ID 10)" and "upfront 16,500".
-        if (preg_match('/\b(?:id|plan_id|media_id)\s*[:#=]?\s*\d+|\b(?:snapshot|customer_type|media_id|plan_id)\b/i', $replyText)) {
+        if (preg_match('/\b(?:id|plan_id|media_id)\s*[:#=]?\s*\d+|\b(?:snapshot|customer_type|media_id|plan_id)\b|(?<![A-Za-z])ID(?![A-Za-z])/i', $replyText)) {
             return true;
         }
 
@@ -1126,9 +1217,29 @@ class ReplyGuard
      * of the system prompt (structured state, approved business memory),
      * what the customer wrote and earlier replies in the history are sources.
      */
-    private function hasUnverifiedNumber(string $replyText, string $system, string $toolResultsBlob, array $contents): bool
+    private function hasUnverifiedNumber(string $replyText, string $system, string $toolResultsBlob, array $contents, bool $earlierRepliesCount = true): bool
     {
-        return $this->unverifiedNumbers($replyText, $system, $toolResultsBlob, $contents) !== [];
+        return $this->unverifiedNumbers($replyText, $system, $toolResultsBlob, $contents, $earlierRepliesCount) !== [];
+    }
+
+    /**
+     * Conversation 302: he wrote "الكاش بقى ٤١٠٠٠" and was told "عندي 39,000"
+     * - the figure came from our own reply ten minutes earlier, not from the
+     * catalog (which said 41,000). When he brings a price, an earlier reply
+     * is no source: the answer needs a lookup now.
+     */
+    private function customerBringsAPrice(WhatsappConversation $conversation): bool
+    {
+        $minValue = (float) (config('agent.guard.number_min_value') ?? 1000);
+        $text = preg_replace('/(?<!\d)0?1[0125]\d{8}(?!\d)/', ' ', $this->westernDigits($this->customerTextSinceLastReply($conversation))) ?? '';
+
+        foreach ($this->extractNumbers($text) as $number) {
+            if ($number >= $minValue && $number < 10000000) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -1155,7 +1266,7 @@ class ReplyGuard
     }
 
     /** @return float[] */
-    private function unverifiedNumbers(string $replyText, string $system, string $toolResultsBlob, array $contents): array
+    private function unverifiedNumbers(string $replyText, string $system, string $toolResultsBlob, array $contents, bool $earlierRepliesCount = true): array
     {
         $minValue = config('agent.guard.number_min_value');
         $sourcedSystem = $this->removeBlock($system, '## فهرس الكتالوج');
@@ -1165,10 +1276,21 @@ class ReplyGuard
         // claim. Blocking it burned the turn's budget on re-lookups.
         $customerText = implode(' ', array_map(
             fn ($c) => implode(' ', array_column(array_filter($c['parts'], fn ($p) => ($p['type'] ?? null) === 'text'), 'text')),
-            array_filter($contents, fn ($c) => in_array($c['role'] ?? null, ['user', 'model'], true))
+            // When he brings a price, neither his figure nor our earlier one
+            // is a source - agreeing with "بقت 35 ألف" is as invented as
+            // repeating a stale price. Only a lookup now answers it.
+            array_filter($contents, fn ($c) => $earlierRepliesCount && in_array($c['role'] ?? null, ['user', 'model'], true))
         ));
 
         $haystackNumbers = $this->extractNumbers($toolResultsBlob.' '.$sourcedSystem.' '.$customerText);
+
+        // "في حدود 60 او 65" is 60,000-65,000: an Egyptian budget is said in
+        // thousands, and repeating it back is not an invented number.
+        foreach ($this->extractNumbers($customerText) as $n) {
+            if ($n >= 1 && $n < 1000) {
+                $haystackNumbers[] = $n * 1000;
+            }
+        }
         $withUnits = $this->numbersWithUnits($replyText);
 
         foreach ($this->extractNumbers($replyText) as $number) {
@@ -1248,6 +1370,8 @@ class ReplyGuard
         '/\bmismatch\b/iu' => 'مش مطابق',
         '/(مفردات(?:\s+(?:ال)?مرتب)?)\s+(?:(?:حديث[ةه]|جديد[ةه])\s+)?و?(?:مختوم[ةه]|حديث[ةه])(?:\s+(?:من\s+جه[ةه]\s+(?:ال)?عمل|و?مختوم[ةه]))?/u' => '$1',
         '/طريه\s+البطاق/u' => 'طريقة البطاق',
+        // a salesman does not call a customer "my daughter / my son"
+        '/(?<!\p{L})يا\s+(?:بنتي|بنيتي|ابني|إبني|ابنى)(?!\p{L})/u' => 'يا فندم',
     ];
 
     /**
@@ -1317,6 +1441,54 @@ class ReplyGuard
         }
 
         return $args;
+    }
+
+    /**
+     * Replayed 2026-10-04: "عايز اقدم" got "دايو 4 على سنتين: أول قسط بعد 45
+     * يوم، القسط 2,625..." for the third time in a row before the papers.
+     * A sentence with a price that our previous reply already said is
+     * dropped in place (no model call) - unless he is asking about a
+     * number now, or too little would be left.
+     */
+    public function withoutRepeatedOffer(array $args, WhatsappConversation $conversation): array
+    {
+        // our last two replies (several messages each) - a customer back
+        // after hours may be reminded of the numbers once
+        $previous = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')->where('sender_type', 'bot')->where('created_at', '>=', now()->subHours(6))
+            ->latest('id')->limit(6)->pluck('text')->filter()->implode("\n");
+
+        if ($previous === '' || preg_match('/\d|[٠-٩]|(?<!\p{L})(?:كام|بكام|قد\s+ايه|قد\s+إيه|تاني|تانى|اعيد|عيد|يعني)(?!\p{L})/u', $this->customerTextSinceLastReply($conversation))) {
+            return $args;
+        }
+
+        $minValue = (float) (config('agent.guard.number_min_value') ?? 1000);
+        // the model rewords the same offer: the same prices are the same sentence
+        $saidNumbers = array_filter($this->extractNumbers($previous), fn ($n) => $n >= $minValue);
+        $messages = [];
+
+        foreach ((array) ($args['messages'] ?? []) as $message) {
+            $kept = [];
+
+            foreach (preg_split('/(?<=[.!؟?\n])/u', (string) $message) as $sentence) {
+                $prices = array_filter($this->extractNumbers($sentence), fn ($n) => $n >= $minValue);
+
+                if ($prices !== [] && array_diff($prices, $saidNumbers) === []) {
+                    continue;
+                }
+
+                $kept[] = $sentence;
+            }
+
+            $text = trim(implode('', $kept));
+
+            if ($text !== '') {
+                $messages[] = $text;
+            }
+        }
+
+        // only when what is left still says something
+        return mb_strlen(implode(' ', $messages)) >= 20 ? ['messages' => $messages] + $args : $args;
     }
 
     /** What the customer wrote since our last reply. */

@@ -60,11 +60,63 @@ const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
 const SEND_MAX_PER_MINUTE = Number(process.env.SEND_MAX_PER_MINUTE || 20);
 const SEND_MIN_GAP_MS = Number(process.env.SEND_MIN_GAP_MS || 1500);
 const SEND_MAX_GAP_MS = Number(process.env.SEND_MAX_GAP_MS || 4000);
-const TYPING_MS_PER_CHAR = Number(process.env.TYPING_MS_PER_CHAR || 45);
-const TYPING_MIN_MS = Number(process.env.TYPING_MIN_MS || 1500);
-const TYPING_MAX_MS = Number(process.env.TYPING_MAX_MS || 7000);
-const READ_DELAY_MIN_MS = Number(process.env.READ_DELAY_MIN_MS || 1000);
-const READ_DELAY_MAX_MS = Number(process.env.READ_DELAY_MAX_MS || 4000);
+/*
+ * Owner 2026-10-04: the wait belongs before the "seen", not after it. A
+ * message is NOT marked read when it lands - Laravel starts on it at once,
+ * and the read receipt goes out only when the reply is ready to send
+ * (flushReads), followed by a short "typing". The customer sees seen ->
+ * typing -> reply in a few seconds instead of seen, then half a minute of
+ * nothing. A turn that never gets a reply (handoff, a closing "تمام") is
+ * marked read after READ_FALLBACK_MS.
+ */
+const TYPING_MS_PER_CHAR = Number(process.env.TYPING_MS_PER_CHAR || 25);
+const TYPING_MIN_MS = Number(process.env.TYPING_MIN_MS || 1000);
+const TYPING_MAX_MS = Number(process.env.TYPING_MAX_MS || 3500);
+const READ_TO_TYPING_MIN_MS = Number(process.env.READ_TO_TYPING_MIN_MS || 500);
+const READ_TO_TYPING_MAX_MS = Number(process.env.READ_TO_TYPING_MAX_MS || 1200);
+const READ_FALLBACK_MS = Number(process.env.READ_FALLBACK_MS || 120000);
+
+/** botId|jid -> { keys: [], timer } - customer messages not marked read yet. */
+const pendingReads = new Map();
+
+function readKeys(botId, jids) {
+    return [...new Set(jids.filter(Boolean).flatMap(jid => [`${botId}|${jid}`, `${botId}|${String(jid).split('@')[0].split(':')[0]}`]))];
+}
+
+function queueRead(sock, botId, jids, key) {
+    const keys = readKeys(botId, jids);
+    const entry = keys.map(k => pendingReads.get(k)).find(Boolean) || { keys: [], timer: null, mapKeys: [] };
+
+    entry.keys.push(key);
+    entry.mapKeys = [...new Set([...entry.mapKeys, ...keys])];
+    keys.forEach(k => pendingReads.set(k, entry));
+
+    clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => flushReads(sock, botId, jids), READ_FALLBACK_MS);
+}
+
+/** Marks the customer's waiting messages read; true when there were any. */
+async function flushReads(sock, botId, jids) {
+    const entry = readKeys(botId, jids).map(k => pendingReads.get(k)).find(Boolean);
+
+    if (!entry) return false;
+
+    clearTimeout(entry.timer);
+    entry.mapKeys.forEach(k => pendingReads.delete(k));
+
+    try {
+        await sock.readMessages(entry.keys);
+    } catch {}
+
+    return true;
+}
+
+/** Right before the first thing we send: seen, a beat, then typing/send. */
+async function seenBeforeReply(sock, botId, jid) {
+    if (await flushReads(sock, botId, [jid])) {
+        await sleep(randomBetween(READ_TO_TYPING_MIN_MS, READ_TO_TYPING_MAX_MS));
+    }
+}
 
 const sendLimiters = {};
 
@@ -559,13 +611,6 @@ async function handleIncomingMessage(sock, botId, msg) {
 
     console.log(`📩 ${isFromMe ? '[fromMe] ' : ''}${originalFrom}: ${cleanText || `[${type}]`}`);
 
-    // A read receipt in the same instant the message lands is a bot tell.
-    if (!isFromMe) {
-        setTimeout(() => {
-            sock.readMessages([msg.key]).catch(() => {});
-        }, randomBetween(READ_DELAY_MIN_MS, READ_DELAY_MAX_MS));
-    }
-
     recentRawMessages.set(messageId, msg);
 
     if (recentRawMessages.size > 2000) {
@@ -574,6 +619,11 @@ async function handleIncomingMessage(sock, botId, msg) {
 
     try {
         const customerJid = isFromMe ? null : await resolveCustomerJid(sock, originalFrom, msg);
+
+        // seen waits for the reply (see pendingReads)
+        if (!isFromMe) {
+            queueRead(sock, botId, [originalFrom, customerJid], msg.key);
+        }
 
         const payload = {
             bot_id: botId,
@@ -880,6 +930,8 @@ app.post('/send-message', checkToken, async (req, res) => {
             ? recentRawMessages.get(req.body.quoted_message) || null
             : null;
 
+        await seenBeforeReply(sock, botId, jid);
+
         const sent = await sendTextSafely(sock, jid, text, quotedMsg, callerGone(res));
         const waMessageId = sent?.key?.id ? `${botId}_${sent.key.id}` : null;
 
@@ -920,6 +972,8 @@ app.post('/send-media-items', checkToken, async (req, res) => {
 
         const results = [];
         const isCancelled = callerGone(res);
+
+        await seenBeforeReply(sock, botId, jid);
 
         for (const item of mediaItems) {
             const url = item.url || item.media_url || item.image || item.path;

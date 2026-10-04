@@ -14,6 +14,11 @@ class Customer extends Model
         'lid_jid',
         'phone',
         'push_name',
+        'memory',
+    ];
+
+    protected $casts = [
+        'memory' => 'array',
     ];
 
     public function whatsappBot(): BelongsTo

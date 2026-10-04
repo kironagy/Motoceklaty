@@ -45,6 +45,10 @@ class CatalogService
             $query->where('cash_price', '<=', $filters['max_cash_price']);
         }
 
+        if (isset($filters['min_cash_price'])) {
+            $query->where('cash_price', '>=', $filters['min_cash_price']);
+        }
+
         if (isset($filters['max_installment_price'])) {
             $query->where('installment_price', '<=', $filters['max_installment_price']);
         }
@@ -93,6 +97,14 @@ class CatalogService
                 SORT_REGULAR,
                 $filters['sort'] === 'most_expensive'
             )->values();
+        }
+
+        // Replayed 2026-10-04 (conversation 852): "في حدود 60 او 65" took the
+        // first five rows under 65,000 - 39-41k motorcycles - and the bot told
+        // her nothing fits while scooters at 53-59k did. "In the range of X"
+        // means as close to X as possible: nearest the budget first.
+        elseif (isset($filters['max_cash_price'])) {
+            $machines = $machines->sortByDesc(fn (Machine $m) => (float) $m->cash_price)->values();
         }
 
         $limit = min(8, $filters['limit'] ?? 5);

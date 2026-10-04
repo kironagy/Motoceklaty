@@ -78,6 +78,7 @@ class StartApplicationTool implements Tool
                 'installment_system' => ['type' => 'string', 'description' => 'System name as shown to the customer, e.g. امان. With months, preferred over plan_id.'],
                 'months' => ['type' => 'integer', 'minimum' => 1],
                 'down_payment' => ['type' => 'number', 'minimum' => 0],
+                'other_applicant_quote' => ['type' => 'string', 'description' => 'Only when someone else (not the customer) is the one applying: the customer\'s exact words saying so, e.g. "اخويا هو اللي هيقدم".'],
             ],
         ];
     }
@@ -109,6 +110,15 @@ class StartApplicationTool implements Tool
 
         if ($typeEvidence === null) {
             return ToolResult::error('CUSTOMER_TYPE_NOT_STATED', 'customer_type_quote is not in the customer\'s messages. If he already said what he works, copy his words EXACTLY as he wrote them (same spelling, no additions, no merging with your own words) and call again. Only if he never said it, ask him "حضرتك بتشتغل إيه؟ ولا على المعاش؟" (never list types like موظف/عامل حر).');
+        }
+
+        // Conversation 84: "سني 18" was his second message; the bot opened an
+        // application and collected his address, work and phone for twenty
+        // minutes before telling him the minimum is 21. An age he stated
+        // himself stops it before anything is collected - unless someone
+        // else (who works) is the one applying.
+        if ($problem = $this->statedAgeProblem($ctx, (string) ($args['other_applicant_quote'] ?? ''))) {
+            return ToolResult::error('AGE_BELOW_MINIMUM_STATED', $problem);
         }
 
         // Owner 2026-10-03: his work is read by the AI from the conversation
@@ -222,5 +232,53 @@ class StartApplicationTool implements Tool
             'snapshot' => $this->snapshots->for($outcome['application']),
         ] + ($planProblem ? ['plan_not_set' => $planProblem] : [])
           + (($outcome['reopened'] ?? false) ? ['reopened' => 'His cancelled application is back with everything he already sent. Tell him so in one line and continue from snapshot next_step - do not ask again for what is already in.'] : []));
+    }
+
+    /** "سني 18" / "عندي 20 سنة" / "عمري ١٩" in his own recent messages. */
+    private function ageInRecentWords(int $conversationId): ?int
+    {
+        $texts = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversationId)->where('direction', 'incoming')
+            ->where('sender_type', 'customer')->latest('id')->limit(30)->get(['text', 'transcript']);
+
+        foreach ($texts as $message) {
+            $text = strtr(\App\Support\ArabicTextNormalizer::normalize(trim(($message->text ?? '').' '.($message->transcript ?? ''))),
+                ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9']);
+
+            if (preg_match('/(?:سني|عمري)\s*(\d{2})(?!\d)|(?:عندي|انا)\s*(\d{2})\s*(?:سنه|سنين|سنة)(?!\p{L})/u', $text, $m)) {
+                $age = (int) ($m[1] !== '' ? $m[1] : $m[2]);
+
+                return $age >= 10 && $age <= 99 ? $age : null;
+            }
+        }
+
+        return null;
+    }
+
+    private function statedAgeProblem(ToolContext $ctx, string $otherApplicantQuote = ''): ?string
+    {
+        if ($otherApplicantQuote !== '' && app(\App\Domain\Conversations\CustomerStatements::class)->messageContainingQuote($ctx->conversationId, $otherApplicantQuote) !== null) {
+            return null;
+        }
+
+        $memory = app(\App\Domain\Memory\CustomerMemory::class);
+        // His memory is written when the turn's reply goes out; "سني 18
+        // وعايز اقدم" in this same turn is read from his words directly.
+        $age = $memory->statedAge($ctx->customerId) ?? $this->ageInRecentWords($ctx->conversationId);
+        $min = \App\Domain\Memory\CustomerMemory::minimumAge();
+
+        if ($age === null || $min === null || $age >= $min) {
+            return null;
+        }
+
+        $applicant = $memory->get($ctx->customerId)['facts']['applicant'] ?? null;
+
+        if ($applicant && ($applicant['source'] ?? null) === 'customer_statement'
+            && ! preg_match('/^(?:هو|انا|أنا|نفسه|بنفسه|العميل|self)$/u', trim((string) $applicant['value']))) {
+            return null;
+        }
+
+        return "He said he is {$age}; applying needs {$min} or older. Do not open an application or collect anything in his name. "
+            .'Tell him kindly in one line, then offer the only way: any other person who works (21 or older, not necessarily a relative) applies in his own name with his own papers. '
+            .'When he says who will apply, call start_application with THAT person\'s work and other_applicant_quote = his words saying it. Cash purchase is always possible.';
     }
 }

@@ -110,6 +110,8 @@ class DocumentPipelineTest extends TestCase
         // Declaring every known extraction field as a named string property
         // fixed it; this locks in that the schema is actually built that way.
         $this->fields();
+        // only the ID type in play: the migration-seeded insurance print would widen the union
+        \App\Models\DocumentType::where('key', 'insurance_print')->delete();
         $this->nationalIdDocumentType();
         [$application, $media, $ctx] = $this->bootstrapApplication();
         $this->fakeOcr();

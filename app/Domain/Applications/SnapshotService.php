@@ -470,6 +470,14 @@ class SnapshotService
 
         $labels = \App\Models\DocumentType::whereIn('key', $workPapers)->pluck('label')->implode('، ');
 
+        // Owner 2026-10-04: no salary slip from the company = the insurance
+        // print instead; only with neither, the card-only route.
+        if (in_array('salary_slip', $workPapers, true)) {
+            return ['if_unavailable' => 'If his company does not give a salary slip: ask for برنت التأمينات (his social-insurance print, from the التأمينات office or app) instead - it counts as the salary slip. '
+                .'Only when he says he cannot get either of them at all (not "later"): the last resort is the card-only route - quote its numbers with get_installment_offer customer_type=self_employed, '
+                .'and when he agrees call update_application_selection route=card_only with his own words. Never offered to a woman, never any other substitute paper, never someone else in his name for it.'];
+        }
+
         // Owner 2026-10-04: "the important thing is that he applies" - the
         // last resort for a working man who cannot bring these papers.
         return ['if_unavailable' => 'Only when he says he cannot get '.$labels.' at all (not "later"): the last resort is the card-only route - '
@@ -519,7 +527,8 @@ class SnapshotService
             }
         }
 
-        return [$counted, $partial];
+        // an insurance print counts for the salary slip (DocumentEquivalents)
+        return [\App\Domain\Documents\DocumentEquivalents::satisfied($counted), $partial];
     }
 
     /** @return array<int, array{field_key: string, value: mixed, status: string, issue_code: ?string}> */

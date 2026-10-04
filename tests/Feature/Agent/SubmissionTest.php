@@ -250,7 +250,8 @@ class SubmissionTest extends TestCase
         $this->assertSame('12', $ir->applicant_building_number);
         $this->assertStringContainsString('شارع التحرير', $ir->applicant_address);
         $this->assertSame(8000, (int) $ir->salary_amount);
-        $this->assertSame('شارع الهرم', $ir->work_address);
+        // the governorate comes from the district the street is named after
+        $this->assertSame('شارع الهرم - الجيزة', $ir->work_address);
         $this->assertSame('Ahmed Hassan', $ir->guarantor_name);
         $this->assertSame('01122223333', $ir->guarantor_phone);
         $this->assertSame('30001011234567', $ir->guarantor_national_id);
@@ -409,8 +410,60 @@ class SubmissionTest extends TestCase
         $this->assertSame('المنيب', $columns['applicant_area']);
         $this->assertSame('جمال عبد الناصر', $columns['applicant_branch_street']);
         $this->assertSame('المعادي كورنيش صيدليه اللؤلؤه', $columns['work_street']);
-        $this->assertArrayNotHasKey('work_governorate', $columns);
-        $this->assertArrayNotHasKey('work_area', $columns);
+        // the home's Giza never leaks in - the district in his own line decides
+        $this->assertSame('القاهرة', $columns['work_governorate']);
+        $this->assertSame('المعادي', $columns['work_area']);
+    }
+
+    public function test_without_the_ai_split_the_line_is_still_divided(): void
+    {
+        // server 2026-10-04: 7 of 15 requests had no governorate or area
+        [$application] = $this->completeApplication();
+        foreach (['address' => '34 شارع الشرفاء العشرين فيصل', 'address_building_no' => '34', 'address_floor' => '3',
+            'work_address' => 'الهرم محطه مشعل شارع الامير متفرع من شارع زغلول'] as $key => $value) {
+            ApplicationData::create(['application_id' => $application->id, 'party' => 'applicant', 'field_key' => $key, 'value' => $value, 'source' => 'customer_stated', 'status' => 'valid']);
+        }
+        $splitter = Mockery::mock(\App\Domain\Applications\AddressSplitter::class);
+        $splitter->shouldReceive('split')->andReturn([]); // the provider was busy
+        $this->app->instance(\App\Domain\Applications\AddressSplitter::class, $splitter);
+
+        $columns = app(\App\Domain\Applications\LegacyRequestProjector::class)->attributes($application, 'no_income_proof');
+
+        $this->assertSame('الجيزة', $columns['applicant_governorate']);
+        $this->assertSame('فيصل', $columns['applicant_area']);
+        $this->assertSame('الشرفاء العشرين', $columns['applicant_street']);
+        $this->assertSame('3', $columns['applicant_floor']);
+        $this->assertSame('الجيزة', $columns['work_governorate']);
+        $this->assertSame('الهرم محطه مشعل', $columns['work_area']);
+        $this->assertSame('الامير', $columns['work_street']);
+        $this->assertSame('زغلول', $columns['work_branch_street']);
+    }
+
+    public function test_the_request_shows_what_he_works_not_just_the_category(): void
+    {
+        // owner 2026-10-04: "اسم العمل" said "شغل حر" for every freelancer
+        [$application] = $this->completeApplication();
+        $conversation = \App\Models\WhatsappConversation::find($application->origin_conversation_id);
+        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text',
+            'text' => 'انا شغال صنايعي خراط وعجان في فرن بلدي وبكسب 9000 في الشهر وعندي رخصة']);
+        app(\App\Domain\Memory\CustomerMemory::class)->applyModelUpdate($application->customer_id, $conversation->id, ['facts' => [
+            ['key' => 'job', 'value' => 'صنايعي خراط وعجان', 'quote' => 'شغال صنايعي خراط وعجان'],
+            ['key' => 'workplace', 'value' => 'فرن بلدي', 'quote' => 'في فرن بلدي'],
+            ['key' => 'monthly_income', 'value' => '9000', 'quote' => 'بكسب 9000'],
+            ['key' => 'has_driving_license', 'value' => 'معاه رخصة', 'quote' => 'عندي رخصة'],
+        ]]);
+        $splitter = Mockery::mock(\App\Domain\Applications\AddressSplitter::class);
+        $splitter->shouldReceive('split')->andReturn([]);
+        $this->app->instance(\App\Domain\Applications\AddressSplitter::class, $splitter);
+        $this->app->instance(\App\Domain\Applications\WorkClassification::class, Mockery::mock(\App\Domain\Applications\WorkClassification::class, ['reading' => null]));
+
+        $columns = app(\App\Domain\Applications\LegacyRequestProjector::class)->attributes($application, 'no_income_proof');
+
+        $this->assertSame('صنايعي خراط وعجان - فرن بلدي', $columns['free_work_name']);
+        $this->assertStringContainsString('المهنة: صنايعي خراط وعجان', $columns['notes']);
+        $this->assertStringContainsString('مكان الشغل: فرن بلدي', $columns['notes']);
+        $this->assertStringContainsString('الدخل الشهري: 9000', $columns['notes']);
+        $this->assertStringContainsString('الرخصة: معاه رخصة', $columns['notes']);
     }
 
     public function test_an_address_with_no_street_leaves_the_street_empty(): void

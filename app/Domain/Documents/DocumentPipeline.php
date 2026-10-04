@@ -618,6 +618,8 @@ class DocumentPipeline
             $requiredKeys = collect(app(\App\Domain\Applications\SnapshotService::class)->for($application)['documents']['required'] ?? [])
                 ->merge(collect($this->requirements->requirementsFor($application->customerType)['documents'])->where('required', true)->pluck('key'))
                 ->unique();
+            // an insurance print sent for the salary slip is that paper, not a wrong one
+            $requiredKeys = collect(\App\Domain\Documents\DocumentEquivalents::acceptable($requiredKeys->all()));
             $alreadyAccepted = ApplicationDocument::where('application_id', $application->id)
                 ->where('status', 'accepted')->pluck('detected_type_key');
 
@@ -637,6 +639,15 @@ class DocumentPipeline
 
         foreach ((array) ($documentType->extraction_fields ?? []) as $fieldKey) {
             if (! array_key_exists($fieldKey, $extractedFields) || $extractedFields[$fieldKey] === null || $extractedFields[$fieldKey] === '') {
+                // Server history: 7 of 8 app profile screenshots were refused
+                // MISSING_DATA app_name (conversation 830: six tries, "ده كل
+                // حاجه وضحه") - the profile page rarely prints the app's
+                // name. The app is already known from his earnings
+                // screenshot or from what he said he works on.
+                if ($fieldKey === 'app_name' && $this->knownAppName($application) !== null) {
+                    continue;
+                }
+
                 $issues[] = ['code' => 'MISSING_DATA', 'field' => $fieldKey];
             }
         }
@@ -761,5 +772,34 @@ class DocumentPipeline
             'issues' => $issues,
             'applied_fields' => $appliedFields,
         ];
+    }
+
+    /** The delivery app he works on: from an accepted earnings screenshot, else his own words. */
+    private function knownAppName(Application $application): ?string
+    {
+        foreach (ApplicationDocument::where('application_id', $application->id)->where('status', 'accepted')
+            ->where('detected_type_key', 'delivery_app_earnings')->latest('id')->get(['id', 'extracted'])->pluck('extracted') as $extracted) {
+            $fields = is_array($extracted) ? $extracted : (json_decode((string) $extracted, true) ?: []);
+
+            if (filled($fields['app_name'] ?? null)) {
+                return (string) $fields['app_name'];
+            }
+        }
+
+        $memory = app(\App\Domain\Memory\CustomerMemory::class)->get((int) $application->customer_id)['facts'];
+
+        foreach (['workplace', 'job'] as $key) {
+            $value = (string) ($memory[$key]['value'] ?? '');
+
+            if (($memory[$key]['source'] ?? null) === 'customer_statement' && preg_match('/اوبر|أوبر|uber|ديدي|didi|طلبات|talabat|مرسول|بولت|bolt|اندرايف|إندرايف|indrive|نون|noon|بريد فاست|breadfast|رابيت|rabbit|جاهز|كريم|careem|swvl|سويفل/iu', $value, $m)) {
+                return $m[0];
+            }
+        }
+
+        $place = $application->origin_conversation_id
+            ? (string) (app(\App\Domain\Applications\WorkClassification::class)->reading((int) $application->origin_conversation_id)['workplace_name'] ?? '')
+            : '';
+
+        return $place !== '' ? $place : null;
     }
 }
