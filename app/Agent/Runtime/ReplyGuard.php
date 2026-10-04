@@ -169,7 +169,8 @@ class ReplyGuard
         // Server 2026-10-04 (simulator 930): "جيلكم من فيديو تيك توك... بالبطاقة
         // بس" got "التقسيط بالكارت موجود... نفتح لك الطلب؟" - whether the ID
         // alone is enough depends on his work, which nobody knew yet.
-        if ($this->promisesCardOnlyBeforeWork($assertions, $conversation, $outcomes, $args)) {
+        // an offer ("عايز أبدأ لك التقديم بالبطاقة فقط؟") counts as much as a claim
+        if ($this->promisesCardOnlyBeforeWork($this->withoutConditionalClausesOnly($replyText), $conversation, $outcomes, $args)) {
             return 'CARD_ONLY_BEFORE_WORK';
         }
 
@@ -1044,7 +1045,7 @@ class ReplyGuard
 
     private function promisesCardOnlyBeforeWork(string $assertions, WhatsappConversation $conversation, array $outcomes, array $args = []): bool
     {
-        if (! preg_match('/(?:بال)?بطاق[ةه]\s+(?:بس|فقط|لوحده|لوحدها)|(?:بال)?بطاق[ةه]\s+(?:\S+\s+){0,2}?(?:موجود|متاح|ينفع|شغال)|التقديم\s+بالبطاق[ةه]/u', $assertions)) {
+        if (! preg_match('/(?:بال)?بطاق[ةه]\s+و?(?:بس|فقط|لوحده|لوحدها)|(?:بال)?بطاق[ةه]\s+(?:\S+\s+){0,4}?(?:موجود|متاح|ينفع|شغال)|التقديم\s+(?:\S+\s+)?بالبطاق[ةه]/u', $assertions)) {
             return false;
         }
 

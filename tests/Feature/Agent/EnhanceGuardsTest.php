@@ -236,6 +236,9 @@ class EnhanceGuardsTest extends TestCase
         // simulator 930 on the server
         $this->message('incoming', 'انا جيلكم من فيديو تيك توك كنتم بتقولو فيه تقسيط بالبطاقه بس');
         $this->assertSame('CARD_ONLY_BEFORE_WORK', $this->check('أيوة، التقسيط بالبطاقة موجود، عايز نفتح لك الطلب دلوقتي؟'));
+        // the server's next try after the first fix
+        $this->assertSame('CARD_ONLY_BEFORE_WORK', $this->check('أيوه، الفيديو كان بيتكلم عن تقسيط بالبطاقه وبس، وده خيار متاح عندنا. عايز أبدأ لك التقديم بالبطاقه فقط؟'));
+        $this->assertNull($this->check('على حسب شغلك يا باشا، حضرتك بتشتغل إيه؟'));
 
         // the same reply is fine once he said what he works, in this very message
         $this->message('incoming', 'انا شغال على توكتوك');
