@@ -17,6 +17,12 @@ class ReplyQuality
     /** Refusals that are bookkeeping, not mistakes. */
     private const NOT_A_PROBLEM = ['RESCUED_WITHOUT_UNVERIFIED_SENTENCES'];
 
+    /** OBS-004: a logged silent rewrite (REWRITE:tidy...) is bookkeeping too. */
+    public static function notAProblem(string $code): bool
+    {
+        return in_array($code, self::NOT_A_PROBLEM, true) || str_starts_with($code, 'REWRITE:');
+    }
+
     public function summary(Carbon $since): array
     {
         $traces = AiTrace::where('created_at', '>=', $since)->get(['id', 'status', 'guard_events', 'created_at', 'updated_at', 'conversation_id']);
@@ -26,7 +32,7 @@ class ReplyQuality
         $reviewRedo = 0;
 
         foreach ($traces as $trace) {
-            $events = collect($trace->guard_events ?? [])->pluck('code')->filter()->reject(fn ($c) => in_array($c, self::NOT_A_PROBLEM, true));
+            $events = collect($trace->guard_events ?? [])->pluck('code')->filter()->reject(fn ($c) => self::notAProblem($c));
 
             if ($events->isNotEmpty()) {
                 $withProblem++;
@@ -64,7 +70,7 @@ class ReplyQuality
             ->limit($limit)
             ->get()
             ->map(function (AiTrace $trace) {
-                $codes = collect($trace->guard_events ?? [])->pluck('code')->filter()->reject(fn ($c) => in_array($c, self::NOT_A_PROBLEM, true))->values();
+                $codes = collect($trace->guard_events ?? [])->pluck('code')->filter()->reject(fn ($c) => self::notAProblem($c))->values();
 
                 if ($codes->isEmpty() && ! in_array($trace->status, ['fallback', 'error'], true)) {
                     return null;

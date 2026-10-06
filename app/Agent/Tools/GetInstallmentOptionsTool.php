@@ -13,7 +13,7 @@ use App\Models\CustomerType;
 use App\Models\Machine;
 
 /** READ — plan §6.5 */
-class GetInstallmentOptionsTool implements Tool
+class GetInstallmentOptionsTool implements ReadTool
 {
     public function __construct(
         private readonly InstallmentOptionsService $options,
@@ -55,13 +55,7 @@ class GetInstallmentOptionsTool implements Tool
 
     public function execute(array $args, ToolContext $ctx): ToolResult
     {
-        // Owner: the customer never picks a finance company; names only when
-        // he asks who finances. Replayed 2026-10-04, "بسأل عن الهوجن ٤" and
-        // "بتحسب القسط على كام" got every company and plan listed.
-        if (! $this->asksAboutCompanies($ctx)) {
-            return ToolResult::error('USE_GET_INSTALLMENT_OFFER', 'He did not ask who finances or about companies/systems. Call get_installment_offer instead - it picks the best offer for him, with no company names.');
-        }
-
+        // When to compare companies is the model's call (description); no word list second-guesses it.
         $machine = Machine::where('is_active', true)->find($args['motorcycle_id']);
 
         if (! $machine) {
@@ -116,11 +110,9 @@ class GetInstallmentOptionsTool implements Tool
             'restrictions' => $restrictions,
         ] + ($cap !== null ? ['financing_cap' => [
             'max_financed_amount' => $cap,
-            'explain_to_customer' => $this->caps->explanation($cap, $customerTypeId),
-            'note' => 'This customer type can finance at most max_financed_amount. When the price is higher, the '
-                .'difference is already included in minimum_down_payment; cash_due_upfront = that down payment + '
-                .'the admin fee. Tell the customer the cash_due_upfront and the monthly payment - never say the '
-                .'motorcycle cannot be bought in installments.',
+            'cap_reason' => $this->caps->explanation($cap, $customerTypeId),
+            // the price above the cap is already in minimum_down_payment (rule in the instructions)
+            'difference_in_down_payment' => true,
         ]] : []));
     }
 
@@ -170,25 +162,4 @@ class GetInstallmentOptionsTool implements Tool
         ] + ($warnings === [] ? [] : ['warnings' => $warnings]);
     }
 
-    /** His recent words name a company/system or ask who finances. */
-    private function asksAboutCompanies(ToolContext $ctx): bool
-    {
-        $text = \App\Support\ArabicTextNormalizer::normalize(\App\Models\WhatsappMessage::where('whatsapp_conversation_id', $ctx->conversationId)
-            ->where('direction', 'incoming')->where('sender_type', 'customer')->latest('id')->limit(3)->get(['text', 'transcript'])
-            ->map(fn ($m) => trim(($m->text ?? '').' '.($m->transcript ?? '')))->implode(' '));
-
-        if (preg_match('/(?<!\p{L})(?:مين|مع مين|جهه|جهات|شركه|شركات|شركة|نظام|انظمه|الانظمه|انظمة|برنامج|برامج|ابلكيشن|تطبيق|تمويل|بنك|مباشر|قارن|مقارنه)(?!\p{L})/u', $text)) {
-            return true;
-        }
-
-        foreach (\App\Models\InstallmentSystem::pluck('name') as $name) {
-            $name = \App\Support\ArabicTextNormalizer::normalize(trim((string) $name));
-
-            if (mb_strlen($name) >= 3 && str_contains($text, $name)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }

@@ -428,6 +428,7 @@ class TeachingCoach
         foreach ($attempts as $attempt) {
             $request = new AiRequest(
                 purpose: 'teaching',
+                label: 'teaching_coach',
                 system: $system.($attempt['schema'] ? '' : "\n\n## شكل الرد\nرد بـ JSON بس (من غير أي كلام قبله أو بعده) بالمفاتيح دي بالظبط:\n"
                     .json_encode($this->schema(), JSON_UNESCAPED_UNICODE)),
                 contents: [['role' => 'user', 'parts' => [['type' => 'text', 'text' => $prompt]]]],

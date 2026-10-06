@@ -44,7 +44,7 @@ class CreateBusinessMemory extends CreateRecord
         $existing = BusinessMemory::where('is_pinned', true)->where('is_active', true)->get()
             ->sum(fn (BusinessMemory $m) => $m->estimatedTokens());
 
-        $thisEstimate = (int) ceil(mb_strlen((string) ($data['content'] ?? '')) / 4);
+        $thisEstimate = \App\Agent\Context\TokenEstimator::estimate((string) ($data['content'] ?? ''));
 
         if ($existing + $thisEstimate > (int) $cap) {
             Notification::make()

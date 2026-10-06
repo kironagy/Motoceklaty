@@ -67,186 +67,123 @@ class AgentRunner
         \Illuminate\Support\Facades\DB::table('whatsapp_message_jobs')
             ->where('id', $turn->id)->whereNull('trace_id')->update(['trace_id' => $trace->id]);
 
+        \App\Agent\Tracing\AiCalls::setTrace($trace->id, 'v1');
+
         $ctx = new ToolContext(
             $customer->id, $conversation->id, $activeApplication?->id, $turn->id, $trace->id, new TurnResultBuilder()
         );
 
+        // ARCH-006 / ERR-002: what an earlier attempt of this turn already did
+        // (read before this attempt runs anything itself).
+        $resumed = $this->completedSteps((int) $turn->id);
+
+        // Owner 2026-10-05: a message that is only a greeting gets the
+        // showroom's greeting, never the model's improvisation.
+        $onlyText = ! \App\Models\WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')
+            ->whereNotIn('type', ['text', 'audio', 'voice', 'ptt'])->exists();
+
+        if ($resumed === [] && $onlyText && blank($turn->media_items ?? null)) {
+            $greeting = app(GreetingReply::class)->for($conversation, $this->guard->customerTextSinceLastReply($conversation));
+
+            if ($greeting !== null) {
+                $this->resetFailureCounter($conversation);
+                $this->finishTrace($trace, 'done', [], null);
+
+                return ['messages' => [$greeting]];
+            }
+        }
+
         // read first, so the context shows each photo as its result, not as the image again
         $preread = $activeApplication ? $this->prereadDocuments($turn, $ctx) : null;
 
-        // His facts are saved by the code before the reply is written, so
-        // the reply model neither forgets them nor reads them back to him.
-        $understood = config('agent.understanding.enabled')
-            ? app(TurnUnderstanding::class)->understand($turn, $conversation, $customer, $activeApplication)
-            : null;
-
+        // Rebuild: the model understands and records his facts itself
+        // (record_customer_data); no separate understanding call before it.
         $request = $this->context->build($turn);
-        $request = new AiRequest(
-            system: $request->system."\n\n".TurnUnderstanding::note($understood, $conversation->refresh()),
-            contents: $request->contents,
-        );
         $contents = $request->contents;
-        $toolDeclarations = $this->toolsFor($activeApplication !== null, $turn);
+        $toolDeclarations = $this->toolsFor($activeApplication !== null);
 
         $modelCalls = 0;
         $toolCallCount = 0;
-        $numberGuardViolations = 0;
+        $repairs = 0;
+        $openedNow = false;
         $guardEvents = [];
         /** @var array<int, array{name: string, ok: bool, data: array}> $outcomes */
         $outcomes = [];
-        $forceToolNext = false;
-        $forceSendNext = false;
-        $safeReplyTried = false;
-        $reviews = 0;
         $started = microtime(true);
         $lastResponse = null;
 
-        // QA 2026-10-04 (one question = one call): a photo sent to an open
-        // application cost a model call to ask for process_document, its
-        // result, then the reply - and a guard retry when the model skipped
-        // it. The photos are read before the first call; the model answers
+        // QA 2026-10-04 (one question = one call): photos sent to an open
+        // application are read before the first call; the model answers
         // from the result in one step.
+        if ($resumed !== []) {
+            array_push($outcomes, ...array_column($resumed, 'outcome'));
+            $contents[] = $this->resumedContent($resumed);
+        }
+
         if ($preread !== null) {
             $outcomes[] = $preread['outcome'];
             $contents[] = $preread['content'];
         }
 
-        // What the understanding saved is a save of this turn: "تمام، سجلت
-        // العنوان" after it was refused as DATA_CLAIMED_NOT_SAVED.
-        if (($understood['saved'] ?? []) !== []) {
-            $outcomes[] = $this->understandingOutcome($understood['saved']);
-        }
-
         try {
             while (true) {
-                $limitReached = $modelCalls >= (int) $maxModelCalls
+                $limitReached = $modelCalls >= (int) $maxModelCalls - 1
                     || $toolCallCount >= (int) $maxToolCalls
                     || (microtime(true) - $started) >= (int) $wallClockSeconds;
 
-                $response = $this->callModel($request->system, $contents, $toolDeclarations, forceSendReply: $limitReached || $forceSendNext, forceOtherTool: ! $limitReached && ! $forceSendNext && $forceToolNext);
-                $forceToolNext = false;
-                $forceSendNext = false;
+                if ($modelCalls >= (int) $maxModelCalls) {
+                    return $this->unverifiedReply($conversation, $trace, $guardEvents, 'LIMIT_REACHED_WITHOUT_REPLY');
+                }
+
+                $response = $this->callModel($request->system, $contents, $toolDeclarations, forceSendReply: $limitReached);
                 $lastResponse = $response;
                 $this->addUsage($response);
                 $modelCalls++;
 
                 $toolCalls = $response->toolCalls;
-                // [send_reply("سجلت"), record_customer_data] in one step: the
-                // reply was judged before the save ran and refused - a whole
-                // extra model call for nothing. The step's tools run first.
+                // the step's tools run before its reply is judged
                 usort($toolCalls, fn ($a, $b) => ($a['name'] === 'send_reply') <=> ($b['name'] === 'send_reply'));
 
                 if ($toolCalls === []) {
-                    // Plain text without send_reply: still a reply candidate,
-                    // through the same guards (plan T17 §1.7 - no silent drop).
                     $toolCalls = [['id' => 'implicit', 'name' => 'send_reply', 'args' => ['messages' => [implode(' ', $response->textParts)]]]];
                 } else {
                     $contents[] = $this->modelToolCallContent($response);
                 }
 
-                $finished = false;
-
                 foreach ($toolCalls as $toolCall) {
                     $toolCallCount++;
 
                     if ($toolCall['name'] === 'send_reply') {
-                        $toolCall['args'] = $this->guard->autofix($this->guard->withoutRepeatedOffer(
-                            $this->guard->tidy($this->guard->withoutUnpromptedSalam($toolCall['args'], $conversation, (int) $turn->id)),
-                            $conversation,
-                        ), $conversation, $outcomes);
+                        // Only technical cleanup (emoji, markdown, dashes) - never his words changed.
+                        $toolCall['args'] = $this->rewritten($toolCall['args'], $guardEvents, ['tidy' => fn ($a) => $this->guard->tidy($a)]);
 
-                        // The code checks first: they cost nothing, and a draft with a
-                        // wrong number or a false claim never waits for the reviewer.
+                        // PHP checks only what the AI may not decide: claims of
+                        // actions, numbers and facts no tool gave, promises.
                         $violation = $this->guard->check($toolCall['args'], $conversation, $request->system, $contents, $outcomes);
-                        $passedChecks = $violation === null;
-                        $detail = $this->guard->lastDetail();
-                        $rescued = null;
 
                         if ($violation !== null) {
                             $guardEvents[] = ['code' => $violation, 'args' => $toolCall['args']];
-                            $numberGuardViolations += in_array($violation, self::NEEDS_TOOL_FIRST, true) ? 1 : 0;
 
-                            // Handing off is the last resort (owner: the bot closes ~90%
-                            // itself): two misses used to end the turn with a colleague.
-                            $exhausted = $numberGuardViolations >= 3 || $this->countCode($guardEvents, 'DUPLICATE_REPLY') >= 3 || $limitReached;
+                            // One repair, told plainly what is wrong. A second
+                            // miss is not argued with: an honest short line.
+                            if ($repairs >= 1 || $limitReached) {
+                                // Replay of conversation 206 (Gemini): a second repeat ended
+                                // in "مش متأكد إني فهمتك" three times - worse than the repeat.
+                                // What he already got is dropped and the rest is sent.
+                                $trimmed = $violation === 'REPEATED_REPLY' ? $this->guard->withoutRepeatedSentences((array) ($toolCall['args']['messages'] ?? []), $conversation) : null;
 
-                            // Replayed 2026-10-04: "أجهز لك معاينة في أقرب فرع" refused six
-                            // times until the wall clock ran out and the customer got
-                            // "ممكن توضحلي تقصد إيه؟". The same refusal twice = drop that
-                            // sentence and send the rest, when the rest stands alone.
-                            $sameTwice = in_array($violation, self::SENTENCE_RESCUABLE, true) && $this->countCode($guardEvents, $violation) >= 2;
+                                if ($trimmed === null || $this->guard->check(['messages' => $trimmed] + $toolCall['args'], $conversation, $request->system, $contents, $outcomes) !== null) {
+                                    return $this->unverifiedReply($conversation, $trace, $guardEvents, $violation);
+                                }
 
-                            // Out of tries, a repeated question or wording is still a
-                            // true answer - better than handing the customer off.
-                            // Simulator 2026-10-05: DOCUMENTS_RELISTED refused the same true
-                            // reply seven times until the turn ran out. Style is asked twice, never more.
-                            if (($exhausted || $this->countCode($guardEvents, $violation) >= 2) && in_array($violation, self::SOFT_VIOLATIONS, true)) {
-                                $violation = null;
-                            }
-                        }
-
-                        if ($violation !== null) {
-
-                            // A freelancer's offer went to a colleague three times in one
-                            // morning because each try carried one figure the model worked
-                            // out itself. The rest of the reply was right: send it without
-                            // those sentences.
-                            $rescued = $exhausted ? $this->withoutUnverifiedSentences($toolCall['args'], $violation, $conversation, $request->system, $contents, $outcomes) : null;
-                            $rescued ??= ($exhausted || $sameTwice) ? $this->withoutViolatingSentences($toolCall['args'], $violation, $conversation, $request->system, $contents, $outcomes) : null;
-
-                            if ($rescued !== null) {
-                                $guardEvents[] = ['code' => 'RESCUED_WITHOUT_UNVERIFIED_SENTENCES', 'args' => $rescued];
-                                $toolCall['args'] = $rescued;
-                            } elseif ($exhausted && ! $safeReplyTried) {
-                                // one more try, told exactly how to pass: no numbers at all
-                                $safeReplyTried = true;
-                                $forceSendNext = true;
+                                $toolCall['args']['messages'] = $trimmed;
+                                $guardEvents[] = ['code' => 'REWRITE:repeated_sentences_dropped', 'args' => $toolCall['args']];
+                            } else {
+                                $repairs++;
+                                $detail = $this->guard->lastDetail();
                                 $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => [
                                     'code' => $violation,
-                                    'detail' => (self::GUARD_HINTS[$violation] ?? '').($detail !== null ? ' '.$detail : '').' FINAL TRY: send a short reply with NO numbers at all and no claims - '
-                                        .'answer his message in words, or ask him one short question. Do not promise that a colleague will follow up.',
-                                ]]);
-
-                                continue;
-                            } elseif ($exhausted) {
-                                return $this->unverifiedReply($conversation, $trace, $guardEvents, $violation);
-                            }
-                        }
-
-                        if ($violation !== null && $rescued === null) {
-
-                            // Told "call the tool first", the model resent the same
-                            // number twice and the turn ended in the "we're busy"
-                            // fallback. Its next call has to be a real tool call -
-                            // except on the last try, which just has to drop the number.
-                            $lastTry = $numberGuardViolations >= 2 || $this->countCode($guardEvents, 'DUPLICATE_REPLY') >= 2;
-                            $forceToolNext = ! $lastTry && in_array($violation, self::NEEDS_TOOL_FIRST, true);
-
-                            $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => [
-                                'code' => $violation,
-                                'detail' => (self::GUARD_HINTS[$violation] ?? '').($detail !== null ? ' '.$detail : '').($lastTry
-                                    ? ' LAST TRY: send the reply now in different words, leaving out any number you cannot point to in a tool result.'
-                                    : ''),
-                            ]]);
-
-                            continue;
-                        }
-
-                        // Then the owner's eye, on what the code cannot read: a
-                        // misunderstanding or an invented reason. Twice at most,
-                        // never once the turn is out of time.
-                        if ($passedChecks && config('agent.reviewer.enabled') && ($toolCall['args']['no_reply'] ?? false) !== true
-                            && $this->worthReviewing($conversation)
-                            && $reviews < 2 && ! $limitReached) {
-                            $reviews++;
-                            $review = app(ReplyReviewer::class)->review($toolCall['args'], $conversation, $turn, $outcomes, $request->system);
-
-                            if ($review['verdict'] === 'redo') {
-                                $guardEvents[] = ['code' => 'REVIEW_REDO', 'args' => $toolCall['args'] + ['problems' => $review['problems']]];
-                                $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => [
-                                    'code' => 'REVIEW_REDO',
-                                    'detail' => 'Not sent - the owner reviewed it: '.implode(' ', $review['problems'])
-                                        .' Fix exactly this (call the tool you need first), then send_reply again.',
+                                    'detail' => trim((self::GUARD_HINTS[$violation] ?? '').($detail !== null ? ' '.$detail : '')),
                                 ]]);
 
                                 continue;
@@ -260,6 +197,8 @@ class AgentRunner
                     // that motorcycle) goes to his memory without a model call.
                     if ($toolCall['name'] !== 'send_reply') {
                         app(\App\Domain\Memory\CustomerMemory::class)->recordToolEvent($ctx->customerId, $toolCall['name'], (array) $toolCall['args'], $result);
+                        // READ tools write nothing; what they proved is recorded here, once.
+                        app(ToolOutcomeRecorder::class)->record($toolCall['name'], (array) $toolCall['args'], $result, $ctx);
                     }
 
                     $outcomes[] = [
@@ -268,26 +207,20 @@ class AgentRunner
                         'data' => ($result['ok'] ?? false) ? (array) ($result['data'] ?? []) : (array) ($result['error'] ?? []),
                     ];
 
-                    if ($result['ok'] ?? false) {
-
-                        // The context was built before the turn opened an
-                        // application; start_application + process_document
-                        // in one step lost the customer's ID card to
-                        // NO_ACTIVE_APPLICATION.
-                        if ($toolCall['name'] === 'start_application' && isset($result['data']['application_id'])) {
-                            $ctx = $ctx->withActiveApplication((int) $result['data']['application_id']);
-
-                            // What he said before it opened goes on it now.
-                            if (config('agent.understanding.enabled') && $customer && ($opened = Application::find((int) $result['data']['application_id']))
-                                && ($flushed = app(TurnUnderstanding::class)->flushPending($conversation->refresh(), $customer, $opened)) !== []) {
-                                $outcomes[] = $this->understandingOutcome($flushed);
-                            }
-                            $toolDeclarations = $this->toolsFor(true, $turn);
-                        }
+                    // start_application + process_document in one step: the
+                    // document needs the application the step just opened.
+                    if (($result['ok'] ?? false) && $toolCall['name'] === 'start_application' && isset($result['data']['application_id'])) {
+                        $ctx = $ctx->withActiveApplication((int) $result['data']['application_id']);
+                        $toolDeclarations = $this->toolsFor(true);
+                        $openedNow = (($result['data']['created'] ?? false) === true || isset($result['data']['reopened']));
                     }
-                    // Each write tool returns the whole application snapshot; with
-                    // three tools in a turn all three rode along on every later
-                    // call. Only the newest one is the truth - older copies go.
+
+                    // the applicant changed and his open application was closed: later tools must not write into it
+                    if (($result['ok'] ?? false) && $toolCall['name'] === 'record_work_profile' && isset($result['data']['previous_application_closed'])) {
+                        $ctx = $ctx->withoutActiveApplication();
+                    }
+
+                    // Only the newest application snapshot is the truth.
                     if (isset($result['data']['snapshot'])) {
                         $contents = $this->withoutOlderSnapshots($contents);
                     }
@@ -295,18 +228,21 @@ class AgentRunner
                     $contents[] = $this->toolResultContent($toolCall['id'], $toolCall['name'], $result);
 
                     if ($toolCall['name'] === 'send_reply' && ($result['ok'] ?? false)) {
-                        $finished = true;
+                        $this->resetFailureCounter($conversation);
+                        $this->finishTrace($trace, 'done', $guardEvents, $lastResponse);
+
+                        return $ctx->outbound->toArray();
                     }
                 }
 
-                if ($finished) {
-                    break;
+                // DOC-006: papers he sent before there was an application are read
+                // now - after the step's tool results (a provider wants those together)
+                if ($openedNow && ($earlier = $this->readEarlierDocuments($ctx)) !== null) {
+                    $outcomes[] = $earlier['outcome'];
+                    $contents[] = $earlier['content'];
                 }
 
-                // the final no-numbers try still gets its one call
-                if ($limitReached && ! $forceSendNext) {
-                    return $this->unverifiedReply($conversation, $trace, $guardEvents, 'LIMIT_REACHED_WITHOUT_REPLY');
-                }
+                $openedNow = false;
             }
         } catch (AiProviderException $e) {
             if ($e->retryable) {
@@ -323,124 +259,104 @@ class AgentRunner
             throw $e;
         }
 
-        $this->resetFailureCounter($conversation);
-        $this->finishTrace($trace, 'done', $guardEvents, $lastResponse);
-
-        return $ctx->outbound->toArray();
     }
 
-    /**
-     * A bare code gave the model nothing to act on: after DUPLICATE_REPLY it
-     * resent the same sentence and the turn fell through to the "we're busy"
-     * fallback on a plain off-topic message. The hint says what to change.
-     */
-    /**
-     * Only a missing source is fixed by forcing a lookup. Forcing a tool
-     * after a claim guard made the model call *something* - six motorcycle
-     * photos were queued for a customer who had just said goodbye.
-     */
-    /** Style problems only - nothing false is said. */
-    private const SOFT_VIOLATIONS = ['DOCUMENTS_RELISTED', 'FORMAL_ARABIC', 'ECHOES_CUSTOMER', 'REPEATED_QUESTION', 'DUPLICATE_REPLY', 'WORK_TYPES_LISTED', 'HANDOFF_TIME_PROMISED', 'REQUEST_NUMBER_MISSING', 'APPLICATION_ALREADY_OPEN_CLAIMED'];
 
-    private const NEEDS_TOOL_FIRST = ['UNVERIFIED_NUMBER', 'BRANCH_NOT_SOURCED', 'TOTAL_NOT_SOURCED', 'AGE_NOT_CHECKED', 'VERSIONS_NOT_LOOKED_UP'];
 
-    private const GUARD_HINTS = [
-        'EMPTY_REPLY' => 'Not sent: the reply is empty. Write the actual message to the customer.',
-        'GARBLED_TEXT' => 'Not sent: a word in the reply has Latin letters mixed inside Arabic letters (a typing glitch). Rewrite the reply in clean Egyptian Arabic.',
-        'HANDOFF_CLAIMED_NOT_DONE' => 'Not sent: the reply promises a colleague will follow up, but handoff_to_human did not succeed this turn. Call handoff_to_human (reason + short note) first, or do not promise a follow-up.',
-        'DATA_CLAIMED_NOT_SAVED' => 'Not sent: the reply says something was saved or changed, but no write tool succeeded this turn. If the customer gave data or a choice, call record_customer_data / update_application_selection first. If nothing needed saving, rewrite the reply without saying anything was saved or changed.',
-        'SUBMISSION_CLAIMED_NOT_DONE' => 'Not sent: the reply says the application was sent/submitted, but it was NOT submitted (no successful submit_application with submitted=true). Tell the customer truthfully what is still needed (see the snapshot blockers), or call submit_application if the customer confirmed the reviewed summary.',
-        'WORK_TYPE_NOT_RECORDED' => 'Not sent: the reply lists documents that depend on the customer\'s work, but work_type is not saved on the application. If the customer already said what he works (e.g. "شغال اوبر"), call record_customer_data with work_type (quote = his words) first and take the documents from the returned snapshot. If he has not said it, ask what he works instead of listing documents.',
-        'UNSOURCED_FINANCE_COMPANY' => 'Not sent: the reply names a finance company that no tool result this turn contains. We only work with the systems get_installment_options returns - call it if the customer asked who finances, otherwise leave company names out.',
-        'REPEATED_QUESTION' => 'Not sent: the reply ends with the same question your previous message ended with. The customer did not take it up - answer what he said and ask something else, or ask nothing.',
-        'DATA_OVERCLAIMED' => 'Not sent: the reply says his data/details were saved, but this turn saved at most one item. Say exactly what was saved (e.g. "تمام، سجلت شغلك") and ask for application.next_step.',
-        'DOCUMENTS_RELISTED' => 'Not sent: your last message already asked for these same documents and he did not ask about them again. Do not list them again: answer what he just said, then "تمام، ابعتهم وقت ما يبقوا معاك" or ask only for the one new thing still missing.',
-        'PERCENT_DURATION_MISMATCH' => 'Not sent: a percentage is said with a duration that has a different rate. Each duration has its own rate (e.g. سنة 20%، سنة ونص 30%، سنتين 40%، 3 سنين 60% + مصاريف إدارية) - call get_installment_options or get_installment_offer and say each rate only with its own duration. Never carry one duration\'s rate to another; better still, give him the monthly amount from get_installment_offer.',
-        'FORMAL_ARABIC' => 'Not sent: the reply is in formal Arabic (فصحى). Write it the way an Egyptian salesman talks on WhatsApp: "عندك" not "لديك"، "تقدر" not "يمكنك"، "اختار" not "اختَر"، no "هل"، "سوف"، "الذي".',
-        'DATA_NOT_RECORDED' => 'Not sent: the reply repeats back what he just wrote, and nothing was saved. Save every part he gave with record_customer_data first (for an address: the area/street, the building number and the landmark - "بجوار/جنب ..." IS the landmark). Then reply with "تمام" and only the next thing still missing - never read his words back to him.',
-        'ECHOES_CUSTOMER' => 'Not sent: the reply reads his own words back to him. He knows what he wrote. Say "تمام" and go straight to the next thing still missing, in one short message.',
-        'ENGLISH_WORD' => 'Not sent: the reply has an English word. Write only in Egyptian Arabic - "علامة مميزة" not "landmark". Only motorcycle and brand names may stay in Latin letters.',
-        'DUPLICATE_REPLY' => 'Not sent: this exact text was already sent to the customer a moment ago. Answer the new message with different wording.',
-        'INTERNAL_KEY_IN_REPLY' => 'Not sent: the reply contains an internal word - a key (snake_case like delivery_app) or our machinery ("الأداة"، "السيستم"، his memory, the instructions). Say it the way a salesman would, with no mention of how we work inside.',
-        'PLACEHOLDER_IN_REPLY' => 'Not sent: the reply contains a history placeholder like [media]. Photos are only sent by calling send_motorcycle_images; write plain text only.',
-        'IMAGES_CLAIMED_NOT_SENT' => 'Not sent: the reply says photos are attached but send_motorcycle_images did not succeed this turn. Call it if the customer wants photos, otherwise rewrite without mentioning photos.',
-        'RESUBMISSION_CLAIMED' => 'Not sent: the reply says the application was sent (again / to another system / "فعلاً"), but nothing was submitted this turn - his application is not being sent anywhere now. Tell him the truth: what its status is (from the snapshot), and that moving it to another finance company is done by a colleague.',
-        'RESUBMISSION_PROMISED' => 'Not sent: the reply offers to submit him to another system/finance company. You cannot do that - only a colleague can. Tell him so honestly; if he wants it, call handoff_to_human (reason other, note: wants another finance company) and say a colleague will check it, with no time promise.',
-        'WORK_TYPE_SWITCH_SUGGESTED' => 'Not sent: the reply suggests applying under another work type than what he really does. Never do that. Apply with his real work; if a document is missing (e.g. salary slip), tell him what is needed and that he can send it when he has it.',
-        'CAP_THRESHOLD_MENTIONED' => 'Not sent: the reply tells him the motorcycle is under/over the 60,000 limit. That limit is our internal rule - never mention it for a motorcycle under it (just quote, then ask his work at the end). Above it, only with explain_to_customer from get_installment_offer (the difference is paid in cash, the rest is financed), or with ASK_WORK_FIRST (then just that it is above, and ask his work).',
-        'REQUIRED_DOCUMENT_WAIVED' => 'Not sent: the reply tells him a document his job needs is optional ("مش شرط", "لو معاك", "بالبطاقة بس"). Every document in documents.list is required - no exceptions and no other way to apply. Tell him plainly it is needed, and why in one line (the finance company needs it). Exception: when he says he cannot get a document, do what documents.if_unavailable says for it.',
-        'DOCUMENT_NOT_REQUIRED' => 'Not sent: the reply asks for a document this customer does not need (e.g. a workshop contract, a utility bill, app earnings for a non-app job). Ask only for what the snapshot (documents.required / next_step) or get_application_requirements lists. The only substitute for مفردات المرتب is برنت التأمينات - never a bank statement, invoices, receipts or tax papers.',
-        'HANDOFF_TIME_PROMISED' => 'Not sent: the reply promises when a colleague will answer ("ثواني", "حالا", "فوراً", "للمرة الأخيرة"). Nobody controls that. Say a colleague will answer, with no time - and keep helping him yourself with what you can answer.',
-        'OCCUPATION_SOFTENED' => 'Not sent: his work is one the finance companies refuse. Tell him plainly that the request will be refused (the sentence from the tool result) - no "بتتحفظ", no offer to try or apply, no asking for another income source. You may offer the cash price.',
-        'TOTAL_REFUSED' => 'Not sent: the reply refuses to give the total. The total is in every offer: call get_installment_offer for his motorcycle and duration and send that offer\'s `breakdown` (what he pays at pickup + installments = the total in the end).',
-        'WORK_TYPES_LISTED' => 'Not sent: the reply lists work types for him to choose from. Ask only "حضرتك بتشتغل إيه؟" and let him say it in his own words.',
-        'TOTAL_NOT_SOURCED' => 'Not sent: the reply states a total that no tool result of this turn contains (a number the customer wrote is not a total). Call get_installment_offer for this motorcycle and duration and quote total_paid and cash_price exactly as returned (never the installment price). The admin fee is never added to the total - it is said on its own.',
-        'UNSOURCED_REASON' => 'Not sent: the reply explains the fees or the installment/cash difference without the owner\'s policy. Call get_installment_offer for this motorcycle and explain the difference only from its price_difference_policy (in your own words) plus its numbers. The admin fees have no recorded reason - just say they are paid once at pickup.',
-        'BRANCH_NOT_SOURCED' => 'Not sent: the reply states a branch, an address or opening hours that no get_branch_information result this turn contains. Call get_branch_information (governorate of the customer if he said it) and use only the branches it returns - if his governorate has none, say so and give the nearest ones it returned. Never name a branch or area that is not in the result.',
-        'AGE_NOT_CHECKED' => 'Not sent: the reply says his age is fine without a check. Call check_eligibility with his age (and months if a duration is known) and answer from its result - if not_eligible, tell him kindly and clearly.',
-        'AVAILABILITY_PROMISE' => 'Not sent: the reply promises to tell him when a model arrives. Nothing records or sends such a notice. Say it is not available with us right now (للأسف مش متوفرة عندنا حاليا), with no date or promise, and offer an available alternative.',
-        'DOCUMENT_CLAIMED_NOT_ACCEPTED' => 'Not sent: the reply says his document/photo arrived or was saved, but no process_document accepted a document this turn. If he sent a photo call process_document and answer from its result (a rejected photo: tell him why and ask for a new one). Otherwise do not say it arrived.',
-        'REQUEST_NUMBER_MISSING' => 'Not sent: the application was submitted but the reply does not give him its number. Tell him his request number exactly as `reference.installment_request_id` (e.g. "رقم طلبك #4395") so he can quote it to the branch.',
-        'INVENTED_APPLICATION_ROUTE' => 'Not sent: someone else applying in his name is offered only when he does not work at all, is about to start working, is under 21, or has a bad credit record (سكور). None of that applies here. If his problem is the salary slip, follow documents.if_unavailable in the snapshot; otherwise tell him plainly what is needed.',
-        'WITHDRAWAL_CLAIMED_NOT_DONE' => 'Not sent: the reply says the application was (or will be) closed/stopped/cancelled, but withdraw_application did not succeed this turn. If he clearly asked to cancel, call withdraw_application first; otherwise do not say it was closed.',
-        'APPLICATION_CLAIMED_NOT_OPENED' => 'Not sent: the reply says an application was opened, but none is open. Call start_application first (after he said what he works), or do not say it.',
-        'CARD_ONLY_BEFORE_WORK' => 'Not sent: whether he can apply with the ID alone depends on his work, and you do not know it yet. Reply in one short line like: "على حسب شغلك يا باشا، حضرتك بتشتغل إيه؟" - nothing about papers, the card-only route or opening an application until he says what he works.',
-        'VERSIONS_NOT_LOOKED_UP' => 'Not sent: the reply says how many versions/kinds of a model we have, but no search_motorcycles / get_motorcycle_details ran this turn - the catalog index is not complete enough for that. Call search_motorcycles with his words and list the versions it returns, each with its cash price.',
-        'STOCK_OR_CHECK_CLAIMED' => 'Not sent: the reply says a model is in stock at a branch, or offers to check / arrange / prepare something and come back ("هشوفلك وأرد عليك", "أجهز لك معاينة", "أشيّك لك"). Nothing holds per-branch stock and you cannot do anything later on your own. Say instead, for example: "تقدر تيجي تعاين في أي فرع من فروعنا، والفرع بيوريك القطعة واللون على الطبيعة" and give the branches from get_branch_information (call it) - no offer to arrange, check or confirm.',
-        'UNRECORDED_PROMISE' => 'Not sent: the reply promises something nothing records - a reservation ("محجوزة", "نحجزلك"), a time frame ("نفس اليوم", "خلال كذا يوم"), a warranty, a guarantor, or "I will tell you as soon as...". None of these exist in our data. Remove the promise; say only what the tools returned.',
-        'INTEREST_DENIED' => 'Not sent: the reply says there is no interest/no increase. That is false - the installment price is higher than cash. Never deny it. If he asks about interest, give the cash price and what he pays in total from get_installment_offer (the breakdown line), and explain the difference only from price_difference_policy.',
-        'SCRIPTED_PHRASE_REQUEST' => 'Not sent: the reply asks the customer to say/write a specific sentence. Never do that. If he already said what he works, use his own earlier words as the quote (record_customer_data / start_application). If he did not, just ask "حضرتك بتشتغل إيه؟".',
-        'WORK_REFUSAL_NOT_SOURCED' => 'Not sent: the reply says his work is refused, but no tool said so. Call check_eligibility with work = his own words: say it is refused only when it returns occupation_not_accepted; if it returns ask_sector ask only "حكومي ولا خاص؟".',
-        'DOCUMENT_PHOTO_NOT_PROCESSED' => 'Not sent: he sent a photo this turn and the reply ignores it. Call process_document with the media_id shown next to it as "[صورة مرفقة - media_id: N]" (identify_motorcycle_from_image if it is a motorcycle photo), then answer from that result only.',
-        'WORK_TYPE_TOLD' => 'Not sent: the reply tells him his type ("كعامل حر"). The type is for the tools only - never say it to the customer. Rewrite without it.',
-        'JOB_AS_NAME' => 'Not sent: you called him by his job ("يا أستاذ محاسب"). His work is not his name - use his name only if he wrote it or it is on his ID, otherwise يا باشا / يا غالي. Rewrite.',
-        'WORK_JUDGED' => 'Not sent: the reply judges his work ("بيسهل الإجراءات", "فرص القبول أعلى", "مقبول جداً"). Only the tools decide what his work means - say nothing about it being easier, better or accepted. Rewrite without it.',
-        'BANNED_WORDING' => 'Not sent: the reply uses wording the owner banned - a name for yourself (never give yourself a name), "أهلاً بك", "حقك عليا", "من غير مقدم"/"بدون مقدم" (say what is paid at pickup instead) or the word "كتالوج" (say "عندنا" / "المتاح عندنا"). Rewrite without it.',
-        'HUMAN_REQUEST_IGNORED' => 'Not sent: he asked to talk to a person / to be called. That is always honoured at once: call handoff_to_human in this step (reason call_request when he asks for a call, customer_request when he asks for a person; short note), then tell him a colleague from the showroom will contact him - no time promise, no "I only answer in writing" - and still answer anything else he asked.',
-        'QUOTE_GATED' => 'Not sent: the reply makes the installment numbers wait for an application, his ID or more data. Prices and installments never need an application or a document. Call get_installment_offer now (customer_type if he said his work, down_payment if he named one, months if he named a duration) and give him the numbers; ask for the ID only after, if he wants to apply.',
-        'DOCUMENT_LIST_INCOMPLETE' => 'Not sent: the application was just opened and the reply asks for only part of his papers. Send the WHOLE documents.list from the snapshot in this one message - every item by name (e.g. وش وضهر البطاقة + صورة المحل باليافطة + البطاقة الضريبية أو السجل التجاري) - then he sends them one by one. Nothing on the list is optional.',
-        'META_TEXT' => 'Not sent: the reply contains a note in brackets or formal Arabic ("سيتم"، "يرجى"). Write only what a salesman would send, in Egyptian Arabic.',
-        'SUMMARY_DUPLICATED' => 'Not sent: the stored summary is sent to him automatically right after your message - do not write your own summary or list his data. Just ask him in one or two short lines to check the summary below and confirm, or say what to fix.',
-        'UNVERIFIED_NUMBER' => 'Not sent: the reply contains a number (a price, a fee, or a measured value like km/litre, hp, months, %) that no tool result of this turn, structured state or customer message contains. Call the tool again this turn (get_motorcycle_details / get_installment_offer / calculate_installment) - numbers from your earlier messages do not count - or leave the number out. Never state specifications that are not in a tool result.',
-        'IMAGES_CLAIMED_FOR_UNSENT_MODEL' => 'Not sent: the reply says photos of a model went out that send_motorcycle_images did not send this turn. Say only which photos were sent, or call send_motorcycle_images for the other model first (if it failed, tell him why from its result).',
-        'APPLICATION_ALREADY_OPEN_CLAIMED' => 'Not sent: his application was already open before this turn - you did not open it now. Do not say "فتحتلك/بدأتلك الطلب"; say "طلبك مفتوح" and ask for snapshot next_step only.',
-        'SELECTION_CLAIMED_NOT_SET' => 'Not sent: the reply ties his application to a motorcycle or duration it is not set to. Call update_application_selection first (if he chose it), or say only what is set.',
-        'COMPLETION_OVERCLAIMED' => 'Not sent: the reply says everything is done/ready, but the application still has missing items (snapshot blockers). Do not say it is complete - say "تمام" and ask for the next missing item only.',
-        'MODEL_NOT_LOOKED_UP' => 'Not sent: the reply names a motorcycle that no tool returned this turn, his state does not hold and he did not mention. Call search_motorcycles / get_motorcycle_details for it first, or leave that model out.',
-        'INVENTED_REASON_PHRASE' => 'Not sent: the reply gives a reason, procedure or promise nobody recorded ("قرار جهات التمويل"، "النسبة ثابتة"، "البطاقة هتملى البيانات لوحدها"، "الفرع هيكلمك"، "هتمضي في الفرع"، "مفيش ورق للكاش"). Remove that sentence; say only what the tools and the guidance say.',
+    /**
+     * Rebuild: one short factual line per refusal - what is untrue and what
+     * makes it true. No wording rules: tone and phrasing are the
+     * instructions' job, never a refusal.
+     */
+    public const GUARD_HINTS = [
+        'EMPTY_REPLY' => 'The reply is empty.',
+        'GARBLED_TEXT' => 'A word mixes Latin letters into Arabic (a typing glitch).',
+        'INTERNAL_KEY_IN_REPLY' => 'The reply shows an internal key or code name.',
+        'PLACEHOLDER_IN_REPLY' => 'The reply contains a placeholder in brackets, not real text.',
+        'SUBMISSION_CLAIMED_NOT_DONE' => 'It says the application was sent, but submit_application did not succeed.',
+        'SUBMISSION_DENIED_BUT_DONE' => 'submit_application succeeded this turn: the request WAS sent - give him its number from reference.',
+        'RESUBMISSION_CLAIMED' => 'It says the request went again or elsewhere; nothing was submitted this turn.',
+        'RESUBMISSION_PROMISED' => 'Moving a submitted request to another finance company is staff-only.',
+        'DATA_CLAIMED_NOT_SAVED' => 'It says something was saved or changed, but no write tool succeeded. If he sent data this turn, call record_customer_data with it now, then reply.',
+        'SUMMARY_CLAIMED_NOT_SENT' => 'It talks about his summary, but only submit_application (confirm=true) sends it - call it.',
+        'DATA_OVERCLAIMED' => 'It says all his data was saved; only part was.',
+        'DOCUMENT_CLAIMED_NOT_ACCEPTED' => 'It says a document was received/accepted; process_document did not accept it.',
+        'DOCUMENT_PHOTO_NOT_PROCESSED' => 'He sent a photo this turn that was not read; process_document (or identify_motorcycle_from_image) first.',
+        'WITHDRAWAL_CLAIMED_NOT_DONE' => 'It says the application was cancelled; withdraw_application did not succeed.',
+        'APPLICATION_CLAIMED_NOT_OPENED' => 'It says an application was opened; start_application did not succeed.',
+        'APPLICATION_ALREADY_OPEN_CLAIMED' => 'His application was already open before this turn; it was not opened now.',
+        'SELECTION_CLAIMED_NOT_SET' => 'The motorcycle/plan it states is not what the application holds.',
+        'COMPLETION_OVERCLAIMED' => 'It says the data is complete; items are still missing.',
+        'IMAGES_CLAIMED_NOT_SENT' => 'It says photos were sent; send_motorcycle_images did not succeed.',
+        'IMAGES_CLAIMED_FOR_UNSENT_MODEL' => 'It names photos of a model whose photos were not sent.',
+        'HANDOFF_CLAIMED_NOT_DONE' => 'It promises a colleague; handoff_to_human did not succeed.',
+        'HANDOFF_TIME_PROMISED' => 'It promises when a colleague will answer; nothing records that.',
+        'UNRECORDED_PROMISE' => 'It promises something nothing in the system does (reservation, time, warranty).',
+        'STOCK_OR_CHECK_CLAIMED' => 'Nothing checks stock per branch or follows up later.',
+        'AVAILABILITY_PROMISE' => 'Nothing notifies him when a model arrives.',
+        'UNVERIFIED_NUMBER' => 'A number in the reply is in no tool result or earlier verified data; look it up or leave it out.',
+        'TOTAL_NOT_SOURCED' => 'The total it states is not in a tool result.',
+        'PERCENT_DURATION_MISMATCH' => 'That rate does not belong to that duration in the active plans.',
+        'BRANCH_NOT_SOURCED' => 'Branch facts come from get_branch_information only.',
+        'MODEL_NOT_LOOKED_UP' => 'It names a motorcycle no tool returned this turn.',
+        'UNSOURCED_FINANCE_COMPANY' => 'It names a finance company we do not work with.',
+        'AGE_NOT_CHECKED' => 'Whether his age qualifies comes from check_eligibility only.',
+        'WORK_REFUSAL_NOT_SOURCED' => 'A refusal of his work comes from check_eligibility / start_application only.',
+        'REQUIRED_DOCUMENT_WAIVED' => 'Every document on his list is required; it cannot be waived.',
+        'INTEREST_DENIED' => 'Installments do carry interest; it cannot be denied.',
+        'REPEATED_REPLY' => 'He already got these exact words from you. Answer his new message itself in one short line in other words; a refusal he already heard = one short line ("زي ما قلتلك، للأسف مش هينفع وهو مش شغال") with no list of options again.',
+        'PERSON_NOT_RECORDED' => 'His relatives are "أخوك/أبوك/والدتك" when you speak to him - never "أخويا/ابويا/امي". The reply speaks of one person (أخوك/أبوك...) as the one applying, but that is not who is recorded. If his own words clearly name ONE person, call record_work_profile (applicant=someone_else, applicant_relation, applicant_quote = his words) first; if they do not ("اخ اخويا حبيب صاحب", or "اه" to your own guess), reply only: مين اللي هيقدّم؟',
     ];
 
     /**
-     * 2026-10-02 review: every model call carried all 21 tool definitions
-     * (~7,700 tokens) on top of the instructions. Tools that only act on an
-     * open application, or on a photo, are left out until they can be used.
+     * The tools an open application adds, in this order, after every other tool.
      */
-    private function toolsFor(bool $hasApplication, object $turn): array
+    public const APPLICATION_TOOLS = ['update_application_selection', 'submit_application', 'withdraw_application'];
+
+    /** Photo tools: in both sets (a photo can come at any stage), right before the application tools. */
+    public const PHOTO_TOOLS = ['identify_motorcycle_from_image', 'process_document'];
+
+    /**
+     * TOOL-013: two stable sets - browsing and open application. Four
+     * variants (application x photo in this turn) changed the tool list
+     * from turn to turn, and the provider cache (it caches the request from
+     * its start, tools first) missed whenever a photo came or went. Now the
+     * browsing set is an exact prefix of the application set: stable tools,
+     * then the photo tools, then the application tools. Rule documented in
+     * docs/rebuild/tool-contract-v2.md.
+     */
+    private function toolsFor(bool $hasApplication): array
     {
-        $hasMedia = \App\Models\WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')
-            ->whereIn('type', ['image', 'document', 'video'])->exists();
+        $tail = array_merge(self::PHOTO_TOOLS, $hasApplication ? self::APPLICATION_TOOLS : []);
+        $all = $this->tools->declarations();
+        $stable = array_values(array_filter($all, fn ($d) => ! in_array($d['name'], [...self::PHOTO_TOOLS, ...self::APPLICATION_TOOLS], true)));
+        $byName = array_column($all, null, 'name');
 
-        $hidden = [];
-        if (! $hasApplication) {
-            $hidden = ['update_application_selection', 'submit_application', 'withdraw_application'];
-            if (! $hasMedia) {
-                $hidden[] = 'process_document';
+        return array_merge($stable, array_values(array_filter(array_map(fn ($name) => $byName[$name] ?? null, $tail))));
+    }
+
+    /**
+     * Applies the silent rewrites in order; every one that changed the reply
+     * leaves a REWRITE:<step> event with what it was and what it became.
+     *
+     * @param  array<string, callable(array): array>  $steps
+     */
+    private function rewritten(array $args, array &$guardEvents, array $steps): array
+    {
+        foreach ($steps as $step => $rewrite) {
+            $after = $rewrite($args);
+
+            if ($after !== $args) {
+                $guardEvents[] = ['code' => 'REWRITE:'.$step, 'args' => [
+                    'before' => $args['messages'] ?? $args,
+                    'after' => $after['messages'] ?? $after,
+                ]];
             }
-        }
-        if (! $hasMedia) {
-            $hidden[] = 'identify_motorcycle_from_image';
+
+            $args = $after;
         }
 
-        // Google caches the request from its start (tools first, then the
-        // instructions), so the tools that come and go sit at the end: every
-        // turn then shares the cached tools + instructions prefix (owner
-        // 2026-10-02, paid key - cached tokens cost a tenth).
-        $optional = ['update_application_selection', 'submit_application', 'withdraw_application', 'process_document', 'identify_motorcycle_from_image'];
-        $tools = array_values(array_filter($this->tools->declarations(), fn ($d) => ! in_array($d['name'], $hidden, true)));
-        usort($tools, fn ($a, $b) => (int) in_array($a['name'], $optional, true) <=> (int) in_array($b['name'], $optional, true)
-            ?: array_search($a['name'], $optional, true) <=> array_search($b['name'], $optional, true));
-
-        return $tools;
+        return $args;
     }
 
     private function callModel(string $system, array $contents, array $tools, bool $forceSendReply, bool $forceOtherTool = false): AiResponse
@@ -457,90 +373,14 @@ class AgentRunner
             tools: $tools,
             toolMode: $allowed === [] ? 'auto' : 'any',
             allowedTools: $allowed,
+            label: 'main',
         ));
     }
 
-    /**
-     * The reply minus the sentences carrying an unsourced number, if what is
-     * left still says something and passes every guard - otherwise null.
-     */
-    private function withoutUnverifiedSentences(array $args, string $violation, WhatsappConversation $conversation, string $system, array $contents, array $outcomes): ?array
-    {
-        if (! in_array($violation, ['UNVERIFIED_NUMBER', 'TOTAL_NOT_SOURCED'], true)) {
-            return null;
-        }
 
-        $messages = [];
 
-        foreach ((array) ($args['messages'] ?? []) as $message) {
-            $bad = $this->guard->unverifiedSentences((string) $message, $system, $contents, $outcomes);
-            $kept = trim(str_replace($bad, '', (string) $message));
 
-            if ($kept !== '') {
-                // the dropped sentence leaves its line break behind
-                $messages[] = preg_replace('/\n{2,}/u', str_contains((string) $message, "\n\n") ? "\n\n" : "\n", $kept);
-            }
-        }
 
-        $rescued = ['messages' => $messages] + $args;
-
-        if (mb_strlen(implode(' ', $messages)) < 15 || $messages === (array) ($args['messages'] ?? [])) {
-            return null;
-        }
-
-        return $this->guard->check($rescued, $conversation, $system, $contents, $outcomes) === null ? $rescued : null;
-    }
-
-    /** Claims a single sentence carries - dropping that sentence leaves the rest true. */
-    private const SENTENCE_RESCUABLE = ['ENGLISH_WORD', 'STOCK_OR_CHECK_CLAIMED', 'UNRECORDED_PROMISE', 'AVAILABILITY_PROMISE', 'VERSIONS_NOT_LOOKED_UP', 'UNSOURCED_REASON', 'CAP_THRESHOLD_MENTIONED', 'WORK_TYPE_TOLD', 'WORK_JUDGED', 'BANNED_WORDING', 'INTERNAL_KEY_IN_REPLY',
-        'IMAGES_CLAIMED_FOR_UNSENT_MODEL', 'APPLICATION_ALREADY_OPEN_CLAIMED', 'MODEL_NOT_LOOKED_UP', 'INVENTED_REASON_PHRASE'];
-
-    /** The reply minus every sentence that alone triggers $violation, if the rest passes every guard. */
-    private function withoutViolatingSentences(array $args, string $violation, WhatsappConversation $conversation, string $system, array $contents, array $outcomes): ?array
-    {
-        if (! in_array($violation, self::SENTENCE_RESCUABLE, true)) {
-            return null;
-        }
-
-        $messages = [];
-
-        foreach ((array) ($args['messages'] ?? []) as $message) {
-            $kept = array_filter(preg_split('/(?<=[.!؟?\n])/u', (string) $message),
-                fn ($sentence) => trim($sentence) === '' || $this->guard->check(['messages' => [$sentence]], $conversation, $system, $contents, $outcomes) !== $violation);
-            $text = trim(implode('', $kept));
-
-            if ($text !== '') {
-                $messages[] = $text;
-            }
-        }
-
-        if (mb_strlen(implode(' ', $messages)) < 15 || $messages === (array) ($args['messages'] ?? [])) {
-            return null;
-        }
-
-        $rescued = ['messages' => $messages] + $args;
-
-        return $this->guard->check($rescued, $conversation, $system, $contents, $outcomes) === null ? $rescued : null;
-    }
-
-    /**
-     * The reviewer reads for what code cannot: an ignored question or
-     * something he told us. A plain "تمام", a phone number or a photo has
-     * neither - 2026-10-05 it ran on every reply and cost a third of the bill.
-     */
-    private function worthReviewing(WhatsappConversation $conversation): bool
-    {
-        $said = $this->guard->customerTextSinceLastReply($conversation);
-
-        return mb_strlen(trim($said)) >= 4 && (bool) preg_match('/[؟?]|(?<!\p{L})(?:ينفع|ممكن|ازاي|إزاي|ليه|ليش|كام|بكام|امتى|إمتى|فين|مين|ايه|إيه|هو|هي|يعني|طب|طيب|بس|لو)(?!\p{L})'
-            .'|(?:مش|مبيطلعوش|مبتطلعش|معنديش|معيش|مفيش|ماعنديش|مش معايا|مش بتطلع|مش بيطلع)/u', $said);
-    }
-
-    /** A save the understanding made, shown to the checks like any write tool's. */
-    private function understandingOutcome(array $saved): array
-    {
-        return ['name' => 'record_customer_data', 'ok' => true, 'data' => ['saved' => array_keys($saved), 'source' => 'turn_understanding']];
-    }
 
     private function modelToolCallContent(AiResponse $response): array
     {
@@ -595,6 +435,86 @@ class AgentRunner
         ];
     }
 
+    /**
+     * DOC-006: an ID photo sent before he said "عايز اقدم" waited until the
+     * model thought of it (often never - he was asked to send it again).
+     * Right after start_application opens his application, his last week's
+     * unread document photos (this turn's too) go through process_document.
+     */
+    private function readEarlierDocuments(ToolContext $ctx): ?array
+    {
+        $mediaIds = \App\Models\MessageMedia::query()
+            ->whereHas('message', fn ($q) => $q->where('whatsapp_conversation_id', $ctx->conversationId)
+                ->where('direction', 'incoming')->where('created_at', '>=', now()->subDays(7)))
+            ->whereIn('media_type', ['image', 'document'])
+            ->whereNotIn('id', \App\Models\ApplicationDocument::whereNotNull('media_id')->select('media_id'))
+            ->latest('id')
+            ->get()
+            ->reject(fn ($m) => isset(($m->analysis ?? [])['band']) || isset(($m->analysis ?? [])['not_a_document']))
+            ->pluck('id')
+            ->take(4)
+            ->all();
+
+        if ($mediaIds === []) {
+            return null;
+        }
+
+        $result = $this->tools->execute('process_document', ['media_ids' => $mediaIds, '_preread' => true], $ctx);
+
+        return [
+            'outcome' => [
+                'name' => 'process_document',
+                'ok' => (bool) ($result['ok'] ?? false),
+                'data' => ($result['ok'] ?? false) ? (array) ($result['data'] ?? []) : (array) ($result['error'] ?? []),
+            ],
+            'content' => ['role' => 'user', 'parts' => [['type' => 'text', 'text' => "## الصور اللي بعتها قبل ما الطلب يتفتح اتقرت دلوقتي (process_document - ما تناديهاش تاني عليها)\n```json\n"
+                .json_encode($result, JSON_UNESCAPED_UNICODE)."\n```"]]],
+        ];
+    }
+
+    /**
+     * ARCH-006 / ERR-002: a turn re-queued after a provider failure ran every
+     * model and tool call again from the start - a "قدم الطلب" turn that died
+     * after start_application could open the request twice. The tool steps
+     * the earlier attempt completed (ai_trace_steps) are handed to the model
+     * as done; the registry also returns the stored result for the same call.
+     *
+     * @return list<array{name: string, args: array, result: array, outcome: array}>
+     */
+    private function completedSteps(int $turnId): array
+    {
+        return \App\Models\AiTraceStep::where('turn_id', $turnId)->where('kind', 'tool_call')
+            ->where('tool_name', '!=', 'send_reply')->orderBy('id')->get()
+            ->map(function (\App\Models\AiTraceStep $step) {
+                $result = (array) $step->result_redacted;
+
+                // the application in the context is newer than any snapshot then
+                if (isset($result['data']['snapshot'])) {
+                    $result['data']['snapshot'] = 'superseded - the application in the context is current';
+                }
+
+                return [
+                    'name' => $step->tool_name,
+                    'args' => array_diff_key((array) $step->args_redacted, ['_preread' => 1]),
+                    'result' => $result,
+                    'outcome' => [
+                        'name' => $step->tool_name,
+                        'ok' => (bool) ($result['ok'] ?? false),
+                        'data' => ($result['ok'] ?? false) ? (array) ($result['data'] ?? []) : (array) ($result['error'] ?? []),
+                    ],
+                ];
+            })->values()->all();
+    }
+
+    /** One plain block, the same for every provider (no synthetic tool-call ids or signatures). */
+    private function resumedContent(array $steps): array
+    {
+        $done = array_map(fn ($s) => ['tool' => $s['name'], 'args' => $s['args'], 'result' => $s['result']], $steps);
+
+        return ['role' => 'user', 'parts' => [['type' => 'text', 'text' => "## اتعمل خلاص في نفس الرسالة دي قبل عطل مؤقت (ما تعيدش أي خطوة منهم - كمّل من بعدهم ورد عليه)\n```json\n"
+            .json_encode($done, JSON_UNESCAPED_UNICODE)."\n```"]]];
+    }
+
     private function withoutOlderSnapshots(array $contents): array
     {
         foreach ($contents as $i => $content) {
@@ -617,10 +537,6 @@ class AgentRunner
         return ['role' => 'tool', 'parts' => [['type' => 'tool_result', 'id' => $id, 'name' => $name, 'result' => $result]]];
     }
 
-    private function countCode(array $guardEvents, string $code): int
-    {
-        return count(array_filter($guardEvents, fn ($e) => $e['code'] === $code));
-    }
 
     /**
      * The model could not produce a reply that passes the guards. Sending
@@ -675,21 +591,27 @@ class AgentRunner
             $step = null;
         }
 
+        // Simulator 2026-10-05: a 64-year-old already told installments are not
+        // possible got "نكمّل طلبك؟" from this line.
+        if (($step['type'] ?? null) === 'not_eligible') {
+            return 'معاك. لو حابب تشتري كاش من الفرع أو حد تاني شغال يقدّم باسمه قولّي.';
+        }
+
         if (in_array($step['type'] ?? null, ['field', 'document'], true) && filled($step['label'] ?? null)) {
-            return "تمام يا باشا، عشان نكمّل طلبك ابعتلي {$step['label']}";
+            return "تمام، ابعتلي {$step['label']}";
         }
 
         // Conversation 857: "خلاص خلينا في الهوجن L250 على سنتين" with
         // everything in got "ممكن توضحلي تقصد إيه؟" - he was perfectly clear.
         if (($step['type'] ?? null) === 'submit') {
-            return 'تمام يا باشا، كده طلبك جاهز. أقدّمهولك دلوقتي؟';
+            return 'كده طلبك جاهز. أقدّمهولك دلوقتي؟';
         }
 
         if ($application) {
-            return 'تمام يا باشا، معاك. نكمّل طلبك؟';
+            return 'معاك. نكمّل طلبك؟';
         }
 
-        return 'معلش يا باشا، ممكن توضحلي تقصد إيه بالظبط عشان أرد عليك صح؟';
+        return 'معلش، مش متأكد إني فهمتك صح. تقصد إيه بالظبط؟';
     }
 
     /** @return array{messages: string[]} */
@@ -767,6 +689,7 @@ class AgentRunner
         // (every server trace had lost them).
         $manifest = (array) ($trace->fresh()?->context_manifest ?? $trace->context_manifest ?? []);
         $manifest['usage'] = $this->usage;
+        $manifest['ai_calls'] = \App\Agent\Tracing\AiCalls::summaryForTrace($trace->id);
         $responseFields['context_manifest'] = $manifest;
         $this->usage = self::EMPTY_USAGE;
 

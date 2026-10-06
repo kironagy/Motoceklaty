@@ -41,6 +41,7 @@ class AddressSplitter
         try {
             $response = $this->ai->chat(new AiRequest(
                 purpose: 'address',
+                label: 'address',
                 system: 'You split an Egyptian address into the fields of a finance application form. '
                     .'Use only what the customer wrote; never invent a number, street or landmark. '
                     .'governorate = the Egyptian governorate in Arabic (القاهرة، الجيزة، القليوبية ...) - infer it from a well known city/district '

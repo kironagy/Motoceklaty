@@ -54,13 +54,17 @@ return [
     // only with the reply). A message that lands while a reply is being
     // written still supersedes it (TurnScheduler), and the customer sees
     // no "seen" meanwhile - so a short window only catches a quick burst.
-    // Owner 2026-10-04 ("بياع مصري شاطر"): the code reads and saves what the
-    // customer wrote before the reply (TurnUnderstanding), and a second look
-    // checks each draft for misreadings, invented facts and false claims
-    // (ReplyReviewer). Both are extra model calls; tests with scripted
-    // provider answers switch them off.
-    'understanding' => ['enabled' => (bool) env('AGENT_UNDERSTANDING_ENABLED', true)],
-    'reviewer' => ['enabled' => (bool) env('AGENT_REVIEWER_ENABLED', true), 'effort' => env('AGENT_REVIEWER_EFFORT', 'low')],
+    // Rebuild (AI_SALES_AGENT_REBUILD_PLAN.md). OBS-003: redacted prompt and
+    // answer on each ai_calls row - off, sampled, phones and IDs masked.
+    'observability' => [
+        'capture' => [
+            'enabled' => (bool) env('AGENT_CAPTURE_ENABLED', false),
+            'sample_rate' => (float) env('AGENT_CAPTURE_SAMPLE_RATE', 0.1),
+        ],
+    ],
+
+    // OBS-005: chars per token until ai_calls has enough real calls to calibrate it
+    'tokens' => ['default_chars_per_token' => (float) env('AGENT_DEFAULT_CHARS_PER_TOKEN', 4.0)],
 
     'turns' => [
         'debounce_seconds' => env('AGENT_TURNS_DEBOUNCE_SECONDS', 3),
@@ -90,7 +94,6 @@ return [
         \App\Agent\Tools\GetEarlierMessagesTool::class,
         \App\Agent\Tools\SendReplyTool::class,
         \App\Agent\Tools\HandoffToHumanTool::class,
-        \App\Agent\Tools\GetBusinessKnowledgeTool::class,
         \App\Agent\Tools\SearchMotorcyclesTool::class,
         \App\Agent\Tools\GetMotorcycleDetailsTool::class,
         \App\Agent\Tools\LookupMotorcycleSpecsOnlineTool::class,
@@ -100,7 +103,7 @@ return [
         \App\Agent\Tools\GetApplicationRequirementsTool::class,
         \App\Agent\Tools\GetInstallmentOfferTool::class,
         \App\Agent\Tools\GetInstallmentOptionsTool::class,
-        \App\Agent\Tools\CalculateInstallmentTool::class,
+        \App\Agent\Tools\RecordWorkProfileTool::class,
         \App\Agent\Tools\CheckEligibilityTool::class,
         \App\Agent\Tools\RecordCustomerDataTool::class,
         \App\Agent\Tools\StartApplicationTool::class,
@@ -287,16 +290,22 @@ return [
         // pinned-memory cap is only enforced once this is set (T08).
         'pinned_memory_tokens' => env('AGENT_CONTEXT_PINNED_MEMORY_TOKENS'),
 
-        // T16 (L7): recent-messages budget. No default - until set, L7
-        // includes the full current session with no trimming.
-        'recent_messages_tokens' => env('AGENT_CONTEXT_RECENT_MESSAGES_TOKENS'),
+        // CTX-006 (L7): recent-messages budget, in tokens as the provider
+        // bills them (TokenEstimator, calibrated from ai_calls). Filled
+        // newest first; the oldest messages that do not fit fall to the
+        // summary (L6). The current turn (L8) is never cut. 4,000 tokens
+        // = about 60-80 short WhatsApp lines.
+        'recent_messages_tokens' => env('AGENT_CONTEXT_RECENT_MESSAGES_TOKENS', 4000),
     ],
 
     'summary' => [
-        // T16: how many messages must fall out of the L7 window (since the
-        // last summary) before the summarizer job is dispatched. No
-        // default - until set, the summary is never triggered.
+        // CTX-010: the summarizer runs once this many tokens of messages
+        // fell out of the L7 window since the last summary.
+        'trigger_tokens' => env('AGENT_SUMMARY_TRIGGER_TOKENS', 1500),
+        // Legacy count trigger (either one is enough). No default.
         'trigger_messages' => env('AGENT_SUMMARY_TRIGGER_MESSAGES'),
+        // Items kept per section of the structured summary.
+        'max_items' => 8,
     ],
 
     // T15: document rule evaluator registry, keyed by document_types.validation_rules[].rule_type.

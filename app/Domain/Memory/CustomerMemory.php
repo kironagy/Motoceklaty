@@ -34,7 +34,7 @@ class CustomerMemory
     public const FACT_KEYS = [
         'name', 'age', 'job', 'workplace', 'insured', 'monthly_income', 'governorate', 'area',
         'monthly_budget', 'cash_budget', 'down_payment', 'preferred_duration', 'usage',
-        'has_driving_license', 'applicant', 'gender', 'nationality',
+        'has_driving_license', 'gender', 'nationality',
     ];
 
     /** Arabic labels for the prompt - the keys never reach the model's reply. */
@@ -62,6 +62,18 @@ class CustomerMemory
 
     private const MAX_HISTORY = 3;
 
+    /**
+     * MEM-003: a topic or open question from yesterday ("مستني صورة
+     * البطاقة" after it was accepted) was shown as current. These expire;
+     * expired items are not rendered and are dropped on the next write.
+     */
+    private const TOPIC_TTL_HOURS = 24;
+
+    private const OBJECTION_TTL_DAYS = 7;
+
+    /** Interest in a motorcycle a month ago is not interest now - unless he applied for it. */
+    private const MOTORCYCLE_TTL_DAYS = 30;
+
     public function __construct(private readonly CustomerStatements $statements)
     {
     }
@@ -76,6 +88,8 @@ class CustomerMemory
             'facts' => (array) ($memory['facts'] ?? []),
             'motorcycles' => (array) ($memory['motorcycles'] ?? []),
             'conversation' => (array) ($memory['conversation'] ?? []),
+            // facts about the person applying instead of him: {for: relation, facts: {...}}
+            'applicant_facts' => (array) ($memory['applicant_facts'] ?? []),
         ];
     }
 
@@ -112,6 +126,16 @@ class CustomerMemory
             $verified = $quote !== '' && $this->quoteIsHis($conversationId, $quote)
                 && ($key !== 'age' || $this->ageInQuote($value, $quote));
 
+            // Conversation 206: "عندها ٤٥" (his mother) replaced HIS age 20 and
+            // "عنده ٢١ سنه" (his brother) replaced it again. Another person's
+            // facts are kept apart, for the person applying now only.
+            if (($fact['about'] ?? 'customer') === 'other_applicant') {
+                $result = $this->putApplicantFact($memory, $conversationId, $key, $value, $verified ? 'customer_statement' : 'ai_inference', $verified ? $quote : null, $now);
+                $result === null ? $rejected[] = ['item' => $key, 'code' => 'WEAKER_THAN_STATED'] : $applied[] = "applicant_fact:{$key}";
+
+                continue;
+            }
+
             $result = $this->putFact($memory, $key, $value, $verified ? 'customer_statement' : 'ai_inference', $verified ? $quote : null, $conversationId, $now);
 
             $result === null ? $rejected[] = ['item' => $key, 'code' => 'WEAKER_THAN_STATED'] : $applied[] = "fact:{$key}";
@@ -128,6 +152,9 @@ class CustomerMemory
             if (array_key_exists($field, $update)) {
                 $text = trim((string) $update[$field]);
                 $conversation[$field] = $text === '' ? null : mb_substr($text, 0, $limit);
+                $conversation[$field.'_at'] = $text === '' ? null : $now;
+                // written in this stage; a new stage (application opened, submitted) ends it
+                $conversation['stage'] = $this->stage($customerId);
                 $applied[] = $field;
             }
         }
@@ -135,6 +162,7 @@ class CustomerMemory
         if (isset($update['objections']) && is_array($update['objections'])) {
             $objections = array_values(array_filter(array_map(fn ($o) => mb_substr(trim((string) $o), 0, 60), $update['objections'])));
             $conversation['objections'] = array_slice($objections, 0, 4);
+            $conversation['objections_at'] = $now;
             $applied[] = 'objections';
         }
 
@@ -166,7 +194,7 @@ class CustomerMemory
                 'get_installment_offer', 'calculate_installment', 'send_motorcycle_images' => [(int) ($args['motorcycle_id'] ?? 0)],
                 // the tool may fill the motorcycle from the last quote: the application says which
                 'start_application', 'update_application_selection' => [(int) ($args['motorcycle_id'] ?? 0)
-                    ?: (int) \App\Models\Application::whereKey((int) ($data['application_id'] ?? $data['snapshot']['application_id'] ?? 0))->value('machine_id')],
+                    ?: (int) \App\Models\Application::whereKey((int) ($data['application_id'] ?? $data['snapshot']['application_id'] ?? $data['application_now']['application_id'] ?? 0))->value('machine_id')],
                 'get_motorcycle_details' => array_map('intval', (array) ($args['motorcycle_ids'] ?? [])),
                 'submit_application' => ($data['submitted'] ?? false) === true
                     ? [(int) \App\Models\Application::where('customer_id', $customerId)->whereNotNull('submitted_at')->latest('id')->value('machine_id')]
@@ -227,14 +255,24 @@ class CustomerMemory
      * The memory as a short block for the system prompt - Arabic labels,
      * provenance spelled out, nothing a customer could be shown verbatim.
      */
-    public function forPrompt(int $customerId, ?int $conversationId = null): ?string
+    /** Memory facts the application also holds, by application field key. */
+    private const APPLICATION_KEYS = ['name' => 'full_name', 'monthly_income' => 'monthly_income'];
+
+    public function forPrompt(int $customerId, ?int $conversationId = null, ?int $applicationId = null): ?string
     {
-        $memory = $this->get($customerId);
+        $memory = $this->withoutExpired($this->get($customerId), $customerId);
         $lines = [];
 
         $stated = [];
         $guessed = [];
         $changed = [];
+        $conflicts = [];
+
+        // One value per fact: what the application holds is shown with the
+        // application; a document/staff value beats his words (rebuild).
+        $held = $applicationId === null ? collect() : \App\Models\ApplicationData::where('application_id', $applicationId)
+            ->where('party', 'applicant')->where('status', 'valid')->whereIn('field_key', array_values(self::APPLICATION_KEYS))
+            ->get(['field_key', 'value', 'source'])->keyBy('field_key');
 
         foreach (self::FACT_KEYS as $key) {
             $fact = $memory['facts'][$key] ?? null;
@@ -245,6 +283,15 @@ class CustomerMemory
 
             $label = self::FACT_LABELS[$key];
             $entry = "{$label}: {$fact['value']}";
+
+            if (($row = $held->get(self::APPLICATION_KEYS[$key] ?? '')) !== null && filled($row->value)) {
+                if (in_array($row->source, ['document', 'staff'], true)
+                    && \App\Support\ArabicTextNormalizer::normalize((string) $row->value) !== \App\Support\ArabicTextNormalizer::normalize((string) $fact['value'])) {
+                    $conflicts[] = "{$label}: قال \"{$fact['value']}\" والمستند فيه \"{$row->value}\" - المستند هو الصح";
+                }
+
+                continue;
+            }
 
             if (($fact['source'] ?? null) === 'ai_inference') {
                 $guessed[] = $entry;
@@ -263,6 +310,25 @@ class CustomerMemory
 
         if ($stated !== []) {
             $lines[] = 'قاله بنفسه: '.implode(' · ', $stated);
+        }
+
+        $applicantFacts = $memory['applicant_facts'] ?? [];
+        $nowFor = $conversationId !== null ? \App\Domain\Applications\Applicant::label(
+            \App\Domain\Applications\Applicant::fromProfile(app(\App\Domain\Applications\WorkProfiles::class)->get($conversationId))
+        ) : null;
+
+        if (! empty($applicantFacts['facts']) && ($applicantFacts['for'] ?? null) === $nowFor) {
+            $about = [];
+
+            foreach ($applicantFacts['facts'] as $key => $fact) {
+                $about[] = (self::FACT_LABELS[$key] ?? $key).': '.$fact['value'].(($fact['source'] ?? null) === 'ai_inference' ? ' (مش مؤكد)' : '');
+            }
+
+            $lines[] = "عن اللي هيقدّم بدله ({$nowFor}) - مش عنه هو: ".implode(' · ', $about);
+        }
+
+        if ($conflicts !== []) {
+            $lines[] = 'كلامه عكس المستند (اسأله بلطف لو فرقت): '.implode(' · ', $conflicts);
         }
 
         if ($changed !== []) {
@@ -333,6 +399,19 @@ class CustomerMemory
     }
 
     // ---------------------------------------------------------------- internals
+
+    /** Facts about the person applying instead of him - dropped when that person changes. */
+    private function putApplicantFact(array &$memory, int $conversationId, string $key, string $value, string $source, ?string $quote, string $now): ?string
+    {
+        $for = \App\Domain\Applications\Applicant::label(
+            \App\Domain\Applications\Applicant::fromProfile(app(\App\Domain\Applications\WorkProfiles::class)->get($conversationId))
+        );
+        $sub = ($memory['applicant_facts']['for'] ?? null) === $for ? ['facts' => (array) ($memory['applicant_facts']['facts'] ?? [])] : ['facts' => []];
+        $result = $this->putFact($sub, $key, $value, $source, $quote, $conversationId, $now);
+        $memory['applicant_facts'] = ['for' => $for, 'facts' => $sub['facts']];
+
+        return $result;
+    }
 
     /** @return ?string the stored source, or null when refused */
     private function putFact(array &$memory, string $key, string $value, string $source, ?string $quote, int $conversationId, string $now): ?string
@@ -474,8 +553,49 @@ class CustomerMemory
         return $motorcycles;
     }
 
+    /**
+     * MEM-003: topic / open question after 24 h or a stage change,
+     * objections after 7 days, a motorcycle's stage after 30 days unless he
+     * applied for it. Items written before the per-item time existed use the
+     * block's updated_at.
+     */
+    private function withoutExpired(array $memory, int $customerId): array
+    {
+        $conversation = (array) ($memory['conversation'] ?? []);
+        $fallback = $conversation['updated_at'] ?? null;
+        $older = fn (?string $at, \Illuminate\Support\Carbon $limit) => $at === null || \Illuminate\Support\Carbon::parse($at)->lt($limit);
+        $stageChanged = isset($conversation['stage']) && $conversation['stage'] !== $this->stage($customerId);
+
+        foreach (['topic', 'open_question'] as $field) {
+            if (isset($conversation[$field]) && ($stageChanged || $older($conversation[$field.'_at'] ?? $fallback, now()->subHours(self::TOPIC_TTL_HOURS)))) {
+                unset($conversation[$field], $conversation[$field.'_at']);
+            }
+        }
+
+        if (! empty($conversation['objections']) && $older($conversation['objections_at'] ?? $fallback, now()->subDays(self::OBJECTION_TTL_DAYS))) {
+            unset($conversation['objections'], $conversation['objections_at']);
+        }
+
+        if (! isset($conversation['topic']) && ! isset($conversation['open_question'])) {
+            unset($conversation['stage']);
+        }
+
+        $memory['conversation'] = array_diff_key($conversation, ['updated_at' => 1]) === [] ? [] : $conversation;
+        $memory['motorcycles'] = array_filter((array) ($memory['motorcycles'] ?? []), fn ($bike) => ($bike['stage'] ?? null) === 'applied'
+            || ! $older($bike['last_at'] ?? null, now()->subDays(self::MOTORCYCLE_TTL_DAYS)));
+
+        return $memory;
+    }
+
+    /** The structured stage of this customer: his latest application's status, or browsing. */
+    private function stage(int $customerId): string
+    {
+        return (string) (\App\Models\Application::where('customer_id', $customerId)->latest('id')->value('status') ?? 'browsing');
+    }
+
     private function save(int $customerId, array $memory): void
     {
+        $memory = $this->withoutExpired($memory, $customerId);
         $memory['v'] = 1;
         Customer::whereKey($customerId)->update(['memory' => json_encode($memory, JSON_UNESCAPED_UNICODE)]);
     }

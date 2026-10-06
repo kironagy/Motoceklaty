@@ -29,7 +29,7 @@ class GeminiClient
         // 1 char = 1 token was ~3.7x too pessimistic in practice for this
         // Arabic-heavy content (measured via real usageMetadata.promptTokenCount
         // responses), causing tighter TPS-window rejections than necessary.
-        $estimatedTokens = (int) ceil(mb_strlen($prompt) / 4);
+        $estimatedTokens = \App\Agent\Context\TokenEstimator::estimate($prompt, 'gemini');
 
         while (true) {
             $modelRow = $manager->reserveAvailableModel(

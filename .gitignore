@@ -57,3 +57,5 @@ yarn-error.log
 
 # Single-instance runtime lockfiles (B2/B7)
 /whatsapp-bot/whatsapp-bot.lock
+/whatsapp-bot/spool/
+/whatsapp-bot/sent-items/

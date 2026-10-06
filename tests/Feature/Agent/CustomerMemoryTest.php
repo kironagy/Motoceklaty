@@ -252,7 +252,9 @@ class CustomerMemoryTest extends TestCase
         $silent = (new SendReplyTool())->execute(['messages' => [], 'no_reply' => true], $this->ctx($conversation, $customer, 1));
         $this->assertTrue($silent->ok);
 
-        $this->says($conversation, 'طب الهوجن بكام؟', 2);
+        // after our own question an answer is owed, whatever he wrote
+        $this->botSays($conversation, 'تحب أبعتلك صورها؟');
+        $this->says($conversation, 'اه', 2);
         $refused = (new SendReplyTool())->execute(['messages' => [], 'no_reply' => true], $this->ctx($conversation, $customer, 2));
         $this->assertFalse($refused->ok);
         $this->assertSame('REPLY_REQUIRED', $refused->error['code']);
@@ -275,6 +277,8 @@ class CustomerMemoryTest extends TestCase
         CustomerType::firstOrCreate(['key' => 'self_employed'], ['label' => 'عامل حر', 'is_active' => true]);
         $this->says($conversation, 'شغال صنايعي ميكانيكي');
         $this->says($conversation, 'سني 18');
+        // the age is a fact the model recorded - never parsed from his text by the tool
+        $this->memory()->applyModelUpdate($customer->id, $conversation->id, ['facts' => [['key' => 'age', 'value' => '18', 'quote' => 'سني 18']]]);
 
         $result = app(StartApplicationTool::class)->execute(['customer_type' => 'self_employed', 'customer_type_quote' => 'شغال صنايعي ميكانيكي'], $this->ctx($conversation, $customer));
 
@@ -282,7 +286,6 @@ class CustomerMemoryTest extends TestCase
         $this->assertSame('AGE_BELOW_MINIMUM_STATED', $result->error['code']);
         $this->assertSame(0, \App\Models\Application::count());
 
-        $this->memory()->applyModelUpdate($customer->id, $conversation->id, ['facts' => [['key' => 'age', 'value' => '18', 'quote' => 'سني 18']]]);
         $this->assertStringContainsString('أقل من 21', $this->memory()->forPrompt($customer->id));
     }
 

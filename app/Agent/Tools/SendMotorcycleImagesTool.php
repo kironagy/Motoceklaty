@@ -7,7 +7,7 @@ use App\Models\WhatsappConversation;
 use Illuminate\Support\Facades\Storage;
 
 /** WRITE (outbound queue) — plan §6.3 */
-class SendMotorcycleImagesTool implements Tool
+class SendMotorcycleImagesTool implements WriteTool
 {
     public function __construct(private readonly CatalogService $catalog)
     {

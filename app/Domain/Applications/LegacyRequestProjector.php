@@ -76,7 +76,7 @@ class LegacyRequestProjector
      * Customer/guarantor/work/document columns only - the selection columns
      * (machine, plan, deposit, status ...) are set by the caller.
      */
-    public function attributes(Application $application, string $legacyWorkStatus): array
+    public function attributes(Application $application, string $legacyWorkStatus, bool $aiAddressSplit = true): array
     {
         $application->loadMissing(['customer', 'machine.brand', 'installmentPlan.installmentSystem']);
 
@@ -150,27 +150,63 @@ class LegacyRequestProjector
             ]];
         }
 
+        $attributes = array_merge($attributes, $this->addressColumns($application, $aiAddressSplit, $applicant, $facts));
+
+        return array_merge($attributes, $this->documents($application));
+    }
+
+    /**
+     * APP-006: the address columns alone. Without the AI split (submit) the
+     * deterministic AddressParser divides the line at once; the AI split
+     * runs later in SplitRequestAddresses and fills what staff left as is.
+     *
+     * @return array<string, ?string>
+     */
+    public function addressColumns(Application $application, bool $aiSplit = true, ?array $applicant = null, ?array $facts = null): array
+    {
+        $applicant ??= $this->values($application, 'applicant');
+        $facts ??= $this->documentFacts($application);
+
+        $columns = [
+            'applicant_street' => $applicant['address'] ?? null,
+            'applicant_building_number' => $applicant['address_building_no'] ?? null,
+            'applicant_floor' => $applicant['address_floor'] ?? null,
+            'applicant_apartment' => $applicant['address_apartment'] ?? null,
+            'applicant_landmark' => $applicant['address_landmark'] ?? null,
+            'applicant_address' => $this->joinAddress([
+                isset($applicant['address_building_no']) ? "رقم العقار {$applicant['address_building_no']}" : null,
+                $applicant['address'] ?? null,
+                isset($applicant['address_floor']) ? "الدور {$applicant['address_floor']}" : null,
+                isset($applicant['address_apartment']) ? "شقة {$applicant['address_apartment']}" : null,
+                isset($applicant['address_landmark']) ? "بجوار {$applicant['address_landmark']}" : null,
+            ]),
+            'work_address' => $applicant['work_address'] ?? null,
+            'work_street' => $applicant['work_address'] ?? null,
+            'work_building_number' => $applicant['work_building_no'] ?? null,
+            'work_landmark' => $applicant['work_landmark'] ?? null,
+        ];
+
         foreach (['applicant' => self::HOME_FIELDS, 'work' => self::WORK_FIELDS] as $prefix => $fields) {
-            $split = $this->splitAddress($application, $applicant, $fields, $prefix);
+            $split = $this->splitAddress($application, $applicant, $fields, $prefix, $aiSplit);
 
             // Request 4391: "مدينة بدر ... قطعة 194" has no street - the
             // split put it in area + building, and the whole line stayed
             // in the street column on top of them.
             if ($split !== [] && ! isset($split[$prefix.'_street'])) {
-                $attributes[$prefix.'_street'] = null;
+                $columns[$prefix.'_street'] = null;
             }
 
-            $attributes = array_merge($attributes, $split);
+            $columns = array_merge($columns, $split);
         }
 
         // Owner 2026-10-04: staff could not see where he works. The name of
         // the company/shop leads the full work address.
-        if (($place = $this->workPlaceName($application, $applicant, $facts)) !== null && filled($attributes['work_address'] ?? null)
-            && ! str_contains((string) $attributes['work_address'], $place)) {
-            $attributes['work_address'] = $place.' - '.$attributes['work_address'];
+        if (($place = $this->workPlaceName($application, $applicant, $facts)) !== null && filled($columns['work_address'] ?? null)
+            && ! str_contains((string) $columns['work_address'], $place)) {
+            $columns['work_address'] = $place.' - '.$columns['work_address'];
         }
 
-        return array_merge($attributes, $this->documents($application));
+        return $columns;
     }
 
     /**
@@ -200,7 +236,7 @@ class LegacyRequestProjector
      *
      * @return array<string, string>
      */
-    private function splitAddress(Application $application, array $values, array $fields, string $prefix): array
+    private function splitAddress(Application $application, array $values, array $fields, string $prefix, bool $aiSplit = true): array
     {
         $stored = array_filter(array_intersect_key($values, $fields));
 
@@ -208,7 +244,7 @@ class LegacyRequestProjector
             return [];
         }
 
-        $parts = $this->addresses->split($stored, $this->evidenceMessages($application, array_keys($fields)), $prefix === 'work' ? 'work' : 'home');
+        $parts = $aiSplit ? $this->addresses->split($stored, $this->evidenceMessages($application, array_keys($fields)), $prefix === 'work' ? 'work' : 'home') : [];
         $lineKey = array_search('street', $fields, true);
         $line = (string) ($values[$lineKey] ?? '');
         $parser = app(AddressParser::class);

@@ -44,6 +44,7 @@ class GeminiVoiceTranscriber implements VoiceTranscriber
         try {
             $response = $this->provider->chat(new AiRequest(
                 purpose: 'voice',
+                label: 'voice',
                 system: self::PROMPT,
                 contents: [
                     ['role' => 'user', 'parts' => [

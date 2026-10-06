@@ -96,12 +96,13 @@ class DocumentExtractionTest extends TestCase
         }
     }
 
-    public function test_the_focused_read_of_the_type_fills_and_corrects_the_first_one(): void
+    public function test_the_focused_read_of_the_type_fills_a_missing_required_field(): void
     {
         [$application, $media, $ctx] = $this->application();
-        // live 2026-09-26: the generic call read "٦٬٧٧٥" as 6075 and no hire date
+        // live 2026-09-26: the generic call skipped the net salary and the hire date.
+        // DOC-001: only a missing REQUIRED field pays for the second read.
         $this->reads('salary_slip',
-            ['full_name' => 'محمد احمد علي حسن', 'monthly_income' => '6075', 'salary_slip_date' => now()->subMonth()->toDateString()],
+            ['full_name' => 'محمد احمد علي حسن', 'salary_slip_date' => now()->subMonth()->toDateString()],
             ['monthly_income' => '6775', 'hire_date' => '2019-03-15', 'job_title' => 'مشرف إنتاج'],
         );
 
@@ -113,6 +114,48 @@ class DocumentExtractionTest extends TestCase
         $this->assertSame('2019-03-15', $extracted['hire_date']);
         $this->assertSame('مشرف إنتاج', $extracted['job_title']);
         $this->assertSame(['full_name', 'monthly_income', 'salary_slip_date'], $this->ai->requests()[1]->responseSchema['required']);
+        $this->assertCount(2, $this->ai->requests());
+    }
+
+    public function test_a_clear_place_photo_with_an_unreadable_sign_is_accepted_and_asks_for_the_tax_card(): void
+    {
+        // Owner 2026-10-05: the photo must be clear; a sign that does not read
+        // is backed by the tax card, never by a name typed in the chat.
+        DocumentType::create(['key' => 'business_place_photo', 'label' => 'صورة مكان النشاط', 'description_for_ai' => 'place', 'accepted_mimes' => ['image/jpeg'],
+            'extraction_fields' => ['business_activity'], 'optional_fields' => ['business_name'], 'validation_rules' => [], 'is_active' => true]);
+        [, $media, $ctx] = $this->application();
+        $this->reads('business_place_photo', ['business_activity' => 'قهوة']);
+
+        $item = app(ProcessDocumentTool::class)->execute(['media_ids' => [$media->id]], $ctx)->data['results'][0];
+
+        $this->assertTrue($item['accepted'], json_encode($item['issues'] ?? []));
+        $this->assertSame('tax_card_needed', $item['sign_not_readable']);
+    }
+
+    public function test_a_blurry_place_photo_is_still_refused(): void
+    {
+        DocumentType::create(['key' => 'business_place_photo', 'label' => 'صورة مكان النشاط', 'description_for_ai' => 'place', 'accepted_mimes' => ['image/jpeg'],
+            'extraction_fields' => ['business_activity'], 'optional_fields' => ['business_name'], 'validation_rules' => [], 'is_active' => true]);
+        [, $media, $ctx] = $this->application();
+        $this->reads('business_place_photo', []);
+        $this->reads('business_place_photo', [], []);
+
+        $item = app(ProcessDocumentTool::class)->execute(['media_ids' => [$media->id]], $ctx)->data['results'][0];
+
+        $this->assertFalse($item['accepted']);
+    }
+
+    public function test_a_complete_first_read_is_the_only_call(): void
+    {
+        [, $media, $ctx] = $this->application();
+        $this->reads('salary_slip', ['full_name' => 'محمد احمد علي حسن', 'monthly_income' => '6775', 'salary_slip_date' => now()->subMonth()->toDateString()]);
+
+        $item = app(ProcessDocumentTool::class)->execute(['media_ids' => [$media->id]], $ctx)->data['results'][0];
+
+        $this->assertTrue($item['accepted'], json_encode($item['issues']));
+        $this->assertCount(1, $this->ai->requests());
+        // the focused read's rules are in the one read now
+        $this->assertStringContainsString('digit by digit', $this->ai->requests()[0]->system);
     }
 
     public function test_a_salary_slip_gives_the_net_salary_its_month_and_the_hire_date(): void

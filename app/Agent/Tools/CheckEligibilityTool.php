@@ -10,7 +10,7 @@ use App\Models\InstallmentPlan;
 use App\Models\Machine;
 
 /** READ — plan §6.7. The tool contains no rules; everything goes through EligibilityService (T11). */
-class CheckEligibilityTool implements Tool
+class CheckEligibilityTool implements ReadTool
 {
     public function __construct(
         private readonly EligibilityService $eligibility,
@@ -37,9 +37,11 @@ class CheckEligibilityTool implements Tool
         return [
             'type' => 'object',
             'properties' => [
+                'about' => ['type' => 'string', 'enum' => ['customer', 'other_applicant'], 'description' => 'Whose age/work this is: customer = the one chatting; other_applicant = the person applying instead of him (his mother, brother...). Default customer.'],
                 'customer_type' => ['type' => 'string'],
                 'work' => ['type' => 'string', 'description' => 'His own words about his work, e.g. "انا امين شرطة".'],
                 'age' => ['type' => 'integer'],
+                'monthly_income' => ['type' => 'number', 'description' => 'Net monthly income or pension he stated, e.g. "المعاش ٢٠٠٠" = 2000.'],
                 'months' => ['type' => 'integer', 'description' => 'Installment duration, to check the age at the last installment.'],
                 'motorcycle_id' => ['type' => 'integer'],
                 'plan_id' => ['type' => 'integer'],
@@ -83,6 +85,12 @@ class CheckEligibilityTool implements Tool
             $facts['months'] = (int) $args['months'];
         }
 
+        // Replay of conversation 206: "المعاش ٢٠٠٠ج هينفع؟" could not be
+        // checked (no income input) and got "عمره كام؟" instead of an answer.
+        if (isset($args['monthly_income']) && (float) $args['monthly_income'] > 0) {
+            $facts['monthly_income'] = (float) $args['monthly_income'];
+        }
+
         if (isset($args['motorcycle_id'])) {
             $machine = Machine::where('is_active', true)->find($args['motorcycle_id']);
 
@@ -97,34 +105,48 @@ class CheckEligibilityTool implements Tool
 
         // QA 2026-10-04: "١٩ سنه" was refused, then "لا انا ٢٢، اكتب ٢٢" got
         // "أنت مؤهل للتقسيط". A stated age only screens; the ID decides.
+        // Conversation 206: his mother's 45 and his brother's 21 were each
+        // taken as HIM changing his age after the refusal at 20.
+        $aboutOther = ($args['about'] ?? 'customer') === 'other_applicant';
+
         if (isset($facts['age']) && ($result['status'] ?? null) === 'eligible') {
-            if ($this->ageRefusedEarlier($ctx->conversationId)) {
+            if (! $aboutOther && $this->ageRefusedEarlier($ctx->conversationId)) {
+                // what to do with it is in the instructions (rebuild: facts only here)
                 return ToolResult::ok([
                     'status' => 'needs_id',
                     'reasons' => [['code' => 'AGE_CHANGED_AFTER_REFUSAL']],
-                    'note' => 'He gave another age after his age was refused. The age is read from his national ID only: tell him '
-                        .'kindly that the age is taken from the ID card, and do not say he is eligible or open an application on his word.',
                 ]);
             }
 
-            $result['note'] = 'Stated age only - his national ID decides. Do not tell him he is eligible or accepted; just go on.';
+            $result['decided_by'] = 'stated_age';
         }
 
         // Replayed 2026-10-04: "سبت التدريس وبشتغل سواق اوبر" was checked for
         // his work and answered "عندك عمرك كام؟" - the missing age in the
         // result read as a question to ask. The age comes from his ID.
         if (! isset($facts['age'])) {
-            $result['age_note'] = 'No age was checked - that is fine. Do not ask his age for this; it is read from his national ID if he applies.';
+            $result['age_checked'] = false;
         }
 
         if (filled($facts['work_statement'] ?? null)
             && ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, 'employee', $facts['work_statement']))) {
-            if ($problem['code'] === 'OCCUPATION_NOT_ACCEPTED') {
+            if ($problem['code'] === 'APPLICANT_HAS_NO_WORK') {
+                // "امي مش شغاله بس عندها شقه تمليك" was asked her age and ID:
+                // the one who applies must work or be on a pension.
+                $result['status'] = 'not_eligible';
+                $result['reasons'] = array_merge($result['reasons'] ?? [], [['code' => 'APPLICANT_HAS_NO_WORK']]);
+            } elseif ($problem['code'] === 'OCCUPATION_NOT_ACCEPTED') {
                 $result['occupation_not_accepted'] = $problem['hint'];
             } elseif ($problem['code'] === 'ASK_SECTOR') {
                 // "انا مدرس" was told teachers are refused: a private school is fine.
-                $result['ask_sector'] = $problem['hint'].' Do not say his work is refused or accepted before he answers.';
+                $result['ask_sector'] = $problem['hint'];
             }
+        }
+
+        if (($result['status'] ?? null) === 'not_eligible' && \App\Domain\Applications\OtherApplicant::appliesTo(array_column($result['reasons'] ?? [], 'code'))) {
+            $result['other_applicant_line'] = \App\Domain\Applications\OtherApplicant::line(
+                $aboutOther || (app(\App\Domain\Applications\WorkProfiles::class)->get($ctx->conversationId)['applicant'] ?? null) === 'someone_else'
+            );
         }
 
         return ToolResult::ok($result);

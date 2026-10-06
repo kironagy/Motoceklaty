@@ -12,6 +12,7 @@ class Application extends Model
         'customer_id',
         'origin_conversation_id',
         'customer_type_id',
+        'applicant',
         'machine_id',
         'installment_plan_id',
         'down_payment',
@@ -27,6 +28,7 @@ class Application extends Model
         'submitted_at' => 'datetime',
         'last_activity_at' => 'datetime',
         'staff_request' => 'array',
+        'applicant' => 'array',
     ];
 
     /** Statuses that count as "still open" for the active-application policy (T13 §3). */

@@ -7,7 +7,7 @@ use App\Domain\Applications\SubmissionService;
 use App\Models\Application;
 
 /** DESTRUCTIVE — plan §6.13 */
-class SubmitApplicationTool implements Tool
+class SubmitApplicationTool implements WriteTool
 {
     public function __construct(private readonly SubmissionService $submissions)
     {
@@ -61,11 +61,8 @@ class SubmitApplicationTool implements Tool
         }
 
         if ($result['submitted'] === true) {
-            return ToolResult::ok(['submitted' => true, 'reference' => $result['reference'],
-                'tell_customer' => 'Give him his request number: #'.($result['reference']['installment_request_id'] ?? '').' - he quotes it at the branch.']
-                + (($result['resubmitted'] ?? false)
-                ? ['resubmitted' => true, 'note' => 'What staff asked for was sent back to the same request, now under review again. Tell him that in one line.']
-                : []));
+            return ToolResult::ok(['submitted' => true, 'reference' => $result['reference']]
+                + (($result['resubmitted'] ?? false) ? ['resubmitted' => true] : []));
         }
 
         // Not submitted is never a success. The summary is sent by Laravel,
@@ -75,8 +72,7 @@ class SubmitApplicationTool implements Tool
         // QA 2026-10-04: the line before the summary said "ناقص الرقم القومي ونوع
         // الشغل" while the summary showed them recorded (✓), and an "اه" after
         // it got "عايز أقدّم دلوقتي؟" twice more.
-        return ToolResult::error('CUSTOMER_CONFIRMATION_REQUIRED', 'NOT submitted yet. The stored summary goes to him right after your message. '
-            .'Your message: ONE short line only, e.g. "ده ملخص طلبك، راجعه ولو كله تمام قولّي اه" - list nothing, never say something is missing '
-            .'(✓ means recorded). His next message accepting it (اه، تمام، ماشي، صح، قدم) = call submit_application confirm=true at once, no other question.');
+        // what the reply around the summary is: the instructions (§٨)
+        return ToolResult::error('CUSTOMER_CONFIRMATION_REQUIRED', 'Not submitted yet. The stored summary is sent to him right after your message.');
     }
 }

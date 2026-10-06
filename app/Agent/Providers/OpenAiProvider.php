@@ -389,6 +389,6 @@ class OpenAiProvider
             }
         }
 
-        return (int) ceil($chars / 4);
+        return (int) ceil($chars / \App\Agent\Context\TokenEstimator::charsPerToken('openai'));
     }
 }

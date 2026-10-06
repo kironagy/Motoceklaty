@@ -6,7 +6,7 @@ use App\Agent\Tracing\Redactor;
 use App\Models\WhatsappMessage;
 
 /** READ — plan §6.17 */
-class GetEarlierMessagesTool implements Tool
+class GetEarlierMessagesTool implements ReadTool
 {
     public function name(): string
     {

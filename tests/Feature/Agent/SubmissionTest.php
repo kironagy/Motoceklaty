@@ -350,6 +350,8 @@ class SubmissionTest extends TestCase
         app(\App\Agent\Tools\WithdrawApplicationTool::class)->execute(['reason_code' => 'customer_request'], $this->ctx($conversation, $application, 3));
 
         WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'لا خلاص كمل انا موظف']);
+        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف', 'occupation' => 'موظف', 'work_stated' => true, 'customer_type' => 'employee',
+            'working_now' => 'yes', 'relation_to_workplace' => 'works_for_someone', 'insured' => 'yes'], $this->ctx($conversation, $application, 4));
         $result = app(\App\Agent\Tools\StartApplicationTool::class)->execute(['customer_type' => 'employee', 'customer_type_quote' => 'انا موظف'], $this->ctx($conversation, $application, 4));
 
         $this->assertTrue($result->ok);
@@ -643,7 +645,7 @@ class SubmissionTest extends TestCase
 
         $mine = app(\App\Domain\Applications\CustomerRequestStatus::class)->for($conversation->customer, $conversation);
         $this->assertSame($request->id, $mine[0]['request_number']);
-        $this->assertStringContainsString('Final', $mine[0]['note']);
+        $this->assertSame('credit_record_final', $mine[0]['refusal']);
     }
 
     public function test_a_pause_with_only_a_reason_has_the_bot_get_it_from_him(): void
@@ -690,15 +692,4 @@ class SubmissionTest extends TestCase
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/send-message') && $r['bot_id'] === (string) $live->id);
     }
 
-    public function test_the_submit_reply_must_carry_the_request_number(): void
-    {
-        [$application, $conversation] = $this->completeApplication();
-        $result = $this->submitConfirmed($conversation, $application);
-        $number = (string) $result->data['reference']['installment_request_id'];
-        $outcomes = [['name' => 'submit_application', 'ok' => true, 'data' => $result->data]];
-        $check = fn (string $reply) => app(\App\Agent\Runtime\ReplyGuard::class)->check(['messages' => [$reply]], $conversation, '', [], $outcomes);
-
-        $this->assertSame('REQUEST_NUMBER_MISSING', $check('تمام يا باشا، الطلب اتبعت للمراجعة.'));
-        $this->assertNull($check("تمام يا باشا، طلبك اتبعت للمراجعة ورقمه #{$number}."));
-    }
 }

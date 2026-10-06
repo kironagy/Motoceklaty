@@ -12,7 +12,7 @@ use App\Models\MessageMedia;
 use Illuminate\Support\Facades\Storage;
 
 /** READ (caches result on the media row) — plan §6.4 */
-class IdentifyMotorcycleFromImageTool implements Tool
+class IdentifyMotorcycleFromImageTool implements ReadTool
 {
     public function __construct(
         private readonly AiProvider $provider,
@@ -77,6 +77,7 @@ class IdentifyMotorcycleFromImageTool implements Tool
         try {
             $response = $this->provider->chat(new AiRequest(
                 purpose: 'image',
+                label: 'image',
                 system: "You identify a motorcycle photo against this catalog (id: name), one per line:\n{$catalogList}\n\n"
                     .'Identify the MAIN motorcycle only: the one in the centre / in focus / taking most of the frame. '
                     .'Set vehicle_count to how many motorcycles or scooters are visible (even partly). '
@@ -179,21 +180,14 @@ class IdentifyMotorcycleFromImageTool implements Tool
             'identified_by' => $identifiedBy,
             'candidates' => $candidates->all(),
             'observed' => $parsed['observed'] ?? [],
-        ] + ($vehicleCount > 1 ? [
-            'vehicle_count' => $vehicleCount,
-            'note' => 'Several motorcycles are in this photo. Do not claim which model it is: name the likely candidate(s) '
-                .'and ask which bike in the photo the customer means.',
-        ] : []);
+        ] + ($vehicleCount > 1 ? ['vehicle_count' => $vehicleCount] : []);
 
         // Simulator 691: an SRK 250 photo, then "ايه المتاح؟" got 150cc
         // bikes. What the photo shows is what he is after.
         if ($band === 'not_in_catalog' && ($cc = CustomerInterest::ccIn($observedModel)) !== null) {
             $kind = str_contains(mb_strtolower((string) ($parsed['observed']['style'] ?? '')), 'scooter') ? 'scooter' : 'motorcycle';
-            CustomerInterest::remember($ctx->conversationId, trim(($parsed['observed']['brand'] ?? '').' '.$observedModel), $cc, $kind);
             $result['similar_available'] = app(\App\Domain\Catalog\CatalogService::class)->similar($cc, $kind, null, 5);
-            $result['note'] = trim(($result['note'] ?? '').' Alternatives are similar_available (same kind, about '.$cc.'cc) - never other sizes or kinds unless he asks.');
-        } elseif ($band === 'match' && ($top = $candidates->first())) {
-            CustomerInterest::rememberMachine($ctx->conversationId, Machine::with('brand')->find($top['motorcycle_id']));
+            $result['similar_cc'] = $cc;
         }
 
         $media->update(['analysis' => $result]);

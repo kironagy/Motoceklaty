@@ -61,7 +61,7 @@ class BusinessMemoryResource extends Resource
     /** char/4, matching the estimate already used in GeminiClient. */
     public static function estimateTokens(?string $content): int
     {
-        return (int) ceil(mb_strlen((string) $content) / 4);
+        return \App\Agent\Context\TokenEstimator::estimate((string) $content);
     }
 
     public static function form(Form $form): Form

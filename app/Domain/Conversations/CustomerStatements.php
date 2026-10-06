@@ -114,30 +114,6 @@ class CustomerStatements
         return $runs;
     }
 
-    /** The newest customer message matching $pattern (run on the normalized text), or null. */
-    public function messageMatching(int $conversationId, string $pattern, int $recent = self::MAX_MESSAGES): ?int
-    {
-        foreach (array_slice($this->messages($conversationId), 0, $recent) as $message) {
-            if (preg_match($pattern, \App\Support\ArabicTextNormalizer::normalize($message['text']))) {
-                return $message['id'];
-            }
-        }
-
-        return null;
-    }
-
-    /** Whether any recent customer message matches $pattern (run on the normalized text). */
-    public function anyMessageMatches(int $conversationId, string $pattern): bool
-    {
-        foreach ($this->messages($conversationId) as $message) {
-            if (preg_match($pattern, \App\Support\ArabicTextNormalizer::normalize($message['text']))) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     /** @return string[] recent customer messages, normalized, newest first */
     public function recentTexts(int $conversationId): array
     {

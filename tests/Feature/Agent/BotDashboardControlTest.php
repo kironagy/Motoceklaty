@@ -98,10 +98,10 @@ class BotDashboardControlTest extends TestCase
 
         $simulator = app(ConversationSimulator::class);
         $conversation = $simulator->start('test');
-        $result = $simulator->send($conversation, 'السلام عليكم');
+        $result = $simulator->send($conversation, 'عايز موتوسيكل');
 
         $this->assertNull($result['error']);
-        $this->assertSame(['أهلاً بيك، تحت أمرك'], $result['reply']);
+        $this->assertSame(['أهلا بيك، تحت أمرك'], $result['reply']);
         $this->assertFalse((bool) $simulator->bot()->is_active);
 
         $this->assertSame(1, WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
@@ -167,7 +167,7 @@ class BotDashboardControlTest extends TestCase
         $conversation = $simulator->start();
 
         $fake->queue($reply('أهلاً'));
-        $simulator->send($conversation, 'السلام عليكم');
+        $simulator->send($conversation, 'عايز موتوسيكل');
 
         // the second turn's services must not reuse the first turn's message cache
         $fake->queue($reply('تمام'));

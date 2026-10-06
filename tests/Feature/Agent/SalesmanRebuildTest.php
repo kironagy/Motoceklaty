@@ -74,43 +74,6 @@ class SalesmanRebuildTest extends TestCase
         return new AiResponse([json_encode($data, JSON_UNESCAPED_UNICODE)], [], 'STOP', ['input_tokens' => 10, 'output_tokens' => 5], 'gpt-test', null, 5);
     }
 
-    public function test_a_draft_the_reviewer_rejects_is_fixed_before_it_is_sent(): void
-    {
-        // his question was ignored - the code cannot read that, the reviewer can
-        config(['agent.reviewer.enabled' => true, 'agent.understanding.enabled' => false]);
-        $conversation = $this->conversation();
-        $fake = $this->fake();
-        $fake->queue($this->reply('تمام يا باشا، تحب تشوف صور المكنة؟', 't1'))
-            ->queue($this->jsonAnswer(['verdict' => 'redo', 'problems' => ['He asked whether his son can be the guarantor - answer that (call get_business_knowledge).']]))
-            ->queue($this->reply('بخصوص الضامن، ده بيتحدد من الفرع.', 't2'))
-            ->queue($this->jsonAnswer(['verdict' => 'ok', 'problems' => []]));
-
-        $result = app(AgentRunner::class)->run($this->turnWith($conversation, 'ينفع ابني يبقى الضامن؟'));
-
-        $this->assertSame(['بخصوص الضامن، ده بيتحدد من الفرع.'], $result['messages']);
-        $this->assertStringContainsString('call get_business_knowledge', json_encode($fake->requests()[2]->contents, JSON_UNESCAPED_UNICODE));
-    }
-
-    public function test_what_he_says_before_the_application_opens_is_kept_and_she_is_addressed_as_a_woman(): void
-    {
-        // conversation 166: her address came before the application opened and was lost
-        RequirementField::create(['key' => 'address', 'label' => 'عنوان السكن', 'data_type' => 'address', 'scope' => 'application', 'is_active' => true]);
-        $conversation = $this->conversation();
-        $fake = $this->fake();
-        $fake->queue($this->jsonAnswer([
-            'fields' => [['key' => 'address', 'value' => '12 شارع الهرم', 'quote' => '12 شارع الهرم']],
-            'customer_gender' => 'female', 'gender_quote' => 'انا ساكنة',
-        ]));
-
-        $turn = $this->turnWith($conversation, 'انا ساكنة في 12 شارع الهرم');
-        $understood = app(TurnUnderstanding::class)->understand($turn, $conversation, $conversation->customer, null);
-
-        $state = $conversation->refresh()->state;
-        $this->assertSame('female', $state['customer_gender']);
-        $this->assertSame('12 شارع الهرم', $state['pending_fields'][0]['value']);
-        $this->assertStringContainsString('woman', TurnUnderstanding::note($understood, $conversation));
-    }
-
     public function test_the_reply_quality_page_shows_refusals_and_fallbacks(): void
     {
         $conversation = $this->conversation();

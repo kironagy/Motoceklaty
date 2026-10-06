@@ -210,22 +210,6 @@ class CodeChecksTest extends TestCase
 
     // C
 
-    public function test_reasons_invented_word_for_word_are_refused_unless_a_source_says_them(): void
-    {
-        $this->assertSame('INVENTED_REASON_PHRASE', $this->check('ده قرار جهات التمويل مش إحنا.'));
-        $this->assertSame('INVENTED_REASON_PHRASE', $this->check('البطاقة هتملى بياناتك أوتوماتيك.'));
-        $this->assertSame('INVENTED_REASON_PHRASE', $this->check('الفرع هيكلمك يأكد معاك.'));
-        $this->assertSame('INVENTED_REASON_PHRASE', $this->check('هتمضي الورق في الفرع وبعدها نبعت الطلب.'));
-        $this->assertSame('INVENTED_REASON_PHRASE', $this->check('مفيش ورق للكاش خالص.'));
-
-        $this->assertNull($this->check('النسبة مش ثابتة، كل مدة ليها نسبتها.'));
-        $this->assertNull($this->check('بعد الموافقة بتمضي العقد في الفرع وقت الاستلام.'));
-        $this->assertNull($this->check('ده قرار جهات التمويل مش إحنا.', [], [], "## إرشادات ثابتة\nالرفض قرار جهات التمويل."));
-
-        $this->conversation->update(['status' => 'awaiting_agent']);
-        $this->assertNull($this->check('الفرع هيكلمك يأكد معاك.'));
-    }
-
     // A0 + the order: code checks, then the reviewer
 
     private function turnWith(string $text): object
@@ -259,69 +243,6 @@ class CodeChecksTest extends TestCase
         return new AiResponse([json_encode($data, JSON_UNESCAPED_UNICODE)], [], 'STOP', ['input_tokens' => 10, 'output_tokens' => 5], 'gpt-test', null, 5);
     }
 
-    public function test_what_the_understanding_saved_counts_as_saved(): void
-    {
-        config(['agent.understanding.enabled' => true, 'agent.reviewer.enabled' => false]);
-        RequirementField::create(['key' => 'address', 'label' => 'عنوان السكن', 'data_type' => 'address', 'scope' => 'application', 'is_active' => true]);
-        ApplicationRequirement::create(['customer_type_id' => $this->type->id, 'requirement_type' => 'field',
-            'requirement_field_id' => RequirementField::where('key', 'address')->value('id'), 'is_required' => true]);
-        $this->application();
-
-        $fake = $this->fake();
-        $fake->queue($this->jsonAnswer(['fields' => [['key' => 'address', 'value' => '12 شارع الهرم الجيزة', 'quote' => '12 شارع الهرم الجيزة']]]))
-            ->queue($this->reply('تمام، سجلت العنوان.', 't1'));
-
-        $result = app(AgentRunner::class)->run($this->turnWith('ساكن في 12 شارع الهرم الجيزة'));
-
-        $this->assertSame(['تمام، سجلت العنوان.'], $result['messages']);
-        $this->assertSame('12 شارع الهرم الجيزة', ApplicationData::where('field_key', 'address')->value('value'));
-    }
-
-    public function test_a_draft_the_code_refuses_never_reaches_the_reviewer(): void
-    {
-        config(['agent.understanding.enabled' => false, 'agent.reviewer.enabled' => true]);
-        $fake = $this->fake();
-        $fake->queue($this->reply('تمام، بعتلك الصور.', 't1'))
-            ->queue($this->reply('تحب أبعتلك صورها؟', 't2'))
-            ->queue($this->jsonAnswer(['verdict' => 'ok', 'problems' => []]));
-
-        $result = app(AgentRunner::class)->run($this->turnWith('ممكن اشوف شكلها؟'));
-
-        $this->assertSame(['تحب أبعتلك صورها؟'], $result['messages']);
-        $this->assertCount(3, $fake->requests());
-        // the one review saw only the draft that passed
-        $this->assertStringNotContainsString('بعتلك الصور', json_encode($fake->requests()[2]->contents, JSON_UNESCAPED_UNICODE));
-    }
-
-    public function test_a_style_refusal_is_asked_twice_never_more(): void
-    {
-        // simulator 2026-10-05: DOCUMENTS_RELISTED refused one true reply seven times
-        config(['agent.understanding.enabled' => false, 'agent.reviewer.enabled' => false]);
-        $fake = $this->fake();
-        $fake->queue($this->reply('حضرتكم تحبوا نكمل الطلب؟', 't1'))->queue($this->reply('حضرتكم تحبوا نكمل الطلب؟', 't2'));
-
-        $result = app(AgentRunner::class)->run($this->turnWith('تمام'));
-
-        $this->assertSame(['حضرتكم تحبوا نكمل الطلب؟'], $result['messages']);
-        $this->assertCount(2, $fake->requests());
-    }
-
-    public function test_the_whole_list_is_the_answer_when_he_says_he_wants_to_apply(): void
-    {
-        $this->message('outgoing', 'ابعت صورة وش وضهر البطاقة وصورة مكان القهوة.');
-        $this->message('incoming', 'عايز اقدم');
-        $this->assertNull($this->check('تمام، ابعت صورة وش وضهر البطاقة وصورة مكان القهوة.'));
-
-        $this->message('outgoing', 'ابعت صورة وش وضهر البطاقة وصورة مكان القهوة.');
-        $this->message('incoming', 'ماشي');
-        $this->assertSame('DOCUMENTS_RELISTED', $this->check('تمام، ابعت صورة وش وضهر البطاقة وصورة مكان القهوة.'));
-    }
-
-    public function test_finance_decisions_in_the_plural_are_caught_too(): void
-    {
-        $this->assertSame('INVENTED_REASON_PHRASE', $this->check('دي قرارات جهات التمويل وإحنا ما بنحددهاش.'));
-    }
-
     private function fix(string $reply, array $outcomes = []): array
     {
         return $this->guard->autofix(['messages' => [$reply]], $this->conversation, $outcomes)['messages'];
@@ -338,37 +259,6 @@ class CodeChecksTest extends TestCase
         $this->assertCount(1, $fake->requests());
     }
 
-    public function test_relisted_papers_are_mended_in_place_without_a_model_call(): void
-    {
-        $this->message('outgoing', 'ابعت صورة وش وضهر البطاقة وصورة مكان القهوة.');
-        $this->message('incoming', 'ماشي');
-
-        $fixed = $this->fix('تمام يا باشا. ابعت صورة وش وضهر البطاقة وصورة مكان القهوة.');
-        $this->assertSame(['تمام يا باشا. ابعتهم وقت ما يبقوا معاك.'], $fixed);
-        $this->assertNull($this->check($fixed[0]));
-    }
-
-    public function test_asking_again_for_a_saved_phone_is_dropped(): void
-    {
-        RequirementField::create(['key' => 'phone', 'label' => 'رقم التليفون', 'data_type' => 'phone', 'scope' => 'application', 'is_active' => true]);
-        ApplicationRequirement::create(['customer_type_id' => $this->type->id, 'requirement_type' => 'field',
-            'requirement_field_id' => RequirementField::where('key', 'phone')->value('id'), 'is_required' => true]);
-        $application = $this->application();
-        ApplicationData::create(['application_id' => $application->id, 'party' => 'applicant', 'field_key' => 'phone', 'value' => '01012345678', 'source' => 'customer_stated', 'status' => 'valid']);
-
-        $this->assertSame(['تمام يا باشا، فاضل صورة البطاقة.'], $this->fix('تمام يا باشا، فاضل صورة البطاقة. ممكن رقم تليفونك؟'));
-        // nothing saved yet: the question stays
-        ApplicationData::query()->delete();
-        $this->assertSame(['تمام يا باشا، فاضل صورة البطاقة. ممكن رقم تليفونك؟'], $this->fix('تمام يا باشا، فاضل صورة البطاقة. ممكن رقم تليفونك؟'));
-    }
-
-    public function test_formal_words_are_said_in_egyptian_in_place(): void
-    {
-        $this->assertSame(['التقسيط مش ممكن على المكنة دي، تختار فرز تاني ولا استيراد؟ رقم طلبك #4395'],
-            $this->guard->tidy(['messages' => ['التقسيط مش ممكن على المكنة دي (FINANCING_CAP_EXCEEDED)، تختار فرز تاني #7 ولا استيراد #15؟ رقم طلبك #4395']])['messages']);
-        $this->assertSame(['تحب نكمل؟ عندك البطاقة؟'], $this->guard->tidy(['messages' => ['هل تحب نكمل؟ هل لديك البطاقة؟']])['messages']);
-    }
-
     public function test_a_work_address_on_his_own_street_is_saved_when_he_names_the_workplace(): void
     {
         foreach (['address' => 'عنوان السكن', 'work_address' => 'عنوان الشغل'] as $key => $label) {
@@ -380,7 +270,8 @@ class CodeChecksTest extends TestCase
         $data->record($this->customer, $application, [['key' => 'address', 'value' => 'القليوبيه الخصوص شارع السعاده متفرع من شارع الصرف']], $this->conversation->id);
 
         $this->message('incoming', 'القهوة القليوبيه الخصوص شارع السعاده متفرع من شارع الصرف');
-        $result = $data->record($this->customer, $application, [['key' => 'work_address', 'value' => 'القليوبيه الخصوص شارع السعاده متفرع من شارع الصرف']], $this->conversation->id);
+        // the model says it: he works on his own street (no phrase list guesses it)
+        $result = $data->record($this->customer, $application, [['key' => 'work_address', 'value' => 'القليوبيه الخصوص شارع السعاده متفرع من شارع الصرف', 'same_as_home' => true]], $this->conversation->id);
 
         $this->assertSame(['work_address'], $result['saved'], json_encode($result));
     }

@@ -34,8 +34,6 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
-        <env name="AGENT_UNDERSTANDING_ENABLED" value="false"/>
-        <env name="AGENT_REVIEWER_ENABLED" value="false"/>
         <env name="AGENT_HANDOFF_WAITING_MESSAGE" value=""/>
         <env name="AGENT_HANDOFF_RETURN_TO_AGENT_AFTER_MINUTES" value=""/>
     </php>

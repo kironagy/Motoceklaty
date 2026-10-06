@@ -327,7 +327,7 @@ class DocumentPipelineTest extends TestCase
         // The card is real and readable; the age is an eligibility outcome
         // of the application, decided by Laravel from the accepted data.
         $this->assertTrue($result->data['results'][0]['accepted']);
-        $snapshot = $result->data['snapshot'];
+        $snapshot = $result->data['application_now'];
         $this->assertSame('not_eligible', $snapshot['eligibility']['status']);
         $this->assertContains('AGE_OUT_OF_RANGE', array_column($snapshot['eligibility']['reasons'], 'code'));
         $this->assertFalse($snapshot['can_submit']);
@@ -377,6 +377,8 @@ class DocumentPipelineTest extends TestCase
         $this->queueResponses([
             ['document_type_key' => 'national_id_front', 'legibility' => 'good', 'confidence' => 0.9, 'fields' => ['national_id' => '30411262102496', 'full_name' => 'ناصر درويش']],
             ['document_type_key' => 'national_id_front', 'legibility' => 'good', 'confidence' => 0.9, 'fields' => ['national_id' => '30407230106719', 'full_name' => 'يوسف ابراهيم']],
+            // the name does not match the card on file: its one careful re-read
+            ['national_id' => '30407230106719', 'full_name' => 'يوسف ابراهيم'],
             ['document_type_key' => 'national_id_front', 'legibility' => 'good', 'confidence' => 0.9, 'fields' => ['national_id' => '30407230106719', 'full_name' => 'يوسف ابراهيم']],
         ]);
 
@@ -413,9 +415,8 @@ class DocumentPipelineTest extends TestCase
         $fake = new FakeAiProvider();
 
         foreach ($payloads as $data) {
+            // DOC-001: one call per photo when it reads every required field
             $fake->queue(new AiResponse(textParts: [json_encode($data)], toolCalls: [], finishReason: 'STOP', usage: [], model: 'gemini-test', keyId: null, latencyMs: 1));
-            // the focused read of the classified type's fields
-            $fake->queue(new AiResponse(textParts: [json_encode($data['fields'] ?? [])], toolCalls: [], finishReason: 'STOP', usage: [], model: 'gemini-test', keyId: null, latencyMs: 1));
         }
 
         $this->app->instance(AiProvider::class, $fake);
@@ -550,18 +551,17 @@ class DocumentPipelineTest extends TestCase
                 'document_type_key' => 'delivery_app_earnings', 'legibility' => 'good', 'confidence' => 0.9,
                 'fields' => $fields,
             ])], toolCalls: [], finishReason: 'STOP', usage: [], model: 'gemini-test', keyId: null, latencyMs: 1));
-            $fake->queue(new AiResponse(textParts: [json_encode($fields)], toolCalls: [], finishReason: 'STOP', usage: [], model: 'gemini-test', keyId: null, latencyMs: 1));
         }
         $this->app->instance(AiProvider::class, $fake);
 
         $first = app(ProcessDocumentTool::class)->execute(['media_ids' => [$this->earningsScreen($application, 'sep')->id]], $ctx);
         $this->assertTrue($first->data['results'][0]['accepted']);
-        $this->assertNotContains('delivery_app_earnings', $first->data['snapshot']['documents']['accepted']);
-        $this->assertSame(23, $first->data['snapshot']['documents']['partial']['delivery_app_earnings']['covered_days']);
+        $this->assertNotContains('delivery_app_earnings', $first->data['application_now']['documents']['accepted']);
+        $this->assertSame(23, $first->data['application_now']['documents']['partial']['delivery_app_earnings']['covered_days']);
 
         $second = app(ProcessDocumentTool::class)->execute(['media_ids' => [$this->earningsScreen($application, 'julaug')->id]], $ctx);
-        $this->assertContains('delivery_app_earnings', $second->data['snapshot']['documents']['accepted']);
-        $this->assertArrayNotHasKey('partial', $second->data['snapshot']['documents']);
+        $this->assertContains('delivery_app_earnings', $second->data['application_now']['documents']['accepted']);
+        $this->assertArrayNotHasKey('partial', $second->data['application_now']['documents']);
     }
 
     public function test_old_earnings_screenshots_do_not_count_even_when_long_enough(): void

@@ -9,7 +9,7 @@ use App\Models\Customer;
 use App\Models\WhatsappMessage;
 
 /** WRITE — plan §6.9 */
-class RecordCustomerDataTool implements Tool
+class RecordCustomerDataTool implements WriteTool
 {
     public function __construct(
         private readonly CustomerDataService $customerData,
@@ -52,6 +52,8 @@ class RecordCustomerDataTool implements Tool
                             // field validator already expects (CustomerDataService casts to string).
                             'value' => ['type' => 'string'],
                             'quote' => ['type' => 'string', 'description' => 'The customer\'s exact words this value comes from. Required for enum fields.'],
+                            'same_as_home' => ['type' => 'boolean', 'description' => 'work_address only: true when he said he works at/under his home (same address).'],
+                            'none' => ['type' => 'boolean', 'description' => 'Address parts (building/floor/apartment/landmark) only: true when he said there is none or he does not know it; quote = his words.'],
                         ],
                     ],
                 ],
@@ -85,15 +87,52 @@ class RecordCustomerDataTool implements Tool
         // made it look like something the customer never wrote.
         $fields = array_map(fn (array $f) => ['value' => preg_replace('/^\s*'.preg_quote((string) $f['key'], '/').'\s*[:=]\s*/u', '', (string) $f['value'])] + $f, $args['fields']);
 
-        $result = $this->customerData->record($customer, $application, $fields, $ctx->conversationId);
+        // Simulator 2026-10-05: an insured employee's second number was saved
+        // as a guarantor's phone. A guarantor field his application does not
+        // ask for is refused (structural: the requirement list decides).
+        $notNeeded = [];
+
+        // Simulator 2026-10-05: "رقمي X ورقم تاني Y" came as phone=X and phone=Y
+        // in one call - Y overwrote his main number. One value per field.
+        $seen = [];
+        $fields = array_values(array_filter($fields, function (array $f) use (&$seen, &$notNeeded) {
+            if (isset($seen[$f['key']])) {
+                $notNeeded[] = ['key' => $f['key'], 'code' => 'ONE_VALUE_PER_FIELD'];
+
+                return false;
+            }
+
+            return $seen[$f['key']] = true;
+        }));
+
+        if ($application) {
+            $required = app(\App\Domain\Applications\RequirementService::class)
+                ->requirementsFor($application->customerType, [])['fields'] ?? [];
+            $requiredKeys = array_column($required, 'key');
+            $fields = array_values(array_filter($fields, function (array $f) use ($requiredKeys, &$notNeeded) {
+                if (str_starts_with((string) $f['key'], 'guarantor_') && ! in_array($f['key'], $requiredKeys, true)) {
+                    $notNeeded[] = ['key' => $f['key'], 'code' => 'NOT_NEEDED_FOR_THIS_APPLICATION'];
+
+                    return false;
+                }
+
+                return true;
+            }));
+        }
+
+        $result = $fields === []
+            ? ['saved' => [], 'rejected' => [], 'conflicts' => [], 'facts' => []]
+            : $this->customerData->record($customer, $application, $fields, $ctx->conversationId);
+        $result['rejected'] = array_merge($result['rejected'], $notNeeded);
 
         $data = [
             'saved' => $result['saved'],
             'rejected' => $result['rejected'],
             'conflicts' => $result['conflicts'],
-            'snapshot' => $application ? $this->snapshots->for($application->refresh()) : null,
         ];
-        $data['ask_next'] = \App\Domain\Applications\SnapshotService::askNext($data['snapshot']);
+        $snapshot = $application ? $this->snapshots->for($application->refresh()) : null;
+        // TOOL-006: the compact status, not the whole snapshot again
+        $data['application_now'] = SnapshotService::compact($snapshot);
 
         // Server 2026-10-04: 7 of 15 requests reached the dashboard with no
         // governorate or area. An address line with neither (and no district
@@ -101,8 +140,7 @@ class RecordCustomerDataTool implements Tool
         foreach ($fields as $field) {
             if (in_array($field['key'], ['address', 'work_address'], true) && in_array($field['key'], $result['saved'], true)
                 && app(\App\Domain\Applications\AddressParser::class)->placeIn((string) $field['value']) === [null, null]) {
-                $data['address_missing_place'] = ($field['key'] === 'address' ? 'His home' : 'His work').' address has no governorate/area. '
-                    .'Ask only that, in a few words ("في أنهي محافظة ومنطقة؟"), then save the same field again with his words added.';
+                $data['address_missing_place'][] = $field['key'];
             }
         }
 
@@ -113,7 +151,7 @@ class RecordCustomerDataTool implements Tool
                 .'(if you read it from a photo, use process_document; otherwise ask the customer); QUOTE_NOT_FOUND = give the customer\'s exact words in quote; '
                 .'CONFLICTS_WITH_VERIFIED_VALUE = a document/staff value differs - ask the customer which is right; '
                 .'NOT_A_BUILDING_NUMBER / NOT_A_LANDMARK / NOT_AN_APARTMENT_NUMBER / NOT_A_FLOOR = that value is not one (e.g. "ورشة", or "شقة ملك" which is residence_ownership=owned) - save it in the right field or ask him; '
-                .'SAME_AS_RESIDENCE = the work address is his home address - ask him where he works (the workshop/shop address), unless he says he works from home; '
+                .'SAME_AS_RESIDENCE = the work address equals his home address - if he works at home send it again with same_as_home=true, otherwise ask where he works; '
                 .'DOCUMENT_ONLY = never taken from his words - it is read from the shop photo / tax card (process_document); never tell him it was saved. Details: '
                 .json_encode(['rejected' => $result['rejected'], 'conflicts' => $result['conflicts']], JSON_UNESCAPED_UNICODE));
         }

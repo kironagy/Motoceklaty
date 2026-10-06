@@ -102,9 +102,12 @@ class ApplicationFlowTest extends TestCase
         [$application] = $this->application();
         $this->recordWorkType($application);
 
-        $why = app(SnapshotService::class)->for($application)['next_step']['why'];
+        // rebuild: the step is a fact; "never say what is read from it" is in the instructions (§١١)
+        $step = app(SnapshotService::class)->for($application)['next_step'];
 
-        $this->assertStringContainsString('do not tell him what will be read from it', $why);
+        $this->assertSame('national_id_front', $step['key']);
+        $this->assertArrayNotHasKey('why', $step);
+        $this->assertStringContainsString('ما تطلبهمش كتابة ولا تقوله هيتقري منها إيه', app(\App\Domain\Settings\AgentInstructions::class)->fromFile()['text']);
     }
 
     public function test_the_missing_parts_of_an_address_are_asked_together(): void
@@ -203,18 +206,9 @@ class ApplicationFlowTest extends TestCase
         $snapshot = app(SnapshotService::class)->for($application);
 
         $this->assertSame('phone', $snapshot['next_step']['key']);
-        $this->assertStringContainsString('بطاقة الرقم القومي', $snapshot['next_step']['why']);
+        $this->assertSame('بطاقة الرقم القومي', $snapshot['next_step']['skipped_after_two_asks']);
     }
 
-    public function test_a_quote_about_the_motorcycle_is_not_a_work_statement(): void
-    {
-        // Live: "عايز اقسط هوجن ٤ استيراد على سنة" opened the customer as عامل حر.
-        $this->assertFalse(\App\Agent\Tools\StartApplicationTool::talksAboutWork('عايز اقسط هوجن ٤ استيراد على سنة'));
-        $this->assertTrue(\App\Agent\Tools\StartApplicationTool::talksAboutWork('شغال حر'));
-        $this->assertTrue(\App\Agent\Tools\StartApplicationTool::talksAboutWork('انا موظف في شركة'));
-        $this->assertTrue(\App\Agent\Tools\StartApplicationTool::talksAboutWork('على المعاش'));
-        $this->assertTrue(\App\Agent\Tools\StartApplicationTool::talksAboutWork('سواق اوبر'));
-    }
     public function test_the_selection_cannot_silently_swap_the_model_just_quoted(): void
     {
         // Live: quoted "هوجن ٤ استيراد", then selected "هوجن ٤ استيراد فرز تاني".

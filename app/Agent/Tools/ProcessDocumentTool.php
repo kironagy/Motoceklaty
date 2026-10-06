@@ -8,7 +8,7 @@ use App\Models\Application;
 use App\Models\MessageMedia;
 
 /** WRITE — plan §6.12 */
-class ProcessDocumentTool implements Tool
+class ProcessDocumentTool implements WriteTool
 {
     public function __construct(
         private readonly DocumentPipeline $pipeline,
@@ -100,24 +100,19 @@ class ProcessDocumentTool implements Tool
             $have[$month->format('Y-m')] ?? $missing[] = $names[(int) $month->format('n')];
         }
 
-        return ['earnings_months' => 'Say it like this: "وصلني '.implode(' و', $have).($missing !== [] ? '، فاضل سكرين '.implode(' و', $missing) : '').'".'];
+        return ['earnings_months' => ['arrived' => array_values($have), 'missing' => $missing]];
     }
 
-    /** "دي بطاقة ابويا بالغلط"، "اللي فاتت مش بتاعتي"، "دي بطاقتي انا" in this turn's message. */
-    private function saysEarlierWasWrong(ToolContext $ctx): bool
-    {
-        $text = (string) \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $ctx->conversationId)
-            ->where('direction', 'incoming')->where('turn_id', $ctx->turnId)->pluck('text')->implode(' ');
-
-        return (bool) preg_match('/غلط|مش\s*بتاعت|مش\s*بتاعي|بطاق[تة]ي\s*انا|دي\s*بطاق[تة]ي|بتاع[ةه]?\s*(?:ابويا|ابوي|امي|اخويا|اختي|صاحبي|مراتي|حد\s*تاني)|بطاق[ةه]\s*(?:ابويا|ابوي|امي|اخويا|اختي|صاحبي|مراتي)/u', $text);
-    }
 
     public function execute(array $args, ToolContext $ctx): ToolResult
     {
         $application = $ctx->activeApplicationId ? Application::find($ctx->activeApplicationId) : null;
 
         if (! $application) {
-            return ToolResult::error('NO_ACTIVE_APPLICATION');
+            // Replay of conversation 206: "ماقدرش أراجع الصور... مافيش طلب مفتوح"
+            // three times - our mechanics are not his problem.
+            return ToolResult::error('NO_ACTIVE_APPLICATION', 'The photos arrived; they are read once an application is open. Never tell him about an open application or reviewing photos. '
+                .'If the person applying is clear and allowed, call start_application and then process_document; otherwise just answer where the conversation stands (who applies), without repeating a refusal you already gave.');
         }
 
         $expected = $args['expected_document_type'] ?? null;
@@ -161,18 +156,30 @@ class ProcessDocumentTool implements Tool
 
         $requested = array_map('intval', $args['media_ids']);
 
+        $readable = [];
+        $expectedByMedia = [];
+
         foreach ($mediaIds as $mediaId) {
             $media = MessageMedia::with('message')->find($mediaId);
 
             if (! $media || $media->message?->whatsapp_conversation_id !== $ctx->conversationId || $media->message?->direction !== 'incoming') {
-                $results[] = ['media_id' => $mediaId, 'document_id' => null, 'detected_type' => null, 'accepted' => false, 'status' => 'failed', 'issues' => [['code' => 'MEDIA_NOT_FOUND']], 'applied_fields' => []];
+                $results[$mediaId] = ['media_id' => $mediaId, 'document_id' => null, 'detected_type' => null, 'accepted' => false, 'status' => 'failed', 'issues' => [['code' => 'MEDIA_NOT_FOUND']], 'applied_fields' => []];
 
                 continue;
             }
 
+            $results[$mediaId] = null;
+            $readable[] = $media;
             // the model's expected type is for the ids it passed, not this turn's other photos
-            $results[] = $this->pipeline->process($media, $application, in_array((int) $mediaId, $requested, true) ? $expected : null, ($args['replaces_previous'] ?? false) === true);
+            $expectedByMedia[$media->id] = in_array((int) $mediaId, $requested, true) ? $expected : null;
         }
+
+        // DOC-004: the photos of one burst are read in one model call.
+        foreach ($this->pipeline->processMany($readable, $application, $expectedByMedia, ($args['replaces_previous'] ?? false) === true) as $result) {
+            $results[$result['media_id']] = $result;
+        }
+
+        $results = array_values($results);
 
         // QA 2026-10-04: front and back in one message, the back read first
         // with one digit misread (٣ as ٤) - rejected, because the front that
@@ -182,26 +189,15 @@ class ProcessDocumentTool implements Tool
                 $misread = collect($r['issues'] ?? [])->contains(fn ($issue) => ($issue['code'] ?? null) === 'INVALID_FORMAT' && ($issue['field'] ?? null) === 'national_id');
 
                 if (! ($r['accepted'] ?? false) && ($r['detected_type'] ?? null) === 'national_id_back' && $misread) {
-                    $results[$i] = $this->pipeline->process(MessageMedia::find($r['media_id']), $application->refresh(), $expected);
+                    // the same reading, checked again now the front is on file - no new model call
+                    $results[$i] = $this->pipeline->process(MessageMedia::find($r['media_id']), $application->refresh(), $expected, false, $this->pipeline->readingOf((int) $r['media_id']));
                 }
             }
         }
 
         // Simulation 676: a number read wrong became "الصورة مش واضحة" - the
         // reason he is given is the real one, worded here, not guessed.
-        $results = array_map(fn (array $r) => ($r['accepted'] ?? false) ? $r : $r + ['reason_for_customer' => $this->reason($r['issues'] ?? [])], $results);
-
-        // QA 2026-10-04: he said the first ID was his father's by mistake
-        // and sent his own - the model never set replaces_previous, his own ID
-        // was rejected against his father's and he kept being told he is 64.
-        // When his message says the earlier one was wrong, the new ID replaces
-        // it (front first), and every check runs against the new person.
-        if (($args['replaces_previous'] ?? false) !== true && $this->saysEarlierWasWrong($ctx) && collect($results)->contains(fn ($r) => ($r['detected_type'] ?? null) === 'national_id_front'
-            && in_array('ID_MISMATCH', array_column($r['issues'] ?? [], 'code'), true))) {
-            $ordered = collect($results)->sortBy(fn ($r) => ($r['detected_type'] ?? null) === 'national_id_front' ? 0 : 1)->pluck('media_id');
-            $results = $ordered->map(fn ($id) => $this->pipeline->process(MessageMedia::find($id), $application->refresh(), null, true))->values()->all();
-            $replacedIdentity = true;
-        }
+        $results = array_map(fn (array $r) => ($r['accepted'] ?? false) ? $r : $r + ['rejection_reason' => $this->reason($r['issues'] ?? [])], $results);
 
         // QA 2026-10-04: "دي بطاقة ابويا، دي بطاقتي انا" - his own ID was
         // rejected against his father's, and he kept being told he is 64.
@@ -209,9 +205,7 @@ class ProcessDocumentTool implements Tool
             $codes = array_column($r['issues'] ?? [], 'code');
 
             return ($r['detected_type'] ?? null) === 'national_id_front' && in_array('NAME_MISMATCH', $codes, true) && in_array('ID_MISMATCH', $codes, true)
-                ? $r + ['different_person' => 'This ID is another person than the ID on file (name and number differ). If he said the earlier '
-                    .'ID was not his / was a relative\'s, call process_document again now with these media_ids and replaces_previous=true - '
-                    .'the earlier ID and everything read from it stop counting. Otherwise ask him whose ID this is. Never mix the two.']
+                ? $r + ['different_person' => true]
                 : $r;
         }, $results);
 
@@ -219,7 +213,7 @@ class ProcessDocumentTool implements Tool
         $results = array_map(function (array $r) {
             $say = app(\App\Domain\Applications\OccupationPolicy::class)->rejection($r['occupation_on_id'] ?? null);
 
-            return $say ? $r + ['occupation_not_accepted' => StartApplicationTool::occupationHint($say)] : $r;
+            return $say ? $r + ['occupation_not_accepted' => 'refusal: "'.$say.'"'] : $r;
         }, $results);
 
         // Read before the model's call: a photo that is no document at all
@@ -243,21 +237,19 @@ class ProcessDocumentTool implements Tool
 
         // QA 2026-10-04: after the swap the reply still asked "the name differs,
         // confirm it's yours" and spoke of the father's age.
-        if ($replacedIdentity ?? false) {
-            $results = array_map(fn ($r) => array_diff_key($r, ['note' => 1, 'differs_from_file' => 1, 'different_person' => 1]), $results);
+        $replacedIdentity = ($args['replaces_previous'] ?? false) === true;
+
+        if ($replacedIdentity) {
+            $results = array_map(fn ($r) => array_diff_key($r, ['differs_from_file' => 1, 'different_person' => 1]), $results);
         }
 
         return ToolResult::ok([
             'results' => $results,
-        ] + ($notDocuments !== [] ? ['not_documents' => 'media '.implode(', ', $notDocuments).' is not a document - if it is a motorcycle, '
-            .'call identify_motorcycle_from_image; otherwise answer what he wrote with it.'] : [])
-          + (($months = $this->earningsMonths($snapshot = $this->snapshots->for($application->refresh()))) !== []
-              ? ['ask_next' => 'First tell him which months arrived and which is missing: '.$months['earnings_months'].' Ask for that screenshot; the rest can wait.'] + $months
-              : ['ask_next' => \App\Domain\Applications\SnapshotService::askNext($snapshot)])
-          + (($replacedIdentity ?? false) ? ['identity_replaced' => 'The earlier ID (another person) and everything read from it no longer count; '
-            .'his own ID is on file now. Say in one line that his ID is in, do not ask him to confirm the name, and forget the earlier person\'s '
-            .'age or name - go on from next_step.'] : []) + [
-            'snapshot' => $snapshot,
+        ] + ($notDocuments !== [] ? ['not_documents' => $notDocuments] : [])
+          + $this->earningsMonths($snapshot = $this->snapshots->for($application->refresh()))
+          + ($replacedIdentity ? ['identity_replaced' => true] : []) + [
+            // TOOL-006: the compact status, not the whole snapshot again
+            'application_now' => SnapshotService::compact($snapshot),
         ]);
     }
 }

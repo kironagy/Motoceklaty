@@ -5,7 +5,7 @@ namespace App\Agent\Tools;
 use App\Domain\Catalog\CatalogService;
 
 /** READ — plan §6.2. Also how motorcycles are compared. */
-class GetMotorcycleDetailsTool implements Tool
+class GetMotorcycleDetailsTool implements ReadTool
 {
     public function __construct(private readonly CatalogService $catalog)
     {
@@ -51,10 +51,6 @@ class GetMotorcycleDetailsTool implements Tool
 
         if ($result['unknown_ids'] !== []) {
             return ToolResult::error('UNKNOWN_MOTORCYCLE', 'Unknown id(s): '.implode(', ', $result['unknown_ids']));
-        }
-
-        if (count($args['motorcycle_ids']) === 1) {
-            \App\Domain\Conversations\QuotedMotorcycle::remember($ctx->conversationId, (int) $args['motorcycle_ids'][0]);
         }
 
         return ToolResult::ok(['items' => $result['items']]);

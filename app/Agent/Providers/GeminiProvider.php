@@ -251,7 +251,7 @@ class GeminiProvider implements AiProvider
             }
         }
 
-        return (int) ceil($chars / 4);
+        return (int) ceil($chars / \App\Agent\Context\TokenEstimator::charsPerToken('gemini'));
     }
 
     private function buildPayload(AiRequest $request): array

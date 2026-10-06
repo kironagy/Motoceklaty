@@ -33,8 +33,8 @@ class BranchService
                 return [
                     'branches' => $this->present($inGovernorate),
                     'no_branch_in_requested_area' => true,
-                    'note' => 'No branch in '.$city.' itself. These are our branches in '.(config('agent.governorates')[$governorate] ?? $governorate)
-                        .', his governorate - give them as the nearest. Never name any other branch or area.',
+                    'asked_place' => $city,
+                    'listed' => 'his_governorate',
                 ];
             }
         }
@@ -50,11 +50,9 @@ class BranchService
             return [
                 'branches' => $this->present($all),
                 'no_branch_in_requested_area' => true,
-            ] + ($nearest ? ['nearest_branch' => $nearest->name] : []) + [
-                'note' => 'No branch in '.$place.'. Say it in one short line using the place as HE said it (e.g. "المنصورة", not the governorate\'s formal name)'
-                    .($nearest ? ', then give the nearest one first: '.$nearest->name.' (address, hours, map link from this result)' : ', then give the branches listed here')
-                    .'. If he wants to buy, tell him he can buy there. Never name any other branch or area.',
-            ];
+                'asked_place' => $place,
+                'listed' => 'nearest_first',
+            ] + ($nearest ? ['nearest_branch' => $nearest->name] : []);
         }
 
         return ['branches' => $this->present($branches)];

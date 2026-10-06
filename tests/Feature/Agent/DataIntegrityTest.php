@@ -84,6 +84,13 @@ class DataIntegrityTest extends TestCase
         return ApplicationDocument::create(['application_id' => $this->application->id, 'media_id' => $media->id, 'party' => 'applicant', 'status' => 'accepted', 'detected_type_key' => 'national_id_front', 'attempts' => 1]);
     }
 
+    /** The agent's reading of his work (record_work_profile), from words he really wrote. */
+    private function works(string $evidence, array $reading): void
+    {
+        $result = app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => $evidence, 'work_stated' => true, 'working_now' => 'yes'] + $reading, $this->ctx(0));
+        $this->assertTrue($result->ok, json_encode($result->error ?? null));
+    }
+
     private function ctx(?int $applicationId = null): ToolContext
     {
         $trace = AiTrace::create(['conversation_id' => $this->conversation->id, 'turn_id' => 1, 'status' => 'running']);
@@ -159,11 +166,13 @@ class DataIntegrityTest extends TestCase
         // Opened as صاحب ورشة: asked for shop photos he does not have.
         CustomerType::create(['key' => 'business_owner', 'label' => 'صاحب نشاط', 'is_active' => true]);
         $this->say('انا شغال في ورشة ميكانيكا');
+        $this->works('انا شغال في ورشة ميكانيكا', ['occupation' => 'ميكانيكي', 'customer_type' => 'self_employed', 'work_type' => 'craftsman', 'relation_to_workplace' => 'works_for_someone']);
 
         $worker = app(StartApplicationTool::class)->execute(['customer_type' => 'business_owner', 'customer_type_quote' => 'شغال في ورشة ميكانيكا'], $this->ctx(0));
         $this->assertSame('OWNERSHIP_NOT_STATED', $worker->error['code']);
 
         $this->say('لا انا صاحب الورشة');
+        $this->works('انا صاحب الورشة', ['occupation' => 'صاحب ورشة', 'customer_type' => 'business_owner', 'relation_to_workplace' => 'owner']);
         $owner = app(StartApplicationTool::class)->execute(['customer_type' => 'business_owner', 'customer_type_quote' => 'انا صاحب الورشة'], $this->ctx(0));
         $this->assertTrue($owner->ok);
     }
@@ -184,7 +193,7 @@ class DataIntegrityTest extends TestCase
         // he says so himself: then it is his work address too
         $this->say('الورشة تحت البيت نفس العنوان');
         $same = app(RecordCustomerDataTool::class)->execute(['fields' => [
-            ['key' => 'work_address', 'value' => 'الخصوص، شارع السعادة، عقار 3'],
+            ['key' => 'work_address', 'value' => 'الخصوص، شارع السعادة، عقار 3', 'same_as_home' => true],
         ]], $this->ctx());
         $this->assertTrue($same->ok);
     }
@@ -249,6 +258,7 @@ class DataIntegrityTest extends TestCase
     {
         // Request 4272: "متأمن عليا بس في فترة تقييم" was moved to عامل حر.
         $this->say('متأمن عليا بس انا حاليا في فتره تقييم من الشركه ف مش هعرف اطلع مفردات مرتب');
+        $this->works('متأمن عليا', ['occupation' => 'موظف', 'customer_type' => 'employee', 'relation_to_workplace' => 'works_for_someone', 'insured' => 'yes']);
 
         $switch = app(UpdateApplicationSelectionTool::class)->execute(['customer_type' => 'self_employed', 'customer_type_quote' => 'مش هعرف اطلع مفردات مرتب'], $this->ctx());
         $this->assertSame('INSURED_IS_EMPLOYEE', $switch->error['code']);
@@ -259,7 +269,8 @@ class DataIntegrityTest extends TestCase
         // the owner's one exception
         $this->say('انا موظف بس مش متأمن عليا ومعنديش مفردات');
 
-        $this->assertFalse(StartApplicationTool::saidInsured($this->conversation->id));
+        // rebuild: the agent reads "مش متأمن" (record_work_profile), no phrase list
+        $this->works('موظف بس مش متأمن عليا', ['occupation' => 'موظف', 'customer_type' => 'self_employed', 'work_type' => 'other', 'relation_to_workplace' => 'works_for_someone', 'insured' => 'no']);
         $switch = app(UpdateApplicationSelectionTool::class)->execute(['customer_type' => 'self_employed', 'customer_type_quote' => 'مش متأمن عليا'], $this->ctx());
         $this->assertTrue($switch->ok);
     }
@@ -285,19 +296,11 @@ class DataIntegrityTest extends TestCase
         $this->assertNull($policy->rejection('انا شغال كهربائي'));
 
         $this->say('انا أمين شرطة وعايز اقسط');
+        $this->works('انا أمين شرطة', ['occupation' => 'أمين شرطة', 'customer_type' => 'employee', 'sector' => 'government', 'refused_work' => true]);
         $result = app(StartApplicationTool::class)->execute(['customer_type' => 'employee', 'customer_type_quote' => 'انا أمين شرطة'], $this->ctx(0));
 
         $this->assertSame('OCCUPATION_NOT_ACCEPTED', $result->error['code']);
         $this->assertStringContainsString('هيترفض', $result->error['detail']);
-    }
-
-    public function test_a_softened_refusal_is_not_sent(): void
-    {
-        $guard = app(\App\Agent\Runtime\ReplyGuard::class);
-        $outcomes = [['name' => 'start_application', 'ok' => false, 'data' => ['code' => 'OCCUPATION_NOT_ACCEPTED']]];
-
-        $this->assertSame('OCCUPATION_SOFTENED', $guard->check(['messages' => ['مهنة أمين الشرطة من المهن اللي جهات التمويل بتتحفظ عليها، لو حابب نجرب ونقدم مفيش مشكلة.']], $this->conversation, '', [], $outcomes));
-        $this->assertNull($guard->check(['messages' => ['للأسف جهات التمويل مش بتقبل الشغل الحكومي، فالطلب هيترفض. لو حابب تشتري كاش أنا معاك.']], $this->conversation, '', [], $outcomes));
     }
 
     public function test_an_ocr_name_missing_the_first_name_does_not_replace_the_full_name(): void
@@ -430,7 +433,8 @@ class DataIntegrityTest extends TestCase
         $this->say('مش موجود والله رقم عقار للمدرسه');
         $this->say('لا يوجد رقم');
 
-        $result = app(RecordCustomerDataTool::class)->execute(['fields' => [['key' => 'work_building_no', 'value' => 'مفيش رقم']]], $this->ctx());
+        // the agent says it is "none" and points at his words
+        $result = app(RecordCustomerDataTool::class)->execute(['fields' => [['key' => 'work_building_no', 'value' => 'مفيش رقم', 'none' => true, 'quote' => 'لا يوجد رقم']]], $this->ctx());
 
         $this->assertTrue($result->ok);
         $this->assertSame('لا يوجد', ApplicationData::where('field_key', 'work_building_no')->value('value'));

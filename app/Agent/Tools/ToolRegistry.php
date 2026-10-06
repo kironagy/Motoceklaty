@@ -78,9 +78,9 @@ class ToolRegistry
         }
 
         try {
-            $result = ($conflict = $this->mentionedMotorcycleConflict($args, $ctx))
-                ? ToolResult::error('NOT_THE_MODEL_HE_NAMED', $conflict)->toArray()
-                : $this->executeWithReconnect($tool, $args, $ctx);
+            // Rebuild: which model he means is the agent's call (no phrase
+            // list on his text); every result names the motorcycle it used.
+            $result = $this->executeWithReconnect($tool, $args, $ctx);
         } catch (\Throwable $e) {
             // submit_application crashed on a null plan and nothing anywhere
             // said why - the exception was swallowed whole. Log where it
@@ -136,20 +136,6 @@ class ToolRegistry
 
             return $tool->execute($args, $ctx)->toArray();
         }
-    }
-
-    /** Every tool that takes a motorcycle must take the one the customer just named. */
-    private function mentionedMotorcycleConflict(array $args, ToolContext $ctx): ?string
-    {
-        $ids = array_filter(array_merge((array) ($args['motorcycle_ids'] ?? []), isset($args['motorcycle_id']) ? [$args['motorcycle_id']] : []), 'is_numeric');
-
-        foreach (\App\Models\Machine::whereIn('id', $ids)->get() as $machine) {
-            if ($conflict = \App\Domain\Conversations\MentionedMotorcycle::conflict($ctx->conversationId, $machine)) {
-                return $conflict;
-            }
-        }
-
-        return null;
     }
 
     /**

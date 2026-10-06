@@ -146,7 +146,8 @@ class StaffDecisionService
         $request = InstallmentRequest::find($application->installment_request_id);
 
         if ($request) {
-            $attributes = $this->projector->attributes($application, $request->work_status ?: (string) $application->customerType?->legacy_work_status);
+            // APP-006: resubmitted from the chat - no AI call on this path either
+            $attributes = $this->projector->attributes($application, $request->work_status ?: (string) $application->customerType?->legacy_work_status, aiAddressSplit: false);
             $type = $staffRequest['type'] ?? null;
             $dataColumns = array_filter($attributes, fn ($value, $column) => preg_match('/^(applicant|work|guarantor|free_work)_/', $column)
                 && ! str_ends_with($column, '_image') && $value !== null && $value !== '', ARRAY_FILTER_USE_BOTH);
@@ -176,6 +177,10 @@ class StaffDecisionService
                 'customer_action' => null,
                 'notes' => trim((string) $request->notes."\n".'العميل بعت المطلوب ('.$what.') على الواتساب - '.now()->format('Y-m-d H:i')),
             ])->saveQuietly();
+
+            if ($type !== 'document') {
+                \App\Jobs\SplitRequestAddresses::dispatch($request->id)->afterCommit();
+            }
         }
 
         foreach (['collecting', 'submitted'] as $status) {

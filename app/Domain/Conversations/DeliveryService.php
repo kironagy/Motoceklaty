@@ -148,6 +148,8 @@ class DeliveryService
             'jid' => $turn->reply_jid ?: $turn->from,
             'message' => $text,
             'quoted_message' => $quoteWaMessageId,
+            // ERR-003: a resend of an item the worker already sent is not sent again
+            'client_id' => 'out_'.$outbound->id,
         ], 180);
 
         $this->finalizeDelivery($outbound, $response);
@@ -184,6 +186,7 @@ class DeliveryService
             'bot_id' => (string) $turn->whatsapp_bot_id,
             'jid' => $turn->reply_jid ?: $turn->from,
             'media_items' => [$item],
+            'client_id' => 'out_'.$outbound->id,
         ], 240);
 
         $this->finalizeDelivery($outbound, $response);

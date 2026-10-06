@@ -25,6 +25,8 @@ return new class extends Migration
             $table->string('provider', 20);
             $table->string('model', 80);
             $table->unsignedTinyInteger('attempt')->default(1);
+            // OBS-005: characters sent (text + tool declarations, no media) - calibrates TokenEstimator
+            $table->unsignedInteger('prompt_chars')->nullable();
             $table->unsignedInteger('input_tokens')->default(0);
             $table->unsignedInteger('cached_tokens')->default(0);
             $table->unsignedInteger('output_tokens')->default(0);

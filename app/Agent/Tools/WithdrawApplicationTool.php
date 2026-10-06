@@ -7,7 +7,7 @@ use App\Domain\Applications\ApplicationTransitionException;
 use App\Models\Application;
 
 /** DESTRUCTIVE — plan §6.14 */
-class WithdrawApplicationTool implements Tool
+class WithdrawApplicationTool implements WriteTool
 {
     public function __construct(private readonly ApplicationService $applications)
     {

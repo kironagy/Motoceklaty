@@ -2,7 +2,6 @@
 
 namespace App\Agent\Runtime;
 
-use App\Domain\Conversations\ConversationClosing;
 
 /** T17 §4: the real TurnProcessor, bound only when config('agent.enabled') is true. */
 class AgentTurnProcessor implements TurnProcessor
@@ -13,11 +12,6 @@ class AgentTurnProcessor implements TurnProcessor
 
     public function process(object $turn): array
     {
-        // We already said goodbye and he only wrote "تسلم" / "حبيبي": no reply.
-        if (ConversationClosing::onlyThanksAfterGoodbye((int) $turn->whatsapp_conversation_id, (int) $turn->id)) {
-            return ['messages' => []];
-        }
-
         // A colleague answered after the customer's last message (the turn
         // waited out his quiet window): nothing new to answer - the bot
         // carries on from the customer's next message.
@@ -25,7 +19,11 @@ class AgentTurnProcessor implements TurnProcessor
             return ['messages' => []];
         }
 
-        return $this->runner->run($turn);
+        // OBS-001: every model call made for this turn - however deep - is counted against it.
+        return \App\Agent\Tracing\AiCalls::within(
+            ['turn_id' => (int) $turn->id, 'conversation_id' => (int) $turn->whatsapp_conversation_id, 'runner' => 'v1'],
+            fn () => $this->runner->run($turn),
+        );
     }
 
     public static function staffAnsweredLast(int $conversationId): bool

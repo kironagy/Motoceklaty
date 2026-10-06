@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Cache;
  * A result is only accepted when the source matches brand, model, cc AND
  * model year; anything less comes back found=false.
  */
-class LookupMotorcycleSpecsOnlineTool implements Tool
+class LookupMotorcycleSpecsOnlineTool implements ReadTool
 {
     private const FOUND_TTL_DAYS = 30;
 
@@ -84,8 +84,6 @@ class LookupMotorcycleSpecsOnlineTool implements Tool
                 'found' => false,
                 'reason' => 'VERSION_NOT_DEFINED',
                 'missing_in_dashboard' => $missing,
-                'note' => 'The exact version is not defined, so nothing was looked up. Do not state any value for these specs; '
-                    .'say the branch confirms them.',
             ]);
         }
 
@@ -97,7 +95,7 @@ class LookupMotorcycleSpecsOnlineTool implements Tool
             return ToolResult::ok($cached);
         }
 
-        $unavailable = ToolResult::error('LOOKUP_UNAVAILABLE', 'The online lookup failed. Do not state any value for these specs; say the branch confirms them.');
+        $unavailable = ToolResult::error('LOOKUP_UNAVAILABLE', 'The online lookup failed.');
 
         if (Cache::has(self::UNAVAILABLE_KEY)) {
             return $unavailable;
@@ -110,6 +108,7 @@ class LookupMotorcycleSpecsOnlineTool implements Tool
             'timeout' => 20,
             'quotaIsolated' => true,
             'purpose' => 'specs',
+            'label' => 'specs',
         ]);
 
         if (! ($response['ok'] ?? false)) {
@@ -179,7 +178,6 @@ class LookupMotorcycleSpecsOnlineTool implements Tool
             return [
                 'found' => false,
                 'reason' => 'EXACT_VERSION_NOT_CONFIRMED',
-                'note' => 'No source was found for this exact version. Do not state any value for these specs; say the branch confirms them.',
             ];
         }
 
@@ -194,8 +192,7 @@ class LookupMotorcycleSpecsOnlineTool implements Tool
             'specs' => $specs->all(),
             'not_found' => array_values(array_diff($asked, $specs->pluck('name')->all())),
             'sources' => array_slice($sources, 0, 3),
-            'note' => 'Manufacturer specs from the internet for this exact version, not from the showroom sheet. '
-                .'Say them as the manufacturer\'s specs ("حسب مواصفات الشركة"). For anything in not_found, give no value.',
+            'source_kind' => 'manufacturer_online',
         ];
     }
 }

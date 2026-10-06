@@ -5,7 +5,7 @@ namespace App\Agent\Tools;
 use App\Domain\Catalog\CatalogService;
 
 /** READ — plan §6.1 */
-class SearchMotorcyclesTool implements Tool
+class SearchMotorcyclesTool implements ReadTool
 {
     public function __construct(private readonly CatalogService $catalog)
     {
@@ -20,7 +20,7 @@ class SearchMotorcyclesTool implements Tool
     {
         return 'Find catalog motorcycles by structured filters or a name the AI extracted. '
             .'Use when the customer asks what is available, gives a budget/cc/brand, or names a model not '
-            .'obvious from the catalog index. Do not use when the ID is already known (use get_motorcycle_details). '
+            .'obvious from the catalog index (or no index is shown) - name_query also matches showroom nicknames (النحلة، هوجن جمبو). Do not use when the ID is already known (use get_motorcycle_details). '
             .'Each item has its kind (سكوتر / موتوسيكل ...): offer only the kind he asked for.';
     }
 
@@ -39,7 +39,7 @@ class SearchMotorcyclesTool implements Tool
                 'name_query' => ['type' => 'string', 'maxLength' => 60],
                 'brand' => ['type' => 'string'],
                 'kind' => ['type' => 'string', 'enum' => \App\Domain\Catalog\CatalogService::KINDS,
-                    'description' => 'The kind of vehicle he asked for: scooter (سكوتر/اسكوتر), electric (سكوتر كهربا), motorcycle, tricycle (تروسيكل). Always set it when he said one.'],
+                    'description' => 'The kind he asked for: scooter (سكوتر/اسكوتر), electric (سكوتر كهربا), motorcycle (مكنة/موتوسيكل/دليفري - in Egypt مكنة is a motorcycle), tricycle (تروسيكل). Leave it out when he did not say a kind.'],
                 'cc_min' => ['type' => 'integer', 'minimum' => 0],
                 'cc_max' => ['type' => 'integer', 'minimum' => 0],
                 'max_cash_price' => ['type' => 'number', 'minimum' => 0, 'description' => 'His budget ("في حدود 60" = 60000; "60 او 65" = 65000). Results come nearest the budget first.'],
@@ -54,28 +54,7 @@ class SearchMotorcyclesTool implements Tool
         ];
     }
 
-    /**
-     * "عايز مكنة للدليفري" is a motorcycle: scooters are turned into
-     * motorcycles only when he said مكنة/موتوسيكل and never scooter. A girl
-     * who said neither ("أنا بنت، عايزة حاجة شكلها حلو") lost every scooter
-     * to the old rule (scooter only if the word scooter was written).
-     */
-    private function scooterContradictsHisWords(int $conversationId): bool
-    {
-        return $this->saidKind($conversationId, 'motorcycle') && ! $this->saidKind($conversationId, 'scooter');
-    }
 
-    /** His last messages name this kind of vehicle (or work that means it). */
-    private function saidKind(int $conversationId, string $kind): bool
-    {
-        $pattern = $kind === 'scooter'
-            ? '/[اإ]?سكوت[رير]|scooter|فيسبا|vespa/iu'
-            : '/(?<!\p{L})(?:ال)?(?:مكن[ةه]|مكنه|موتوسيكل|موتسيكل|موتوسكل|متسكل|دليفري|ديليفري|توصيل|طلبات|اوبر|أوبر)(?!\p{L})/u';
-
-        return \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversationId)
-            ->where('direction', 'incoming')->latest('id')->limit(6)->pluck('text')
-            ->contains(fn ($t) => preg_match($pattern, (string) $t));
-    }
 
     public function permission(): string
     {
@@ -89,12 +68,7 @@ class SearchMotorcyclesTool implements Tool
         // 65,000 budget was told nothing fits. An empty or zero filter is no filter.
         $args = array_filter($args, fn ($v) => $v !== null && $v !== '' && $v !== 0 && $v !== 0.0 && $v !== '0');
 
-        // A kind is kept only when his words say it: "أنا بنت، عايزة حاجة
-        // شكلها حلو" was searched as motorcycles only.
-        if (($args['kind'] ?? null) === 'motorcycle' && ! filled($args['name_query'] ?? null) && ! $this->saidKind($ctx->conversationId, 'motorcycle')) {
-            unset($args['kind']);
-        }
-
+        // The kind is the model's reading of his words (see the argument); the tool trusts it.
         // a budget means nearest the budget, not the cheapest under it
         if (isset($args['max_cash_price']) && ($args['sort'] ?? null) === 'cheapest') {
             unset($args['sort']);
@@ -102,12 +76,6 @@ class SearchMotorcyclesTool implements Tool
 
         if (isset($args['cc_min'], $args['cc_max']) && $args['cc_min'] > $args['cc_max']) {
             return ToolResult::error('INVALID_ARGUMENTS', 'cc_min must be <= cc_max');
-        }
-
-        // QA 2026-10-04: "عايز مكنة اشتغل عليها دليفري" got four scooters - in
-        // Egypt "مكنة" is a motorcycle. Scooters only when he said scooter.
-        if (($args['kind'] ?? null) === 'scooter' && $this->scooterContradictsHisWords($ctx->conversationId)) {
-            $args['kind'] = 'motorcycle';
         }
 
         $result = $this->catalog->search($args);
@@ -132,21 +100,15 @@ class SearchMotorcyclesTool implements Tool
             $cc = $interest::ccIn((string) $args['name_query']);
 
             if ($cc !== null) {
-                $interest::remember($ctx->conversationId, (string) $args['name_query'], $cc);
                 $result['not_carried'] = true;
                 $result['similar_available'] = $this->catalog->similar($cc, 'motorcycle', null, 5);
-                $result['note'] = 'We do not carry "'.$args['name_query'].'". He wants about '.$cc.'cc: if he asks what we have, offer similar_available '
-                    .'(same size) - never other sizes or kinds unless he asks for them.';
+                $result['similar_cc'] = $cc;
             }
-        } elseif (filled($args['name_query'] ?? null) && count($result['items']) === 1) {
-            // he named a model we have: its kind and size is what he is after
-            $interest::rememberMachine($ctx->conversationId, \App\Models\Machine::with('brand')->find($result['items'][0]['id']));
         } elseif ($this->isGeneric($args) && ($wanted = $interest::get($ctx->conversationId)) && ($wanted['cc'] ?? null)) {
             // "ايه الموجود حاليا؟" right after asking about a 250cc model
             $result['items'] = $this->catalog->similar((int) $wanted['cc'], $wanted['kind'] ?? 'motorcycle', $wanted['price'] ?? null,
                 (int) min(8, $args['limit'] ?? 5), array_filter([$wanted['id'] ?? null]));
-            $result['note'] = 'He was asking about '.$wanted['label'].' (about '.$wanted['cc'].'cc): these are the closest we have. '
-                .'Offer these; other sizes or kinds only if he asks for something different.';
+            $result['closest_to'] = ['label' => $wanted['label'] ?? null, 'cc' => (int) $wanted['cc']];
         }
 
         // "VLR 200" is sold by two brands at different prices; picking one
@@ -158,7 +120,6 @@ class SearchMotorcyclesTool implements Tool
 
         if ($sameName->isNotEmpty()) {
             $result['ambiguous_names'] = $sameName->map(fn ($group) => $group->map(fn ($i) => "{$i['brand']} (id {$i['id']})")->values())->values()->all();
-            $result['note'] = 'Same model name from different brands - ask the customer which brand before quoting a price.';
         }
 
         return ToolResult::ok($result);

@@ -9,7 +9,7 @@ use App\Models\CustomerType;
 use App\Models\Machine;
 
 /** READ - the default answer to any installment question. */
-class GetInstallmentOfferTool implements Tool
+class GetInstallmentOfferTool implements ReadTool
 {
     public function __construct(
         private readonly BestOfferService $offers,
@@ -24,15 +24,9 @@ class GetInstallmentOfferTool implements Tool
 
     public function description(): string
     {
-        return 'THE tool for any installment question ("القسط كام", "على سنة", "أقل مقدم", "ينفع أقسط", "إجمالي السعر كام", "هدفع كام في الآخر" - the offer\'s `breakdown` is the total). The best system for '
-            .'this customer is picked automatically. With no duration named you get the durations to ask him about (no numbers); '
-            .'with months (or months_list / all_durations when he asked for more than one) you get, per duration, the down payment '
-            .'(usually none), the admin fee paid at pickup, and the exact monthly payment - the `say` line has them worded correctly. Do NOT name the '
-            .'system/company unless he asks who finances it. Pass months when he named a duration, down_payment when he '
-            .'named an amount, no_upfront=true when he asks for a plan without the admin fees / paying nothing at pickup '
-            .'("مفيش نظام من غير مصاريف؟", "بدون مصاريف") - never answer that question without this call; only its '
-            .'NO_ZERO_UPFRONT_PLAN error means there is none. '
-            .'Use get_installment_options only when he asks to compare systems/companies.';
+        return 'Installment numbers for a motorcycle (the best plan for him is picked). No months = the durations to ask about; '
+            .'months / months_list / all_durations = per duration the amount at pickup, admin fee, monthly payment, total and a `say` line. '
+            .'no_upfront=true when he wants nothing paid at pickup (NO_ZERO_UPFRONT_PLAN = none exists).';
     }
 
     public function inputSchema(): array
@@ -190,10 +184,8 @@ class GetInstallmentOfferTool implements Tool
             return ToolResult::error('NO_INSTALLMENT_SYSTEMS');
         }
 
-        \App\Domain\Conversations\QuotedMotorcycle::remember($ctx->conversationId, $machine->id);
-
         $capped = collect($offers)->firstWhere('cap', '!==', null);
-        $cap = $capped ? ['explain_to_customer' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : [];
+        $cap = $capped ? ['cap_reason' => $this->caps->explanation((float) $capped['cap'], $customerTypeId)] : [];
 
         // The owner (2026-09-29, conversation 708): "القسط كام؟" is not
         // answered with every duration - he is asked which one first, and
@@ -204,22 +196,13 @@ class GetInstallmentOfferTool implements Tool
             return ToolResult::ok([
                 'cash_price' => (float) $machine->cash_price,
                 'durations' => array_map(fn (array $o) => $this->duration($o['months']), $offers),
-                'how_to_present' => 'He did not name a duration: ask him which duration he wants, naming these durations only - '
-                    .'no installment, fee or total numbers yet (e.g. "حابب تقسطها على قد إيه؟ سنة، ولا سنة ونص، ولا سنتين، ولا ٣ سنين؟"). '
-                    .'When he answers, call again with months (or months_list if he wants more than one compared).',
             ] + $cap);
         }
 
         $shown = $asked === [] ? $offers : array_values(array_filter($offers, fn ($o) => in_array($o['months'], $asked, true)));
 
-        // One duration named = what he is weighing: remembered, and an open
-        // application with no plan yet takes it (he chose before applying).
-        if (count($shown) === 1) {
-            $offer = ['machine_id' => $machine->id, 'months' => $shown[0]['months'], 'plan_id' => $shown[0]['plan_id'], 'down_payment' => (float) $shown[0]['down_payment']];
-            \App\Domain\Conversations\QuotedOffer::remember($ctx->conversationId, $offer);
-            $this->fillEmptySelection($ctx, $offer);
-        }
-
+        // What he was quoted is recorded by the runner (ToolOutcomeRecorder);
+        // the application changes only through update_application_selection.
         if ($shown === []) {
             return ToolResult::error('DURATION_NOT_AVAILABLE', 'No plan for '.implode(', ', $asked).' months. Available durations: '
                 .implode(', ', array_column($offers, 'months')).' - offer the closest ones.');
@@ -237,51 +220,20 @@ class GetInstallmentOfferTool implements Tool
                 // The admin fee is said on its own, never added to it.
                 'total_paid' => round($o['down_payment'] + $o['monthly_payment'] * $o['months']),
                 'breakdown' => $this->breakdown($machine, $o),
-                'say' => $this->line($o),
+                'line' => $this->line($o),
                 // internal: pass these to update_application_selection when he picks this offer - never say them
                 'installment_system' => $o['system'],
                 'down_payment' => $o['down_payment'],
+                'plan_id' => $o['plan_id'],
             ], $shown),
             // once with the offer, or when he asks (owner's instructions)
             'first_payment' => self::firstPaymentLine(),
             // the owner's wording of why installments cost more than cash
-            'price_difference_policy' => (string) config('agent.installments.price_difference_explanation'),
-            'how_to_present' => 'Send the `say` lines as they are (one per line, you may reword lightly, but keep every number and '
-                .'keep saying whether there are admin fees). Admin fees are NOT a down payment - never call them "مقدم". '
-                .'If he asks why installments cost more than cash, explain it in your own short words from price_difference_policy (never copied word for word, never adding reasons it does not give), '
-                .'then offer the cash price. Send only the `say` line per duration - do NOT paste the `breakdown` after it too (same numbers twice); send `breakdown` only when he asks what he pays in total / in the end. '
-                .'Never tell him the installment price of the motorcycle (the price the installment is calculated on). '
-                .'Say `first_payment` once with the offer (or when he asks). Never write the words "من غير مقدم" / "بدون مقدم" - say what is paid at pickup instead. No system/company names, no word "نظام"/"أنظمة". Quote only the offers below (the duration(s) he asked for), each with its numbers.',
+            'why_installment_costs_more' => (string) config('agent.installments.price_difference_explanation'),
         ] + $cap
         );
     }
 
-    /**
-     * A plasterer was quoted "من غير مقدم" and, once his application was
-     * opened as عامل حر, got a 15,000 down payment. While his work is not
-     * known, a motorcycle above a work-type cap is not quoted at all.
-     */
-    private function fillEmptySelection(ToolContext $ctx, array $offer): void
-    {
-        $application = $ctx->activeApplicationId ? Application::find($ctx->activeApplicationId) : null;
-
-        if (! $application || $application->installment_plan_id || ! $application->isActive() || $application->status !== 'collecting'
-            || ($application->machine_id && (int) $application->machine_id !== (int) $offer['machine_id'])) {
-            return;
-        }
-
-        try {
-            app(\App\Domain\Applications\ApplicationService::class)->updateSelection(
-                $application,
-                \App\Models\Machine::find($offer['machine_id']),
-                \App\Models\InstallmentPlan::with('installmentSystem')->find($offer['plan_id']),
-                $offer['down_payment'],
-                null,
-            );
-        } catch (\Throwable) {
-            // the snapshot still lists the plan as not chosen
-        }
-    }
 
     private function cappedWorkTypes(Machine $machine): ?string
     {

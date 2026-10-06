@@ -6,24 +6,24 @@
 
 | Done | ID | Priority | Area | Task | Depends On | Verification |
 |---|---|---|---|---|---|---|
-| [ ] | PRE-001 | CRITICAL | Baseline | Record a frozen baseline: run `agent:simulate-customers` + the QA matrix on the current code; store calls/turn, tokens/turn, latency, guard rejections, fallbacks | — | Baseline report committed under `docs/baselines/` with raw numbers |
-| [ ] | PRE-002 | CRITICAL | Baseline | Export every instruction source (all `agent_instruction_versions`, `business_memories`, `bot_lessons` local **and** server, tool descriptions, tool-result hint strings, guard hints, side-call prompts) into one read-only inventory file | — | Inventory row count matches DB/code counts |
+| [x] | PRE-001 | CRITICAL | Baseline | Record a frozen baseline: run `agent:simulate-customers` + the QA matrix on the current code; store calls/turn, tokens/turn, latency, guard rejections, fallbacks | — | Baseline report committed under `docs/baselines/` with raw numbers |
+| [x] | PRE-002 | CRITICAL | Baseline | Export every instruction source (all `agent_instruction_versions`, `business_memories`, `bot_lessons` local **and** server, tool descriptions, tool-result hint strings, guard hints, side-call prompts) into one read-only inventory file | — | Inventory row count matches DB/code counts |
 | [ ] | PRE-003 | CRITICAL | Business | Owner decisions on every item in §26 (Questions/Blockers) recorded in this file | PRE-002 | Each Q-ID has a written answer + date |
-| [ ] | PRE-004 | CRITICAL | Baseline | Read-only parity check local vs server (code version, `agent_settings`, active instruction version, lessons, installment_systems active flags) | — | Parity table in §26 filled |
+| [x] | PRE-004 | CRITICAL | Baseline | Read-only parity check local vs server (code version, `agent_settings`, active instruction version, lessons, installment_systems active flags) | — | Parity table in §26 filled |
 | [ ] | PRE-005 | HIGH | Architecture | Add feature flag `agent.v2.enabled` + per-bot / per-conversation override (default off) | — | Flag test: off = old runner byte-identical behaviour |
-| [ ] | OBS-001 | CRITICAL | Observability | New `ai_calls` log: one row per model HTTP call (turn_id, trace_id, purpose, model, attempt, input/cached/output/reasoning tokens, latency_ms, outcome) | — | Every AI call in a simulated turn has a row; sums equal `ai_usage_logs` |
-| [ ] | OBS-002 | HIGH | Observability | Count side calls (understanding, reviewer, work, document, image, specs) in the turn trace, not only main-loop calls | OBS-001 | Trace shows total calls per turn |
-| [ ] | OBS-003 | HIGH | Observability | Optional redacted prompt/response capture (flag, sampled, PII-masked) for debugging | OBS-001, SEC-003 | Capture visible for a sim turn; PII masked |
-| [ ] | OBS-004 | HIGH | Observability | Log every silent output rewrite (tidy/autofix/withoutRepeatedOffer/withoutUnpromptedSalam) with before/after | — | Rewrites visible in trace |
+| [x] | OBS-001 | CRITICAL | Observability | New `ai_calls` log: one row per model HTTP call (turn_id, trace_id, purpose, model, attempt, input/cached/output/reasoning tokens, latency_ms, outcome) | — | Every AI call in a simulated turn has a row; sums equal `ai_usage_logs` |
+| [x] | OBS-002 | HIGH | Observability | Count side calls (understanding, reviewer, work, document, image, specs) in the turn trace, not only main-loop calls | OBS-001 | Trace shows total calls per turn |
+| [x] | OBS-003 | HIGH | Observability | Optional redacted prompt/response capture (flag, sampled, PII-masked) for debugging | OBS-001, SEC-003 | Capture visible for a sim turn; PII masked |
+| [x] | OBS-004 | HIGH | Observability | Log every silent output rewrite (tidy/autofix/withoutRepeatedOffer/withoutUnpromptedSalam) with before/after | — | Rewrites visible in trace |
 | [ ] | OBS-005 | MEDIUM | Observability | Replace char/4 estimates with real usage (or calibrated Arabic ratio) in manifest, budgets and admin token hints | OBS-001 | Estimate within ±15% of real usage on 50 calls |
 | [ ] | OBS-006 | MEDIUM | Observability | Pipeline timestamps: Node received, Laravel stored, turn claimed, generated, Node sent | WA-001 | Per-stage latency computable for every turn |
 | [ ] | OBS-007 | MEDIUM | Observability | Extend `/admin/reply-quality` with v2 KPIs (calls, tokens, latency, repair rate, fallback rate, handoff rate) | OBS-001 | Page renders KPIs for old vs v2 |
 | [ ] | ARCH-001 | CRITICAL | Architecture | Create `AgentRunnerV2` beside `AgentRunner` (selected by PRE-005 flag); old runner untouched | PRE-005 | Both runners pass shared contract tests |
 | [ ] | ARCH-002 | CRITICAL | Architecture | Define `TurnContext` DTO: one immutable object holding customer facts, application snapshot, quote ledger, memory, instruction blocks for the turn | ARCH-001 | Unit tests; context built once per turn |
-| [ ] | ARCH-003 | CRITICAL | Architecture | Define tool contract v2 (pure READ vs explicit WRITE, typed result envelope, no prose instructions in results) | ARCH-001 | Contract doc + interface + lint test |
+| [x] | ARCH-003 | CRITICAL | Architecture | Define tool contract v2 (pure READ vs explicit WRITE, typed result envelope, no prose instructions in results) | ARCH-001 | Contract doc + interface + lint test |
 | [ ] | ARCH-004 | CRITICAL | Architecture | Model-call budget policy for v2 (target ≤ 3 normal, hard max 5 per turn incl. side calls) | ARCH-001, OBS-001 | Budget enforced in tests |
 | [ ] | ARCH-005 | HIGH | Architecture | Remove all AI calls triggered from inside validation code (guards) | GUARD-005, WORK-001 | No `WorkClassification` call reachable from `ReplyGuard` |
-| [ ] | ARCH-006 | HIGH | Architecture | Turn-step persistence so a retried turn resumes instead of re-running every AI call | ARCH-001, TOOL-004 | Retry test: completed steps not re-executed |
+| [x] | ARCH-006 | HIGH | Architecture | Turn-step persistence so a retried turn resumes instead of re-running every AI call | ARCH-001, TOOL-004 | Retry test: completed steps not re-executed |
 | [ ] | INST-001 | CRITICAL | Instructions | Classify every inventoried instruction with the §4 categories (CORE_PERSONA … SHOULD_BE_TOOL_TRUTH) | PRE-002 | Every row has ≥1 category + target location |
 | [ ] | INST-002 | CRITICAL | Instructions | Resolve each CONTRADICTORY pair with the owner's decision (§26) | INST-001, PRE-003 | Contradiction list = 0 open items |
 | [ ] | INST-003 | CRITICAL | Instructions | Write the new core persona block (≤ ~1,200 tokens real), Egyptian salesman voice + the few invariant truth rules | INST-002 | Owner review; token count measured |
@@ -35,24 +35,24 @@
 | [ ] | INST-009 | HIGH | Instructions | Lessons (`bot_lessons`) become scoped blocks with conflict detection; keep "newest wins" only inside the same scope | INST-005 | Lesson migration test; server lessons imported |
 | [ ] | INST-010 | HIGH | Instructions | Teaching mode (`TeachingCoach`/`ChangeApplier`) writes into the new block structure (proposal → staff approval unchanged) | INST-009 | Teach-mode test still passes |
 | [ ] | INST-011 | CRITICAL | Instructions | Move business_memories pinned/index/scoped content to: blocks, tool truth, or DB rules (per §6) | INST-002, INST-004 | No business_memories row read by v2 context |
-| [ ] | INST-012 | HIGH | Instructions | Strip presentation instructions out of tool results (`say`, `how_to_present`, `note`, `hint`, `explain_to_customer`, `tell_customer`) — facts stay, wording rules move to packs | ARCH-003, INST-004 | Tool result schema test: no prose-instruction keys |
+| [x] | INST-012 | HIGH | Instructions | Strip presentation instructions out of tool results (`say`, `how_to_present`, `note`, `hint`, `explain_to_customer`, `tell_customer`) — facts stay, wording rules move to packs | ARCH-003, INST-004 | Tool result schema test: no prose-instruction keys |
 | [ ] | INST-013 | HIGH | Instructions | Trim tool descriptions to contract only (what, when, args) — policy moves to packs | ARCH-003 | Declarations ≤ target size (§17) |
 | [ ] | INST-014 | MEDIUM | Instructions | Repair-message texts (v2 validator feedback) short and factual, one source | VAL-002 | Snapshot test of messages |
 | [ ] | INST-015 | MEDIUM | Instructions | Fix approval gate: approved version tracks bundle version, readiness check reads it | INST-005 | `agent:readiness` passes only for approved bundle |
 | [ ] | INST-016 | MEDIUM | Instructions | Make `.env` vs dashboard override visible (show effective model/settings source on admin) | — | Admin shows source per setting |
 | [ ] | CTX-001 | CRITICAL | Context | `ContextBuilderV2`: static prefix (core + tools) first, then packs, then dynamic state, then history | ARCH-002, INST-006 | Prompt snapshot tests; cache hit rate measured |
-| [ ] | CTX-002 | CRITICAL | Context | Single application-snapshot source: compact snapshot rendered once; refreshed (not duplicated) after write tools | CTX-001, TOOL-006 | Test: only one snapshot present at every call |
+| [x] | CTX-002 | CRITICAL | Context | Single application-snapshot source: compact snapshot rendered once; refreshed (not duplicated) after write tools | CTX-001, TOOL-006 | Test: only one snapshot present at every call |
 | [ ] | CTX-003 | HIGH | Context | Whitelisted state rendering — never dump raw `conversation.state` (no counters/timestamps/internal ids) | CTX-001 | Snapshot test: no internal keys |
-| [ ] | CTX-004 | HIGH | Context | Catalog index: compact + only when catalog stage/mention is relevant (structured trigger, not regex) | CTX-001, CAT-002 | Token benchmark |
-| [ ] | CTX-005 | CRITICAL | Context | Fix current-turn query: only `direction=incoming` rows in L8 (outgoing rows share `turn_id`) | — | Regression test replaying a finished turn |
-| [ ] | CTX-006 | HIGH | Context | History window by real tokens, newest-first; keep summary; document limits | OBS-005 | Unit test with long conversation |
-| [ ] | CTX-007 | CRITICAL | Context | Quote ledger in context: last verified offers/prices with source + timestamp, usable as number source across turns | CTX-001, INS-004 | Follow-up "القسط كام تاني؟" answered without new tool call when ledger valid |
-| [ ] | CTX-008 | HIGH | Context | Represent every message type: location, PDF/document, video (currently invisible or "[media]") | CTX-001 | Tests per message type |
+| [x] | CTX-004 | HIGH | Context | Catalog index: compact + only when catalog stage/mention is relevant (structured trigger, not regex) | CTX-001, CAT-002 | Token benchmark |
+| [x] | CTX-005 | CRITICAL | Context | Fix current-turn query: only `direction=incoming` rows in L8 (outgoing rows share `turn_id`) | — | Regression test replaying a finished turn |
+| [x] | CTX-006 | HIGH | Context | History window by real tokens, newest-first; keep summary; document limits | OBS-005 | Unit test with long conversation |
+| [x] | CTX-007 | CRITICAL | Context | Quote ledger in context: last verified offers/prices with source + timestamp, usable as number source across turns | CTX-001, INS-004 | Follow-up "القسط كام تاني؟" answered without new tool call when ledger valid |
+| [x] | CTX-008 | HIGH | Context | Represent every message type: location, PDF/document, video (currently invisible or "[media]") | CTX-001 | Tests per message type |
 | [ ] | CTX-009 | HIGH | Context | PII minimisation: phone/national ID never in prompt; name/address only when the stage needs them | CTX-003, SEC-003 | Snapshot test, regex scan for 11-digit phones |
-| [ ] | CTX-010 | MEDIUM | Context | Summary job: structured summary (facts vs chat), trigger on real tokens | CTX-006 | Summary test |
+| [x] | CTX-010 | MEDIUM | Context | Summary job: structured summary (facts vs chat), trigger on real tokens | CTX-006 | Summary test |
 | [ ] | MEM-001 | CRITICAL | Memory | Provenance hierarchy enforced everywhere: staff > document > customer_statement > ai_inference | ARCH-002 | Test: statement cannot overwrite document value |
 | [ ] | MEM-002 | CRITICAL | Memory | Conflicts stored as conflicts (both values + sources) and surfaced as "ask him which is right", never silently replaced | MEM-001 | Conflict test |
-| [ ] | MEM-003 | HIGH | Memory | Staleness rules: topic/open_question/objections expire (time + stage change) | MEM-001 | Expiry test |
+| [x] | MEM-003 | HIGH | Memory | Staleness rules: topic/open_question/objections expire (time + stage change) | MEM-001 | Expiry test |
 | [ ] | MEM-004 | CRITICAL | Customer facts | One facts store: map `customers.memory.facts`, `customer_attributes`, `application_data`, `pending_fields` to a single source of truth per key | MEM-001, PRE-003 | Mapping table in §8 implemented; no key in two writable stores |
 | [ ] | MEM-005 | HIGH | Memory | Model may only *propose* facts; code validates quote/provenance before saving | MEM-004, FACT-001 | Test: fact without verifiable quote saved as inference only |
 | [ ] | MEM-006 | MEDIUM | Memory | Data migration for existing `customers.memory` JSON | MEM-004, MIG-001 | Migration dry-run on server copy |
@@ -70,42 +70,42 @@
 | [ ] | VAL-004 | HIGH | Guards | Remove customer-text regex from validation (HUMAN_REQUEST_IGNORED, mayApplyThroughSomeoneElse, customerBringsAPrice…) | VAL-001, HAND-001 | Adversarial + handoff tests |
 | [ ] | VAL-005 | HIGH | Guards | Hard-coded business numbers out of guards (20/30/40/60 %, 60,000, 21) → read from plans/rules | INS-002, ELIG-001 | grep test: no business literals in validator |
 | [ ] | VAL-006 | MEDIUM | Guards | Silent rewrites: keep only purely technical cleanups (markdown/emoji); everything else becomes validator feedback | OBS-004, VAL-002 | Rewrite log shows only technical changes |
-| [ ] | VAL-007 | HIGH | Guards | ReplyReviewer out of the hot path; offline sampled reviewer for QA | VAL-002, QA-003 | Reviewer calls/turn = 0 in v2 |
-| [ ] | GUARD-005 | HIGH | Guards | Remove `WorkClassification::reading()` calls from `ReplyGuard` (waivesRequiredDocument, mayApplyThroughSomeoneElse) | WORK-001 | Test: guard makes no AI call |
-| [ ] | REGEX-001 | HIGH | Regex | Remove `ConversationClosing` thanks-after-goodbye regex → model `no_reply` + validator only checks "no question pending" structurally | LOOP-005 | Closing scenarios pass |
-| [ ] | REGEX-002 | HIGH | Regex | Remove `SendReplyTool::mayStaySilent` text rules (≤25 chars, no "؟") → structural check (last bot message not a question / no open application step) | REGEX-001 | Tests |
-| [ ] | REGEX-003 | HIGH | Regex | Remove `GetInstallmentOptionsTool::asksAboutCompanies` regex gate | TOOL-007 | Tool test |
-| [ ] | REGEX-004 | HIGH | Regex | Remove `SearchMotorcyclesTool::saidKind/scooterContradictsHisWords` regex → model passes `kind` explicitly; tool trusts arg | TOOL-002 | Scooter scenarios pass |
-| [ ] | REGEX-005 | HIGH | Regex | Remove `ProcessDocumentTool::saysEarlierWasWrong` regex → model sets `replaces_previous`; tool validates identity conflict | DOC-003 | Identity-replace scenario passes |
-| [ ] | REGEX-006 | MEDIUM | Regex | Replace `ApplicationNudgeService` cancel-phrase regex with structured state (customer declined / application paused) | APP-004 | Nudge tests |
-| [ ] | REGEX-007 | MEDIUM | Regex | Replace work-from-home regex in `CustomerDataService` (SAME_AS_RESIDENCE) with a validated fact `works_from_home` | MEM-004 | Address tests |
-| [ ] | REGEX-008 | MEDIUM | Regex | `StartApplicationTool::ageInRecentWords` regex → use validated `age` fact only | MEM-004 | Age tests |
+| [x] | VAL-007 | HIGH | Guards | ReplyReviewer out of the hot path; offline sampled reviewer for QA | VAL-002, QA-003 | Reviewer calls/turn = 0 in v2 |
+| [x] | GUARD-005 | HIGH | Guards | Remove `WorkClassification::reading()` calls from `ReplyGuard` (waivesRequiredDocument, mayApplyThroughSomeoneElse) | WORK-001 | Test: guard makes no AI call |
+| [x] | REGEX-001 | HIGH | Regex | Remove `ConversationClosing` thanks-after-goodbye regex → model `no_reply` + validator only checks "no question pending" structurally | LOOP-005 | Closing scenarios pass |
+| [x] | REGEX-002 | HIGH | Regex | Remove `SendReplyTool::mayStaySilent` text rules (≤25 chars, no "؟") → structural check (last bot message not a question / no open application step) | REGEX-001 | Tests |
+| [x] | REGEX-003 | HIGH | Regex | Remove `GetInstallmentOptionsTool::asksAboutCompanies` regex gate | TOOL-007 | Tool test |
+| [x] | REGEX-004 | HIGH | Regex | Remove `SearchMotorcyclesTool::saidKind/scooterContradictsHisWords` regex → model passes `kind` explicitly; tool trusts arg | TOOL-002 | Scooter scenarios pass |
+| [x] | REGEX-005 | HIGH | Regex | Remove `ProcessDocumentTool::saysEarlierWasWrong` regex → model sets `replaces_previous`; tool validates identity conflict | DOC-003 | Identity-replace scenario passes |
+| [x] | REGEX-006 | MEDIUM | Regex | Replace `ApplicationNudgeService` cancel-phrase regex with structured state (customer declined / application paused) | APP-004 | Nudge tests |
+| [x] | REGEX-007 | MEDIUM | Regex | Replace work-from-home regex in `CustomerDataService` (SAME_AS_RESIDENCE) with a validated fact `works_from_home` | MEM-004 | Address tests |
+| [x] | REGEX-008 | MEDIUM | Regex | `StartApplicationTool::ageInRecentWords` regex → use validated `age` fact only | MEM-004 | Age tests |
 | [ ] | REGEX-009 | LOW | Regex | Document legitimate validators that stay (AddressParser, NONE_PATTERN, phone/ID validators, OCR anchors, catalog normalisation) with tests | VAL-001 | Inventory §15 marked "keep" |
-| [ ] | WORK-001 | CRITICAL | Customer types | Work classification runs once per new work statement (event-driven), result persisted (`work_profile`) with evidence quote; tools/validators read the stored result | MEM-004 | Calls: ≤1 classifier call per statement |
-| [ ] | WORK-002 | HIGH | Customer types | Installment tools stop calling the classifier; they read `work_profile` or return `WORK_UNKNOWN` | WORK-001 | Tool latency < 300 ms (no AI) |
+| [x] | WORK-001 | CRITICAL | Customer types | Work classification runs once per new work statement (event-driven), result persisted (`work_profile`) with evidence quote; tools/validators read the stored result | MEM-004 | Calls: ≤1 classifier call per statement |
+| [x] | WORK-002 | HIGH | Customer types | Installment tools stop calling the classifier; they read `work_profile` or return `WORK_UNKNOWN` | WORK-001 | Tool latency < 300 ms (no AI) |
 | [ ] | WORK-003 | HIGH | Customer types | Refusals (occupation, gender/free income, foreigner, daily work) = deterministic rules over `work_profile` + `eligibility_rules` | WORK-001, PRE-003 | Rule tests per refusal code |
 | [ ] | WORK-004 | MEDIUM | Customer types | `OccupationPolicy` word list either becomes classifier output category or stays as DB rule — decided in §26 | PRE-003 | Tests |
 | [ ] | TOOL-001 | CRITICAL | Tools | Written contract for each kept tool (inputs, outputs, side effects, errors) per §9 | ARCH-003 | Contract tests generated from spec |
-| [ ] | TOOL-002 | CRITICAL | Read tools | Make READ tools pure: remove state writes from `search_motorcycles`, `get_motorcycle_details`, `calculate_installment`, `get_installment_offer` | ARCH-003, CTX-007 | DB-write assertion test per READ tool |
-| [ ] | TOOL-003 | CRITICAL | Write tools | Remove `get_installment_offer::fillEmptySelection` (silent application selection) | TOOL-002, APP-002 | Test: offer never changes application |
+| [x] | TOOL-002 | CRITICAL | Read tools | Make READ tools pure: remove state writes from `search_motorcycles`, `get_motorcycle_details`, `calculate_installment`, `get_installment_offer` | ARCH-003, CTX-007 | DB-write assertion test per READ tool |
+| [x] | TOOL-003 | CRITICAL | Write tools | Remove `get_installment_offer::fillEmptySelection` (silent application selection) | TOOL-002, APP-002 | Test: offer never changes application |
 | [ ] | TOOL-004 | CRITICAL | Idempotency | Idempotency keys for WRITE tools across retries (turn + tool + semantic key), not only identical args in the same turn | ARCH-003 | Retry test: no duplicate application/document/handoff |
-| [ ] | TOOL-005 | HIGH | Tool results | Standard result envelope `{ok, data, error{code,message}}`, size caps, snapshot diff instead of full snapshot | ARCH-003, CTX-002 | Size test per tool |
-| [ ] | TOOL-006 | HIGH | Tool results | Write tools return a compact delta + `next_step`; runner refreshes the single snapshot | TOOL-005 | Token benchmark |
+| [x] | TOOL-005 | HIGH | Tool results | Standard result envelope `{ok, data, error{code,message}}`, size caps, snapshot diff instead of full snapshot | ARCH-003, CTX-002 | Size test per tool |
+| [x] | TOOL-006 | HIGH | Tool results | Write tools return a compact delta + `next_step`; runner refreshes the single snapshot | TOOL-005 | Token benchmark |
 | [ ] | TOOL-007 | HIGH | Installments | Merge `get_installment_options` + `calculate_installment` into `get_installment_offer` (`compare_systems`, `plan`, `down_payment` args) | INS-001 | Installment tests |
 | [ ] | TOOL-008 | MEDIUM | Tools | `lookup_motorcycle_specs_online`: use configured provider policy; keep cache; mark "external, unverified" | PROV-002 | Tool test |
 | [ ] | TOOL-009 | HIGH | Tools | Selected-motorcycle lock redesign: explicit `selected_motorcycle_id` state set by an explicit write; remove "last quoted" side-effect locks (MOTORCYCLE_DIFFERS_FROM_LAST_QUOTED, NOT_THE_MODEL_HE_NAMED via text matching) | TOOL-002, APP-002 | send_motorcycle_images error rate < 10% |
 | [ ] | TOOL-010 | MEDIUM | Tools | `send_motorcycle_images` resend semantics (ALREADY_SENT_RECENTLY returns info, not error) | TOOL-009 | Error-rate benchmark |
 | [ ] | TOOL-011 | HIGH | Write tools | `record_customer_data`: per-field validation feedback short and actionable (current NOTHING_SAVED 20/48) | MEM-005 | NOTHING_SAVED rate < 10% in QA |
 | [ ] | TOOL-012 | MEDIUM | Tools | Error-code catalog (one file) used by tools, validator and instructions | TOOL-001 | Catalog test: every emitted code listed |
-| [ ] | TOOL-013 | MEDIUM | Tools | Tool availability by state reviewed (currently hides 3–5 tools); document the rule | TOOL-001 | Tests |
+| [x] | TOOL-013 | MEDIUM | Tools | Tool availability by state reviewed (currently hides 3–5 tools); document the rule | TOOL-001 | Tests |
 | [ ] | TOOL-014 | HIGH | Tools | Tool contract test suite (pure/side-effect/idempotency/size) | TOOL-001..TOOL-013 | CI green |
 | [ ] | CAT-001 | HIGH | Catalog | Price/version stamp on machines + plans (updated_at) for the quote ledger staleness check | — | Ledger invalidates after price edit |
-| [ ] | CAT-002 | HIGH | Catalog | Nicknames/grades (هوجن جمبو، النحلة، فرز تاني…) moved from pinned prompt text to `machines.aliases` data used by search | INST-011 | Search tests for every alias |
+| [x] | CAT-002 | HIGH | Catalog | Nicknames/grades (هوجن جمبو، النحلة، فرز تاني…) moved from pinned prompt text to `machines.aliases` data used by search | INST-011 | Search tests for every alias |
 | [ ] | CAT-003 | MEDIUM | Catalog | "Not in catalog" + alternatives flow single source (search tool) | CAT-002 | Scenario tests |
 | [ ] | INS-001 | CRITICAL | Installments | One deterministic offer service (BestOfferService/PlanResolver/InstallmentCalculator) behind one tool; numbers only from it | TOOL-007 | Golden number tests per plan |
 | [ ] | INS-002 | HIGH | Installments | Remove hard-coded rates (guard hints, PERCENT_DURATION_MISMATCH) — rates from `installment_plans` | INS-001 | grep test |
 | [ ] | INS-003 | HIGH | Installments | Price-difference policy text delivered only in the "interest/why more expensive" pack, not every offer | INST-004, INS-001 | Token benchmark |
-| [ ] | INS-004 | CRITICAL | Installments | Quote ledger (machine, plan, months, down payment, numbers, price version, time) written by runner from offer results | CAT-001, INS-001 | Staleness tests |
+| [x] | INS-004 | CRITICAL | Installments | Quote ledger (machine, plan, months, down payment, numbers, price version, time) written by runner from offer results | CAT-001, INS-001 | Staleness tests |
 | [ ] | INS-005 | MEDIUM | Installments | First-payment rule single source (config 45 days vs knowledge "45 + 5 grace") | PRE-003 | Config test |
 | [ ] | INS-006 | HIGH | Installments | Financing-cap wording single source; prompt never states the cap figure | PRE-003, INS-001 | Scenario tests |
 | [ ] | ELIG-001 | HIGH | Eligibility | Age limits only from `eligibility_rules` (remove "21" literals from prompt/guards) | INST-004 | grep test |
@@ -116,26 +116,26 @@
 | [ ] | APP-003 | HIGH | Application submission | Keep two-step submit; confirmation must be the customer's next message after the summary (structural, not text regex) | APP-002 | Submission tests |
 | [ ] | APP-004 | HIGH | Application lifecycle | Pause/withdraw/expire semantics reviewed; nudges read structured state | PRE-003 | Lifecycle tests |
 | [ ] | APP-005 | MEDIUM | Application lifecycle | Staff decisions (needs_more_info/approved/rejected) → customer messaging single path (SendWhatsappStatusNotification) documented and tested | — | Tests |
-| [ ] | APP-006 | MEDIUM | Application submission | `AddressSplitter` AI call moved off the submit hot path (queued) with deterministic fallback | ADDR-002 | Submit latency < 3 s |
+| [x] | APP-006 | MEDIUM | Application submission | `AddressSplitter` AI call moved off the submit hot path (queued) with deterministic fallback | ADDR-002 | Submit latency < 3 s |
 | [ ] | APP-007 | MEDIUM | Application | Card-only route rules single source (code + one pack) | PRE-003 | Scenario tests |
-| [ ] | DOC-001 | HIGH | Documents | Per-photo LLM budget ≤ 2 calls (classify+extract, optional focused re-read) | OBS-001 | Document benchmark |
+| [x] | DOC-001 | HIGH | Documents | Per-photo LLM budget ≤ 2 calls (classify+extract, optional focused re-read) | OBS-001 | Document benchmark |
 | [ ] | DOC-002 | HIGH | Documents | Asynchronous document reading with an immediate honest acknowledgement when reading > N s (avg now 26 s) | PRE-003 | Latency test |
 | [ ] | DOC-003 | HIGH | Documents | Wrong document / other person's ID: explicit tool argument + identity-conflict rule, no regex | MEM-002 | Scenario tests |
-| [ ] | DOC-004 | MEDIUM | Documents | Multiple documents in one burst: one call, per-document results, one reply | DOC-001 | Test with 4 photos |
+| [x] | DOC-004 | MEDIUM | Documents | Multiple documents in one burst: one call, per-document results, one reply | DOC-001 | Test with 4 photos |
 | [ ] | DOC-005 | MEDIUM | OCR | OCR failure/timeout handling + retry policy | — | Fault-injection test |
-| [ ] | DOC-006 | MEDIUM | Documents | Documents before an application exist: visible to model (media id), stored, processed after creation | CTX-008, APP-001 | Scenario test |
+| [x] | DOC-006 | MEDIUM | Documents | Documents before an application exist: visible to model (media id), stored, processed after creation | CTX-008, APP-001 | Scenario test |
 | [ ] | ADDR-001 | MEDIUM | Address | Address rules single source (knowledge `address_requirements` vs code validators vs prompt §7) | INST-011 | Address tests |
 | [ ] | ADDR-002 | MEDIUM | Address | Consolidate `AddressParser` (regex) + `AddressSplitter` (AI) responsibilities | ADDR-001 | Tests |
 | [ ] | HAND-001 | HIGH | Handoff | Handoff decided by the model through the tool contract + structural validator (claim without tool = invalid); remove customer-text regex detection | VAL-004 | Handoff scenarios |
 | [ ] | HAND-002 | MEDIUM | Handoff | `call_request` mode documented and tested (bot keeps answering) | HAND-001 | Tests |
 | [ ] | HAND-003 | MEDIUM | Handoff | Return-to-agent context: bot continues without promising a colleague again | HAND-001 | Tests |
 | [ ] | ERR-001 | HIGH | Error handling | Fallback message catalog (one place, owner-approved texts) | PRE-003 | Snapshot test |
-| [ ] | ERR-002 | HIGH | Retry | Transient provider failure resumes from persisted steps (no repeat of side calls) | ARCH-006 | Retry test |
-| [ ] | ERR-003 | HIGH | Error handling | Abandoned-turn reclaim cannot replay already-delivered replies (with CTX-005) | CTX-005 | Test |
+| [x] | ERR-002 | HIGH | Retry | Transient provider failure resumes from persisted steps (no repeat of side calls) | ARCH-006 | Retry test |
+| [x] | ERR-003 | HIGH | Error handling | Abandoned-turn reclaim cannot replay already-delivered replies (with CTX-005) | CTX-005 | Test |
 | [ ] | ERR-004 | MEDIUM | Error handling | Delivery failure policy (customer-visible outcome, staff alert) | — | Fault test |
 | [ ] | ERR-005 | MEDIUM | Error handling | Duplicate message/job tests (Node redelivery, Laravel retries) | — | Tests |
 | [ ] | WA-001 | MEDIUM | WhatsApp ingestion | Node adds `received_at` ms timestamp; Laravel stores it | — | Timestamps in DB |
-| [ ] | WA-002 | MEDIUM | Node/Baileys | Local spool in Node when Laravel is unreachable after 3 retries (currently message only logged) | — | Kill-Laravel test: message processed after restart |
+| [x] | WA-002 | MEDIUM | Node/Baileys | Local spool in Node when Laravel is unreachable after 3 retries (currently message only logged) | — | Kill-Laravel test: message processed after restart |
 | [ ] | WA-003 | LOW | Node/Baileys | Review pacing/typing/seen timings against latency target | PERF-003 | Measured |
 | [ ] | WA-004 | LOW | WhatsApp ingestion | Constant-time token comparison (`hash_equals`) in controller and Node | SEC-004 | Test |
 | [ ] | WRK-001 | MEDIUM | Laravel worker | Settings cache invalidation documented (cache key `agent_settings.overrides`) + admin save clears it (verify) | — | Test |
@@ -999,36 +999,41 @@ Format: **Task** — files · current → future · change · deps · tests · r
 
 Each needs an owner decision (PRE-003). Code shows the contradiction; it cannot decide.
 
-| ID | Question | Evidence (FACT) |
-|---|---|---|
-| Q-01 | One message per reply, or one line per duration / split long messages? | Pinned `sales_personality` vs L0 §1.3 and `SendReplyTool::asOneMessage` |
-| Q-02 | May the bot say the installment total is higher than cash, and should it ever compute on the "installment price"? | Pinned `pricing_conversation_rules` vs L0 §5 and guard INTEREST_DENIED |
-| Q-03 | Exact owner sentence for "في فايدة؟" | L0 §5 points to a lesson that exists only on the server (#35) |
-| Q-04 | May the 60,000 self-employed cap ever be said to the customer? | Pinned `self_employed_financing_cap` vs CAP_THRESHOLD_MENTIONED |
-| Q-05 | Restricted professions: refuse plainly, or "بتتحفظ" and try? Is the DB word list the final list? | Pinned `restricted_professions_guidance` vs `eligibility_rules.excluded_occupation` + guards |
-| Q-06 | Should the bot read the data back before submit, or only the code summary? | Pinned `review_data_before_submit` vs SUMMARY_DUPLICATED |
-| Q-07 | Guarantor rule (only pension?) — business data or prompt? | L0 §4 only |
-| Q-08 | First installment: 45 days, or 45 + 5 grace? | config vs `installment_payment_schedule` |
-| Q-09 | Keep asking "applied at another showroom?" and "previous loans/default?" Where in the flow? | Pinned baseline; not in `next_step` |
-| Q-10 | Insured employee without a salary slip: insurance print only, or apply as free income, or bank statement (army / high salary)? | L0 §6 vs `employment_category_docs`, `bank_statement_cases`, guard WORK_TYPE_SWITCH_SUGGESTED |
-| Q-11 | Business owner: are commercial register and tax card required or "if available"? | `business_owner_docs` vs REQUIRED_DOCUMENT_WAIVED |
-| Q-12 | Tuk-tuk / daily workers: card-only route, or not eligible? | L0 §6 vs `freelance_profession_docs`, `taxi_microbus_docs` |
-| Q-13 | Acceptable wait for document reading, and the wording of a "reading your document" acknowledgement? | 26 s avg measured |
-| Q-14 | Which environment is the truth for instructions/lessons/settings during the rebuild (server or local)? | Divergence noted in project memory |
-| Q-15 | Fallback and waiting texts — final approved wording | `.env`/`agent_settings` values |
-| Q-16 | Should the model state its identity as an automated reply when asked? (L0 §2 says yes) — confirm | L0 §2 |
-| Q-17 | Quote-ledger validity: how long may an earlier quote be repeated without a new lookup (proposal: 24 h, unchanged price)? | New design |
-| Q-18 | PII: may the bot use the customer's full name from the ID in replies? | Snapshot contains `full_name` |
+| ID | Question | Evidence (FACT) | Server evidence found 2026-10-05 (read-only; **not** a decision — the owner confirms in PRE-003) |
+|---|---|---|---|
+| Q-01 | One message per reply, or one line per duration / split long messages? | Pinned `sales_personality` vs L0 §1.3 and `SendReplyTool::asOneMessage` | Server v2.4.8 §1.3: "**رسالة واحدة** (ما تقسمش الرد)"; `sales_personality` (split messages) is **switched off** on the server. Points to: one message. |
+| Q-02 | May the bot say the installment total is higher than cash, and should it ever compute on the "installment price"? | Pinned `pricing_conversation_rules` vs L0 §5 and guard INTEREST_DENIED | `pricing_conversation_rules` **off** on the server. Server v2.4.8: "ممنوع سعر المكنة بالتقسيط"; lesson #31 (active): explain cash vs installment only when he asks why. |
+| Q-03 | Exact owner sentence for "في فايدة؟" | L0 §5 points to a lesson that exists only on the server (#35) | Lesson #35 (server, active): "شغالين بفايدة ٢٠٪ على السنة و٧٪ مصاريف اداريه … أو ٣٠٪ بدون مصاريف إدارية". v2.4.8 also lists per-duration rates for أمان (20/30/40/60 % + 7 %). |
+| Q-04 | May the 60,000 self-employed cap ever be said to the customer? | Pinned `self_employed_financing_cap` vs CAP_THRESHOLD_MENTIONED | `self_employed_financing_cap` **off** on the server; v2.2.32 note (server): "حد الـ 60 ألف قاعدة داخلية - ما يتقالش للعميل". Lessons #13/#19 still use the 60k threshold to decide when to ask about work. |
+| Q-05 | Restricted professions: refuse plainly, or "بتتحفظ" and try? Is the DB word list the final list? | Pinned `restricted_professions_guidance` vs `eligibility_rules.excluded_occupation` + guards | Lesson #33 (server, active): government (police/officer) or lawyer → check_eligibility, say plainly it will be refused; "بتتحفظ" forbidden; offer cash. `restricted_professions_guidance` is still active and contradicts it. |
+| Q-06 | Should the bot read the data back before submit, or only the code summary? | Pinned `review_data_before_submit` vs SUMMARY_DUPLICATED | `review_data_before_submit` **off** on the server; v2.4.8 §submit: one line "ده ملخص طلبك، راجعه…" over the code summary. |
+| Q-07 | Guarantor rule (only pension?) — business data or prompt? | L0 §4 only | v2.4.8: "الضامن بيتطلب بس لو الحالة طلبته (المعاش)؛ غير كده مفيش ضامن". Prompt only, not data. |
+| Q-08 | First installment: 45 days, or 45 + 5 grace? | config vs `installment_payment_schedule` | Server `agent_settings.installments.first_payment_after_days` = **30**; server notes v2.2.27/28: "بعد 45 يوم بالضبط"; memory `installment_payment_schedule`: 45 + 5 grace. Three values. |
+| Q-09 | Keep asking "applied at another showroom?" and "previous loans/default?" Where in the flow? | Pinned baseline; not in `next_step` | `required_documents_baseline` (active on both) still asks about other showrooms / previous loans; nothing in v2.4.8 or `next_step`. |
+| Q-10 | Insured employee without a salary slip: insurance print only, or apply as free income, or bank statement (army / high salary)? | L0 §6 vs `employment_category_docs`, `bank_statement_cases`, guard WORK_TYPE_SWITCH_SUGGESTED | v2.4.8 §8: only substitute = برنت التأمينات, then card-only; "ممنوع كشف حساب". `employment_category_docs` and `bank_statement_cases` (active on server) still allow other routes. |
+| Q-11 | Business owner: are commercial register and tax card required or "if available"? | `business_owner_docs` vs REQUIRED_DOCUMENT_WAIVED | v2.4.8: "كل مستند في القايمة لازم … ممنوع مش شرط". `business_owner_docs` (active on server) says register/tax "مش شرط". |
+| Q-12 | Tuk-tuk / daily workers: card-only route, or not eligible? | L0 §6 vs `freelance_profession_docs`, `taxi_microbus_docs` | v2.4.8: "التوكتوك والشغل باليومية: بيقدّم بالبطاقة بس على شروط العمل الحر". `freelance_profession_docs` / `taxi_microbus_docs` (active on server) say not eligible. |
+| Q-13 | Acceptable wait for document reading, and the wording of a "reading your document" acknowledgement? | 26 s avg measured | No evidence; measured 26 s average per photo. |
+| Q-14 | Which environment is the truth for instructions/lessons/settings during the rebuild (server or local)? | Divergence noted in project memory | Project memory 2026-10-02/04: research and conversations from the server, code and tests local. |
+| Q-15 | Fallback and waiting texts — final approved wording | `.env`/`agent_settings` values | Server has no fallback/waiting overrides in `agent_settings`; texts come from `.env`. |
+| Q-16 | Should the model state its identity as an automated reply when asked? (L0 §2 says yes) — confirm | L0 §2 | v2.4.8 keeps the L0 §2 identity line (automated reply of the sales team). |
+| Q-17 | Quote-ledger validity: how long may an earlier quote be repeated without a new lookup (proposal: 24 h, unchanged price)? | New design | No evidence (new design). |
+| Q-18 | PII: may the bot use the customer's full name from the ID in replies? | Snapshot contains `full_name` | No evidence. |
 
-**Parity table (PRE-004, to fill):**
+**Parity table (PRE-004, filled 2026-10-05 from read-only SELECTs + file hashes; raw export kept in the session scratchpad, rows in `docs/baselines/instruction-inventory.json`):**
 
 | Item | Local | Server |
 |---|---|---|
-| Code version | `96cfd5c0f` + uncommitted | (fill) |
-| Model / effort | gpt-5-mini / low | (fill; notes say gpt-5-nano / medium) |
-| Active instructions | v2.4.7 | (fill) |
-| bot_lessons | 0 | (fill; ≈38) |
-| installment_systems active | 7/7 | (fill; notes: 1 and 3 disabled) |
+| Code version | `3a3928709` ("V1") + rebuild work | `66f2a8ac` + 83 uncommitted files. Of 537 code files compared by sha1: 509 identical. Server **lacks** the salesman rebuild (`TurnUnderstanding`, `ReplyReviewer`, `CatalogMentions`, ReplyQuality page, the 2026-10-05 `ReplyGuard`/`CustomerDataService`/`SnapshotService`/`WorkClassification`/`SendMotorcycleImagesTool` changes) and everything in this rebuild |
+| Last migration | `2026_10_05_100000_create_ai_calls_table` | `2026_10_04_210000_insurance_print_instead_of_salary_slip` |
+| Model / effort | gpt-5-mini / low; fallback gpt-5-nano; document gpt-5-mini | **gpt-5-nano / medium**; fallback gpt-5-nano; document gpt-5-mini; voice gpt-4o-mini-transcribe |
+| Active instructions | v2.4.7 (16,200 chars, v3 text) | **v2.4.8** (23,862 chars, owner-edited: "Egyptian colloquial, each rate with its own duration") |
+| Approved instruction version | `.env` v2.1.0 | `agent_settings` v2.2.32 |
+| bot_lessons | 0 | **38 (12 active)**: #2, #13, #19, #23, #31–#38 |
+| business_memories | 21, all active, 9 pinned | 21, **15 active**: owner switched off `sales_personality`, `pricing_conversation_rules`, `review_data_before_submit`, `policies_not_on_file`, `self_employed_vs_business_owner`, `self_employed_financing_cap` |
+| installment_systems active | 7/7 | 5/7 (1 عبد اللطيف جميل and 3 مايلو off) |
+| installment_plans | 24 | 24 |
+| First installment setting | config 45 days | **`installments.first_payment_after_days` = 30** in `agent_settings` |
 
 ---
 
@@ -1059,3 +1064,72 @@ Each needs an owner decision (PRE-003). Code shows the contradiction; it cannot 
 - [ ] Production migration completed (MIG-005, MIG-006, MIG-009)
 - [ ] Rollback verified (MIG-007)
 - [ ] Old code cleaned up (MIG-008, CLEAN-*)
+
+---
+
+# 28. Rebuild log — 2026-10-05 (owner: fix the current bot from the roots, no second runner)
+
+Done on the current runner (`AgentRunner`), local only, not deployed. Tests: no new failures (52 failures that existed before this work remain; 23 new rebuild tests under `tests/Feature/Agent/Rebuild/`).
+
+| Problem | What changed |
+|---|---|
+| Many instruction sources | ONE source: the instruction text (`resources/agent/instructions/agent.md` v4.0.0, published locally). Pinned/index/scoped `business_memories`, the lessons layer (L0b), `get_business_knowledge` and the understanding note are gone from the prompt. Server lessons #2/13/19/23/31–38 and the 15 active server memories are folded in; contradictions resolved by the newest owner decision (lesson #33 over `restricted_professions_guidance`; v2.4.8 §8/§10 over `employment_category_docs`/`bank_statement_cases`/`business_owner_docs`/`freelance_profession_docs`). Teach-mode lessons are written INTO the instruction text (`LessonSync`, on every lesson save) |
+| PHP rewrites the AI's words | Only technical cleanup (emoji, markdown, dash). `withoutUnpromptedSalam`, `withoutRepeatedOffer`, `autofix`, wording fixes, sentence deletion and the "final no-numbers try" are deleted |
+| Regex as the bot's brain | Deleted: HUMAN_REQUEST_IGNORED/QUOTE_GATED/… (`conversationFailure`), `mayApplyThroughSomeoneElse`, `customerBringsAPrice`, `ConversationClosing`, `mayStaySilent` text rules (now structural), `asksAboutCompanies`, `saidKind`/`scooterContradictsHisWords`, `saysEarlierWasWrong`, `ageInRecentWords`, the work-from-home phrase list, the nudge cancel phrases, `LABEL_REQUEST`. Replaced by explicit arguments: `send_reply.ends_conversation`, `search_motorcycles.kind`, `process_document.replaces_previous`, `record_customer_data.same_as_home`, the age fact |
+| AI inside tools | `WorkClassifier` deleted. The agent records the work once with `record_work_profile` (evidence checked against his messages); `WorkClassification` rules read the stored profile — no model call in any tool or guard |
+| 31 % rejected turns / rejection loop | `ReplyGuard::check` keeps 31 truth codes only (false action claims, numbers/branches/companies/models no tool gave, promises, eligibility without the tool, technical). 62 → 31 codes, 2,342 → 1,347 lines. One repair call max, then an honest line — never a loop |
+| Reviewer over the AI | `ReplyReviewer` and `TurnUnderstanding` deleted (two extra calls per turn) |
+| READ tools that write | `ToolOutcomeRecorder` (runner) records interest/last quote after the result; `fillEmptySelection` deleted; the application changes only through `update_application_selection`. Lint: `ToolContractTest` |
+| No price memory | `QuotedOffer` ledger: every offer given, with its numbers and price version, valid 24 h and until the price changes, shown as `quotes_given_to_him` and accepted by the number check |
+| Same fact in many places | Raw `conversation_state` no longer dumped (whitelist); `customer_profile` only without an open application; memory facts the application holds are not repeated; his words vs a document = one conflict line, the document wins |
+| Big prompt | Tools 26.8k → 22.7k chars (`calculate_installment` merged away, descriptions = contract); system p50 16.3k chars on 40 recent turns; `max_model_calls` 9 → 5 (local `.env`) |
+| Measuring | `ai_calls` (every model call per turn, side calls included), `agent:baseline` (docs/baselines), `agent:instruction-inventory`, calibrated token estimate |
+| Bot reply read as customer text (CTX-005) | `ContextBuilder::buildL8` reads `direction=incoming` only — a retried turn no longer shows the model its own sent reply as his message. Test: `ContextMessagesTest` replays a finished turn |
+| Invisible message types (CTX-008) | Location = `[العميل بعت لوكيشن: lat, lng - name - address]` (L7 + L8, was skipped / `[media]`); PDF in the current turn = `[ملف مرفق (PDF name) - media_id: N]` so `process_document` can be called (a photo sent as a file is shown like a photo); history = `[ملف سابق - media_id]`; video = a "can't watch it, ask" note. 7 tests |
+| Whole snapshot after every write (TOOL-006 / TOOL-005 / CTX-002) | `record_customer_data`, `process_document`, `update_application_selection` and `start_application` on an already-open application return `application_now` = `SnapshotService::compact()` (progress, missing keys, documents in, eligibility, can_submit, next_step + only its hint) next to what the tool changed (saved/rejected, results, selected_plan). The ONE full snapshot is L4 (or `start_application` when it opens/reopens the application; older copies still stripped by `withoutOlderSnapshots`). Local applications: 2,600 → 731, 2,358 → 947, 1,787 → 415, 1,582 → 413 chars per write. `submit_application` was already compact. Test: `WriteToolSizeTest` |
+| Up to 4 model calls per photo (DOC-001 / DOC-004) | `DocumentPipeline`: ONE call classifies and reads every field (the focused read's rules — digit by digit, net salary, date typos, the person's name — moved into it). One focused re-read only when a required field is missing or the issue date is before the hire date; the name-mismatch "high" re-read only when no re-read happened yet → ≤ 2 calls per photo. A burst (`processMany`, used by `process_document`) = one call with every image and one entry per image; a photo the answer leaves out is read alone. The ID-back recheck after the front reuses the same reading (no new call). Test: `DocumentBudgetTest` (call counts with `FakeAiProvider`); two old tests that queued an always-on second read were updated |
+| Catalog index on every call (CTX-004 / CAT-002) | L3 (58 lines, 2,060 chars) is sent only while motorcycles are the talk — structured: no open application, none chosen on it, or an offer in `quotes_given_to_him` (24 h). Left out while he sends papers for a chosen motorcycle (81 of 93 open local applications). Showroom nicknames are machine aliases (migration `2026_10_05_200000_add_nickname_aliases_to_machines`, every variant: هوجن جمبو/جمبو → هوجن 4 ×3, النحلة → دايو 2 ×2, الأرنبة → هوجن 3 ×2, التفاحة → دايو 4 ×2, زد → Z250, تي إكس → Tx 250, آر كي → Rk200 R, إتش → H250), so `search_motorcycles` and `CatalogMentions` match them; staff edit them in the dashboard. Migrated locally. Test: `CatalogIndexTest` |
+| Four tool-list variants (TOOL-013) | `AgentRunner::toolsFor()` = two stable sets: browsing (stable tools → `identify_motorcycle_from_image`, `process_document`) and application (the browsing set unchanged → `update_application_selection`, `submit_application`, `withdraw_application`). A photo no longer changes the list; the browsing set is an exact prefix of the application set, so the provider cache keeps hitting. 20,271 / 22,724 chars (before: 18,192 / 20,271 / 21,820 / 22,724 by turn). Rule in `docs/rebuild/tool-contract-v2.md`. Test: `ToolSetsTest` |
+| Stale memory shown as current (MEM-003) | `CustomerMemory::withoutExpired()`: topic / open_question expire after 24 h or when the stage changes (stage = his latest application's status, else browsing, stored when written); objections after 7 days; a motorcycle's stage after 30 days unless `applied`. Each item has its own time (`topic_at`, `open_question_at`, `objections_at`; older memories fall back to `updated_at`). Expired items are not rendered (`forPrompt`) and are dropped on the next write (`save`). Test: `MemoryStalenessTest` (travel) |
+| History window and summary (CTX-006 / CTX-010) | L7 is filled newest first by the calibrated `TokenEstimator` within `agent.context.recent_messages_tokens` (default now 4,000; was unlimited without the env). The summary is triggered by the TOKENS that fell out of the window (`agent.summary.trigger_tokens`, default 1,500; the old message count still works if set). `SummarizeConversation` asks for `{facts, decisions, still_open}` (schema, ≤ 8 short lines each, no IDs/prices) and stores it as JSON; L6 renders three labelled lists; an older prose summary is still shown as is; an empty/prose answer keeps the old summary. Test: `HistoryWindowTest` (200-message conversation) |
+| Retried turn redid everything (ARCH-006 / ERR-002) | A turn re-queued after `TransientAiFailure` reads the tool steps its earlier attempt completed (`ai_trace_steps`, before this attempt runs anything) and gives them to the model as one plain "already done in this message — do not repeat" block (provider-neutral: no synthetic tool-call ids or Gemini signatures); they also count as outcomes for the truth guards, and older snapshots in them are marked superseded (L4 is current). The model calls that produced them are not paid again. A repeated identical call still gets the stored result from `ToolRegistry` (no second row / application). Test: `TurnResumeTest` (provider fails after `start_application`) |
+| AI address split inside submit (APP-006) | `SubmissionService` (and the chat resubmission in `StaffDecisionService`) project with `aiAddressSplit: false`: the deterministic `AddressParser` fills governorate/area/street at once, no model call, no 25 s wait inside the transaction. `SplitRequestAddresses` (queued after commit, default queue = `laravel-queue` on the server) runs `AddressSplitter` and updates only the address columns still holding what submit wrote — a column staff changed by hand is never touched. `LegacyRequestProjector::addressColumns()` holds the address part alone (no document copies). Test: `SubmitAddressSplitTest` |
+| Message lost when Laravel is down (WA-002) | `whatsapp-bot/spool.js`: after the 3 retries a payload that got no answer or a 5xx is written to `whatsapp-bot/spool/` (atomic write, max 500 files) and replayed in arrival order on boot, after the next successful post, and every minute while files wait; a 4xx moves it to `spool/failed/`. Laravel already ignores a known `wa_message_id`, so a replay never doubles a message. Pacing/typing untouched. Test: `node --test whatsapp-bot/test/spool.test.js` (fake Laravel down → up). Not deployed: the server's Node process needs a restart to load it |
+
+**Steps 2026-10-05 (second pass, CTX-005 … WA-002):** suite 509 tests, 51 failures — all in `docs/baselines/known-failing-tests-2026-10-05.txt` (one of the 52, `test_a_wrong_persons_id_can_be_replaced_by_the_customers_own`, passes now); 37 new PHP tests + 3 Node tests. `agent:baseline --name=after-steps` reads turns recorded BEFORE these steps (627 turns, 2.47 main calls/turn, p50 25k input tokens/turn, p50 24 s) — it is the "before" picture; the "after" needs new recorded turns (simulator run, paid key — owner's OK first). Deploy needs: `migrate` (nickname aliases), `laravel-queue` running (address split job), Node restart (spool).
+
+**Third pass 2026-10-05 (owner: items 1, 2, 3 of the gap list):**
+
+| Problem | What changed |
+|---|---|
+| PHP read his text with phrase lists to decide (rule: never) | `MentionedMotorcycle::conflict` deleted (it read "زي/غير/تاني/ولا…" and model words in his messages and refused every motorcycle tool with `NOT_THE_MODEL_HE_NAMED`); the class keeps only the brand words `search_motorcycles` uses on the agent's query. `CustomerDataService` no longer searches his messages with the "مفيش/مش عارف" list: the agent sends `none: true` + `quote`, PHP only checks the quote is his. `CustomerStatements::messageMatching` deleted. `ReplyGuard` regexes read the AI's reply (truth codes) — his text is only a source of numbers/models he said himself |
+| English "do this / say that" in tool results (23 places + every work-rule hint) | Tools and L4 return facts and codes only: `WorkClassification` hints = his words / the type to use / the figure; `next_step.why` → `reason`/`issue`/`both_sides`/`skipped_after_two_asks`; `if_unavailable` → `{rule}`; `askNext`/`ask_next`, `note`, `tell_customer`, `age_note`, `occupation_check`, prose `different_person`/`identity_replaced`/`not_documents`/`earnings_months`/`address_missing_place`/`reopened` → booleans, ids, lists; branch/request-status/handoff/interest notes → facts. The owner's Arabic lines from the DB stay as data under neutral keys (`line`, `cap_reason`, `why_installment_costs_more`, `rejection_reason`, `refusal`). Every code's rule is written once in `agent.md` §١١ (v4.1.0, published locally as the active version). Lint: `ToolContractTest` (0 prose keys, scanner now also covers SnapshotService/WorkClassification/DocumentPipeline/BranchService/CustomerRequestStatus/ContextBuilder) + `FactsNotProseTest` (every emitted code has its rule) |
+| Reply sent twice after a crash mid-send (ERR-003) | `DeliveryService` sends `client_id = out_<row id>` (stable across retries); Node `sent-registry.js` returns the first answer for an id already sent and joins one still in flight, kept on disk (last 2,000). Tests: `DeliveryServiceTest`, `node --test whatsapp-bot/test/sent-registry.test.js` |
+| ID sent before applying waited (DOC-006) | When `start_application` opens/reopens the application, the runner reads his last week's unread document photos through `process_document` (after the step's tool results). Test: `EarlyDocumentsTest` |
+| 51 failing tests nobody looked at | Triaged: 31 tested the deleted text regex (`talksAboutWork`, `saidInsured`) — removed (`TalksAboutWorkTest`) or rewritten on `record_work_profile`; 13 had fixtures without a recorded work profile — fixed; the rest asserted the old prompt version/heading/output shapes — updated. **Suite: 485 tests, 0 failures** |
+| Tool definitions 22.7k | 22,900 chars now (+`none`). The two largest are mostly enums/schema (`record_work_profile`: 712 of 2,865 chars are descriptions) — nothing safe left to cut |
+
+**Paid simulator 2026-10-05 (4 real customers, gpt-5-mini; nothing to WhatsApp):** run 1 stopped early (his recorded work was invisible → "بتشتغل إيه؟" 8×, no application). Run 2 after fixes: 52 replies, $0.243, 13.6 s avg, 5 fallbacks; employee and Didi rider SUBMITTED, shop owner stuck on the café photo (sign not read), pensioner (64) refused on age. Fixed from the runs (tests `SimulatorRun1FixesTest`): `his_work` in L4; `cash_prices_shown` as a number source; a reply with no Arabic = EMPTY_REPLY ("[]", "(no reply)", "NO_REPLY_FIELD"); its own JSON args written as text unwrapped (tidy); `SUBMISSION_DENIED_BUT_DONE`; `SUMMARY_CLAIMED_NOT_SENT`; "عنوان فرع أقرب" no longer a branch fact; diacritics stripped before claim checks; `ONE_VALUE_PER_FIELD`; `NOT_NEEDED_FOR_THIS_APPLICATION` (guarantor fields); ID back one-digit misread = same card; `guarantor_fields` in requirements; `application_now` without the missing list; keep-going line after not_eligible. Instructions v4.1.2 (published locally). Run 3 could not start: the photos folder became unreadable ("Operation not permitted").
+**Owner questions from the runs:** (1) 64-year-old pensioner with his son as guarantor — the folder is a real accepted case, the rule says 21–62: is the age limit different on pension with a guarantor? (2) a real café photo whose sign the reader cannot read, with the name said in the chat — accept? (3) local data still has مايلو active (server: inactive) — it is offered as the cheapest.
+
+**Owner 2026-10-05:** Q-08 = first installment **45 days** after pickup (no grace mention); the server's `agent_settings.installments.first_payment_after_days = 30` must become 45 on deploy.
+
+**Server rules read 2026-10-05 (read-only):** `ai_memories` (50 rows, August, not read by the current code) checked rule by rule; still-valid ones not in v4 were added (talk only about the asked model, Haojiang not Haojue, real numbers never "حوالي", every duration on its own line, branches always with location). Superseded ones were left out (tuk-tuk not eligible, army bank statement, review data before submit, never say installment is higher). Server data newer than local: machine prices (20+), عبد اللطيف جميل and مايلو inactive, 345 vs 295 machine-system links, branch hours ("السبت - السبت: 1 الصبح - 1 بالليل" - looks like an entry slip), `excluded: female` on rule 6. Local copy not updated yet (needs the owner's OK).
+
+**Deploy needs:** migrate, publish v4 on the server, and switching off the 12 server lessons now folded into v4 (otherwise `LessonSync` appends them a second time).
+
+**Owner answers 2026-10-05 (local):** over 62 never applies, a guarantor does not fix the age; someone else applies in his own name and must meet every condition (v4.1.3). Café photo: must be clear; an unreadable sign is fine, the tax card proves the name (`business_place_photo` needs `business_activity`, `business_name` optional, result `sign_not_readable`). مايلو + عبد اللطيف جميل switched off locally to match the server. Summary card no longer names the system. Greeting-only messages answered by `GreetingReply` (no model call).
+
+**Conversation 206 (number …119, local, 2026-10-05) - forensic fix.** One application held three people: the customer (20, refused), his father (pension 2,000 - opened as "أبوك" after "اخ" + "اه"), then his brother's ID went into the father's application and the brother was refused three times for the father's pension. His mother's age (45) and brother's (21) replaced his own age in memory and were each read as "he changed his age". A correct draft ("مش بتقبلها بضمان دخل حر") was blocked by the warranty guard and replaced by "ممكن توضحلي". 14 of 16 replies opened "تمام يا باشا".
+| Cause | Fix |
+|---|---|
+| An application had no person | `applications.applicant` {who, relation, quote}; `record_work_profile` takes `applicant_relation` (AI reads it; stands only on his own words, else `unclear`); a different person closes the open collecting application (`Applicant::closeIfOtherPerson`, result `previous_application_closed`, runner drops it from the tool context); a withdrawn application is never reopened for another person; snapshot shows `applicant.person` |
+| Facts not attributed | memory facts take `about: other_applicant` → `applicant_facts` (for the current person only; his own age untouched); `check_eligibility` takes `about` (no "changed his age" for another person), `monthly_income`, and refuses a person with no work (`APPLICANT_HAS_NO_WORK`) |
+| One "someone else" line for every case | `OtherApplicant::line(refusedIsOther)` - the mother/brother get "اللي هيقدّم لازم يكون شغال..." not "حد تاني يقدّم بدالك" |
+| Guard false positive / garbled | "بضمان" only with معرض/وكيل/سنة...; one Latin letter glued to Arabic = GARBLED_TEXT |
+| Self-copying style | code replies without "يا باشا"; context block "ردودك الأخيرة" states facts about its own last 4 replies (nickname count, average length, any 5+ word run it repeated); instructions v4.1.6 (nickname rare, one or two lines, never re-say a refusal, ask "مين اللي هيقدّم؟" instead of guessing) |
+| Internal mechanics told to him | `NO_ACTIVE_APPLICATION` carries what to do; never "مفيش طلب مفتوح" |
+Tests: `Conversation206Test` (11). Suite 511/511. Paid replays of the conversation: see the report.
+**Conversation 206, second pass (local):** guard `PERSON_NOT_RECORDED` (reads the reply only: one relative named as the applicant who is not the recorded person, or "أخويا/ابويا" as if the bot's own; options "أهلك أو صاحبك" pass); `record_work_profile.people_named` (AI lists every person named, the code keeps the person unclear when more than one); another person who does not work → `other_applicant_line` at once and a collecting application for that person closes (`Applicant::closeIfNoWork`); the recorded person and work sit as an internal note next to his new message; "وصلت" is true when photos are held without an application; "في النظام و…" is internal wording. Tests: `Conversation206Test` (20). Suite 520/520. Paid replays stopped: the OpenAI account ran out of credit (`credit_balance_exhausted`, 2026-10-05 20:00).
+**Owner 2026-10-05 (local):** papers + data in ONE message when the application opens (`full_list`, `full_list_sent: false`); after the first reply the context drops the lists and keeps only `next_step` → "تمام، ابعتلي …" one thing at a time (`ContextBuilder::afterFullList`, instructions v4.1.7).
+**Gemini locally (2026-10-05 evening, OpenAI out of credit):** model gemini-3.5-flash, fallback gemini-3.1-flash-lite, documents gemini-3.5-flash, free keys 3/12/13 on, OpenAI key 14 off (before-values saved in the session scratchpad). Same code and instructions. Guard `REPEATED_REPLY` (12+ words already sent in the last 3 replies); a second repeat sends the draft without the repeated sentences (`withoutRepeatedSentences`) instead of the fallback line. Suite 523/523.

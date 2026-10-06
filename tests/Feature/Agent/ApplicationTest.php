@@ -3,7 +3,6 @@
 namespace Tests\Feature\Agent;
 
 use App\Agent\Runtime\TurnResultBuilder;
-use App\Agent\Tools\CalculateInstallmentTool;
 use App\Agent\Tools\RecordCustomerDataTool;
 use App\Agent\Tools\StartApplicationTool;
 use App\Agent\Tools\Tool;
@@ -79,6 +78,13 @@ class ApplicationTest extends TestCase
         return new ToolContext($customerId, $conversation->id, $activeApplicationId, 1, $trace->id, new TurnResultBuilder());
     }
 
+    /** Rebuild: start_application needs his work recorded first (record_work_profile). */
+    private function insuredEmployee(WhatsappConversation $conversation): void
+    {
+        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف', 'occupation' => 'موظف', 'work_stated' => true,
+            'customer_type' => 'employee', 'working_now' => 'yes', 'relation_to_workplace' => 'works_for_someone', 'insured' => 'yes'], $this->ctx($conversation));
+    }
+
     private function customerWithBot(): array
     {
         [$conversation, $message] = $this->conversationAndMessage();
@@ -137,7 +143,7 @@ class ApplicationTest extends TestCase
 
         $this->assertTrue($result->ok);
         $this->assertSame(['full_name'], $result->data['saved']);
-        $this->assertNotNull($result->data['snapshot']);
+        $this->assertNotNull($result->data['application_now']);
         $this->assertSame(
             'Mohamed Ali',
             ApplicationData::where('application_id', $app->id)->where('field_key', 'full_name')->value('value')
@@ -148,6 +154,7 @@ class ApplicationTest extends TestCase
     {
         [$customer, $conversation] = $this->customerWithBot();
         $this->customerType();
+        $this->insuredEmployee($conversation);
 
         $ctx = $this->ctx($conversation);
         $tool = app(StartApplicationTool::class);
@@ -168,6 +175,7 @@ class ApplicationTest extends TestCase
         // Live: "عايز هجن f على سنة" -> months: 12, no system -> no application at all.
         [$customer, $conversation] = $this->customerWithBot();
         $this->customerType();
+        $this->insuredEmployee($conversation);
 
         $result = app(StartApplicationTool::class)->execute([
             'customer_type' => 'employee', 'customer_type_quote' => 'انا موظف', 'months' => 12,
@@ -185,6 +193,7 @@ class ApplicationTest extends TestCase
 
         [, $conversation] = $this->customerWithBot();
         $this->customerType();
+        $this->insuredEmployee($conversation);
 
         $ctx = $this->ctx($conversation);
         $tool = app(StartApplicationTool::class);
@@ -200,6 +209,7 @@ class ApplicationTest extends TestCase
     {
         [, $conversation] = $this->customerWithBot();
         $this->customerType();
+        $this->insuredEmployee($conversation);
         $brand = Brand::create(['name' => 'Bajaj', 'image' => 'b.jpg']);
         $machine = Machine::create([
             'name' => 'M', 'brand_id' => $brand->id, 'cash_price' => 50000,
@@ -214,25 +224,6 @@ class ApplicationTest extends TestCase
         $this->assertFalse($result->ok);
         $this->assertSame('MOTORCYCLE_NOT_AVAILABLE', $result->error['code']);
         $this->assertSame(0, Application::count());
-    }
-
-    public function test_calculate_installment_rejects_an_out_of_stock_motorcycle(): void
-    {
-        [, $conversation] = $this->customerWithBot();
-        $brand = Brand::create(['name' => 'Bajaj', 'image' => 'b.jpg']);
-        $machine = Machine::create([
-            'name' => 'M', 'brand_id' => $brand->id, 'cash_price' => 50000, 'installment_price' => 55000,
-            'is_active' => true, 'availability' => 'out_of_stock', 'type' => 'normal',
-        ]);
-        $system = InstallmentSystem::create(['name' => 'S', 'pricing_mode' => 'standard', 'plans' => [['months' => 12, 'interest' => 20]], 'administrative_fees' => 7]);
-        $machine->installmentSystems()->sync([$system->id]);
-        $plan = InstallmentPlan::where('installment_system_id', $system->id)->first();
-
-        $ctx = $this->ctx($conversation);
-        $result = app(CalculateInstallmentTool::class)->execute(['motorcycle_id' => $machine->id, 'plan_id' => $plan->id], $ctx);
-
-        $this->assertFalse($result->ok);
-        $this->assertSame('MOTORCYCLE_NOT_AVAILABLE', $result->error['code']);
     }
 
     public function test_update_application_selection_and_withdraw_transitions(): void

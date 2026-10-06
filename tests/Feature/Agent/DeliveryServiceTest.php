@@ -163,4 +163,37 @@ class DeliveryServiceTest extends TestCase
         $state = WhatsappConversation::find($turn->whatsapp_conversation_id)->state;
         $this->assertSame(7, $state['last_media_sent'][0]['motorcycle_id']);
     }
+
+    /** ERR-003: an item left 'queued' (worker died mid-send) is resent with the same client_id - Node sends it once. */
+    public function test_a_resent_item_carries_the_same_client_id(): void
+    {
+        $sent = [];
+        $first = true;
+
+        Http::fake(function ($request) use (&$sent, &$first) {
+            $sent[] = $request['client_id'] ?? null;
+
+            if ($first) {
+                $first = false;
+
+                return Http::response(['ok' => false], 504); // the answer never came back
+            }
+
+            return Http::response(['ok' => true, 'wa_message_id' => 'bot1_x', 'duplicate' => true]);
+        });
+
+        $turn = $this->turn();
+
+        try {
+            app(DeliveryService::class)->deliver($turn, ['messages' => ['رسالة']]);
+        } catch (\RuntimeException) {
+        }
+
+        app(DeliveryService::class)->deliver($turn, ['messages' => ['رسالة']]);
+
+        $this->assertCount(2, $sent);
+        $this->assertNotNull($sent[0]);
+        $this->assertSame($sent[0], $sent[1]);
+        $this->assertSame(1, WhatsappMessage::where('turn_id', $turn->id)->count());
+    }
 }

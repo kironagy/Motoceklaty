@@ -3,7 +3,6 @@
 namespace Tests\Feature\Agent;
 
 use App\Agent\Runtime\TurnResultBuilder;
-use App\Agent\Tools\GetBusinessKnowledgeTool;
 use App\Agent\Tools\ToolContext;
 use App\Domain\Knowledge\KnowledgeService;
 use App\Models\AiTrace;
@@ -68,24 +67,4 @@ class KnowledgeServiceTest extends TestCase
         $this->assertGreaterThan(5, $memory->estimatedTokens());
     }
 
-    public function test_tool_returns_content_and_unknown_key(): void
-    {
-        BusinessMemory::create(['key' => 'known', 'title' => 'T', 'content' => 'محتوى', 'is_active' => true]);
-
-        $staff = Staff::create(['name' => 'S', 'email' => 'a'.uniqid().'@x.com', 'password' => 'secret']);
-        $bot = WhatsappBot::create(['staff_id' => $staff->id, 'name' => 'B', 'whatsapp_phone_number_id' => uniqid(), 'is_active' => true]);
-        $conversation = WhatsappConversation::create(['whatsapp_bot_id' => $bot->id, 'phone' => '2011', 'status' => 'open']);
-        $trace = AiTrace::create(['conversation_id' => $conversation->id, 'turn_id' => 1, 'status' => 'running']);
-        $ctx = new ToolContext(1, $conversation->id, null, 1, $trace->id, new TurnResultBuilder());
-
-        $tool = app(GetBusinessKnowledgeTool::class);
-
-        $ok = $tool->execute(['keys' => ['known']], $ctx);
-        $this->assertTrue($ok->ok);
-        $this->assertSame('محتوى', $ok->data['items'][0]['content']);
-
-        $fail = $tool->execute(['keys' => ['missing']], $ctx);
-        $this->assertFalse($fail->ok);
-        $this->assertSame('UNKNOWN_KEY', $fail->error['code']);
-    }
 }

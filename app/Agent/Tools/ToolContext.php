@@ -21,6 +21,11 @@ final class ToolContext
     ) {
     }
 
+    public function withoutActiveApplication(): self
+    {
+        return new self($this->customerId, $this->conversationId, null, $this->turnId, $this->traceId, $this->outbound);
+    }
+
     public function withActiveApplication(int $applicationId): self
     {
         return new self($this->customerId, $this->conversationId, $applicationId, $this->turnId, $this->traceId, $this->outbound);

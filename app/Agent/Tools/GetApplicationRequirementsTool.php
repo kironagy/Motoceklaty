@@ -9,7 +9,7 @@ use App\Models\ApplicationData;
 use App\Models\ApplicationRequirement;
 
 /** READ — plan §6.8 */
-class GetApplicationRequirementsTool implements Tool
+class GetApplicationRequirementsTool implements ReadTool
 {
     public function __construct(private readonly RequirementService $requirements)
     {
@@ -77,7 +77,11 @@ class GetApplicationRequirementsTool implements Tool
 
         return ToolResult::ok([
             'documents' => $requirements['documents'] ?? [],
-            'say' => 'المطلوب: '.implode('، ', $papers).'. (Say these papers as written, nothing added; the address and phone are asked later one by one.)',
+            'papers' => $papers,
+            // Simulator 2026-10-05: "ابني هيبقى الضامن ينفع؟" got "مش هتحتاج ضامن" -
+            // the guarantor a pension needs was nowhere in this result.
+            'guarantor_fields' => collect($requirements['fields'] ?? [])->filter(fn ($f) => str_starts_with((string) ($f['key'] ?? ''), 'guarantor_'))
+                ->pluck('label')->values()->all(),
             'fields_count' => count($requirements['fields'] ?? []),
             'facts_used' => $facts,
             'conditional' => $this->unresolvedConditional($customerType, $facts),

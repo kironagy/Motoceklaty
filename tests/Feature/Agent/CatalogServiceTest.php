@@ -136,6 +136,8 @@ class CatalogServiceTest extends TestCase
         $this->assertTrue($missing->data['not_carried']);
         $this->assertEqualsCanonicalizing(['VLR200', 'وينج ٢٠٠'], array_column($missing->data['similar_available'], 'name'));
 
+        // the tool only reads; the runner records what the search proved
+        app(\App\Agent\Runtime\ToolOutcomeRecorder::class)->record('search_motorcycles', ['name_query' => 'srk 200'], $missing->toArray(), $ctx);
         $this->assertSame(200, \App\Domain\Conversations\CustomerInterest::get($conversation->id)['cc']);
 
         // a photo of a 250 we do not carry moves what he is after
@@ -145,7 +147,7 @@ class CatalogServiceTest extends TestCase
 
         $available = $tool->execute(['available_only' => true], $ctx);
         $this->assertEqualsCanonicalizing(['VLR200', 'وينج ٢٠٠'], array_column($available->data['items'], 'name'));
-        $this->assertStringContainsString('srk 200', $available->data['note']);
+        $this->assertSame(['label' => 'srk 200', 'cc' => 200], $available->data['closest_to']);
     }
 
     public function test_images_fall_back_to_display_image_and_match_hex_by_arabic_name(): void

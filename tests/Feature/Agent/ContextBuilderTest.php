@@ -59,7 +59,7 @@ class ContextBuilderTest extends TestCase
         $request = app(ContextBuilder::class)->build($turn);
 
         $this->assertStringContainsString('فريق المبيعات في معرض موتوجيت للموتوسيكلات', $request->system);
-        $this->assertStringContainsString('## الحالة الحالية', $request->system);
+        $this->assertStringContainsString('## اللي نعرفه عن العميل والطلب', $request->system);
         $this->assertStringNotContainsString('فهرس الكتالوج', $request->system);
         $this->assertStringNotContainsString('إرشادات ثابتة', $request->system);
         $this->assertStringNotContainsString('## ملخص المحادثة السابقة', $request->system);
@@ -92,11 +92,12 @@ class ContextBuilderTest extends TestCase
 
         $request = app(ContextBuilder::class)->build($turn);
 
-        $this->assertStringContainsString('قاعدة مثبتة', $request->system);
-        $this->assertStringContainsString('note1: ملاحظة عامة', $request->system);
+        // one instruction source: dashboard knowledge is no longer a prompt layer
+        $this->assertStringNotContainsString('قاعدة مثبتة', $request->system);
+        $this->assertStringNotContainsString('note1: ملاحظة عامة', $request->system);
         $this->assertStringContainsString('بوكسر 150', $request->system);
         $this->assertStringContainsString((string) $application->id, $request->system);
-        $this->assertStringContainsString('إرشاد مرحلة التحصيل', $request->system);
+        $this->assertStringNotContainsString('إرشاد مرحلة التحصيل', $request->system);
         $this->assertStringContainsString('ملخص المحادثة السابقة', $request->system);
     }
 
@@ -274,7 +275,7 @@ class ContextBuilderTest extends TestCase
         $request = app(ContextBuilder::class)->build($turn);
 
         $this->assertStringContainsString('"unprocessed_media"', $request->system);
-        $this->assertStringContainsString('"media_id": '.$media->id, $request->system);
+        $this->assertStringContainsString('"media_id":'.$media->id, $request->system);
         $history = json_encode($request->contents, JSON_UNESCAPED_UNICODE);
         $this->assertStringContainsString('media_id: '.$media->id, $history);
     }
@@ -289,7 +290,7 @@ class ContextBuilderTest extends TestCase
         $trace = AiTrace::where('conversation_id', $conversation->id)->where('turn_id', $turn->id)->first();
 
         $this->assertNotNull($trace);
-        $this->assertSame('v2.3.0', $trace->prompt_version);
+        $this->assertSame(app(\App\Domain\Settings\AgentInstructions::class)->fromFile()['version'], $trace->prompt_version);
         $this->assertIsArray($trace->context_manifest);
         $this->assertArrayHasKey('total_input_tokens_estimate', $trace->context_manifest);
     }
@@ -322,13 +323,15 @@ class ContextBuilderTest extends TestCase
         ]));
 
         $fake = new FakeAiProvider();
-        $fake->queue(new AiResponse(textParts: ['العميل بيسأل عن الأسعار.'], toolCalls: [], finishReason: 'STOP', usage: [], model: 'gemini-test', keyId: null, latencyMs: 1));
+        // CTX-010: the summary is structured (facts / decisions / still open)
+        $summary = json_encode(['facts' => [], 'decisions' => [], 'still_open' => ['العميل بيسأل عن الأسعار.']], JSON_UNESCAPED_UNICODE);
+        $fake->queue(new AiResponse(textParts: [$summary], toolCalls: [], finishReason: 'STOP', usage: [], model: 'gemini-test', keyId: null, latencyMs: 1));
         $this->app->instance(AiProvider::class, $fake);
 
         (new SummarizeConversation($conversation->id, $messages->last()->id + 1))->handle($fake);
 
         $conversation->refresh();
-        $this->assertSame('العميل بيسأل عن الأسعار.', $conversation->summary);
+        $this->assertSame($summary, $conversation->summary);
         $this->assertSame($messages->last()->id, $conversation->summary_until_message_id);
 
         // A second batch, but the provider fails this time - old summary must survive.
@@ -341,7 +344,7 @@ class ContextBuilderTest extends TestCase
         (new SummarizeConversation($conversation->id, $newMessage->id + 1))->handle($failingFake);
 
         $conversation->refresh();
-        $this->assertSame('العميل بيسأل عن الأسعار.', $conversation->summary);
+        $this->assertSame($summary, $conversation->summary);
         $this->assertSame($messages->last()->id, $conversation->summary_until_message_id);
     }
 }

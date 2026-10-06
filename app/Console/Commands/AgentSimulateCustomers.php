@@ -103,6 +103,11 @@ class AgentSimulateCustomers extends Command
         file_put_contents($path, implode("\n", $report));
         $this->info("Report: {$path}");
 
+        // PRE-001: the same run as raw numbers (calls incl. side calls, tokens, latency), for docs/baselines/
+        $metrics = app(AgentBaseline::class)->metrics($started, now());
+        file_put_contents(substr($path, 0, -3).'.json', json_encode(['summary' => $summary, 'metrics' => $metrics], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+        $this->info('Metrics: '.substr($path, 0, -3).'.json');
+
         return self::SUCCESS;
     }
 
@@ -234,7 +239,8 @@ class AgentSimulateCustomers extends Command
                     'monthly_income' => 'القهوة بتطلع حوالي 20 الف في الشهر', 'residence_ownership' => 'ملك',
                 ],
             ],
-            'pensioner-with-guarantor' => [
+            // over 62: refused even with his son as guarantor; the son may apply in his own name (owner, 2026-10-05)
+            'pensioner-over-62' => [
                 'مساء الخير انا على المعاش وعايز اقسط دايو 4',
                 'سنتين',
                 'ابني هيبقى الضامن ينفع؟',

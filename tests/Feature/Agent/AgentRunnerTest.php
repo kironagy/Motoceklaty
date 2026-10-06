@@ -75,6 +75,51 @@ class AgentRunnerTest extends TestCase
         return new AiResponse($textParts, $toolCalls, 'STOP', ['input_tokens' => 10, 'output_tokens' => 5], 'gemini-test', null, 12);
     }
 
+    public function test_a_plain_greeting_gets_the_showrooms_greeting_without_a_model_call(): void
+    {
+        // Owner 2026-10-05: "مساء الخير" got "... ولا بس سلام؟"
+        $fake = $this->fake();
+        $conversation = $this->conversation();
+        $greet = function (string $text) use ($conversation) {
+            \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => $text]);
+
+            $reply = app(AgentRunner::class)->run($this->turnFor($conversation))['messages'];
+            \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'outgoing', 'sender_type' => 'bot', 'type' => 'text', 'text' => $reply[0]]);
+
+            return $reply;
+        };
+
+        $this->assertSame(['مساء النور، نورتنا. بتدور على موتوسيكل ولا سكوتر؟'], $greet('مساء الخير'));
+        $this->assertSame(['وعليكم السلام ورحمة الله وبركاته، نورتنا. قولّي أقدر أساعدك في إيه؟'], $greet('السلام عليكم ورحمة الله وبركاته 🌹'));
+        $this->assertSame(['وعليكم السلام ورحمة الله وبركاته، نورتنا. قولّي أقدر أساعدك في إيه؟'], $greet('السلام عليكم مساء الخير'));
+        $this->assertCount(0, $fake->requests());
+    }
+
+    public function test_a_photo_captioned_with_a_greeting_goes_to_the_agent(): void
+    {
+        $fake = $this->fake();
+        $conversation = $this->conversation();
+        $turn = $this->turnFor($conversation);
+        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'image', 'text' => 'السلام عليكم', 'turn_id' => $turn->id]);
+        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['وعليكم السلام']]]]));
+
+        app(AgentRunner::class)->run($turn);
+
+        $this->assertCount(1, $fake->requests());
+    }
+
+    public function test_a_greeting_with_a_question_goes_to_the_agent(): void
+    {
+        $fake = $this->fake();
+        $conversation = $this->conversation();
+        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'مساء الخير هوجن 4 بكام']);
+        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['مساء النور']]]]));
+
+        app(AgentRunner::class)->run($this->turnFor($conversation));
+
+        $this->assertCount(1, $fake->requests());
+    }
+
     public function test_single_tool_call_then_reply(): void
     {
         $conversation = $this->conversation();
@@ -83,22 +128,7 @@ class AgentRunnerTest extends TestCase
 
         $result = app(AgentRunner::class)->run($this->turnFor($conversation));
 
-        $this->assertSame(['أهلًا بيك!'], $result['messages']);
-    }
-
-    public function test_the_same_refusal_twice_drops_only_the_bad_sentence(): void
-    {
-        // replayed 2026-10-04: "أجهز لك معاينة" refused until the wall clock ran out
-        $conversation = $this->conversation();
-        $fake = $this->fake();
-        $reply = ['messages' => ['أكيد، أجهز لك معاينة في أقرب فرع ونأكد الموديل واللون.', 'قوليلي مدينتك عشان أبعتلك أقرب فرع ومواعيده.']];
-        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => $reply]]));
-        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => $reply]]));
-
-        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
-
-        $this->assertSame(['قوليلي مدينتك عشان أبعتلك أقرب فرع ومواعيده.'], $result['messages']);
-        $this->assertCount(2, $fake->requests());
+        $this->assertSame(['أهلا بيك!'], $result['messages']);
     }
 
     public function test_chained_tool_calls_across_model_calls(): void
@@ -249,22 +279,6 @@ class AgentRunnerTest extends TestCase
         $this->assertSame(['هي اقتصادية، تحب أبعتلك تفاصيلها؟'], $result['messages']);
     }
 
-    public function test_a_last_try_without_the_number_keeps_the_customer_with_the_bot(): void
-    {
-        // Owner: the bot closes ~90% itself - two unsourced numbers no longer hand off.
-        config(['agent.handoff.waiting_message' => 'وصلتني رسالتك، زميلي هيرد عليك.']);
-        $conversation = $this->conversation();
-        $fake = $this->fake();
-        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['السعر 99999 جنيه']]]]));
-        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['برضو 88888 جنيه']]]]));
-        $fake->queue($this->response([['id' => 't3', 'name' => 'send_reply', 'args' => ['messages' => ['تحب أقولك سعرها بالظبط لو قلتلي أنهي موديل؟']]]]));
-
-        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
-
-        $this->assertSame(['تحب أقولك سعرها بالظبط لو قلتلي أنهي موديل؟'], $result['messages']);
-        $this->assertNotSame('awaiting_agent', $conversation->fresh()->status);
-    }
-
     private function queueFourBadReplies($fake): void
     {
         foreach (['99999', '88888', '77777', '66666'] as $i => $n) {
@@ -285,7 +299,7 @@ class AgentRunnerTest extends TestCase
 
         $result = app(AgentRunner::class)->run($this->turnFor($conversation));
 
-        $this->assertSame(['معلش يا باشا، ممكن توضحلي تقصد إيه بالظبط عشان أرد عليك صح؟'], $result['messages']);
+        $this->assertSame(['معلش، مش متأكد إني فهمتك صح. تقصد إيه بالظبط؟'], $result['messages']);
         $this->assertNotSame('awaiting_agent', $conversation->fresh()->status);
         $this->assertSame(0, Handoff::where('conversation_id', $conversation->id)->count());
     }
@@ -304,41 +318,6 @@ class AgentRunnerTest extends TestCase
         $this->assertSame(1, Handoff::where('conversation_id', $conversation->id)->count());
     }
 
-    public function test_the_sentence_with_an_invented_number_is_dropped_instead_of_handing_off(): void
-    {
-        // A freelancer's offer went to a colleague three times: every try
-        // carried one figure the model had worked out itself.
-        config(['agent.handoff.waiting_message' => 'وصلتني رسالتك، زميلي هيرد عليك.']);
-        $conversation = $this->conversation();
-        $fake = $this->fake();
-        $reply = fn (string $n) => ['messages' => ["تمام يا باشا، بما إن شغلك حر فيه حد أقصى للتمويل.\nالفرق اللي هتدفعه {$n} جنيه.\nتحب نكمل؟"]];
-        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => $reply('99999')]]));
-        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => $reply('88888')]]));
-        $fake->queue($this->response([['id' => 't3', 'name' => 'send_reply', 'args' => $reply('77777')]]));
-
-        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
-
-        $this->assertSame(["تمام يا باشا، بما إن شغلك حر فيه حد أقصى للتمويل.\nتحب نكمل؟"], $result['messages']);
-        $this->assertNotSame('awaiting_agent', $conversation->fresh()->status);
-    }
-
-    public function test_a_final_reply_without_numbers_keeps_the_customer_with_the_bot(): void
-    {
-        config(['agent.handoff.waiting_message' => 'وصلتني رسالتك، زميلي هيرد عليك.']);
-        $conversation = $this->conversation();
-        $fake = $this->fake();
-        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['السعر 99999 جنيه']]]]));
-        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['برضو 88888 جنيه']]]]));
-        $fake->queue($this->response([['id' => 't3', 'name' => 'send_reply', 'args' => ['messages' => ['خلاص 77777 جنيه']]]]));
-        $fake->queue($this->response([['id' => 't4', 'name' => 'send_reply', 'args' => ['messages' => ['تحب أحسبلك القسط على أنهي مدة؟']]]]));
-
-        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
-
-        $this->assertSame(['تحب أحسبلك القسط على أنهي مدة؟'], $result['messages']);
-        $this->assertSame(['send_reply'], $fake->lastRequest()->allowedTools);
-        $this->assertSame(0, Handoff::where('conversation_id', $conversation->id)->count());
-    }
-
     public function test_out_of_tries_a_repeated_reply_is_sent_rather_than_handed_off(): void
     {
         config(['agent.runtime.max_model_calls' => 1, 'agent.handoff.waiting_message' => 'وصلتني رسالتك، زميلي هيرد عليك.']);
@@ -355,31 +334,6 @@ class AgentRunnerTest extends TestCase
 
         $this->assertSame(['تمام يا فندم'], $result['messages']);
         $this->assertSame(0, Handoff::where('conversation_id', $conversation->id)->count());
-    }
-
-    public function test_the_total_is_never_refused_nor_work_types_listed(): void
-    {
-        $conversation = $this->conversation();
-        $fake = $this->fake();
-        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['التقسيط عندنا مش بيتحسب بإجمالي سعر ثابت']]]]));
-        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['قولي حضرتك بتشتغل إيه؟ (موظف، صاحب نشاط، ولا عامل حر؟)']]]]));
-        $fake->queue($this->response([['id' => 't3', 'name' => 'send_reply', 'args' => ['messages' => ['حضرتك بتشتغل إيه؟']]]]));
-
-        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
-
-        $this->assertSame(['حضرتك بتشتغل إيه؟'], $result['messages']);
-    }
-
-    public function test_the_bot_never_says_no_down_payment(): void
-    {
-        $conversation = $this->conversation();
-        $fake = $this->fake();
-        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['التقسيط من غير مقدم يا باشا']]]]));
-        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['وقت الاستلام بتدفع المصاريف الإدارية بس']]]]));
-
-        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
-
-        $this->assertSame(['وقت الاستلام بتدفع المصاريف الإدارية بس'], $result['messages']);
     }
 
     public function test_a_crashing_turn_does_not_leave_its_trace_running(): void
@@ -402,7 +356,8 @@ class AgentRunnerTest extends TestCase
 
     public function test_limit_reached_forces_send_reply(): void
     {
-        config(['agent.runtime.max_model_calls' => 1]);
+        // the last allowed call is the reply; no call after the limit
+        config(['agent.runtime.max_model_calls' => 2]);
         $conversation = $this->conversation();
 
         $fake = $this->fake();
@@ -442,23 +397,6 @@ class AgentRunnerTest extends TestCase
         $this->assertSame(['حصل عطل بسيط، هرد عليك بس هحول المحادثة لموظف.'], $result['messages']);
         // max_failed_turns=2, but this is only the 1st failure - no handoff yet.
         $this->assertSame(0, Handoff::where('conversation_id', $conversation->id)->count());
-    }
-
-    public function test_duplicate_reply_is_rejected_once(): void
-    {
-        $conversation = $this->conversation();
-        WhatsappMessage::create([
-            'whatsapp_conversation_id' => $conversation->id, 'direction' => 'outgoing',
-            'sender_type' => 'bot', 'type' => 'text', 'text' => 'تمام يا فندم',
-        ]);
-
-        $fake = $this->fake();
-        $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['تمام يا فندم']]]]));
-        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['تمام، حاضر']]]]));
-
-        $result = app(AgentRunner::class)->run($this->turnFor($conversation));
-
-        $this->assertSame(['تمام، حاضر'], $result['messages']);
     }
 
     public function test_retryable_provider_failure_throws_transient_exception(): void
@@ -505,7 +443,7 @@ class AgentRunnerTest extends TestCase
         $trace = \App\Models\AiTrace::where('turn_id', $turn->id)->first();
         $this->assertSame('done', $trace->status);
         $this->assertSame(5, $trace->output_tokens);
-        $this->assertSame('v2.3.0', $trace->prompt_version);
+        $this->assertSame(app(\App\Domain\Settings\AgentInstructions::class)->fromFile()['version'], $trace->prompt_version);
     }
 
     public function test_tools_called_together_after_start_application_see_the_new_application(): void
@@ -514,6 +452,10 @@ class AgentRunnerTest extends TestCase
         CustomerType::create(['key' => 'employee', 'label' => 'موظف', 'is_active' => true]);
         RequirementField::create(['key' => 'phone', 'label' => 'تليفون', 'data_type' => 'phone', 'scope' => 'application', 'is_active' => true]);
         WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'انا موظف ورقمي 01012345678']);
+        // rebuild: his work is recorded before start_application
+        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف', 'occupation' => 'موظف', 'work_stated' => true, 'customer_type' => 'employee',
+            'working_now' => 'yes', 'relation_to_workplace' => 'works_for_someone', 'insured' => 'yes'],
+            new \App\Agent\Tools\ToolContext($conversation->customer_id, $conversation->id, null, 0, 1, new \App\Agent\Runtime\TurnResultBuilder()));
 
         $fake = $this->fake();
         $fake->queue($this->response([

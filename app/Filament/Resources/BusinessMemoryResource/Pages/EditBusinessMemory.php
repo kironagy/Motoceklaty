@@ -51,7 +51,7 @@ class EditBusinessMemory extends EditRecord
             ->get()
             ->sum(fn (BusinessMemory $m) => $m->estimatedTokens());
 
-        $thisEstimate = (int) ceil(mb_strlen((string) ($data['content'] ?? '')) / 4);
+        $thisEstimate = \App\Agent\Context\TokenEstimator::estimate((string) ($data['content'] ?? ''));
 
         if ($existing + $thisEstimate > (int) $cap) {
             Notification::make()

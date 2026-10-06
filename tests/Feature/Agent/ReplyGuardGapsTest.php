@@ -111,21 +111,6 @@ class ReplyGuardGapsTest extends TestCase
         }
     }
 
-    public function test_listing_work_documents_before_work_type_is_saved_is_blocked(): void
-    {
-        // Live: "شغال اوبر" got رخصة + سكرين أرباح recited from memory, work_type never saved.
-        $conversation = $this->conversation();
-        $this->selfEmployedApplicationFor($conversation, workTypeSaved: false);
-        $reply = 'المطلوب: صورة البطاقة، ورخصة قيادة سارية، وسكرين أرباح من التطبيق.';
-
-        $this->assertSame('WORK_TYPE_NOT_RECORDED', app(ReplyGuard::class)->check(['messages' => [$reply]], $conversation, '', [], []));
-        // saved in this turn
-        \App\Models\ApplicationData::create(['application_id' => \App\Models\Application::first()->id, 'field_key' => 'work_type', 'party' => 'applicant', 'value' => 'delivery_app', 'source' => 'customer_stated', 'status' => 'valid']);
-        $this->assertNull(app(ReplyGuard::class)->check(['messages' => [$reply]], $conversation, '', [], [
-            ['name' => 'record_customer_data', 'ok' => true, 'data' => []],
-        ]));
-    }
-
     /**
      * Owner 2026-09-29: every document on his list is asked, none waived.
      * Simulated workshop owner: "البطاقة الضريبية أو السجل التجاري مش شرط
@@ -154,28 +139,21 @@ class ReplyGuardGapsTest extends TestCase
     }
 
     /**
-     * Owner 2026-09-29: "بما إن المكنة سعرها تحت 60 ألف، قولي بتشتغل إيه"
-     * is our own rule, not something to tell a customer. Above the cap it is
-     * said - a freelancer pays the difference in cash and the rest is
-     * financed - but only when this turn's offer shows it is above.
+     * Owner 2026-09-29: "بما إن المكنة سعرها تحت 60 ألف، قولي بتشتغل إيه" is
+     * our own rule, not something to tell a customer. Rebuild: the wording
+     * rule is in the instructions; the code only refuses the cap's number
+     * when no tool gave it (the CAP_THRESHOLD_MENTIONED style code is gone).
      */
-    public function test_the_financing_cap_threshold_is_said_only_when_it_applies(): void
+    public function test_the_cap_number_is_refused_unless_a_tool_gave_it(): void
     {
         \App\Models\EligibilityRule::create(['customer_type_id' => \App\Models\CustomerType::create(['key' => 'self_employed', 'label' => 'عامل حر'])->id,
             'rule_type' => 'financing_cap', 'params' => ['max_amount' => 60000], 'is_active' => true]);
         $check = fn (string $reply, array $outcomes = []) => app(ReplyGuard::class)->check(['messages' => [$reply]], $this->conversation(), '', [], $outcomes);
 
-        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('بما إن المكنة سعرها تحت 60 ألف، قولي حضرتك بتشتغل إيه؟'));
-        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('المكنة دي أقل من ٦٠ ألف فمش محتاج تدفع فرق.'));
-        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('المكنة أعلى من 60,000 جنيه فهتدفع الفرق كاش.'));
+        $this->assertSame('UNVERIFIED_NUMBER', $check('المكنة أعلى من 60,000 جنيه فهتدفع الفرق كاش.'));
 
-        $capped = [['name' => 'get_installment_offer', 'ok' => true, 'data' => ['explain_to_customer' => 'بما إن شغلك عامل حر، أقصى مبلغ بيتقسط 60,000 جنيه']]];
-        $this->assertNull($check('بما إن شغلك عامل حر والمكنة أعلى من 60 ألف، هتدفع الفرق كاش والباقي يتقسط.', $capped));
-        // above the cap before his work is known (the tool asked for it): said
         $askWork = [['name' => 'get_installment_offer', 'ok' => false, 'data' => ['code' => 'ASK_WORK_FIRST', 'message' => 'حد التمويل 60,000']]];
         $this->assertNull($check('بما إن سعره بيعدي 60 ألف، قولي حضرتك بتشتغل إيه؟', $askWork));
-        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('بما إن سعره بيعدي 60 ألف، قولي حضرتك بتشتغل إيه؟'));
-        $this->assertSame('CAP_THRESHOLD_MENTIONED', $check('بما إن المكنة تحت 60 ألف، قولي بتشتغل إيه؟', $askWork));
     }
 
     public function test_the_same_list_passes_once_work_type_is_saved(): void
@@ -201,33 +179,6 @@ class ReplyGuardGapsTest extends TestCase
             ['name' => 'get_installment_options', 'ok' => true, 'data' => ['systems' => [['name' => 'مايلو']]]],
         ]));
         $this->assertNull($this->check('المكنة دي فيها أمان وثبات على الطريق، وتقدر تستلمها حالا من الفرع'));
-    }
-
-    public function test_ending_with_the_same_question_as_the_last_reply_is_blocked(): void
-    {
-        $conversation = $this->conversation();
-        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'outgoing', 'sender_type' => 'bot', 'type' => 'text',
-            'text' => 'الضمان بيوضحه الزميل في الفرع. تحب أقولك سعر الهوجن كاش كام؟']);
-
-        $this->assertSame('REPEATED_QUESTION', app(ReplyGuard::class)->check(['messages' => ['الترخيص بيتظبط في الفرع.', 'تحب أقولك سعر الهوجن كاش كام؟']], $conversation, '', [], []));
-        $this->assertNull(app(ReplyGuard::class)->check(['messages' => ['الترخيص بيتظبط في الفرع. تحب تعرف القسط عليها؟']], $conversation, '', [], []));
-    }
-
-    /** Sentences the bot really sent in bot requests 4272-4278 (2026-09-26). */
-    public function test_what_went_wrong_in_the_bot_requests_is_blocked(): void
-    {
-        $this->assertSame('GARBLED_TEXT', $this->check('كده كل البيانات خلصت، هبعتلusd الطلب دلوقتي للمراجعة.'));
-        $this->assertNull($this->check('صور الفيجوري بالVLR200 وصلت؟'));
-        $this->assertSame('RESUBMISSION_PROMISED', $this->check('طالما معاك البطاقة بس، إحنا ممكن نقدم تاني على نظام مختلف من غير ما نعقد الدنيا.'));
-        $this->assertSame('WORK_TYPE_SWITCH_SUGGESTED', $this->check('ممكن نقدّم على إنك "عامل حر" (دخل حر) بدل "موظف". تحب نكمل كده؟'));
-        $this->assertSame('DATA_CLAIMED_NOT_SAVED', $this->check('ولا يهمك، أنا عدلتها عندي في الطلب لـ "شركة اسكويار".'));
-        $this->assertSame('DATA_CLAIMED_NOT_SAVED', $this->check('تمام يا غالي، الرقم وصل. ابعتلي عنوان السكن.'));
-        $this->assertSame('BANNED_WORDING', $this->check('بص يا غالي، مفيش عندنا مقدم خالص.'));
-        $this->assertSame('DOCUMENT_NOT_REQUIRED', $this->check('المطلوب منك صورة من عقد الورشة أو إيصال مرافق للمكان.'));
-        $this->assertSame('UNRECORDED_PROMISE', $this->check('في الغالب الرد بييجي خلال أيام قليلة، مش أسبوعين.'));
-        $this->assertSame('UNRECORDED_PROMISE', $this->check('في العادة الموضوع بياخد من يوم لـ ٣ أيام عمل.'));
-        $this->assertSame('UNRECORDED_PROMISE', $this->check('غالباً في خلال يوم أو يومين عمل بتكون الأمور وضحت.'));
-        $this->assertSame('UNRECORDED_PROMISE', $this->check('كده الطلب متسجل بالرقمين عشان نضمن إننا نوصلك.'));
     }
 
     public function test_a_colleague_is_never_promised_in_seconds(): void
@@ -271,9 +222,4 @@ class ReplyGuardGapsTest extends TestCase
         $this->assertNull(app(ReplyGuard::class)->check($reply, $conversation, '', [], $lookup('10 الصبح - 10 بالليل')));
     }
 
-    public function test_the_word_catalog_is_never_said_to_a_customer(): void
-    {
-        $this->assertSame('BANNED_WORDING', $this->check('للأسف مفيش ميعاد محدد لتوفيرها، المتاح عندنا حالياً هو اللي موجود في الكتالوج.'));
-        $this->assertNull($this->check('للأسف مش متوفرة عندنا حاليا، تحب أشوفلك بديل قريب منها؟'));
-    }
 }

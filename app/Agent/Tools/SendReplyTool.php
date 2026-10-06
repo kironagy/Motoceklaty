@@ -11,7 +11,7 @@ use App\Models\WhatsappMessage;
  * normally. Conversational delivery only: never touches applications,
  * customer data, documents, selections or handoff state.
  */
-class SendReplyTool implements Tool
+class SendReplyTool implements WriteTool
 {
     public function name(): string
     {
@@ -20,9 +20,7 @@ class SendReplyTool implements Tool
 
     public function description(): string
     {
-        return 'Deliver the reply to the customer. This is the only way a turn ends normally. Write it as ONE message (it is sent as one). '
-            .'What his application still needs always comes from the snapshot (next_step). '
-            .'`memory`: only what changed this turn, never a copy of what is already in his memory.';
+        return 'Send the reply (one message) - the only normal end of a turn. memory = only what this turn added.';
     }
 
     /** Facts the customer may tell about himself - CustomerMemory::FACT_KEYS. */
@@ -35,7 +33,7 @@ class SendReplyTool implements Tool
                 'facts' => [
                     'type' => 'array',
                     'maxItems' => 6,
-                    'description' => 'Things he said about himself. quote = his exact words; a guess without his words is stored as unconfirmed.',
+                    'description' => 'Things he said. quote = his exact words; a guess without his words is stored as unconfirmed. about = other_applicant for facts about the person applying instead of him (his mother\'s age is not his age).',
                     'items' => [
                         'type' => 'object',
                         'required' => ['key', 'value', 'quote'],
@@ -43,13 +41,14 @@ class SendReplyTool implements Tool
                             'key' => ['type' => 'string', 'enum' => \App\Domain\Memory\CustomerMemory::FACT_KEYS],
                             'value' => ['type' => 'string'],
                             'quote' => ['type' => 'string'],
+                            'about' => ['type' => 'string', 'enum' => ['customer', 'other_applicant']],
                         ],
                     ],
                 ],
                 'motorcycles' => [
                     'type' => 'array',
                     'maxItems' => 4,
-                    'description' => 'mentioned = just named; asked_about = asked price/specs/photos ("بكام؟" is NOT a choice); compared; interested = "عايز X"; preferred; selected = decided ("خلاص هاخد X"); rejected = "مش عايز X". selected/rejected need his words in quote.',
+                    'description' => 'asked_about = "بكام؟" (not a choice); interested = "عايز X"; selected = "خلاص هاخد X"; rejected = "مش عايز X" (selected/rejected need quote).',
                     'items' => [
                         'type' => 'object',
                         'required' => ['stage'],
@@ -86,7 +85,8 @@ class SendReplyTool implements Tool
                     'maxItems' => 3,
                     'items' => ['type' => 'integer'],
                 ],
-                'no_reply' => ['type' => 'boolean', 'description' => 'true (with messages: []) only when his message needs no answer at all - a thanks, an emoji or "تمام" after the conversation already ended. Anything with a question or new information gets a reply.'],
+                'no_reply' => ['type' => 'boolean', 'description' => 'true with messages [] when his message needs no answer (thanks/emoji after the talk ended).'],
+                'ends_conversation' => ['type' => 'boolean', 'description' => 'true when he declined, paused or said goodbye: no reminders until he writes again.'],
                 'memory' => $this->memorySchema(),
             ],
             'required' => ['messages'],
@@ -134,8 +134,8 @@ class SendReplyTool implements Tool
 
         $messages = array_values(array_filter((array) ($args['messages'] ?? []), fn ($m) => trim((string) $m) !== ''));
 
-        // Silence is the model's call, but only for a short closing word: a
-        // question or new information always gets an answer.
+        // Silence is the model's call; code only refuses it after our own
+        // question or when he sent media (mayStaySilent).
         if ($messages === []) {
             if (! ($args['no_reply'] ?? false) || ! self::mayStaySilent($ctx)) {
                 return ToolResult::error('REPLY_REQUIRED', 'His message needs an answer - write the reply in messages. no_reply is only for a thanks/emoji/"تمام" after the conversation already ended.');
@@ -160,6 +160,13 @@ class SendReplyTool implements Tool
             fn ($item) => ['kind' => $item['kind'], 'key' => $item['key'], 'asked_at' => now()->toIso8601String()],
             $awaiting
         );
+
+        // Rebuild: the model says the conversation ended - no phrase list guesses it.
+        if (($args['ends_conversation'] ?? false) === true) {
+            $state['ended_at'] = now()->toIso8601String();
+        } elseif ($messages !== []) {
+            unset($state['ended_at']);
+        }
 
         $conversation->state = $state;
         $conversation->save();
@@ -213,12 +220,10 @@ class SendReplyTool implements Tool
             return false;
         }
 
-        foreach ($messages as $message) {
-            $text = trim((string) ($message->text ?? $message->transcript ?? ''));
-
-            if (! in_array($message->type, ['text', 'sticker', 'reaction'], true) || mb_strlen($text) > 25 || preg_match('/[؟?]/u', $text)) {
-                return false;
-            }
+        // Rebuild: structure, not his words - a photo, voice note or document
+        // always gets an answer; whether his text needs one is the model's call.
+        if ($messages->contains(fn ($m) => ! in_array($m->type, ['text', 'sticker', 'reaction'], true))) {
+            return false;
         }
 
         $lastBot = WhatsappMessage::where('whatsapp_conversation_id', $ctx->conversationId)

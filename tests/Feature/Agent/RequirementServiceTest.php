@@ -85,10 +85,12 @@ class RequirementServiceTest extends TestCase
         $result = app(GetApplicationRequirementsTool::class)->execute(['customer_type' => 'employee'], $ctx);
 
         $this->assertTrue($result->ok);
-        $this->assertArrayHasKey('fields', $result->data);
+        // QA 2026-10-04: "المطلوب ايه؟" = the papers; the data is asked one step at a time
+        $this->assertArrayNotHasKey('fields', $result->data);
+        $this->assertSame(1, $result->data['fields_count']);
         $this->assertArrayHasKey('documents', $result->data);
+        $this->assertArrayHasKey('papers', $result->data);
         $this->assertArrayHasKey('rules', $result->data);
-        $this->assertSame('salary', $result->data['fields'][0]['key']);
     }
 
     public function test_redaction_uses_is_sensitive_flag(): void

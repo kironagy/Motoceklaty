@@ -14,7 +14,7 @@ use App\Models\InstallmentPlan;
 use App\Models\Machine;
 
 /** WRITE — plan §6.11 */
-class UpdateApplicationSelectionTool implements Tool
+class UpdateApplicationSelectionTool implements WriteTool
 {
     public function __construct(
         private readonly ApplicationService $applications,
@@ -29,10 +29,8 @@ class UpdateApplicationSelectionTool implements Tool
 
     public function description(): string
     {
-        return 'Change motorcycle, plan, down payment or customer type of the active application. Use when the '
-            .'customer picks or changes any of these. plan_id must be copied from a get_installment_options '
-            .'result in this same turn (call it first if needed) - never guess it; check selected_plan in the '
-            .'result matches what the customer chose. Do not use for personal data (use record_customer_data).';
+        return 'Change the open application\'s motorcycle, plan (installment_system + months), down payment, customer type or route, '
+            .'when he picks or changes one. The only way the selection changes.';
     }
 
     public function inputSchema(): array
@@ -188,7 +186,8 @@ class UpdateApplicationSelectionTool implements Tool
                 'system' => trim((string) $selectedPlan->installmentSystem?->name),
                 'months' => $selectedPlan->months,
             ] : null,
-            'snapshot' => $this->snapshots->for($application),
+            // TOOL-006: the compact status, not the whole snapshot again
+            'application_now' => SnapshotService::compact($this->snapshots->for($application)),
             'invalidated' => $invalidatedKeys,
         ]);
     }

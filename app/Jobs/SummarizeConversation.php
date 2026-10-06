@@ -55,11 +55,20 @@ class SummarizeConversation implements ShouldQueue
                 .': '.($m->text ?? $m->transcript ?? '[وسائط]'))
             ->implode("\n");
 
+        $list = ['type' => 'array', 'items' => ['type' => 'string']];
+
         try {
             $response = $ai->chat(new AiRequest(
                 purpose: \App\Services\GeminiKeyManager::isTestPhone($conversation->phone) ? 'simulator' : 'summary',
-                system: 'لخّص المحادثة دي بشكل محايد ومختصر بالعربي. اذكر الحقائق المهمة بس (زي نوع الموتوسيكل '
-                    .'اللي بيتكلموا عنه أو حالة الطلب)، من غير أي بيانات حساسة زي أرقام قومية أو بيانات مستندات.',
+                label: 'summary',
+                // CTX-010: free prose mixed what he said with chat filler; the
+                // model could not tell a decision from a passing remark.
+                system: 'اكتب ملخص المحادثة دي بالعربي في 3 قوايم، كل بند سطر قصير محايد:'."\n"
+                    .'facts: حقايق عن العميل قالها أو اتأكدت (شغله، سنه، منطقته، الموتوسيكل اللي عايزه، ميزانيته).'."\n"
+                    .'decisions: اللي اتفق عليه أو اختاره (موديل، مدة، مقدم، فتح طلب، طلب يكلم حد).'."\n"
+                    .'still_open: اللي لسه مستني رد أو ورق أو سؤال ماتجاوبش.'."\n"
+                    .'اكتب الملخص كله من جديد من الملخص السابق والرسائل الجديدة؛ الجديد يغلب القديم، وشيل اللي اتقفل من still_open. '
+                    .'من غير أي بيانات حساسة زي أرقام قومية أو بيانات مستندات، ومن غير أرقام أسعار أو أقساط (دي بتتجاب من الأدوات).',
                 contents: [
                     ['role' => 'user', 'parts' => [[
                         'type' => 'text',
@@ -69,21 +78,48 @@ class SummarizeConversation implements ShouldQueue
                 ],
                 toolMode: 'none',
                 temperature: 0.2,
+                responseSchema: ['type' => 'object', 'properties' => ['facts' => $list, 'decisions' => $list, 'still_open' => $list]],
             ));
         } catch (AiProviderException) {
             return;
         }
 
-        $newSummary = trim(implode('', $response->textParts));
+        $structured = self::decode(implode('', $response->textParts));
 
-        if ($newSummary === '') {
+        if ($structured === null || array_merge(...array_values($structured)) === []) {
             return;
         }
 
         $conversation->update([
-            'summary' => $newSummary,
+            'summary' => json_encode($structured, JSON_UNESCAPED_UNICODE),
             'summary_until_message_id' => $messages->last()->id,
             'summary_updated_at' => now(),
         ]);
+    }
+
+    /**
+     * The structured summary, or null for an older prose summary.
+     *
+     * @return array{facts: string[], decisions: string[], still_open: string[]}|null
+     */
+    public static function decode(?string $summary): ?array
+    {
+        $data = json_decode((string) $summary, true);
+
+        if (! is_array($data) || array_intersect_key($data, array_flip(['facts', 'decisions', 'still_open'])) === []) {
+            return null;
+        }
+
+        $max = (int) config('agent.summary.max_items', 8);
+        $clean = fn ($items) => array_slice(array_values(array_filter(array_map(
+            fn ($item) => is_scalar($item) ? mb_substr(trim((string) $item), 0, 160) : '',
+            (array) $items
+        ), fn ($item) => $item !== '')), 0, $max);
+
+        return [
+            'facts' => $clean($data['facts'] ?? []),
+            'decisions' => $clean($data['decisions'] ?? []),
+            'still_open' => $clean($data['still_open'] ?? []),
+        ];
     }
 }

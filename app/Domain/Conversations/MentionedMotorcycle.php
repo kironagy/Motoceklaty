@@ -3,15 +3,14 @@
 namespace App\Domain\Conversations;
 
 use App\Models\Brand;
-use App\Models\Machine;
-use App\Models\WhatsappMessage;
 use App\Support\ArabicTextNormalizer;
 
 /**
- * The model the customer named in this turn ("دايو 4 استيراد"). Live: that
- * message was priced - and application 4278 opened - on "هوجن ٤ استيراد",
- * because both names carry a 4. A tool call on a motorcycle of another
- * brand, or another number, than the one he just named is refused.
+ * Brand words for search_motorcycles: which brand(s) a word in the agent's
+ * query names ("هوجن", "سكوتر"). Rebuild 2026-10-05: the gate that read the
+ * customer's messages and refused a tool on "another model than he named"
+ * is gone - which model he means is the agent's call; every tool result
+ * names the motorcycle it used.
  */
 class MentionedMotorcycle
 {
@@ -30,83 +29,6 @@ class MentionedMotorcycle
 
     /** Category words that name no single brand. */
     private const GENERIC = ['scooter', 'scooters', 'electric', 'max', 'sport', 'classic', 'light', 'road', 'music', 'tiger', 'اصلي', 'استيراد', 'فرز', 'تاني', 'تانى'];
-
-    /** Words that mean he wants something else than what he named. */
-    private const ASKS_ALTERNATIVE = '/زي|شبه|بديل|غير|تاني[هة]?|مثل|نفس|احسن من|ارخص من|اقل من|مقارن|قارن|ولا/u';
-
-    /** An error detail when $machine contradicts the model he named this turn, else null. */
-    public static function conflict(int $conversationId, Machine $machine): ?string
-    {
-        $vocabulary = self::vocabulary();
-
-        foreach (self::currentTurnTexts($conversationId) as $raw) {
-            $text = ArabicTextNormalizer::normalize($raw);
-
-            if (preg_match(self::ASKS_ALTERNATIVE, $text)) {
-                continue;
-            }
-
-            $tokens = preg_split('/[^\p{L}\p{N}]+/u', $text, -1, PREG_SPLIT_NO_EMPTY);
-
-            // QA 2026-10-04: "البوكسر ١٥٠" (no brand word) opened the application
-            // on "بلسر ١٥٠" - same brand, same number. A model word he wrote
-            // (بوكسر، بلسر، كيت...) must be in the motorcycle's own name.
-            $modelWords = self::modelWords();
-            $named = array_values(array_filter($tokens, fn ($t) => isset($modelWords[$t])));
-            $machineWords = self::letterTokens((string) $machine->name);
-
-            if ($named !== [] && array_intersect($named, $machineWords) === []) {
-                return "The customer wrote \"{$raw}\", but motorcycle {$machine->id} \"".trim($machine->name).'" is another model. '
-                    .'Use the model he named (search_motorcycles with his own words) and its id.';
-            }
-
-            // brand and number checks need a number he wrote ("دايو 4")
-            if (! preg_match('/\d/', $text)) {
-                continue;
-            }
-
-            $brands = [];
-            $numbers = [];
-
-            foreach ($tokens as $i => $token) {
-                if (! isset($vocabulary[$token])) {
-                    continue;
-                }
-
-                $brands = array_merge($brands, $vocabulary[$token]);
-
-                if (isset($tokens[$i + 1]) && preg_match('/^\d{1,3}$/', $tokens[$i + 1])) {
-                    $numbers[] = $tokens[$i + 1];
-                }
-            }
-
-            if ($brands === []) {
-                continue;
-            }
-
-            $brandNames = Brand::whereIn('id', array_unique($brands))->pluck('name')->map(fn ($n) => trim($n))->implode(' / ');
-
-            // QA 2026-10-04: "Keeway keet 150" is filed under the brand
-            // "Scooters" - the brand he named is in the model's own name.
-            $nameHasBrand = collect(self::letterTokens((string) $machine->name))
-                ->contains(fn ($token) => array_intersect($vocabulary[$token] ?? [], $brands) !== []);
-
-            if (! in_array((int) $machine->brand_id, $brands, true) && ! $nameHasBrand) {
-                return "The customer wrote \"{$raw}\" ({$brandNames}), but motorcycle {$machine->id} \"".trim($machine->name).'" is another brand. '
-                    .'Find the model he named (search_motorcycles with his own words) and use its id. If we do not carry it, tell him '
-                    .'"للأسف مش متوفرة عندنا حاليا" - never quote, show or open another model in its place unless he asks for one.';
-            }
-
-            preg_match_all('/\d+/', ArabicTextNormalizer::normalize($machine->name), $m);
-
-            if ($numbers !== [] && $m[0] !== [] && array_intersect($numbers, $m[0]) === []) {
-                return "The customer wrote \"{$raw}\", but motorcycle {$machine->id} \"".trim($machine->name).'" is a different model number. '
-                    .'Use the model he named (search_motorcycles with his own words). If we do not carry it, say so - never swap in another model.';
-            }
-        }
-
-        return null;
-    }
 
     /** Search words for a whole category, not one brand. */
     private const CATEGORY_WORDS = [
@@ -135,43 +57,7 @@ class MentionedMotorcycle
         return array_values(array_unique($ids));
     }
 
-    /** @return array<string, true> distinctive words of our active model names (no brands, no category words) */
-    private static function modelWords(): array
-    {
-        static $words = null;
 
-        if ($words !== null) {
-            return $words;
-        }
-
-        $brandWords = self::vocabulary();
-        $generic = array_flip(array_map([ArabicTextNormalizer::class, 'normalize'], self::GENERIC));
-        $words = [];
-
-        foreach (Machine::where('is_active', true)->pluck('name') as $name) {
-            foreach (self::letterTokens((string) $name) as $token) {
-                if (! isset($brandWords[$token]) && ! isset($generic[$token])) {
-                    $words[$token] = true;
-                }
-            }
-        }
-
-        return $words;
-    }
-
-    /** @return string[] what the customer sent since the last reply */
-    private static function currentTurnTexts(int $conversationId): array
-    {
-        $lastOutgoing = WhatsappMessage::where('whatsapp_conversation_id', $conversationId)->where('direction', 'outgoing')->max('id') ?? 0;
-
-        return WhatsappMessage::where('whatsapp_conversation_id', $conversationId)
-            ->where('direction', 'incoming')->where('sender_type', 'customer')->where('id', '>', $lastOutgoing)
-            ->get(['text', 'transcript'])
-            ->map(fn ($m) => trim(($m->text ?? '').' '.($m->transcript ?? '')))
-            ->filter()
-            ->values()
-            ->all();
-    }
 
     /** @return array<string, int[]> normalized word => brand ids */
     private static function vocabulary(): array

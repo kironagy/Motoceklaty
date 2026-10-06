@@ -14,7 +14,7 @@ use App\Models\InstallmentPlan;
 use App\Models\Machine;
 
 /** WRITE — plan §6.10 */
-class StartApplicationTool implements Tool
+class StartApplicationTool implements WriteTool
 {
     public function __construct(
         private readonly ApplicationService $applications,
@@ -29,39 +29,13 @@ class StartApplicationTool implements Tool
 
     public function description(): string
     {
-        return 'Open an application. Use IMMEDIATELY the first moment the customer says they want to apply or '
-            .'buy on installment (e.g. "عايز اقدم", "عايز اقسط") - only customer_type is required, everything '
-            .'else (motorcycle, plan, down payment) can be null and filled in later via '
-            .'update_application_selection. Do not wait to collect a complete selection first: record_customer_data '
-            .'and process_document both require an active application to attach to, so delaying this call means '
-            .'customer data and documents they send have nowhere to go and are silently lost. '
-            .'Do not use only when they are just asking questions with no intent to apply. If an active '
-            .'application exists, this returns it; if he cancelled one recently and wants to continue, it is reopened with his data.';
+        return 'Open (or reopen) his application the moment he wants to apply and his work is known. Only customer_type + his words are required; '
+            .'the selection can come later (update_application_selection). Data and documents need an open application.';
     }
-
-    public const NO_WORK_HINT = 'The applicant must be working (or on a pension) - these words say he is not working, a housewife, a student '
-        .'or about to start work. Do not open or switch an application with these words. Before collecting anything, tell him kindly that any '
-        .'other person who works (21 or older, not necessarily a relative) can apply in his own name with his own papers, and the licence can be '
-        .'in the customer\'s name. When he says who will apply, ask what THAT person works ("هو بيشتغل إيه؟") and use that person\'s own words.';
-
-    public static function occupationHint(string $say): string
-    {
-        return 'The finance companies refuse this work (owner\'s rule). Tell him plainly, in these words or very close: "'.$say.'" '
-            .'Do not soften it (no "بتتحفظ", no "القرار عندهم"), do not offer to try or apply anyway, do not ask for another income source, '
-            .'and do not open an application.';
-    }
-
-    public const INSURED_HINT = 'He said he is insured (متأمن عليه): he applies as employee - self_employed is only for an employee who is NOT insured. '
-        .'If he has no salary slip yet, tell him it is needed and he can send it when he gets it. Only if he says he cannot get it at all, '
-        .'the last resort is the card-only route (route=card_only) on its own terms - never another work type on his word.';
 
     public const ROUTE_DESCRIPTION = 'card_only = the last resort when he works but cannot bring the papers his work needs (salary slip, app '
         .'screenshots, tax card...): he applies with his ID only, on the free-work terms (its own cap and installment - quote them with '
         .'get_installment_offer customer_type=self_employed first). Only after he said he cannot bring them; never for a woman.';
-
-    public const NOT_OWNER_HINT = 'business_owner only when he said he OWNS the place (صاحب/عندي محل/ورشتي...). '
-        .'"شغال في ورشة/محل/مطعم" is working there, not owning it. Ask him "إنت صاحب المكان ولا شغال فيه؟" '
-        .'- working there: a craft (ميكانيكي، نجار...) → self_employed with work_type craftsman; with a salary and insurance → employee.';
 
     public function inputSchema(): array
     {
@@ -177,6 +151,7 @@ class StartApplicationTool implements Tool
                 $machine,
                 $plan,
                 isset($args['down_payment']) ? (float) $args['down_payment'] : null,
+                \App\Domain\Applications\Applicant::fromProfile(app(\App\Domain\Applications\WorkProfiles::class)->get($ctx->conversationId)),
             );
         } catch (ApplicationSelectionException $e) {
             return ToolResult::error($e->errorCode);
@@ -226,33 +201,19 @@ class StartApplicationTool implements Tool
             \App\Domain\Applications\CardOnlyRoute::mark($outcome['application'], (string) $args['customer_type_quote']);
         }
 
+        $snapshot = $this->snapshots->for($outcome['application']);
+
+        // TOOL-006: an application opened now is not in the turn's context yet -
+        // its full snapshot comes once; one already open is there, so only its status.
         return ToolResult::ok([
             'application_id' => $outcome['application']->id,
             'created' => $outcome['created'],
-            'snapshot' => $this->snapshots->for($outcome['application']),
-        ] + ($planProblem ? ['plan_not_set' => $planProblem] : [])
-          + (($outcome['reopened'] ?? false) ? ['reopened' => 'His cancelled application is back with everything he already sent. Tell him so in one line and continue from snapshot next_step - do not ask again for what is already in.'] : []));
+        ] + ($outcome['created'] || ($outcome['reopened'] ?? false)
+            ? ['snapshot' => $snapshot]
+            : ['application_now' => SnapshotService::compact($snapshot)]) + ($planProblem ? ['plan_not_set' => $planProblem] : [])
+          + (($outcome['reopened'] ?? false) ? ['reopened' => true] : []));
     }
 
-    /** "سني 18" / "عندي 20 سنة" / "عمري ١٩" in his own recent messages. */
-    private function ageInRecentWords(int $conversationId): ?int
-    {
-        $texts = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversationId)->where('direction', 'incoming')
-            ->where('sender_type', 'customer')->latest('id')->limit(30)->get(['text', 'transcript']);
-
-        foreach ($texts as $message) {
-            $text = strtr(\App\Support\ArabicTextNormalizer::normalize(trim(($message->text ?? '').' '.($message->transcript ?? ''))),
-                ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9']);
-
-            if (preg_match('/(?:سني|عمري)\s*(\d{2})(?!\d)|(?:عندي|انا)\s*(\d{2})\s*(?:سنه|سنين|سنة)(?!\p{L})/u', $text, $m)) {
-                $age = (int) ($m[1] !== '' ? $m[1] : $m[2]);
-
-                return $age >= 10 && $age <= 99 ? $age : null;
-            }
-        }
-
-        return null;
-    }
 
     private function statedAgeProblem(ToolContext $ctx, string $otherApplicantQuote = ''): ?string
     {
@@ -260,10 +221,17 @@ class StartApplicationTool implements Tool
             return null;
         }
 
+        // Simulator 2026-10-05: "طب ممكن اخويا يقدم؟" then "شغال نجار" - the
+        // work profile (its evidence checked against his messages) already
+        // says another person applies; the quote copied from this tool's
+        // example did not match and the brother was refused for HIS age.
+        if ((app(\App\Domain\Applications\WorkProfiles::class)->get($ctx->conversationId)['applicant'] ?? null) === 'someone_else') {
+            return null;
+        }
+
         $memory = app(\App\Domain\Memory\CustomerMemory::class);
-        // His memory is written when the turn's reply goes out; "سني 18
-        // وعايز اقدم" in this same turn is read from his words directly.
-        $age = $memory->statedAge($ctx->customerId) ?? $this->ageInRecentWords($ctx->conversationId);
+        // A stated age is a fact the model recorded (memory / check_eligibility) - never parsed from his text here.
+        $age = $memory->statedAge($ctx->customerId);
         $min = \App\Domain\Memory\CustomerMemory::minimumAge();
 
         if ($age === null || $min === null || $age >= $min) {
@@ -278,7 +246,7 @@ class StartApplicationTool implements Tool
         }
 
         return "He said he is {$age}; applying needs {$min} or older. Do not open an application or collect anything in his name. "
-            .'Tell him kindly in one line, then offer the only way: any other person who works (21 or older, not necessarily a relative) applies in his own name with his own papers. '
+            .'Tell him kindly in one line, then say exactly: "'.\App\Domain\Applications\OtherApplicant::line().'" - nothing else to ask. '
             .'When he says who will apply, call start_application with THAT person\'s work and other_applicant_quote = his words saying it. Cash purchase is always possible.';
     }
 }

@@ -71,8 +71,11 @@ class CustomerDataService
             // رقم" - not his words - refused, and he was asked for the
             // building number again and again. "There is none" is an answer
             // in any wording, once he actually said it.
-            if (self::isAddressPart($key) && self::saysNone((string) $item['value'])
-                && ($noneEvidence = $this->statements->messageMatching($conversationId, self::NONE_PATTERN, 4)) !== null) {
+            // Rebuild: the agent says it (`none` + his words in `quote`); PHP
+            // only checks the words are really his - no phrase list on his text.
+            if (self::isAddressPart($key) && (($item['none'] ?? false) === true || self::saysNone((string) $item['value']))
+                && filled($item['quote'] ?? null)
+                && ($noneEvidence = $this->statements->messageContainingQuote($conversationId, (string) $item['quote'])) !== null) {
                 $outcome = $this->writeApplicationOrCustomer($customer, $application, $field, 'لا يوجد', $noneEvidence);
 
                 if ($outcome === null) {
@@ -154,7 +157,7 @@ class CustomerDataService
         return ['saved' => $saved, 'rejected' => $rejected, 'conflicts' => $conflicts, 'facts' => $facts];
     }
 
-    /** He said the building/floor/apartment/landmark has none, or he does not know it. */
+    /** The agent's value says "none" (its own wording, never his text). */
     private const NONE_PATTERN = '/(?<!\p{L})(?:مفيش|مافيش|مفيهاش|مفيهوش|لا يوجد|مش موجود|ملهاش|مالهاش|ملوش|مالوش|بدون|من غير|مش عارف|معرفش|ماعرفش|مش فاكر|غير معروف)(?!\p{L})/u';
 
     private static function isAddressPart(string $key): bool
@@ -216,17 +219,14 @@ class CustomerDataService
         return null;
     }
 
-    /** The work address is the residence address, and he never said he works where he lives. */
+    /**
+     * The work address is a copy of the residence and the model did not say
+     * he works where he lives (field flag same_as_home) - a structural check,
+     * no reading of his words.
+     */
     private function copiesResidence(?Application $application, array $fields, string $workAddress, int $conversationId): bool
     {
-        // Simulator 2026-10-05: "القهوة القليوبيه الخصوص شارع السعاده..." was
-        // refused three times - his café is on his own street. He named the
-        // workplace in the very message, so it is his work address.
-        $place = '/(?<!\p{L})(?:ال)?(?:قهو[ةه]|كافيه|محل|ورش[ةه]|مطعم|شرك[ةه]|مصنع|مخزن|عياد[ةه]|صيدلي[ةه]|شغل|شغلي)(?!\p{L})/u';
-        $squash = fn (string $v) => preg_replace('/[\s\p{P}]+/u', '', \App\Support\ArabicTextNormalizer::normalize($v));
-        $named = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversationId)->where('direction', 'incoming')
-            ->pluck('text')->contains(fn ($t) => preg_match($place, (string) $t) && str_contains($squash((string) $t), $squash($workAddress)));
-        if ($named) {
+        if ((collect($fields)->firstWhere('key', 'work_address')['same_as_home'] ?? false) === true) {
             return false;
         }
 
@@ -242,14 +242,7 @@ class CustomerDataService
         [$home, $work] = [$compact((string) $residence), $compact($workAddress)];
         similar_text($home, $work, $percent);
 
-        // "القاهرة، عزبة النخل، شارع الشيخ منصور" was cut from the home
-        // address and saved as the work address.
-        if ($percent < 90 && ($work === '' || ! str_contains($home, $work))) {
-            return false;
-        }
-
-        return ! $this->statements->anyMessageMatches($conversationId,
-            '/نفس (?:العنوان|عنوان|المكان|مكان)|(?:بشتغل|شغال|شغلي)\s+(?:\S+\s+)?(?:من|في|ف)\s+(?:البيت|بيت|بيتي)|تحت (?:البيت|بيت)|ورشه تحت|محل تحت|اونلاين|من البيت/u');
+        return $work !== '' && ($percent >= 90 || str_contains($home, $work));
     }
 
     /**

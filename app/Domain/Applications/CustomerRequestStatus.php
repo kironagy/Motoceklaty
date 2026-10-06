@@ -18,13 +18,14 @@ use App\Models\WhatsappConversation;
 class CustomerRequestStatus
 {
     private const STATUS = [
+        // what the agent says for each status: the instructions (§٨)
         'new_request' => ['وصل وفي انتظار المراجعة', null],
         'new' => ['وصل وفي انتظار المراجعة', null],
         'transferred' => ['تحت المراجعة', null],
-        'pending' => ['تحت الاستعلام', 'Answer is not out yet - he will get a WhatsApp message as soon as it is. Never promise a time.'],
-        'work_check' => ['تحت الاستعلام عن الشغل', 'Answer is not out yet - he will get a WhatsApp message as soon as it is. Never promise a time.'],
-        'paused' => ['متوقف على حاجة ناقصة', 'Tell him what is missing (missing) and get it from him.'],
-        'approved' => ['اتوافق عليه', 'He comes to the showroom to sign and receive the motorcycle.'],
+        'pending' => ['تحت الاستعلام', null],
+        'work_check' => ['تحت الاستعلام عن الشغل', null],
+        'paused' => ['متوقف على حاجة ناقصة', null],
+        'approved' => ['اتوافق عليه', null],
         'rejected' => ['اترفض', null],
         'delivered' => ['استلم المكنة', null],
         'canceled' => ['اتلغى', null],
@@ -63,7 +64,7 @@ class CustomerRequestStatus
     private function describe(InstallmentRequest $request): array
     {
         $status = (string) $request->status;
-        [$label, $note] = self::STATUS[$status] ?? ['تحت المراجعة', null];
+        [$label] = self::STATUS[$status] ?? ['تحت المراجعة', null];
         $reason = $this->reason($request->checks_report);
 
         $row = [
@@ -80,12 +81,11 @@ class CustomerRequestStatus
         }
 
         if ($status === 'rejected') {
-            $note = StaffDecisionService::isCreditRejection($reason)
-                ? 'Refused by the finance company on his credit record (I-Score). Final: no next steps, do not offer to re-apply for installments.'
-                : 'Refused by the finance company'.($reason !== null ? ': '.$reason : '').'.';
+            $row['refusal'] = StaffDecisionService::isCreditRejection($reason) ? 'credit_record_final' : 'finance_company';
+            $row['refusal_reason'] = StaffDecisionService::isCreditRejection($reason) ? null : $reason;
         }
 
-        return array_filter($row + ['note' => $note], fn ($v) => $v !== null);
+        return array_filter($row, fn ($v) => $v !== null);
     }
 
     /** @return array{monthly_installment?: float} */

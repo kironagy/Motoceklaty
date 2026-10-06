@@ -41,7 +41,8 @@ class BranchServiceTest extends TestCase
         $result = app(BranchService::class)->find('cairo', 'البساتين');
 
         $this->assertSame(['فرع عين شمس'], array_column($result['branches'], 'name'));
-        $this->assertStringNotContainsString('NO branch in', $result['note']);
+        $this->assertSame('his_governorate', $result['listed']);
+        $this->assertSame('البساتين', $result['asked_place']);
     }
 
     public function test_where_we_have_no_branch_the_nearest_comes_first(): void
@@ -55,7 +56,8 @@ class BranchServiceTest extends TestCase
 
         $this->assertSame('فرع الخصوص', $result['nearest_branch']);
         $this->assertSame(['فرع الخصوص', 'فرع عين شمس', 'فرع الهرم'], array_column($result['branches'], 'name'));
-        $this->assertStringContainsString('No branch in المنصورة', $result['note']);
+        $this->assertTrue($result['no_branch_in_requested_area']);
+        $this->assertSame('المنصورة', $result['asked_place']);
     }
 
     public function test_inactive_branches_excluded(): void

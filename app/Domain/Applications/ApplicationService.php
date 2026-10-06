@@ -41,11 +41,21 @@ class ApplicationService
         ?Machine $machine = null,
         ?InstallmentPlan $plan = null,
         ?float $downPayment = null,
+        ?array $applicant = null,
     ): array {
         $this->assertSelectionValid($machine, $plan);
         $this->assertDownPaymentValid($machine, $plan, $downPayment);
 
+        // Conversation 206: an application still collecting for his father
+        // is not the brother's - it closes and his own opens.
+        Applicant::closeIfOtherPerson($customer->id, $applicant);
+
         $existing = $this->activeFor($customer);
+
+        // an application opened before its person was recorded takes the person now
+        if ($existing && $applicant && ! $existing->applicant) {
+            $existing->update(['applicant' => $applicant]);
+        }
 
         if ($existing) {
             // DEC-14 (still open): project.md §28 already states a customer may
@@ -62,7 +72,7 @@ class ApplicationService
 
         // "الغي الطلب" then "لا خلاص كمّل": he is not asked for his ID and
         // address again - the application he cancelled comes back as it was.
-        if ($reopened = $this->reopenWithdrawn($customer, $customerType, $machine, $plan, $downPayment)) {
+        if ($reopened = $this->reopenWithdrawn($customer, $customerType, $machine, $plan, $downPayment, $applicant)) {
             return ['application' => $reopened, 'created' => false, 'reopened' => true];
         }
 
@@ -70,6 +80,7 @@ class ApplicationService
             'customer_id' => $customer->id,
             'origin_conversation_id' => $conversationId,
             'customer_type_id' => $customerType->id,
+            'applicant' => $applicant,
             'machine_id' => $machine?->id,
             'installment_plan_id' => $plan?->id,
             'down_payment' => $downPayment,
@@ -161,7 +172,7 @@ class ApplicationService
         return array_merge($selectionInvalidated, $this->supersedeDocumentsForKeys($application, $noLongerRequired->values()->all()));
     }
 
-    private function reopenWithdrawn(Customer $customer, CustomerType $customerType, ?Machine $machine, ?InstallmentPlan $plan, ?float $downPayment): ?Application
+    private function reopenWithdrawn(Customer $customer, CustomerType $customerType, ?Machine $machine, ?InstallmentPlan $plan, ?float $downPayment, ?array $applicant = null): ?Application
     {
         $application = Application::where('customer_id', $customer->id)
             ->where('status', 'withdrawn')
@@ -169,7 +180,9 @@ class ApplicationService
             ->latest('id')
             ->first();
 
-        if (! $application) {
+        // his father's cancelled application never comes back as his brother's
+        if (! $application || ! Applicant::same($application->applicant, $applicant)
+            || ($applicant && ! $application->applicant && ($applicant['who'] ?? null) === 'other')) {
             return null;
         }
 

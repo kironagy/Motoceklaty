@@ -7,7 +7,6 @@ use App\Agent\Tracing\Redactor;
 use App\Domain\Applications\ApplicationService;
 use App\Domain\Applications\SnapshotService;
 use App\Domain\Catalog\CatalogService;
-use App\Domain\Knowledge\KnowledgeService;
 use App\Jobs\SummarizeConversation;
 use App\Models\AiTrace;
 use App\Models\Application;
@@ -32,12 +31,10 @@ use Illuminate\Support\Facades\Storage;
 class ContextBuilder
 {
     public function __construct(
-        private readonly KnowledgeService $knowledge,
         private readonly CatalogService $catalog,
         private readonly ApplicationService $applications,
         private readonly SnapshotService $snapshots,
         private readonly \App\Domain\Settings\AgentInstructions $instructions,
-        private readonly \App\Domain\Teaching\LessonBook $lessons,
     ) {
     }
 
@@ -48,23 +45,22 @@ class ContextBuilder
         $application = $customer ? $this->applications->activeFor($customer) : null;
         $snapshot = $application ? $this->snapshots->for($application) : null;
 
+        // Rebuild: ONE instruction source (L0). Pinned/scoped knowledge and
+        // lessons are folded into it; what follows is data only - catalog
+        // names, customer-type keys, then what we know about this customer.
         $l0 = $this->buildL0();
-        $l0b = $this->lessons->forPrompt($snapshot['customer_type'] ?? null);
-        $l1 = $this->buildL1();
-        $l2 = $this->buildL2();
-        $l3 = $this->buildL3();
+        $l3 = $this->catalogIsRelevant($conversation, $application) ? $this->buildL3() : ['text' => null, 'count' => 0];
         $l3b = $this->buildL3b();
         $l4 = $this->buildL4($conversation, $customer, $snapshot, $turn->id);
-        $l4m = $customer ? app(\App\Domain\Memory\CustomerMemory::class)->forPrompt($customer->id, $conversation->id) : null;
-        $l5 = $this->buildL5($application);
+        $l4m = $customer ? app(\App\Domain\Memory\CustomerMemory::class)->forPrompt($customer->id, $conversation->id, $application?->id) : null;
         $l6 = $this->buildL6($conversation);
         $l7 = $this->buildL7($conversation, $turn);
         $l8 = $this->buildL8($conversation, $turn);
 
         $system = implode("\n\n", array_values(array_filter([
-            // The same text for every customer goes first, so Google's cache
-            // covers it on every call; lessons depend on the customer type.
-            $l0['text'], $l1['text'], $l2['text'], $l3['text'], $l3b['text'], $l0b['text'], $l4['text'], $l4m, $l5['text'], $l6['text'],
+            // The same text for every customer goes first, so the provider's
+            // cache covers it on every call.
+            $l0['text'], $l3['text'], $l3b['text'], $l4['text'], $l4m, $l6['text'], $this->ownStyleNote($conversation),
         ], fn ($block) => $block !== null && trim($block) !== '')));
 
         $request = new AiRequest(
@@ -75,14 +71,10 @@ class ContextBuilder
         $manifest = [
             'prompt_version' => $l0['version'],
             'l0_tokens' => TokenEstimator::estimate($l0['text']),
-            'l0b_count' => $l0b['count'],
-            'l1_count' => $l1['count'],
-            'l2_count' => $l2['count'],
             'l3_count' => $l3['count'],
             'l3b_count' => $l3b['count'],
             'l4_present' => true,
             'memory_tokens' => $l4m === null ? 0 : TokenEstimator::estimate($l4m),
-            'l5_count' => $l5['count'],
             'l6_present' => $l6['text'] !== null,
             'l7_count' => count($l7['contents']),
             'l7_trimmed' => $l7['trimmed'],
@@ -96,6 +88,81 @@ class ContextBuilder
         return $request;
     }
 
+    /**
+     * Conversation 206: 14 of 16 replies opened "تمام يا باشا" and most ran
+     * 3-4 lines repeating the same refusal - the model copies its own
+     * earlier replies from the history. What its last replies looked like
+     * is told as a fact, so this one breaks the pattern.
+     */
+    private function ownStyleNote(WhatsappConversation $conversation): ?string
+    {
+        $last = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')->where('sender_type', 'bot')
+            ->latest('id')->limit(4)->pluck('text')->filter()->values();
+
+        if ($last->count() < 2) {
+            return null;
+        }
+
+        $notes = [];
+        $nicknames = $last->filter(fn ($t) => preg_match('/يا\s+(?:باشا|غالي|صاحبي|معلم|ريس|برنس)/u', (string) $t))->count();
+
+        // any nickname in the last two replies: this one has none
+        if ($last->take(2)->contains(fn ($t) => preg_match('/يا\s+(?:باشا|غالي|صاحبي|معلم|ريس|برنس)/u', (string) $t))) {
+            $notes[] = "{$nicknames} من آخر {$last->count()} ردود فيهم نداء (يا باشا...): الرد ده من غير نداء خالص، وابدأ بالإجابة نفسها مش بـ\"تمام\"";
+        }
+
+        // Replay of conversation 206: "جهات التمويل بتطلب اللي يقدم يكون شغال
+        // أو على المعاش وسنه من 21 لـ 62" in four replies running, a word
+        // changed each time - so runs of 5+ words, not whole sentences.
+        $repeated = [];
+        $words = $last->map(fn ($t) => preg_split('/\s+/u', trim(preg_replace('/[.،,؟?!:\n]+/u', ' ', (string) $t))))->all();
+        $texts = array_map(fn ($ws) => array_map(fn ($w) => \App\Support\ArabicTextNormalizer::normalize($w), $ws), $words);
+
+        for ($i = 0; $i < count($texts); $i++) {
+            for ($j = $i + 1; $j < count($texts); $j++) {
+                if (($run = $this->longestSharedRun($texts[$i], $texts[$j])) !== null && $run[1] >= 5) {
+                    $phrase = implode(' ', array_slice($words[$i], $run[0], $run[1]));
+                    $repeated[implode(' ', array_slice($texts[$i], $run[0], $run[1]))] = $phrase;
+                }
+            }
+        }
+
+        if ($repeated !== []) {
+            $notes[] = 'قلت ده في أكتر من رد قبل كده، ما تعيدوش (هو عارفه): "'.implode('" · "', array_slice(array_values($repeated), 0, 2)).'"';
+        }
+
+        $average = (int) round($last->avg(fn ($t) => mb_strlen((string) $t)));
+
+        if ($average > 160) {
+            $notes[] = "ردودك الأخيرة طويلة (حوالي {$average} حرف): الرد ده سطر أو اتنين، ورد على آخر رسالة بس من غير ما تعيد شرح قلته قبل كده";
+        }
+
+        return $notes === [] ? null : "## ردودك الأخيرة\n- ".implode("\n- ", $notes);
+    }
+
+    /** @return array{0: int, 1: int}|null [start in $a, length] of the longest run of words both share */
+    private function longestSharedRun(array $a, array $b): ?array
+    {
+        $best = null;
+
+        for ($i = 0; $i < count($a); $i++) {
+            for ($j = 0; $j < count($b); $j++) {
+                $k = 0;
+
+                while (isset($a[$i + $k], $b[$j + $k]) && $a[$i + $k] === $b[$j + $k]) {
+                    $k++;
+                }
+
+                if ($k > 0 && $k > ($best[1] ?? 0)) {
+                    $best = [$i, $k];
+                }
+            }
+        }
+
+        return $best;
+    }
+
     /** @return array{version: string, text: string} */
     private function buildL0(): array
     {
@@ -104,44 +171,20 @@ class ContextBuilder
         return ['version' => $current['version'], 'text' => $current['text']];
     }
 
-    /** @return array{text: ?string, count: int} */
-    private function buildL1(): array
+
+
+    /**
+     * CTX-004: the 58-line index (~2,000 chars) rode along every call, also
+     * while he was only sending papers for a motorcycle already chosen.
+     * Structured state only: no application, none chosen on it, or an offer
+     * given in the last 24 h = motorcycles are the talk. Otherwise a name he
+     * brings up is found by search_motorcycles (names + aliases, CAT-002).
+     */
+    private function catalogIsRelevant(WhatsappConversation $conversation, ?Application $application): bool
     {
-        $memories = $this->knowledge->pinned();
-        $budget = config('agent.context.pinned_memory_tokens');
-        $lines = [];
-        $used = 0;
-
-        foreach ($memories as $memory) {
-            $tokens = $memory->estimatedTokens();
-
-            if ($budget !== null && $used + $tokens > (int) $budget) {
-                break;
-            }
-
-            $lines[] = "### {$memory->title}\n{$memory->content}";
-            $used += $tokens;
-        }
-
-        if ($lines === []) {
-            return ['text' => null, 'count' => 0];
-        }
-
-        return ['text' => "## إرشادات ثابتة من لوحة التحكم\n".implode("\n\n", $lines), 'count' => count($lines)];
-    }
-
-    /** @return array{text: ?string, count: int} */
-    private function buildL2(): array
-    {
-        $index = $this->knowledge->index();
-
-        if ($index->isEmpty()) {
-            return ['text' => null, 'count' => 0];
-        }
-
-        $lines = $index->map(fn ($title, $key) => "{$key}: {$title}")->values()->all();
-
-        return ['text' => "## فهرس المعرفة (اطلب get_business_knowledge بالمفتاح لو محتاج التفاصيل)\n".implode("\n", $lines), 'count' => count($lines)];
+        return $application === null
+            || $application->machine_id === null
+            || \App\Domain\Conversations\QuotedOffer::ledger($conversation) !== [];
     }
 
     /** @return array{text: ?string, count: int} */
@@ -193,7 +236,9 @@ class ContextBuilder
     {
         $state = $this->cleanedState($conversation, $snapshot);
 
-        $profile = $customer ? $this->customerProfileFacts($customer) : [];
+        // With an open application its snapshot holds his values; the
+        // profile from earlier applications would only repeat them.
+        $profile = $customer && $snapshot === null ? $this->customerProfileFacts($customer) : [];
 
         $handoff = ['status' => $conversation->status === 'awaiting_agent' ? 'awaiting_agent' : 'none'];
 
@@ -202,7 +247,8 @@ class ContextBuilder
                 ->whereNull('closed_at')->latest('opened_at')->value('reason');
 
             if (\App\Domain\Handoff\HandoffService::botKeepsAnswering($conversation)) {
-                $handoff = ['status' => 'call_requested', 'note' => 'Staff were told to call him. Until they do, you answer him here as usual - every question, numbers, his application. Do not hand off again for the call and do not promise a time.'];
+                // what to do meanwhile: the instructions (§٩)
+                $handoff = ['status' => 'call_requested'];
             }
         } else {
             // Returned by the timeout with no staff reply: the agent should
@@ -214,17 +260,39 @@ class ContextBuilder
             }
         }
 
-        $payload = [
+        // Whitelisted state only - no counters, timestamps or internal ids.
+        $payload = array_filter([
             'customer_profile' => $profile,
-            'conversation_state' => $state,
-            'application' => $snapshot,
+            'customer_gender' => $state['customer_gender'] ?? null,
+            'waiting_for' => array_values(array_map(fn ($a) => ['kind' => $a['kind'] ?? null, 'key' => $a['key'] ?? null], (array) ($state['awaiting'] ?? []))),
+            'conversation_ended' => isset($state['ended_at']) ? true : null,
+            // offers a tool really gave him, still valid (24 h, price unchanged): a number source
+            'quotes_given_to_him' => \App\Domain\Conversations\QuotedOffer::ledger($conversation),
+            // cash prices a tool showed him in the last 24 h (catalog price now): a number source
+            'cash_prices_shown' => \App\Domain\Conversations\QuotedOffer::cashPricesShown($conversation),
+            'application' => $this->afterFullList($conversation, $snapshot),
             'handoff' => $handoff,
-        ];
+        ], fn ($v) => $v !== null && $v !== []);
 
         // "ايه المتاح؟" after an SRK 250 photo was answered with 150cc bikes.
         if (($interest = $state['interest'] ?? null) && ($interest['cc'] ?? null)) {
-            $payload['customer_is_after'] = ($interest['label'] ?? '').' (about '.$interest['cc'].'cc). For "what do you have" / alternatives call '
-                .'search_motorcycles - it returns this size first. Never list other sizes or kinds unless he asks for them.';
+            $payload['customer_is_after'] = ['label' => $interest['label'] ?? null, 'cc' => (int) $interest['cc']];
+        }
+
+        // Simulator 2026-10-05: a Didi rider's work was recorded on his first
+        // message, but the reading was nowhere in the next turns - he was asked
+        // "بتشتغل إيه؟" eight times and no application could open.
+        if (($work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id)) && ($work['work_stated'] ?? false)) {
+            // whose work this is: "someone_else" alone let the bot say "أبوك" for a brother
+            $payload['his_work'] = array_filter([
+                'whose_work' => \App\Domain\Applications\Applicant::label(\App\Domain\Applications\Applicant::fromProfile($work)),
+                'his_words' => $work['evidence'] ?? null,
+                'occupation' => $work['occupation'] ?? null,
+                'customer_type' => $work['customer_type'] ?? null,
+                'work_type' => ($work['work_type'] ?? 'none') === 'none' ? null : $work['work_type'],
+                'insured' => ($work['insured'] ?? 'unknown') === 'unknown' ? null : $work['insured'],
+                'still_to_ask' => ($work['question'] ?? 'none') === 'none' ? null : $work['question'],
+            ], fn ($v) => $v !== null && $v !== '');
         }
 
         // "طلبي وصل لفين؟" - his submitted requests, customer-safe fields only.
@@ -240,8 +308,8 @@ class ContextBuilder
             $payload['unprocessed_media'] = $unprocessed;
         }
 
-        return ['text' => "## الحالة الحالية (بيانات حقيقية - لا تخترع غيرها)\n```json\n"
-            .json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)."\n```"];
+        return ['text' => "## اللي نعرفه عن العميل والطلب (بيانات حقيقية من الداتابيز)\n```json\n"
+            .json_encode($payload, JSON_UNESCAPED_UNICODE)."\n```"];
     }
 
     /**
@@ -326,23 +394,6 @@ class ContextBuilder
         return $state;
     }
 
-    /** @return array{text: ?string, count: int} */
-    private function buildL5(?Application $application): array
-    {
-        if (! $application) {
-            return ['text' => null, 'count' => 0];
-        }
-
-        $memories = $this->knowledge->scoped($application->customerType?->key, $application->status);
-
-        if ($memories->isEmpty()) {
-            return ['text' => null, 'count' => 0];
-        }
-
-        $lines = $memories->map(fn ($m) => "### {$m->title}\n{$m->content}")->all();
-
-        return ['text' => "## إرشادات خاصة بمرحلة الطلب الحالية\n".implode("\n\n", $lines), 'count' => count($lines)];
-    }
 
     /** @return array{text: ?string} */
     private function buildL6(WhatsappConversation $conversation): array
@@ -351,7 +402,22 @@ class ContextBuilder
             return ['text' => null];
         }
 
-        return ['text' => "## ملخص المحادثة السابقة\n{$conversation->summary}"];
+        // CTX-010: facts / decisions / still open; a summary written before is prose.
+        $structured = SummarizeConversation::decode($conversation->summary);
+
+        if ($structured === null) {
+            return ['text' => "## ملخص المحادثة السابقة\n{$conversation->summary}"];
+        }
+
+        $sections = [];
+
+        foreach (['facts' => 'حقايق عنه', 'decisions' => 'اتفقنا على', 'still_open' => 'لسه مفتوح'] as $key => $label) {
+            if ($structured[$key] !== []) {
+                $sections[] = "{$label}:\n- ".implode("\n- ", $structured[$key]);
+            }
+        }
+
+        return ['text' => $sections === [] ? null : "## ملخص المحادثة السابقة (الأقدم من الرسايل اللي تحت)\n".implode("\n", $sections)];
     }
 
     /**
@@ -408,9 +474,14 @@ class ContextBuilder
             $ids = $message->media()->pluck('id')->all();
 
             if ($ids !== []) {
-                $note = '[صورة سابقة - media_id: '.implode(', ', $ids).']';
+                $note = ($message->type === 'document' ? '[ملف سابق' : '[صورة سابقة').' - media_id: '.implode(', ', $ids).']';
                 $text = $message->text ? "{$note} {$message->text}" : $note;
             }
+        }
+
+        // CTX-008: a location or a video read as "[media]" in history.
+        if ($isCustomer && ($note = $this->locationNote($message) ?? $this->videoNote($message)) !== null) {
+            $text = $message->text ? "{$note} {$message->text}" : $note;
         }
 
         // A bare "[media]" on the model's own turn read as something it had
@@ -457,9 +528,12 @@ class ContextBuilder
     /** @return array{contents: array, tokens: int} */
     private function buildL8(WhatsappConversation $conversation, object $turn): array
     {
+        // CTX-005: the bot's own reply shares the turn_id; a turn retried
+        // after it was sent showed the model that reply as customer text.
         $messages = WhatsappMessage::with(['quotedMessage', 'media'])
             ->where('whatsapp_conversation_id', $conversation->id)
             ->where('turn_id', $turn->id)
+            ->where('direction', 'incoming')
             ->orderBy('id')
             ->get();
 
@@ -479,8 +553,35 @@ class ContextBuilder
                 $tokens += TokenEstimator::estimate($quoteText);
             }
 
-            if ($message->type === 'image' || $message->type === 'sticker') {
+            // CTX-008: a location has no text and no media - it was skipped.
+            if (($note = $this->locationNote($message) ?? $this->videoNote($message)) !== null) {
+                $parts[] = ['type' => 'text', 'text' => $note];
+                $tokens += TokenEstimator::estimate($note);
+            }
+
+            // CTX-008: a PDF in this turn showed only its caption, so the
+            // model had no media_id to call process_document with.
+            if ($message->type === 'document') {
                 foreach ($message->media as $media) {
+                    if (str_starts_with((string) $media->mime, 'image/')) {
+                        continue; // a photo sent "as a file" is read like a photo below
+                    }
+
+                    $read = \App\Models\ApplicationDocument::where('media_id', $media->id)->latest('id')->first(['detected_type_key', 'status']);
+                    $idNote = $read !== null
+                        ? "[ملف مستند اتقرا - media_id: {$media->id} - ".($read->detected_type_key ?? 'غير معروف')." - {$read->status}]"
+                        : "[ملف مرفق ({$this->fileLabel($media)}) - media_id: {$media->id} - لو مستند للطلب اقراه بـ process_document]";
+                    $parts[] = ['type' => 'text', 'text' => $idNote];
+                    $tokens += TokenEstimator::estimate($idNote);
+                }
+            }
+
+            if (in_array($message->type, ['image', 'sticker', 'document'], true)) {
+                foreach ($message->media as $media) {
+                    if ($message->type === 'document' && ! str_starts_with((string) $media->mime, 'image/')) {
+                        continue;
+                    }
+
                     // process_document/identify_motorcycle_from_image both require a
                     // media_id argument, but the model only ever sees the raw image
                     // bytes below - with no id anywhere in its context it has no way
@@ -525,7 +626,100 @@ class ContextBuilder
             $contents[] = ['role' => 'user', 'parts' => $parts];
         }
 
+        // Replay of conversation 206: "اخويا عنده ٢٥ وشغال نجار" then "لا هو مش
+        // شغال دلوقتي" - the correction was never recorded and the bot kept
+        // collecting the brother's name and phone. What is recorded about the
+        // person applying sits next to his new message, to be checked against it.
+        if ($contents !== [] && ($recorded = $this->recordedApplicantNote($conversation)) !== null) {
+            $contents[count($contents) - 1]['parts'][] = ['type' => 'text', 'text' => $recorded];
+            $tokens += TokenEstimator::estimate($recorded);
+        }
+
         return ['contents' => $contents, 'tokens' => $tokens];
+    }
+
+    /**
+     * Owner 2026-10-05: the whole list once, when the application opens;
+     * then "تمام ابعتلي" + the next missing thing. With every list in front
+     * of it on every turn the model kept re-sending them all. Once a reply
+     * went after the application opened, only next_step stays.
+     */
+    private function afterFullList(WhatsappConversation $conversation, ?array $snapshot): ?array
+    {
+        if ($snapshot === null || ! isset($snapshot['application_id'])) {
+            return $snapshot;
+        }
+
+        $openedAt = Application::whereKey($snapshot['application_id'])->value('created_at');
+        $sent = $openedAt && WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')->where('sender_type', 'bot')->where('created_at', '>=', $openedAt)->exists();
+
+        if (! $sent) {
+            return $snapshot + ['full_list_sent' => false];
+        }
+
+        $next = $snapshot['next_step']['key'] ?? null;
+        unset($snapshot['full_list'], $snapshot['documents']['list']);
+
+        foreach (['fields', 'documents'] as $part) {
+            if (isset($snapshot[$part]['missing_hints'])) {
+                $snapshot[$part]['missing_hints'] = array_intersect_key($snapshot[$part]['missing_hints'], array_flip(array_filter([$next])));
+            }
+        }
+
+        return $snapshot + ['full_list_sent' => true];
+    }
+
+    private function recordedApplicantNote(WhatsappConversation $conversation): ?string
+    {
+        $work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id);
+
+        if ($work === null) {
+            return null;
+        }
+
+        $working = match ($work['working_now'] ?? 'unknown') {
+            'yes' => 'شغال', 'no' => 'مش شغال', 'not_yet' => 'لسه هيشتغل', default => 'مش معروف',
+        };
+
+        // "أنا مسجل كلامك عن والدتك" was said to him from this note: it is marked as not for him
+        return '[ملاحظة داخلية، ما تتقالش له ولا تقول إنك مسجل حاجة - اللي هيقدّم = '.\App\Domain\Applications\Applicant::label(\App\Domain\Applications\Applicant::fromProfile($work))
+            ." · شغله: {$working}".(filled($work['evidence'] ?? null) ? ' (من كلامه: "'.$work['evidence'].'")' : '')
+            .'. لو رسالته دي بتغيّر مين اللي هيقدّم أو شغله، نادي record_work_profile بكلامه الجديد قبل الرد.]';
+    }
+
+    /** "[العميل بعت لوكيشن: 30.04, 31.23 - اسم - عنوان]" or null when it is not a location. */
+    private function locationNote(WhatsappMessage $message): ?string
+    {
+        $location = $message->metadata['location'] ?? null;
+
+        if ($message->type !== 'location' && ! is_array($location)) {
+            return null;
+        }
+
+        $location = (array) $location;
+        $coordinates = isset($location['latitude'], $location['longitude'])
+            ? $location['latitude'].', '.$location['longitude']
+            : null;
+        $details = array_values(array_filter([$coordinates, $location['name'] ?? null, $location['address'] ?? null], fn ($v) => filled($v)));
+
+        return '[العميل بعت لوكيشن'.($details === [] ? '' : ': '.implode(' - ', $details)).']';
+    }
+
+    private function videoNote(WhatsappMessage $message): ?string
+    {
+        if ($message->type !== 'video') {
+            return null;
+        }
+
+        return '[العميل بعت فيديو - مش بنقدر نشوف الفيديو. لو محتاج منه حاجة اطلب صورة أو يكتبها، من غير ما تفترض محتواه]';
+    }
+
+    private function fileLabel(MessageMedia $media): string
+    {
+        $kind = $media->mime === 'application/pdf' ? 'PDF' : ($media->mime ?: 'ملف');
+
+        return $media->original_filename ? "{$kind} {$media->original_filename}" : $kind;
     }
 
     private function imagePart(MessageMedia $media): array
@@ -562,20 +756,25 @@ class ContextBuilder
      */
     private function maybeTriggerSummary(WhatsappConversation $conversation, ?int $oldestIncludedId): void
     {
-        $triggerThreshold = config('agent.summary.trigger_messages');
+        $byTokens = config('agent.summary.trigger_tokens');
+        $byCount = config('agent.summary.trigger_messages');
 
-        if ($triggerThreshold === null || $oldestIncludedId === null) {
+        if (($byTokens === null && $byCount === null) || $oldestIncludedId === null) {
             return;
         }
 
         $since = $conversation->summary_until_message_id ?? 0;
 
-        $backlogCount = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+        // CTX-010: what fell out of the window, measured like the window itself.
+        $backlog = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
             ->where('id', '>', $since)
             ->where('id', '<', $oldestIncludedId)
-            ->count();
+            ->get(['id', 'text', 'transcript']);
 
-        if ($backlogCount >= (int) $triggerThreshold) {
+        $tokens = $backlog->sum(fn ($m) => TokenEstimator::estimate((string) ($m->text ?? $m->transcript ?? '')));
+
+        if (($byTokens !== null && $backlog->isNotEmpty() && $tokens >= (int) $byTokens)
+            || ($byCount !== null && $backlog->count() >= (int) $byCount)) {
             SummarizeConversation::dispatch($conversation->id, $oldestIncludedId);
         }
     }

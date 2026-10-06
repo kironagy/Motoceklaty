@@ -14,6 +14,8 @@ const express = require('express');
 const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
+const { createSpool } = require('./spool');
+const { createSentRegistry } = require('./sent-registry');
 
 require('dotenv').config();
 
@@ -582,6 +584,20 @@ async function postToLaravelWithRetry(payload) {
     throw lastError;
 }
 
+// ERR-003: reply items already sent, by Laravel's client_id (sent-registry.js)
+const sentRegistry = createSentRegistry({ file: process.env.SENT_REGISTRY_FILE || path.join(__dirname, 'sent-items', 'sent-items.json') });
+
+// WA-002: a message Laravel could not take is kept on disk and replayed (spool.js)
+const spool = createSpool({
+    dir: process.env.SPOOL_DIR || path.join(__dirname, 'spool'),
+    post: postToLaravel,
+    maxFiles: Number(process.env.SPOOL_MAX_FILES || 500),
+});
+
+setInterval(() => {
+    if (spool.files().length) spool.replay();
+}, 60000).unref();
+
 async function handleIncomingMessage(sock, botId, msg) {
     const originalFrom = msg.key.remoteJid;
 
@@ -643,9 +659,21 @@ async function handleIncomingMessage(sock, botId, msg) {
 
         console.log(`📤 Sending to Laravel (${type}):`, cleanText || `[${type}]`);
 
-        const response = await postToLaravelWithRetry(payload);
+        let response;
+
+        try {
+            response = await postToLaravelWithRetry(payload);
+        } catch (error) {
+            // unreachable or 5xx after the retries: keep it on disk (WA-002)
+            if (spool.retryable(error)) spool.add(payload);
+
+            throw error;
+        }
 
         console.log('📥 Laravel Response:', JSON.stringify(response.data));
+
+        // Laravel is back: send what waited
+        if (spool.files().length) spool.replay();
     } catch (error) {
         console.error('Laravel Error:', error?.response?.data || error?.message || error);
     }
@@ -930,21 +958,21 @@ app.post('/send-message', checkToken, async (req, res) => {
             ? recentRawMessages.get(req.body.quoted_message) || null
             : null;
 
-        await seenBeforeReply(sock, botId, jid);
+        // ERR-003: the same reply item (client_id) is never sent twice
+        const outcome = await sentRegistry.once(req.body.client_id, async () => {
+            await seenBeforeReply(sock, botId, jid);
 
-        const sent = await sendTextSafely(sock, jid, text, quotedMsg, callerGone(res));
-        const waMessageId = sent?.key?.id ? `${botId}_${sent.key.id}` : null;
+            const sent = await sendTextSafely(sock, jid, text, quotedMsg, callerGone(res));
+            const waMessageId = sent?.key?.id ? `${botId}_${sent.key.id}` : null;
 
-        if (sent && waMessageId) {
-            recentRawMessages.set(waMessageId, sent);
-        }
+            if (sent && waMessageId) {
+                recentRawMessages.set(waMessageId, sent);
+            }
 
-        return res.json({
-            ok: Boolean(sent),
-            bot_id: botId,
-            jid,
-            wa_message_id: waMessageId,
+            return { status: 200, body: { ok: Boolean(sent), bot_id: botId, jid, wa_message_id: waMessageId } };
         });
+
+        return res.status(outcome.status).json(outcome.body);
     } catch (error) {
         console.error('SEND MESSAGE ENDPOINT ERROR:', error?.message || error);
 
@@ -970,8 +998,11 @@ app.post('/send-media-items', checkToken, async (req, res) => {
             return res.status(404).json({ ok: false, error: 'session not found', bot_id: botId });
         }
 
-        const results = [];
         const isCancelled = callerGone(res);
+
+        // ERR-003: the same reply item (client_id) is never sent twice
+        const outcome = await sentRegistry.once(req.body.client_id, async () => {
+        const results = [];
 
         await seenBeforeReply(sock, botId, jid);
 
@@ -1020,13 +1051,16 @@ app.post('/send-media-items', checkToken, async (req, res) => {
             // The gap between photos comes from the per-number pacing.
         }
 
-        return res.json({
+        return { status: 200, body: {
             ok: results.some(r => r.ok),
             sent_count: results.filter(r => r.ok).length,
             total: results.length,
             wa_message_ids: results.filter(r => r.ok).map(r => r.wa_message_id),
             results,
+        } };
         });
+
+        return res.status(outcome.status).json(outcome.body);
     } catch (error) {
         return res.status(500).json({
             ok: false,
@@ -1036,6 +1070,9 @@ app.post('/send-media-items', checkToken, async (req, res) => {
 });
 app.listen(PORT, () => {
     console.log(`🚀 WhatsApp Worker Running ${PORT}`);
+
+    // messages spooled before a restart (WA-002)
+    spool.replay();
 
     fetchLatestActiveBotId().then(({ latest, active }) => {
         const linked = active.filter(isLinkedSession);

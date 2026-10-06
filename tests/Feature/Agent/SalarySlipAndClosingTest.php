@@ -5,7 +5,6 @@ namespace Tests\Feature\Agent;
 use App\Agent\Runtime\AgentTurnProcessor;
 use App\Agent\Runtime\ReplyGuard;
 use App\Domain\Applications\SnapshotService;
-use App\Domain\Conversations\ConversationClosing;
 use App\Models\Application;
 use App\Models\ApplicationRequirement;
 use App\Models\Customer;
@@ -58,10 +57,9 @@ class SalarySlipAndClosingTest extends TestCase
     {
         $application = $this->employeeApplication($this->conversation());
 
-        $hint = app(SnapshotService::class)->for($application)['documents']['if_unavailable']['salary_slip'] ?? '';
-
-        $this->assertStringContainsString('customer_type=self_employed', $hint);
-        $this->assertStringContainsString('Never offer a substitute', $hint);
+        // rebuild: a rule code; what it means (insurance print, then card-only) is in the instructions
+        $this->assertSame(['rule' => 'insurance_print_then_card_only'], app(SnapshotService::class)->for($application)['documents']['if_unavailable']);
+        $this->assertStringContainsString('`insurance_print_then_card_only` = الشركة مش بتطلع مفردات؟ برنت التأمينات', app(\App\Domain\Settings\AgentInstructions::class)->fromFile()['text']);
     }
 
     public function test_going_on_with_the_id_needs_the_switch_first(): void
@@ -78,77 +76,10 @@ class SalarySlipAndClosingTest extends TestCase
         $this->assertNull($check('مفيش مشكلة يا غالي، نكمّل بالبطاقة وعنوان شغلك.'));
     }
 
-    public function test_invented_substitutes_for_the_salary_slip_are_blocked(): void
-    {
-        $this->assertSame('DOCUMENT_NOT_REQUIRED', $this->check('بما إن الشركة مش بتطلع مفردات، ممكن تبعتلي كشف حساب بنكي لآخر ٦ شهور؟'));
-        $this->assertSame('DOCUMENT_NOT_REQUIRED', $this->check('ممكن تبعتلي صورة العقد ده؟ ده هيكون بديل ممتاز للمفردات.'));
-    }
-
-    public function test_someone_else_applying_in_his_name_is_blocked(): void
-    {
-        $this->assertSame('INVENTED_APPLICATION_ROUTE', $this->check('ممكن حضرتك تجيب أي شخص تاني (قريب أو صاحب) يكون متأمن عليه، ويقدم هو الطلب باسمه.'));
-        $this->assertSame('INVENTED_APPLICATION_ROUTE', $this->check('تحب نجرّب نقدّم باسم حد تاني من طرفك؟'));
-    }
-
-    /** Owner 2026-10-02 (lessons 37/38): offered when he does not work, is about to, is under 21 or has a bad score. */
-    public function test_someone_else_may_apply_when_he_cannot(): void
-    {
-        $reply = 'ينفع أي حد تاني (مش شرط قريب) يقدم الطلب باسمه، وجواب الترخيص يطلع باسمك لو هو موافق.';
-
-        foreach (['انا طالب عندي 19 سنه', 'لسه مش شغال بس هشتغل عليها دليفري', 'عليا سكور في البنك'] as $said) {
-            $conversation = $this->conversation();
-            WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => $said]);
-
-            $this->assertNotSame('INVENTED_APPLICATION_ROUTE', app(ReplyGuard::class)->check(['messages' => [$reply]], $conversation, '', [], []), $said);
-        }
-
-        $worker = $this->conversation();
-        WhatsappMessage::create(['whatsapp_conversation_id' => $worker->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'الشركه مش بتطلع مفردات']);
-        $this->assertSame('INVENTED_APPLICATION_ROUTE', app(ReplyGuard::class)->check(['messages' => [$reply]], $worker, '', [], []));
-    }
-
     public function test_stopping_the_application_without_the_tool_is_blocked(): void
     {
         $this->assertSame('WITHDRAWAL_CLAIMED_NOT_DONE', $this->check('تمام يا باشا، وقفتلك الطلب دلوقتي.'));
         $this->assertSame('WITHDRAWAL_CLAIMED_NOT_DONE', $this->check('خلاص، هقفل الطلب دلوقتي زي ما اتفقنا.'));
-    }
-
-    public function test_sign_offs_and_bare_thanks_are_recognised(): void
-    {
-        $this->assertTrue(ConversationClosing::isSignOff('حبيبي يا غالي، نورتنا. في رعاية الله.'));
-        $this->assertFalse(ConversationClosing::isSignOff('تمام يا باشا، نورتنا. تحب تشوف صور؟'));
-
-        foreach (['تسلم', 'حبيبي', 'ماشى يا باشا', 'ماشى يا قلبي', 'الله يسلمك', 'شكرا 🙏', '👍'] as $text) {
-            $this->assertTrue(ConversationClosing::isBareAcknowledgement($text), $text);
-        }
-
-        foreach (['مش هعرف', 'لا', 'انت مش عايز تمشي مع الدنيا', 'تمام ابعتلي الصور'] as $text) {
-            $this->assertFalse(ConversationClosing::isBareAcknowledgement($text), $text);
-        }
-    }
-
-    public function test_thanks_after_our_goodbye_gets_no_reply(): void
-    {
-        $conversation = $this->conversation();
-        $say = fn (string $direction, string $sender, string $text, ?int $turn = null) => WhatsappMessage::create([
-            'whatsapp_conversation_id' => $conversation->id, 'whatsapp_bot_id' => $conversation->whatsapp_bot_id,
-            'direction' => $direction, 'sender_type' => $sender, 'type' => 'text', 'text' => $text, 'turn_id' => $turn,
-        ]);
-
-        $say('outgoing', 'bot', 'تسلم يا غالي، كلك ذوق. في رعاية الله.');
-        $say('incoming', 'customer', 'حبيبي', 501);
-
-        $this->assertSame(['messages' => []], app(AgentTurnProcessor::class)->process((object) ['id' => 501, 'whatsapp_conversation_id' => $conversation->id]));
-        $this->assertTrue(ConversationClosing::onlyThanksAfterGoodbye($conversation->id, 501));
-
-        // A real message after the goodbye still gets an answer.
-        $say('incoming', 'customer', 'مش هعرف', 502);
-        $this->assertFalse(ConversationClosing::onlyThanksAfterGoodbye($conversation->id, 502));
-
-        // "تمام" answering our question is not a goodbye.
-        $say('outgoing', 'bot', 'دي القسط والمصاريف، تمام؟');
-        $say('incoming', 'customer', 'تمام', 503);
-        $this->assertFalse(ConversationClosing::onlyThanksAfterGoodbye($conversation->id, 503));
     }
 
     public function test_a_job_said_over_several_messages_is_found(): void

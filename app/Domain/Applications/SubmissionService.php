@@ -124,7 +124,8 @@ class SubmissionService
             // Customer, guarantor, work and document columns - the bot tab
             // of the deliveries table shows these like any manual request.
             $installmentRequest = InstallmentRequest::create(array_merge(
-                $this->projector->attributes($application, $legacyWorkStatus),
+                // APP-006: no AI call inside the submit - the parser split now, the AI split queued
+                $this->projector->attributes($application, $legacyWorkStatus, aiAddressSplit: false),
                 [
                     'application_id' => $application->id,
                     'machine_id' => $application->machine_id,
@@ -145,6 +146,7 @@ class SubmissionService
             ]);
 
             $application->update(['installment_request_id' => $installmentRequest->id, 'submitted_at' => now()]);
+            \App\Jobs\SplitRequestAddresses::dispatch($installmentRequest->id)->afterCommit();
 
             return ['submitted' => true, 'reference' => $this->reference($application)];
         });
@@ -206,7 +208,8 @@ class SubmissionService
         }
 
         $lines[] = "• الموتوسيكل: {$review['motorcycle']}";
-        $lines[] = "• نظام التقسيط: {$review['installment_system']} - {$review['months']} شهر";
+        // The customer never picks a system - its name ("مايلو") only when he asks (owner, 2026-10-05).
+        $lines[] = "• المدة: {$review['months']} شهر";
         $lines[] = '• المقدم: '.number_format($review['down_payment']).' جنيه';
 
         if ($review['monthly_payment'] !== null) {

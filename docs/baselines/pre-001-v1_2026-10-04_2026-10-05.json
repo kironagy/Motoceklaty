@@ -1,0 +1,165 @@
+{
+    "generated_at": "2026-10-05 02:11:59",
+    "window": {
+        "since": "2026-10-04 00:00:00",
+        "until": "2026-10-05 23:59:00",
+        "runner": null
+    },
+    "environment": {
+        "model": "gpt-5-mini",
+        "fallback_models": "gpt-5-nano",
+        "reasoning_effort": "low",
+        "understanding": true,
+        "reviewer": true,
+        "code_version": "3a3928709"
+    },
+    "turns": {
+        "count": 614,
+        "status": {
+            "error": 10,
+            "done": 588,
+            "fallback": 10,
+            "running": 6
+        },
+        "rejected_turns": 190,
+        "rejected_percent": 30.9,
+        "fallback_percent": 1.6,
+        "silent_rewrites": 0
+    },
+    "main_loop_calls_per_turn": {
+        "n": 602,
+        "avg": 2.47,
+        "p10": 1,
+        "p50": 2,
+        "p90": 4,
+        "p95": 5,
+        "max": 11,
+        "histogram": {
+            "1": 167,
+            "2": 222,
+            "3": 108,
+            "4+": 105
+        }
+    },
+    "input_tokens_per_turn": {
+        "n": 603,
+        "avg": 32187.25,
+        "p10": 12021,
+        "p50": 24971,
+        "p90": 57820,
+        "p95": 73746,
+        "max": 164989,
+        "cached_share_percent": 79.2
+    },
+    "input_tokens_per_main_call": 13079,
+    "latency_seconds": {
+        "n": 614,
+        "avg": 30.28,
+        "p10": 8,
+        "p50": 24,
+        "p90": 58,
+        "p95": 71,
+        "max": 203
+    },
+    "guard_codes": {
+        "REVIEW_REDO": 71,
+        "UNVERIFIED_NUMBER": 28,
+        "REPEATED_QUESTION": 27,
+        "ECHOES_CUSTOMER": 23,
+        "BANNED_WORDING": 20,
+        "BRANCH_NOT_SOURCED": 19,
+        "REVIEW_REWRITE": 19,
+        "DOCUMENTS_RELISTED": 14,
+        "EMPTY_REPLY": 13,
+        "INTERNAL_KEY_IN_REPLY": 13,
+        "STOCK_OR_CHECK_CLAIMED": 13,
+        "DOCUMENT_LIST_INCOMPLETE": 12,
+        "DATA_CLAIMED_NOT_SAVED": 9,
+        "WORK_TYPE_TOLD": 8,
+        "GARBLED_TEXT": 6,
+        "UNSOURCED_FINANCE_COMPANY": 4,
+        "DOCUMENT_CLAIMED_NOT_ACCEPTED": 4,
+        "DOCUMENT_PHOTO_NOT_PROCESSED": 3,
+        "DATA_NOT_RECORDED": 3,
+        "OCCUPATION_SOFTENED": 3,
+        "ENGLISH_WORD": 3,
+        "DOCUMENT_NOT_REQUIRED": 2,
+        "VERSIONS_NOT_LOOKED_UP": 2,
+        "UNRECORDED_PROMISE": 2,
+        "PERCENT_DURATION_MISMATCH": 2,
+        "IMAGES_CLAIMED_NOT_SENT": 1,
+        "PLACEHOLDER_IN_REPLY": 1,
+        "HANDOFF_CLAIMED_NOT_DONE": 1,
+        "INVENTED_APPLICATION_ROUTE": 1,
+        "META_TEXT": 1,
+        "AVAILABILITY_PROMISE": 1,
+        "DUPLICATE_REPLY": 1,
+        "REQUIRED_DOCUMENT_WAIVED": 1,
+        "UNSOURCED_REASON": 1,
+        "REQUEST_NUMBER_MISSING": 1,
+        "MODEL_NOT_LOOKED_UP": 1,
+        "APPLICATION_ALREADY_OPEN_CLAIMED": 1,
+        "FORMAL_ARABIC": 1
+    },
+    "ai_usage_by_source": {
+        "simulator": {
+            "source": "simulator",
+            "calls": 1527,
+            "input_tokens": 19441946,
+            "cached_tokens": 15445760,
+            "output_tokens": 147792,
+            "thoughts_tokens": 1512000,
+            "cost_usd": 1.90687
+        },
+        "work": {
+            "source": "work",
+            "calls": 326,
+            "input_tokens": 751377,
+            "cached_tokens": 591616,
+            "output_tokens": 56727,
+            "thoughts_tokens": 149760,
+            "cost_usd": 0.169844
+        },
+        "document": {
+            "source": "document",
+            "calls": 357,
+            "input_tokens": 1275318,
+            "cached_tokens": 523904,
+            "output_tokens": 22047,
+            "thoughts_tokens": 242496,
+            "cost_usd": 0.429374
+        },
+        "address": {
+            "source": "address",
+            "calls": 9,
+            "input_tokens": 4932,
+            "cached_tokens": 0,
+            "output_tokens": 684,
+            "thoughts_tokens": 4544,
+            "cost_usd": 0.007144
+        },
+        "reply": {
+            "source": "reply",
+            "calls": 563,
+            "input_tokens": 2012259,
+            "cached_tokens": 783104,
+            "output_tokens": 36118,
+            "thoughts_tokens": 196160,
+            "cost_usd": 0.703186
+        },
+        "image": {
+            "source": "image",
+            "calls": 1,
+            "input_tokens": 2497,
+            "cached_tokens": 0,
+            "output_tokens": 85,
+            "thoughts_tokens": 2432,
+            "cost_usd": 0.001132
+        }
+    },
+    "cost": {
+        "usd_total": 3.2176,
+        "cents_per_reply": 0.538
+    },
+    "ai_calls": null
+}

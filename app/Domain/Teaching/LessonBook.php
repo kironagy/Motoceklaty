@@ -44,12 +44,12 @@ class LessonBook
 
             $line = $this->line($lesson, withExample: false);
             $withExample = $this->line($lesson, withExample: true);
-            $cost = (int) ceil(mb_strlen($withExample) / 4);
+            $cost = \App\Agent\Context\TokenEstimator::estimate($withExample);
 
             if ($used + $cost <= $budget) {
                 $line = $withExample;
             } else {
-                $cost = (int) ceil(mb_strlen($line) / 4);
+                $cost = \App\Agent\Context\TokenEstimator::estimate($line);
 
                 if ($used + $cost > $budget) {
                     continue;

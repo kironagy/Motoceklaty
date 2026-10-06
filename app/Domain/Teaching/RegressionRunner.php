@@ -86,6 +86,7 @@ class RegressionRunner
         try {
             $response = $this->ai->chat(new AiRequest(
                 purpose: 'teaching',
+                label: 'teaching_replay',
                 system: "إنت حَكَم بتراجع رد بوت مبيعات موتوسيكلات مصري. قرر هل الرد بيحقق المطلوب.\n"
                     ."- احكم على المعنى والتصرف مش على الكلمات بالظبط.\n"
                     ."- الثوابت المطلوبة لازم تبان في الرد (مسموح اختلاف بسيط في الإملا).\n"

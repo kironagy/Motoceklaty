@@ -35,6 +35,6 @@ class BusinessMemory extends Model
     /** Matches the char/4 estimate used elsewhere (e.g. GeminiClient). */
     public function estimatedTokens(): int
     {
-        return (int) ceil(mb_strlen((string) $this->content) / 4);
+        return \App\Agent\Context\TokenEstimator::estimate((string) $this->content);
     }
 }

@@ -80,18 +80,10 @@ class ApplicationNudgeService
             return false;
         }
 
-        // "لسه معايا؟ طلبك ماشي" went to a customer refused for his age and
-        // to one who had just said "اقفل الطلب".
-        $lastCustomerText = \App\Support\ArabicTextNormalizer::normalize((string) WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
-            ->where('direction', 'incoming')->latest('id')->value('text'));
-
-        // "طلبك قرب يخلص، فاضل بس مفردات المرتب" went an hour after "لا والله
-        // مفيش شكرا" and our "نورتنا، في رعاية الله": a goodbye ends it.
-        $lastBotText = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
-            ->where('direction', 'outgoing')->whereIn('sender_type', ['bot', 'system'])->latest('id')->value('text');
-
-        if (\App\Domain\Conversations\ConversationClosing::isSignOff($lastBotText)
-            || preg_match('/اقفل|اقفلو|الغي|الغيه|لغيه|مش عايز|مش عاوز|مش محتاج|مش هقدر|مش هعرف|مش هكمل|خلاص مش|بلاش|كنسل|cancel|مفيش شكرا|لا شكرا/u', $lastCustomerText)
+        // He declined, paused or said goodbye: the bot marked the conversation
+        // ended (send_reply.ends_conversation) - no reminder until he writes.
+        // Refused by the rules: nothing to remind him of.
+        if (isset(($conversation->state ?? [])['ended_at'])
             || ($this->snapshots->for($application)['eligibility']['status'] ?? null) === 'not_eligible') {
             return false;
         }

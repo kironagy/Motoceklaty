@@ -5,7 +5,7 @@ namespace App\Agent\Tools;
 use App\Domain\Branches\BranchService;
 
 /** READ — plan §6.15 */
-class GetBranchInformationTool implements Tool
+class GetBranchInformationTool implements ReadTool
 {
     public function __construct(private readonly BranchService $branches)
     {

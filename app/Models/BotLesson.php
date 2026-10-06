@@ -13,4 +13,12 @@ class BotLesson extends Model
         'scope_customer_types' => 'array',
         'is_active' => 'boolean',
     ];
+
+    /** One instruction source: every lesson change is written into the instructions (LessonSync). */
+    protected static function booted(): void
+    {
+        $sync = fn () => app(\App\Domain\Teaching\LessonSync::class)->sync(auth()->id());
+        static::saved($sync);
+        static::deleted($sync);
+    }
 }

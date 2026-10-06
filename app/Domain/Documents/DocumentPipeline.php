@@ -25,6 +25,9 @@ use Illuminate\Support\Facades\Storage;
  */
 class DocumentPipeline
 {
+    /** @var array<int, array> media id => the model's reading, this request only */
+    private array $readings = [];
+
     public function __construct(
         private readonly OcrProvider $ocr,
         private readonly AiProvider $ai,
@@ -70,7 +73,7 @@ class DocumentPipeline
     /**
      * @return array{media_id: int, document_id: ?int, detected_type: ?string, accepted: bool, status: string, issues: array, applied_fields: string[]}
      */
-    public function process(MessageMedia $media, Application $application, ?string $expectedTypeKey = null, bool $replacesPrevious = false): array
+    public function process(MessageMedia $media, Application $application, ?string $expectedTypeKey = null, bool $replacesPrevious = false, ?array $preRead = null): array
     {
         $activeTypes = DocumentType::where('is_active', true)->get();
 
@@ -106,7 +109,10 @@ class DocumentPipeline
         // "not a document" while the application was waiting for exactly
         // that photo. What he still owes is the likeliest reading.
         $owed = $this->owedDocuments($application);
-        $classification = $this->classify($media, $ocrText, $activeTypes, $owed);
+        // DOC-004: a burst was read in one call (processMany); its reading of this photo is used as is.
+        $classification = $preRead !== null
+            ? $this->interpret($media, $ocrText, $activeTypes, $preRead)
+            : $this->classify($media, $ocrText, $activeTypes, $owed);
 
         if (! $classification) {
             $document = $this->recordDocument($application, $media, null, $expectedTypeKey, 'failed', null, null, [], [['code' => 'OCR_UNAVAILABLE']]);
@@ -114,7 +120,7 @@ class DocumentPipeline
             return $this->result($media->id, $document->id, null, false, 'failed', [['code' => 'OCR_UNAVAILABLE']], []);
         }
 
-        [$detectedTypeKey, $legibility, $confidence, $extractedFields] = $classification;
+        [$detectedTypeKey, $legibility, $confidence, $extractedFields, $reread] = $classification;
         $documentType = $activeTypes->firstWhere('key', $detectedTypeKey);
         $extractedFields = $this->trustedNationalId($extractedFields, $ocrText, $application);
 
@@ -139,7 +145,8 @@ class DocumentPipeline
         // shop was refused against its own tax card. A name that does not match
         // is read once more, carefully - the stored name is never shown to the
         // reader, so a different shop still fails.
-        if ($documentType && array_intersect(array_column($issues, 'code'), ['NAME_MISMATCH', 'BUSINESS_NAME_MISMATCH', 'TAXPAYER_NAME_MISMATCH']) !== []) {
+        // DOC-001: at most one re-read per photo - not when the reading already had it.
+        if ($documentType && ! $reread && array_intersect(array_column($issues, 'code'), ['NAME_MISMATCH', 'BUSINESS_NAME_MISMATCH', 'TAXPAYER_NAME_MISMATCH']) !== []) {
             $reread = $this->fillMissingFields($media, $ocrText, $documentType, $extractedFields, 'high');
             $retry = $this->validate($application, $documentType, $detectedTypeKey, $expectedTypeKey, $legibility, $reread, $activeTypes);
 
@@ -179,9 +186,8 @@ class DocumentPipeline
             $result['occupation_on_id'] = (string) $extractedFields['occupation'];
             // Owner 2026-10-04: a job title on the ID makes the salary slip
             // compulsory; "بدون عمل" / "طالب" is no problem at all.
-            $result['occupation_check'] = \App\Domain\Applications\IdOccupation::isNoJob((string) $extractedFields['occupation'])
-                ? 'The ID shows no job - that is no problem: do not ask him to prove his work because of it, and he needs no salary slip. Carry on with his application.'
-                : 'The ID shows a job title. If he is an employee, the salary slip is compulsory (or برنت التأمينات) - never anything else and never the card-only route.';
+            // what it means for his papers: the instructions (§٧)
+            $result['id_shows_job'] = ! \App\Domain\Applications\IdOccupation::isNoJob((string) $extractedFields['occupation']);
 
             if (\App\Domain\Applications\IdOccupation::isNoJob((string) $extractedFields['occupation'])) {
                 \App\Models\ApplicationEvent::create([
@@ -194,15 +200,59 @@ class DocumentPipeline
             }
         }
 
+        // Owner 2026-10-05: a clear place photo whose sign does not read is
+        // accepted - the tax card proves the business name. Until that card
+        // is in, the agent asks for it (a name typed in the chat is no proof).
+        if ($status === 'accepted' && $detectedTypeKey === 'business_place_photo' && blank($extractedFields['business_name'] ?? null)) {
+            $result['sign_not_readable'] = ApplicationDocument::where('application_id', $application->id)
+                ->where('status', 'accepted')->where('detected_type_key', 'tax_card')->exists()
+                ? 'tax_card_on_file' : 'tax_card_needed';
+        }
+
         if (($differs ?? []) !== []) {
             // Not a rejection - an app screen shows the name in English, the
             // ID in Arabic. The agent asks the customer whether it's theirs.
             $result['differs_from_file'] = $differs;
-            $result['note'] = 'Values on this document differ from what is already on file (kept unchanged). '
-                .'If it is a name, ask the customer to confirm the account is theirs before submitting.';
         }
 
         return $result;
+    }
+
+    /**
+     * DOC-004: the photos of one burst (front, back, salary slip...) are
+     * classified and read in ONE model call, then each is validated on its
+     * own. Average 26 s per photo (max 143 s) came from up to four calls per
+     * photo, one photo after another. A photo the batch answer misses is
+     * read on its own.
+     *
+     * @param  MessageMedia[]  $medias
+     * @param  array<int, ?string>  $expectedByMedia  media id => expected type key
+     * @return array<int, array> one result per media, same order
+     */
+    public function processMany(array $medias, Application $application, array $expectedByMedia = [], bool $replacesPrevious = false): array
+    {
+        $activeTypes = DocumentType::where('is_active', true)->get();
+        $toRead = array_values(array_filter($medias, fn (MessageMedia $m) => $this->intake($m, $activeTypes) === null
+            && $this->existingAcceptedDuplicate($application, $m) === null));
+        $preRead = [];
+
+        if (count($toRead) > 1) {
+            $ocrTexts = array_map(function (MessageMedia $m) {
+                try {
+                    return $this->ocr($m);
+                } catch (OcrException $e) {
+                    Log::warning('Document OCR failed', ['media_id' => $m->id, 'error' => $e->getMessage()]);
+
+                    return '';
+                }
+            }, $toRead);
+
+            foreach ((array) $this->read($toRead, $ocrTexts, $activeTypes, $this->owedDocuments($application)) as $i => $parsed) {
+                $preRead[$toRead[$i]->id] = $parsed;
+            }
+        }
+
+        return array_map(fn (MessageMedia $m) => $this->process($m, $application->refresh(), $expectedByMedia[$m->id] ?? null, $replacesPrevious, $preRead[$m->id] ?? null), $medias);
     }
 
     private function intake(MessageMedia $media, \Illuminate\Support\Collection $activeTypes): ?array
@@ -248,7 +298,6 @@ class DocumentPipeline
         return $result->text;
     }
 
-    /** @return array{0: ?string, 1: string, 2: float, 3: array}|null */
     /** @return string[] document keys this application still waits for */
     private function owedDocuments(Application $application): array
     {
@@ -259,7 +308,31 @@ class DocumentPipeline
         }
     }
 
+    /** @return array{0: ?string, 1: string, 2: float, 3: array, 4: bool}|null type, legibility, confidence, fields, re-read done */
     private function classify(MessageMedia $media, string $ocrText, \Illuminate\Support\Collection $activeTypes, array $owed = []): ?array
+    {
+        $parsed = $this->read([$media], [$ocrText], $activeTypes, $owed)[0] ?? null;
+
+        return $parsed === null ? null : $this->interpret($media, $ocrText, $activeTypes, $parsed);
+    }
+
+    /** The model's reading of a photo processed in this request, so validating it again costs no call. */
+    public function readingOf(int $mediaId): ?array
+    {
+        return $this->readings[$mediaId] ?? null;
+    }
+
+    /**
+     * DOC-001: ONE call classifies and reads every field of the type (it
+     * used to classify, then always re-read the fields, then re-read again
+     * for a date or a name). One photo = the object schema; a burst = one
+     * entry per image.
+     *
+     * @param  MessageMedia[]  $medias
+     * @param  string[]  $ocrTexts  same order as $medias
+     * @return array<int, array>|null parsed reading per index; null when the provider failed
+     */
+    private function read(array $medias, array $ocrTexts, \Illuminate\Support\Collection $activeTypes, array $owed = []): ?array
     {
         // extraction_fields is never enforced here (Gemini's `fields` schema
         // below has no per-type shape to keep the prompt type-agnostic) -
@@ -290,26 +363,57 @@ class DocumentPipeline
             ->mapWithKeys(fn ($key) => [$key => DocumentFields::schema($key)])
             ->all();
 
+        $document = [
+            // Gemini's responseSchema (like its function-calling schema) has no
+            // union types - an empty string means "couldn't classify", handled
+            // identically to null below (in_array against active keys).
+            'document_type_key' => ['type' => 'string'],
+            'legibility' => ['type' => 'string', 'enum' => ['good', 'poor', 'unreadable']],
+            'confidence' => ['type' => 'number'],
+            'fields' => $fieldProperties !== []
+                ? ['type' => 'object', 'properties' => $fieldProperties]
+                : ['type' => 'object'],
+        ];
+        $many = count($medias) > 1;
+
+        $ocrSection = $many
+            ? implode("\n\n", array_map(fn ($text, $i) => 'OCR text of image '.($i + 1).":\n".$text, $ocrTexts, array_keys($ocrTexts)))
+            : "OCR text:\n".($ocrTexts[0] ?? '');
+
+        $parts = [];
+
+        foreach ($medias as $i => $media) {
+            if ($many) {
+                $parts[] = ['type' => 'text', 'text' => 'Image '.($i + 1).':'];
+            }
+
+            $parts[] = ['type' => 'inline_media', 'mime' => $media->mime, 'base64' => base64_encode(Storage::disk($media->disk)->get($media->path))];
+        }
+
         try {
             $response = $this->ai->chat(new AiRequest(
                 purpose: 'document',
-                system: "Classify a customer-submitted document image against these types (key: description):\n{$typeList}\n\n"
+                label: 'document',
+                system: ($many ? 'Classify EACH of these '.count($medias).' customer-submitted document images (one entry per image, `image` = its number) ' : 'Classify a customer-submitted document image ')
+                    ."against these types (key: description):\n{$typeList}\n\n"
                     .'Use a type only if the image really is that document as described (the side and content the description names). '
                     .'If it matches none of them - e.g. the other side of a card when only one side is listed, or a different document - '
                     .'return an empty document_type_key; never force the closest type. '
-                    .'Once you identify the type, put its listed fields (exact keys) and their values into `fields`. '
+                    .'Once you identify the type, put ALL its listed fields (exact keys) and their values into `fields`. '
                     .'A field that is not visible on this image is left out - never write "null" or a guess. '
+                    // the focused second read's rules, now in the one read (DOC-001)
+                    .'Copy every number digit by digit exactly as printed (check it against the OCR text), converting Arabic-Indic digits to 0-9; '
+                    .'an amount is the one the field description names (e.g. net = صافي), without currency or thousands separators. '
                     .'A person\'s full name may be printed across several lines (e.g. the first name alone on the line above the rest): '
-                    .'join all name lines in reading order. '
-                    .'Today is '.now()->toDateString().' - resolve relative periods ("آخر 30 يوم", "this month", a month name without a year) against it; dates as YYYY-MM-DD.'
+                    .'join all name lines in reading order. The person\'s name is the person the document is about (the employee, the pensioner), '
+                    .'never a manager or signer in the letterhead. '
+                    .'Today is '.now()->toDateString().' - resolve relative periods ("آخر 30 يوم", "this month", a month name without a year) against it; dates as YYYY-MM-DD. '
+                    .'A date printed with a typo (a 5-digit year like 20246, a missing digit) is read as the date it plainly means from the other dates '
+                    .'on the document and today - an issue date can never be before the hire date on the same paper.'
                     .($owed !== [] ? "\nThis customer was just asked for: ".implode(', ', $owed).' - a photo that fits one of these (even a shop front with a lit or stylised sign, '
                         .'or a screenshot in another language) is most likely it; still never force a type it is not.' : '')."\n\n"
-                    ."OCR text:\n{$ocrText}",
-                contents: [
-                    ['role' => 'user', 'parts' => [
-                        ['type' => 'inline_media', 'mime' => $media->mime, 'base64' => base64_encode(Storage::disk($media->disk)->get($media->path))],
-                    ]],
-                ],
+                    .$ocrSection,
+                contents: [['role' => 'user', 'parts' => $parts]],
                 toolMode: 'none',
                 temperature: 0.1,
                 // Regression: with no explicit thinkingBudget, the model's default
@@ -318,31 +422,49 @@ class DocumentPipeline
                 // every real document - every single one failed extraction even
                 // when classification itself succeeded. This is pure structured
                 // extraction with no need for extended reasoning.
-                maxOutputTokens: 2048,
+                maxOutputTokens: 2048 * max(1, count($medias)),
                 thinkingBudget: 0,
-                responseSchema: [
-                    'type' => 'object',
-                    'properties' => [
-                        // Gemini's responseSchema (like its function-calling schema) has no
-                        // union types - an empty string means "couldn't classify", handled
-                        // identically to null below (in_array against active keys).
-                        'document_type_key' => ['type' => 'string'],
-                        'legibility' => ['type' => 'string', 'enum' => ['good', 'poor', 'unreadable']],
-                        'confidence' => ['type' => 'number'],
-                        'fields' => $fieldProperties !== []
-                            ? ['type' => 'object', 'properties' => $fieldProperties]
-                            : ['type' => 'object'],
-                    ],
-                ],
+                responseSchema: $many
+                    ? ['type' => 'object', 'properties' => ['documents' => ['type' => 'array', 'items' => [
+                        'type' => 'object', 'properties' => ['image' => ['type' => 'integer']] + $document,
+                    ]]]]
+                    : ['type' => 'object', 'properties' => $document],
             ));
         } catch (AiProviderException $e) {
-            Log::warning('Document classification failed', ['media_id' => $media->id, 'error' => $e->getMessage()]);
+            Log::warning('Document classification failed', ['media_ids' => array_map(fn ($m) => $m->id, $medias), 'error' => $e->getMessage()]);
 
             return null;
         }
 
         $raw = implode('', $response->textParts);
-        $parsed = json_decode($raw, true) ?? $this->salvage($raw);
+
+        if (! $many) {
+            return [json_decode($raw, true) ?? $this->salvage($raw)];
+        }
+
+        $readings = [];
+
+        foreach ((array) ((json_decode($raw, true) ?? [])['documents'] ?? []) as $entry) {
+            $index = (int) ($entry['image'] ?? 0) - 1;
+
+            if (is_array($entry) && isset($medias[$index]) && ! isset($readings[$index])) {
+                $readings[$index] = $entry;
+            }
+        }
+
+        return $readings;
+    }
+
+    /**
+     * The reading becomes the result. The one optional re-read (DOC-001):
+     * only when a field the type requires is missing, or a date contradicts
+     * the paper it is on.
+     *
+     * @return array{0: ?string, 1: string, 2: float, 3: array, 4: bool}
+     */
+    private function interpret(MessageMedia $media, string $ocrText, \Illuminate\Support\Collection $activeTypes, array $parsed): array
+    {
+        $this->readings[$media->id] = $parsed;
         $activeKeys = $activeTypes->pluck('key')->all();
         $detectedTypeKey = is_string($parsed['document_type_key'] ?? null) ? strtolower(trim($parsed['document_type_key'])) : null;
 
@@ -352,21 +474,32 @@ class DocumentPipeline
 
         $fields = $this->withoutEmptyValues(is_array($parsed['fields'] ?? null) ? $parsed['fields'] : []);
         $detectedTypeKey = $this->nationalIdSide($detectedTypeKey, $ocrText, $activeKeys);
+        $reread = (bool) ($parsed['_reread'] ?? false);
 
         if ($detectedTypeKey !== null) {
             $type = $activeTypes->firstWhere('key', $detectedTypeKey);
             // The schema is the union over every type: a salary slip came
             // back with an app_name, which is not this document's to carry.
             $fields = array_intersect_key($fields, array_flip($type->allFields()));
-            $fields = $this->fillMissingFields($media, $ocrText, $type, $fields);
+
+            // The generic read used to skip type-specific fields: a clearly
+            // printed license end date came back empty. A required field
+            // missing = one focused, typed read of this type.
+            $missing = array_diff((array) ($type->extraction_fields ?? []), array_keys($fields));
 
             // QA 2026-10-04: a letter printed "13/9/20246" was read as 2024 -
             // a year before the hire date on the same paper - and rejected as
             // expired. A date that contradicts the document is read once more.
-            if (($issued = $fields['salary_slip_date'] ?? $fields['pension_statement_date'] ?? null) && ($hired = $fields['hire_date'] ?? null)
-                && strtotime((string) $issued) && strtotime((string) $hired) && strtotime((string) $issued) < strtotime((string) $hired)) {
-                $fields = $this->fillMissingFields($media, $ocrText."\n\nNOTE: the issue date you read ({$issued}) is before the hire date ({$hired}) "
-                    .'on the same paper - that cannot be. Read the issue date again (a typo in the year is likely).', $type, $fields);
+            $issued = $fields['salary_slip_date'] ?? $fields['pension_statement_date'] ?? null;
+            $hired = $fields['hire_date'] ?? null;
+            $dateConflict = $issued && $hired && strtotime((string) $issued) && strtotime((string) $hired) && strtotime((string) $issued) < strtotime((string) $hired);
+
+            if (($missing !== [] || $dateConflict) && ! ($parsed['_reread'] ?? false)) {
+                $fields = $this->fillMissingFields($media, $ocrText.($dateConflict ? "\n\nNOTE: the issue date you read ({$issued}) is before the hire date ({$hired}) "
+                    .'on the same paper - that cannot be. Read the issue date again (a typo in the year is likely).' : ''), $type, $fields);
+                $reread = true;
+                // checked again later (ID back after the front): the re-read is not paid twice
+                $this->readings[$media->id] = ['fields' => $fields, '_reread' => true] + $parsed;
             }
 
             if ($detectedTypeKey === 'national_id_front') {
@@ -379,6 +512,7 @@ class DocumentPipeline
             $parsed['legibility'] ?? 'unreadable',
             (float) ($parsed['confidence'] ?? 0),
             $fields,
+            $reread,
         ];
     }
 
@@ -467,6 +601,7 @@ class DocumentPipeline
         try {
             $response = $this->ai->chat(new AiRequest(
                 purpose: 'document',
+                label: 'document',
                 system: "This document is: {$type->label} - {$type->description_for_ai}\n\n"
                     .'Extract these fields: '.implode(', ', $all).'. Copy every number digit by digit exactly as printed '
                     .'(check it against the OCR text), converting Arabic-Indic digits to 0-9; an amount is the one the field '
@@ -528,7 +663,12 @@ class DocumentPipeline
         $read = $parser->normalizeDigits((string) $fields['national_id']);
 
         if ($parser->parse($read)['valid']) {
-            return $fields;
+            // Simulator 2026-10-05: the back of the same card, one digit misread
+            // into another valid number, was flagged "differs" and the customer
+            // was asked whether the card is his. Two digits off = the same card.
+            $known = $this->knownNationalId($application);
+
+            return $known && $read !== $known && levenshtein($read, $known) <= 2 ? ['national_id' => $known] + $fields : $fields;
         }
 
         // per line: the parser's normalisation drops separators, and the card
@@ -543,10 +683,7 @@ class DocumentPipeline
             return ['national_id' => $valid[0]] + $fields;
         }
 
-        $known = \App\Models\ApplicationData::where('application_id', $application->id)->where('party', 'applicant')
-            ->where('field_key', 'national_id')->where('status', 'valid')->value('value')
-            ?? \App\Models\CustomerAttribute::where('customer_id', $application->customer_id)
-                ->where('field_key', 'national_id')->where('status', 'valid')->value('value');
+        $known = $this->knownNationalId($application);
 
         if ($known && $read !== '' && levenshtein($read, (string) $known) <= 2) {
             return ['national_id' => (string) $known] + $fields;
@@ -561,6 +698,16 @@ class DocumentPipeline
         }
 
         return $fields;
+    }
+
+    private function knownNationalId(Application $application): ?string
+    {
+        $known = \App\Models\ApplicationData::where('application_id', $application->id)->where('party', 'applicant')
+            ->where('field_key', 'national_id')->where('status', 'valid')->value('value')
+            ?? \App\Models\CustomerAttribute::where('customer_id', $application->customer_id)
+                ->where('field_key', 'national_id')->where('status', 'valid')->value('value');
+
+        return $known !== null ? (string) $known : null;
     }
 
     /**

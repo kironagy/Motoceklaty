@@ -6,7 +6,7 @@ use App\Domain\Handoff\HandoffService;
 use App\Models\WhatsappConversation;
 
 /** WRITE — plan §6.18. Thin: all logic lives in HandoffService. */
-class HandoffToHumanTool implements Tool
+class HandoffToHumanTool implements WriteTool
 {
     public function __construct(private readonly HandoffService $handoffService)
     {
@@ -19,13 +19,8 @@ class HandoffToHumanTool implements Tool
 
     public function description(): string
     {
-        return 'Give the conversation to staff - the bot stops answering until they reply, so it is the LAST resort. '
-            .'Use it right away only when: the customer asks for a person/support/the manager; a complaint about a '
-            .'motorcycle he bought or money; he insists on negotiating the price/discount; the snapshot shows '
-            .'IDENTITY_IN_USE_BY_ANOTHER_CUSTOMER. Otherwise handle it yourself: a question with no data on file, an '
-            .'unclear message, a rejected document or an unusual job are NOT reasons to hand off - answer what you know, '
-            .'ask a short question, or ask for the document again. You must still send_reply telling the customer a '
-            .'colleague will follow up (call_request: a colleague will call him, and you keep answering what he asked).';
+        return 'Give the conversation to staff (the bot then stops, except call_request). Only when: he asks for a person or a call, '
+            .'a complaint about a bike or money, he insists on a discount, IDENTITY_IN_USE_BY_ANOTHER_CUSTOMER, or he insists on information we do not have.';
     }
 
     public function inputSchema(): array

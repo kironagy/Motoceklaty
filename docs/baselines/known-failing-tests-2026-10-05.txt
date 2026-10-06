@@ -1,0 +1,52 @@
+Tests\Feature\Agent\AgentReadinessTest::test_passes_once_every_prerequisite_is_met
+Tests\Feature\Agent\AgentRunnerTest::test_tools_called_together_after_start_application_see_the_new_application
+Tests\Feature\Agent\AgentRunnerTest::test_trace_is_recorded_with_status_and_tokens
+Tests\Feature\Agent\ApplicationFlowTest::test_a_quote_about_the_motorcycle_is_not_a_work_statement
+Tests\Feature\Agent\ApplicationTest::test_start_application_creates_then_reuses_active_application
+Tests\Feature\Agent\ApplicationTest::test_start_application_rejects_an_out_of_stock_motorcycle
+Tests\Feature\Agent\ApplicationTest::test_start_application_rejects_when_policy_forbids_concurrency
+Tests\Feature\Agent\ApplicationTest::test_start_application_still_opens_when_months_come_without_a_system
+Tests\Feature\Agent\ContextBuilderTest::test_minimal_conversation_has_only_l0_and_l4
+Tests\Feature\Agent\ContextBuilderTest::test_the_manifest_is_recorded_on_the_turns_trace
+Tests\Feature\Agent\DataIntegrityTest::test_an_employee_who_is_not_insured_may_apply_as_self_employed
+Tests\Feature\Agent\DataIntegrityTest::test_an_insured_employee_is_not_switched_to_self_employed
+Tests\Feature\Agent\DataIntegrityTest::test_refused_work_is_named_plainly_and_no_application_is_opened
+Tests\Feature\Agent\DataIntegrityTest::test_working_in_a_workshop_is_not_owning_it
+Tests\Feature\Agent\DocumentPipelineTest::test_a_wrong_persons_id_can_be_replaced_by_the_customers_own
+Tests\Feature\Agent\InstallmentTest::test_above_the_freelancer_cap_the_work_comes_before_any_installment
+Tests\Feature\Agent\InstallmentTest::test_installment_options_quote_capped_customers_at_the_down_payment_that_fits
+Tests\Feature\Agent\InstallmentTest::test_the_offer_explains_a_financing_cap_and_reports_missing_durations
+Tests\Feature\Agent\InstallmentTest::test_the_offer_skips_systems_whose_conditions_the_customer_does_not_meet
+Tests\Feature\Agent\ReplyGuardGapsTest::test_the_financing_cap_threshold_is_said_only_when_it_applies
+Tests\Feature\Agent\RequirementServiceTest::test_tool_output_shape_for_known_type
+Tests\Feature\Agent\SalarySlipAndClosingTest::test_an_employee_missing_the_salary_slip_is_told_what_to_do_without_it
+Tests\Feature\Agent\SubmissionTest::test_after_cancelling_he_can_continue_with_everything_he_sent
+Tests\Unit\TalksAboutWorkTest::test_an_intent_alone_is_not_an_occupation with data set #0 ('عايز اقسط')
+Tests\Unit\TalksAboutWorkTest::test_an_intent_alone_is_not_an_occupation with data set #1 ('طب لا خليها تقسيط بس المقدم 30 الف')
+Tests\Unit\TalksAboutWorkTest::test_an_intent_alone_is_not_an_occupation with data set #2 ('تمام يلا')
+Tests\Unit\TalksAboutWorkTest::test_an_intent_alone_is_not_an_occupation with data set #3 ('ماشي')
+Tests\Unit\TalksAboutWorkTest::test_an_intent_alone_is_not_an_occupation with data set #4 ('عايز اقدم')
+Tests\Unit\TalksAboutWorkTest::test_an_intent_alone_is_not_an_occupation with data set #5 ('هوجن فرز تاني')
+Tests\Unit\TalksAboutWorkTest::test_an_intent_alone_is_not_an_occupation with data set #6 ('الفيجوري ال 250 على سنتين')
+Tests\Unit\TalksAboutWorkTest::test_an_intent_alone_is_not_an_occupation with data set #7 ('حبيبي')
+Tests\Unit\TalksAboutWorkTest::test_an_intent_alone_is_not_an_occupation with data set #8 ('طيب خلاص')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #0 ('انا صاحب مطعم')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #1 ('عندي كافيه')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #10 ('عندي عربية فول')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #11 ('شغال في مطعم')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #12 ('موظف في شركة')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #13 ('على المعاش')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #14 ('سواق ميكروباص')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #15 ('مدير يا فندم')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #16 ('معاه طلباط')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #17 ('انا شغال شيف')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #18 ('كوافير و ماسك ادراة الصالون')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #19 ('ممثله في مسرح')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #2 ('عندي سوبر ماركت')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #3 ('انا سباك')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #4 ('نجار')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #5 ('بشتغل نقاش')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #6 ('عندي فرن عيش')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #7 ('صاحب مكتب عقارات')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #8 ('انا مبيض محارة')
+Tests\Unit\TalksAboutWorkTest::test_recognises_a_stated_occupation with data set #9 ('بقال')

@@ -18,7 +18,7 @@ use Illuminate\Support\Facades\Log;
  */
 class AiCalls
 {
-    /** @var list<array{turn_id: ?int, conversation_id: ?int, trace_id: ?int, runner: ?string, calls: int}> */
+    /** @var list<array{turn_id: ?int, conversation_id: ?int, trace_id: ?int, runner: ?string, calls: int, ok: array<string, int>}> */
     private static array $scopes = [];
 
     public static function within(array $scope, callable $callback): mixed
@@ -29,6 +29,7 @@ class AiCalls
             'trace_id' => $scope['trace_id'] ?? null,
             'runner' => $scope['runner'] ?? null,
             'calls' => 0,
+            'ok' => [],
         ];
 
         try {
@@ -53,6 +54,43 @@ class AiCalls
         return self::$scopes === [] ? 0 : self::$scopes[array_key_last(self::$scopes)]['calls'];
     }
 
+    /** Answered model calls in the current turn, by label - failed key attempts are not calls (ARCH-004). */
+    public static function okCallsInTurn(?string $exceptLabel = null): int
+    {
+        if (self::$scopes === []) {
+            return 0;
+        }
+
+        $ok = self::$scopes[array_key_last(self::$scopes)]['ok'];
+        unset($ok[$exceptLabel ?? '']);
+
+        return array_sum($ok);
+    }
+
+    public static function okCallsOfLabel(string $label): int
+    {
+        return self::$scopes === [] ? 0 : (int) (self::$scopes[array_key_last(self::$scopes)]['ok'][$label] ?? 0);
+    }
+
+    /**
+     * OBS-002: every call the turn made, side calls included, for the trace.
+     *
+     * @return array{total: int, failed: int, by_label: array<string, int>, input_tokens: int, output_tokens: int, reasoning_tokens: int}
+     */
+    public static function summaryForTrace(int $traceId): array
+    {
+        $rows = AiCall::where('trace_id', $traceId)->get(['label', 'outcome', 'input_tokens', 'output_tokens', 'reasoning_tokens']);
+
+        return [
+            'total' => $rows->count(),
+            'failed' => $rows->where('outcome', '!=', 'ok')->count(),
+            'by_label' => $rows->countBy('label')->sortKeys()->all(),
+            'input_tokens' => (int) $rows->sum('input_tokens'),
+            'output_tokens' => (int) $rows->sum('output_tokens'),
+            'reasoning_tokens' => (int) $rows->sum('reasoning_tokens'),
+        ];
+    }
+
     /**
      * @param  array{input_tokens?: int, cached_tokens?: int, output_tokens?: int, thoughts_tokens?: int}  $usage
      */
@@ -60,8 +98,15 @@ class AiCalls
     {
         $scope = self::$scopes === [] ? null : self::$scopes[array_key_last(self::$scopes)];
 
+        $label = mb_substr($request->label ?? GeminiKeyManager::purpose() ?? 'other', 0, 30);
+
         if ($scope !== null) {
-            self::$scopes[array_key_last(self::$scopes)]['calls']++;
+            $last = array_key_last(self::$scopes);
+            self::$scopes[$last]['calls']++;
+
+            if ($outcome === 'ok') {
+                self::$scopes[$last]['ok'][$label] = (self::$scopes[$last]['ok'][$label] ?? 0) + 1;
+            }
         }
 
         try {
@@ -70,11 +115,12 @@ class AiCalls
                 'turn_id' => $scope['turn_id'] ?? null,
                 'conversation_id' => $scope['conversation_id'] ?? null,
                 'runner' => $scope['runner'] ?? null,
-                'label' => mb_substr($request->label ?? GeminiKeyManager::purpose() ?? 'other', 0, 30),
+                'label' => $label,
                 'purpose' => GeminiKeyManager::purpose(),
                 'provider' => $provider,
                 'model' => mb_substr($model, 0, 80),
                 'attempt' => min(255, max(1, $attempt)),
+                'prompt_chars' => self::promptChars($request),
                 'input_tokens' => (int) ($usage['input_tokens'] ?? 0),
                 'cached_tokens' => (int) ($usage['cached_tokens'] ?? 0),
                 'output_tokens' => (int) ($usage['output_tokens'] ?? 0),
@@ -86,6 +132,29 @@ class AiCalls
         } catch (\Throwable $e) {
             Log::warning('ai_calls row failed', ['error' => $e->getMessage()]);
         }
+    }
+
+    /** Text characters of the request; null when it carries media (images cost tokens no character count explains). */
+    public static function promptChars(AiRequest $request): ?int
+    {
+        $chars = mb_strlen((string) $request->system);
+
+        foreach ($request->contents as $turn) {
+            foreach ($turn['parts'] ?? [] as $part) {
+                if (($part['type'] ?? null) === 'inline_media') {
+                    return null;
+                }
+
+                $chars += match ($part['type'] ?? null) {
+                    'text' => mb_strlen((string) ($part['text'] ?? '')),
+                    'tool_call' => mb_strlen((string) json_encode($part['args'] ?? [], JSON_UNESCAPED_UNICODE)),
+                    'tool_result' => mb_strlen((string) json_encode($part['result'] ?? null, JSON_UNESCAPED_UNICODE)),
+                    default => 0,
+                };
+            }
+        }
+
+        return $chars + ($request->tools === [] ? 0 : mb_strlen((string) json_encode($request->tools, JSON_UNESCAPED_UNICODE)));
     }
 
     /**
@@ -122,7 +191,7 @@ class AiCalls
     public static function mask(mixed $value): mixed
     {
         if (is_array($value)) {
-            return array_map(fn ($item) => self::mask($item), Redactor::redact($value));
+            return Redactor::redact(array_map(fn ($item) => self::mask($item), $value));
         }
 
         if (! is_string($value)) {

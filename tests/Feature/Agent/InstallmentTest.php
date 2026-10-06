@@ -3,7 +3,6 @@
 namespace Tests\Feature\Agent;
 
 use App\Agent\Runtime\TurnResultBuilder;
-use App\Agent\Tools\CalculateInstallmentTool;
 use App\Agent\Tools\CheckEligibilityTool;
 use App\Agent\Tools\GetInstallmentOptionsTool;
 use App\Agent\Tools\ToolContext;
@@ -189,73 +188,6 @@ class InstallmentTest extends TestCase
         $this->assertSame('NO_INSTALLMENT_SYSTEMS', $result->error['code']);
     }
 
-    public function test_calculate_installment_tool_happy_path(): void
-    {
-        $system = $this->standardSystem();
-        $machine = $this->machine(['installment_systems' => [$system->id]]);
-        $plan = InstallmentPlan::where('installment_system_id', $system->id)->where('months', 12)->first();
-
-        $result = app(CalculateInstallmentTool::class)->execute([
-            'motorcycle_id' => $machine->id,
-            'plan_id' => $plan->id,
-            'down_payment' => 5000,
-        ], $this->ctx());
-
-        $this->assertTrue($result->ok);
-        $this->assertSame(12, $result->data['months']);
-        $this->assertSame(50000.0, $result->data['financed_amount']); // 55000 - 5000
-        $this->assertSame(60000.0, $result->data['total_payable']); // 50000 * 1.20
-        $this->assertSame(5000.0, $result->data['monthly_payment']); // 60000 / 12
-    }
-
-    public function test_a_guessed_plan_id_contradicting_the_named_plan_fails_clearly(): void
-    {
-        $aman = $this->standardSystem();
-        $zero = $this->zeroFeesSystem();
-        $machine = $this->machine(['installment_systems' => [$aman->id, $zero->id]]);
-        $guessed = InstallmentPlan::where('installment_system_id', $zero->id)->first();
-
-        $conflicting = app(CalculateInstallmentTool::class)->execute([
-            'motorcycle_id' => $machine->id, 'plan_id' => $guessed->id,
-            'installment_system' => 'امان', 'months' => 24, 'down_payment' => 5000,
-        ], $this->ctx());
-        $this->assertSame('CONFLICTING_PLAN_ARGUMENTS', $conflicting->error['code']);
-
-        $named = app(CalculateInstallmentTool::class)->execute([
-            'motorcycle_id' => $machine->id, 'installment_system' => 'امان', 'months' => 24, 'down_payment' => 5000,
-        ], $this->ctx());
-        $this->assertTrue($named->ok);
-        $this->assertSame('أمان', $named->data['installment_system']);
-        $this->assertSame(24, $named->data['months']);
-    }
-
-    public function test_months_without_a_system_is_rejected_not_silently_dropped(): void
-    {
-        $aman = $this->standardSystem();
-        $machine = $this->machine(['installment_systems' => [$aman->id]]);
-
-        $result = app(CalculateInstallmentTool::class)->execute([
-            'motorcycle_id' => $machine->id, 'months' => 12, 'down_payment' => 30000,
-        ], $this->ctx());
-
-        $this->assertSame('SYSTEM_REQUIRED', $result->error['code']);
-    }
-
-    public function test_calculate_installment_rejects_a_plan_not_linked_to_the_motorcycle(): void
-    {
-        $unlinkedSystem = $this->standardSystem();
-        $machine = $this->machine(); // no systems linked at all
-        $plan = InstallmentPlan::where('installment_system_id', $unlinkedSystem->id)->first();
-
-        $result = app(CalculateInstallmentTool::class)->execute([
-            'motorcycle_id' => $machine->id,
-            'plan_id' => $plan->id,
-        ], $this->ctx());
-
-        $this->assertFalse($result->ok);
-        $this->assertSame('PLAN_NOT_AVAILABLE_FOR_MOTORCYCLE', $result->error['code']);
-    }
-
     public function test_check_eligibility_reports_financing_cap_exceeded(): void
     {
         $type = CustomerType::create(['key' => 'self_employed', 'label' => 'Self employed']);
@@ -302,54 +234,19 @@ class InstallmentTest extends TestCase
         return $type;
     }
 
-    public function test_calculate_installment_moves_the_amount_over_the_cap_to_the_down_payment(): void
-    {
-        // Owner's example: a 66,000 motorcycle, 60,000 cap -> 6,000 difference + admin fees in cash.
-        $this->selfEmployedCappedAt(60000);
-        $system = $this->standardSystem();
-        $machine = $this->machine(['installment_systems' => [$system->id], 'cash_price' => 62000, 'installment_price' => 66000]);
-
-        $result = app(CalculateInstallmentTool::class)->execute([
-            'motorcycle_id' => $machine->id, 'installment_system' => 'امان', 'months' => 12, 'customer_type' => 'self_employed',
-        ], $this->ctx());
-
-        $this->assertTrue($result->ok);
-        $this->assertSame(6000.0, $result->data['down_payment']);
-        $this->assertSame(60000.0, $result->data['financed_amount']);
-        $this->assertSame(4200.0, $result->data['admin_fee']); // 7% of 60,000
-        $this->assertSame(10200.0, $result->data['cash_due_upfront']);
-        $this->assertSame([], $result->data['warnings']);
-        $this->assertSame(60000.0, $result->data['financing_cap']['max_financed_amount']);
-        $this->assertStringContainsString('60,000', $result->data['financing_cap']['explain_to_customer']);
-        $this->assertStringContainsString('عامل حر', $result->data['financing_cap']['explain_to_customer']);
-    }
-
-    public function test_calculate_installment_keeps_a_down_payment_already_above_the_cap_minimum(): void
-    {
-        $this->selfEmployedCappedAt(60000);
-        $system = $this->standardSystem();
-        $machine = $this->machine(['installment_systems' => [$system->id], 'cash_price' => 62000, 'installment_price' => 66000]);
-
-        $result = app(CalculateInstallmentTool::class)->execute([
-            'motorcycle_id' => $machine->id, 'installment_system' => 'امان', 'months' => 12,
-            'down_payment' => 20000, 'customer_type' => 'self_employed',
-        ], $this->ctx());
-
-        $this->assertSame(20000.0, $result->data['down_payment']);
-        $this->assertArrayNotHasKey('financing_cap', $result->data);
-    }
-
     public function test_installment_options_quote_capped_customers_at_the_down_payment_that_fits(): void
     {
         $this->selfEmployedCappedAt(60000);
         $system = $this->standardSystem();
         $machine = $this->machine(['installment_systems' => [$system->id], 'cash_price' => 62000, 'installment_price' => 66000]);
 
+        $ctx = $this->ctx();
+        $this->worksAs($ctx, 'self_employed');
         $result = app(GetInstallmentOptionsTool::class)->execute([
             'motorcycle_id' => $machine->id, 'customer_type' => 'self_employed',
-        ], $this->ctx());
+        ], $ctx);
 
-        $this->assertTrue($result->ok);
+        $this->assertTrue($result->ok, json_encode($result->error ?? null));
         $aman = $result->data['systems'][0];
         $this->assertSame(6000.0, $aman['minimum_down_payment']);
         $twelve = collect($aman['plans'])->firstWhere('months', 12);
@@ -372,7 +269,23 @@ class InstallmentTest extends TestCase
     }
     private function offerTool(array $args): \App\Agent\Tools\ToolResult
     {
-        return app(\App\Agent\Tools\GetInstallmentOfferTool::class)->execute($args, $this->ctx());
+        $ctx = $this->ctx();
+
+        if (isset($args['customer_type'])) {
+            $this->worksAs($ctx, $args['customer_type']);
+        }
+
+        return app(\App\Agent\Tools\GetInstallmentOfferTool::class)->execute($args, $ctx);
+    }
+
+    /** Rebuild: a type is priced only when his recorded work (record_work_profile) supports it. */
+    private function worksAs(ToolContext $ctx, string $type): void
+    {
+        $words = ['self_employed' => 'شغال حر', 'pension' => 'انا على المعاش', 'employee' => 'انا موظف متأمن عليا'][$type] ?? 'شغال';
+        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $ctx->conversationId, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => $words]);
+        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => $words, 'occupation' => $words, 'work_stated' => true, 'customer_type' => $type,
+            'working_now' => 'yes', 'relation_to_workplace' => $type === 'employee' ? 'works_for_someone' : 'independent',
+            'insured' => $type === 'employee' ? 'yes' : 'unknown'] + ($type === 'self_employed' ? ['work_type' => 'other'] : []), $ctx);
     }
 
     public function test_the_offer_picks_the_cheapest_system_per_duration_without_listing_systems(): void
@@ -414,7 +327,8 @@ class InstallmentTest extends TestCase
         $this->assertTrue($result->ok);
         $this->assertArrayNotHasKey('offers', $result->data);
         $this->assertSame(['سنة', 'سنة ونص', 'سنتين', '٣ سنين'], $result->data['durations']);
-        $this->assertStringContainsString('which duration', $result->data['how_to_present']);
+        // how to ask is the instructions' job (§5); the tool returns facts only
+        $this->assertArrayNotHasKey('how_to_present', $result->data);
     }
 
     /** Several durations with their numbers only when he asks for more than one. */
@@ -427,7 +341,7 @@ class InstallmentTest extends TestCase
 
         $all = $this->offerTool(['motorcycle_id' => $machine->id, 'all_durations' => true]);
         $this->assertSame([12, 18, 24, 36], array_column($all->data['offers'], 'months'));
-        $this->assertStringContainsString('سنتين', $all->data['offers'][2]['say']);
+        $this->assertStringContainsString('سنتين', $all->data['offers'][2]['line']);
     }
 
     public function test_the_admin_fee_is_never_added_to_the_total(): void
@@ -453,10 +367,10 @@ class InstallmentTest extends TestCase
 
         // 55000 * 7% = 3850 fees, (55000 * 1.2) / 12 = 5500 a month
         $this->assertEquals(3850, $offer['admin_fee_at_pickup']);
-        $this->assertStringNotContainsString('مقدم', $offer['say']);
-        $this->assertStringContainsString('مصاريف إدارية 3,850', $offer['say']);
-        $this->assertStringContainsString('5,500', $offer['say']);
-        $this->assertStringNotContainsString('مقدم 3,850', $offer['say']);
+        $this->assertStringNotContainsString('مقدم', $offer['line']);
+        $this->assertStringContainsString('مصاريف إدارية 3,850', $offer['line']);
+        $this->assertStringContainsString('5,500', $offer['line']);
+        $this->assertStringNotContainsString('مقدم 3,850', $offer['line']);
     }
 
     public function test_the_first_installment_date_is_part_of_the_offer(): void
@@ -486,7 +400,7 @@ class InstallmentTest extends TestCase
         $this->assertEquals(0, $insists->data['offers'][0]['cash_due_upfront']);
         // 55000 * 1.3 / 12
         $this->assertEquals(5958, $insists->data['offers'][0]['monthly_payment']);
-        $this->assertStringContainsString('مفيش أي مبلغ بيتدفع وقت الاستلام', $insists->data['offers'][0]['say']);
+        $this->assertStringContainsString('مفيش أي مبلغ بيتدفع وقت الاستلام', $insists->data['offers'][0]['line']);
     }
 
     public function test_no_upfront_with_no_such_system_says_so(): void
@@ -541,7 +455,9 @@ class InstallmentTest extends TestCase
 
         $result = $this->offerTool(['motorcycle_id' => $machine->id, 'months' => 12, 'customer_type' => 'self_employed']);
         $this->assertEquals(10200, $result->data['offers'][0]['cash_due_upfront']);
-        $this->assertStringContainsString('60,000', $result->data['explain_to_customer']);
+        // the owner: the cap and its number are never told - only that part is paid up front
+        $this->assertStringContainsString('بيتدفع كاش وقت الاستلام', $result->data['cap_reason']);
+        $this->assertStringNotContainsString('60,000', $result->data['cap_reason']);
 
         $missing = $this->offerTool(['motorcycle_id' => $machine->id, 'months' => 18, 'customer_type' => 'self_employed']);
         $this->assertSame('DURATION_NOT_AVAILABLE', $missing->error['code']);
