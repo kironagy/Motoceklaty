@@ -120,8 +120,35 @@ class SearchMotorcyclesTool implements ReadTool
 
         if ($sameName->isNotEmpty()) {
             $result['ambiguous_names'] = $sameName->map(fn ($group) => $group->map(fn ($i) => "{$i['brand']} (id {$i['id']})")->values())->values()->all();
+        } elseif (($versions = $this->versionsOf($args, $result['items'])) !== null) {
+            $result['versions'] = $versions;
         }
 
         return ToolResult::ok($result);
+    }
+
+    /**
+     * Owner 2026-10-06: "هوجن 3" comes as more than one version (استراد 75٪,
+     * استراد بالكامل, فرز أول/تاني); the bot quoted one of them as if it were
+     * the only one. A model he named (not a bare brand) that matched several
+     * models of one brand = every version with its cash price.
+     *
+     * @return list<array{id: int, name: string, cash_price: mixed}>|null
+     */
+    private function versionsOf(array $args, array $items): ?array
+    {
+        $query = trim((string) ($args['name_query'] ?? ''));
+
+        if ($query === '' || count($items) < 2 || count($items) > 6
+            || \App\Domain\Conversations\MentionedMotorcycle::brandIdsFor($query) !== []
+            || collect($items)->pluck('brand')->unique()->count() !== 1) {
+            return null;
+        }
+
+        return array_map(fn ($i) => [
+            'id' => $i['id'],
+            'name' => $i['name'],
+            'cash_price' => $i['is_offer'] && $i['offer_price'] ? $i['offer_price'] : $i['cash_price'],
+        ], array_values($items));
     }
 }

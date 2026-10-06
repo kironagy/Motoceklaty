@@ -111,6 +111,9 @@ class AgentRunner
         $outcomes = [];
         $started = microtime(true);
         $lastResponse = null;
+        /** @var array<string, int> $callsSeen tool+args => times called this turn */
+        $callsSeen = [];
+        $replyNow = false;
 
         // QA 2026-10-04 (one question = one call): photos sent to an open
         // application are read before the first call; the model answers
@@ -135,7 +138,9 @@ class AgentRunner
                     return $this->unverifiedReply($conversation, $trace, $guardEvents, 'LIMIT_REACHED_WITHOUT_REPLY');
                 }
 
-                $response = $this->callModel($request->system, $contents, $toolDeclarations, forceSendReply: $limitReached);
+                // a step that only repeated a lookup is answered from what it has
+                $response = $this->callModel($request->system, $contents, $toolDeclarations, forceSendReply: $limitReached || $replyNow);
+                $replyNow = false;
                 $lastResponse = $response;
                 $this->addUsage($response);
                 $modelCalls++;
@@ -152,6 +157,13 @@ class AgentRunner
 
                 foreach ($toolCalls as $toolCall) {
                     $toolCallCount++;
+
+                    // Owner 2026-10-06 (no loops): the same lookup again, or a
+                    // third call of one tool, adds nothing - the next step replies.
+                    if ($toolCall['name'] !== 'send_reply' && $this->isLoopingCall($toolCall, $callsSeen)) {
+                        $replyNow = true;
+                        $guardEvents[] = ['code' => 'LOOP_BROKEN', 'args' => ['tool' => $toolCall['name']]];
+                    }
 
                     if ($toolCall['name'] === 'send_reply') {
                         // Only technical cleanup (emoji, markdown, dashes) - never his words changed.
@@ -333,6 +345,27 @@ class AgentRunner
         $byName = array_column($all, null, 'name');
 
         return array_merge($stable, array_values(array_filter(array_map(fn ($name) => $byName[$name] ?? null, $tail))));
+    }
+
+    /**
+     * The same tool with the same arguments again this turn, or a lookup
+     * (not a write) called for the third time: the model is going round
+     * instead of answering.
+     *
+     * @param  array<string, int>  $callsSeen
+     */
+    private function isLoopingCall(array $toolCall, array &$callsSeen): bool
+    {
+        $args = (array) ($toolCall['args'] ?? []);
+        ksort($args);
+        $key = $toolCall['name'].':'.json_encode($args, JSON_UNESCAPED_UNICODE);
+        $byName = 'name:'.$toolCall['name'];
+
+        $repeated = isset($callsSeen[$key]);
+        $callsSeen[$key] = ($callsSeen[$key] ?? 0) + 1;
+        $callsSeen[$byName] = ($callsSeen[$byName] ?? 0) + 1;
+
+        return $repeated || (! in_array($toolCall['name'], ReplyGuard::WRITE_TOOLS, true) && $callsSeen[$byName] >= 3);
     }
 
     /**
@@ -578,8 +611,26 @@ class AgentRunner
         return ['messages' => [$waiting]];
     }
 
-    /** A reply that claims nothing: the next thing his application needs, or a question. */
+    /**
+     * Owner 2026-10-06: the same canned line twice in a row is what makes him
+     * feel he is talking to a machine - the one he got last is skipped.
+     */
     private function keepGoingReply(WhatsappConversation $conversation): string
+    {
+        $last = trim((string) WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')->where('sender_type', 'bot')->latest('id')->value('text'));
+
+        foreach ($this->keepGoingLines($conversation) as $line) {
+            if ($line !== $last) {
+                return $line;
+            }
+        }
+
+        return 'قولّي تحب نكمّل في إيه؟';
+    }
+
+    /** @return string[] replies that claim nothing: the next thing his application needs, or a question */
+    private function keepGoingLines(WhatsappConversation $conversation): array
     {
         $application = $conversation->customer_id
             ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->latest('id')->first()
@@ -594,24 +645,24 @@ class AgentRunner
         // Simulator 2026-10-05: a 64-year-old already told installments are not
         // possible got "نكمّل طلبك؟" from this line.
         if (($step['type'] ?? null) === 'not_eligible') {
-            return 'معاك. لو حابب تشتري كاش من الفرع أو حد تاني شغال يقدّم باسمه قولّي.';
+            return ['معاك. لو حابب تشتري كاش من الفرع أو حد تاني شغال يقدّم باسمه قولّي.', 'الكاش متاح في الفرع في أي وقت، ولو حد تاني شغال يحب يقدّم باسمه قولّي.'];
         }
 
         if (in_array($step['type'] ?? null, ['field', 'document'], true) && filled($step['label'] ?? null)) {
-            return "تمام، ابعتلي {$step['label']}";
+            return ["تمام، ابعتلي {$step['label']}", "فاضل {$step['label']} ونكمّل."];
         }
 
         // Conversation 857: "خلاص خلينا في الهوجن L250 على سنتين" with
         // everything in got "ممكن توضحلي تقصد إيه؟" - he was perfectly clear.
         if (($step['type'] ?? null) === 'submit') {
-            return 'كده طلبك جاهز. أقدّمهولك دلوقتي؟';
+            return ['كده طلبك جاهز. أقدّمهولك دلوقتي؟', 'كله تمام، أقدّم الطلب؟'];
         }
 
         if ($application) {
-            return 'معاك. نكمّل طلبك؟';
+            return ['معاك. نكمّل طلبك؟', 'تمام، نكمّل في الطلب؟'];
         }
 
-        return 'معلش، مش متأكد إني فهمتك صح. تقصد إيه بالظبط؟';
+        return ['معلش وضّحلي قصدك أكتر؟', 'ممكن تقولّي تاني إنت محتاج إيه بالظبط؟'];
     }
 
     /** @return array{messages: string[]} */

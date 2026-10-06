@@ -90,8 +90,9 @@ class AgentRunnerTest extends TestCase
         };
 
         $this->assertSame(['مساء النور، نورتنا. بتدور على موتوسيكل ولا سكوتر؟'], $greet('مساء الخير'));
-        $this->assertSame(['وعليكم السلام ورحمة الله وبركاته، نورتنا. قولّي أقدر أساعدك في إيه؟'], $greet('السلام عليكم ورحمة الله وبركاته 🌹'));
-        $this->assertSame(['وعليكم السلام ورحمة الله وبركاته، نورتنا. قولّي أقدر أساعدك في إيه؟'], $greet('السلام عليكم مساء الخير'));
+        $this->assertSame(['وعليكم السلام ورحمة الله وبركاته. قولّي محتاج إيه؟'], $greet('السلام عليكم ورحمة الله وبركاته 🌹'));
+        // owner 2026-10-06: never the same line twice in a row
+        $this->assertSame(['وعليكم السلام ورحمة الله وبركاته، معاك.'], $greet('السلام عليكم مساء الخير'));
         $this->assertCount(0, $fake->requests());
     }
 
@@ -299,7 +300,7 @@ class AgentRunnerTest extends TestCase
 
         $result = app(AgentRunner::class)->run($this->turnFor($conversation));
 
-        $this->assertSame(['معلش، مش متأكد إني فهمتك صح. تقصد إيه بالظبط؟'], $result['messages']);
+        $this->assertSame(['معلش وضّحلي قصدك أكتر؟'], $result['messages']);
         $this->assertNotSame('awaiting_agent', $conversation->fresh()->status);
         $this->assertSame(0, Handoff::where('conversation_id', $conversation->id)->count());
     }

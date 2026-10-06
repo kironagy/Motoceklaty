@@ -635,7 +635,32 @@ class ContextBuilder
             $tokens += TokenEstimator::estimate($recorded);
         }
 
+        // Owner 2026-10-06: "بكام الهوجن 3 وبتقسطوا على كام سنة وفين الفرع؟"
+        // got the price only - the rest of his message was dropped.
+        if ($contents !== [] && $this->asksSeveralThings($messages)) {
+            $note = '[ملاحظة داخلية، ما تتقالش له: رسالته فيها أكتر من سؤال أو طلب - جاوبهم كلهم في نفس الرد بالترتيب، كل واحد في سطر قصير، ونادي كل الأدوات اللي محتاجها في نفس الخطوة]';
+            $contents[count($contents) - 1]['parts'][] = ['type' => 'text', 'text' => $note];
+            $tokens += TokenEstimator::estimate($note);
+        }
+
         return ['contents' => $contents, 'tokens' => $tokens];
+    }
+
+    private const QUESTION_WORDS = '(?:بكام|بكم|كام|فين|امتى|إمتى|ازاي|إزاي|ايه|إيه|اية|هل|ينفع|ممكن|عندكم|عندك|في\s+تقسيط|المطلوب|محتاج)';
+
+    /** Two or more questions/asks in this turn's text: several messages, "؟" twice, or "و" + a second question word. */
+    private function asksSeveralThings(\Illuminate\Support\Collection $messages): bool
+    {
+        $text = $messages->map(fn ($m) => trim((string) ($m->text ?? $m->transcript)))->filter()->implode("\n");
+
+        if ($text === '') {
+            return false;
+        }
+
+        $pieces = preg_split('/[؟?\n]+|\s+و\s*(?='.self::QUESTION_WORDS.'(?:\s|$))/u', $text, -1, PREG_SPLIT_NO_EMPTY);
+        $questions = array_filter($pieces, fn ($p) => preg_match('/(?:^|\s)'.self::QUESTION_WORDS.'(?:\s|$)/u', trim($p)));
+
+        return count($questions) >= 2;
     }
 
     /**

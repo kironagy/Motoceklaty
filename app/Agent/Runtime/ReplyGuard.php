@@ -1062,7 +1062,7 @@ class ReplyGuard
             'son' => 'ابنك', 'daughter' => 'بنتك', 'spouse' => 'مراتك|جوزك|زوجتك', 'friend' => 'صاحبك', 'relative' => 'قريبك',
         ] as $relation => $words) {
             // "حد تاني من أهلك أو صاحبك" offers options - it names nobody
-            if (preg_match('/(?<!(?:أو|او|ولا|زي|مثلا)\s)(?<!\p{L})(?:'.$words.')(?!\p{L})(?!\s+(?:أو|او|ولا)\s)/u', $replyText)) {
+            if (preg_match('/(?<!أو\s|او\s|ولا\s|زي\s|مثلا\s)(?<!\p{L})(?:'.$words.')(?!\p{L})(?!\s+(?:أو|او|ولا)\s)/u', $replyText)) {
                 $named[] = $relation;
             }
         }

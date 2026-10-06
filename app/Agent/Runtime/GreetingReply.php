@@ -49,7 +49,15 @@ class GreetingReply
         $first = array_key_first(array_intersect_key(self::GREETINGS, $matched));
         // no "يا باشا": the model copies its earlier replies, and every
         // reply opening with it is what made it sound like a bot (conversation 206)
-        return self::GREETINGS[$first][1].'، نورتنا. '.$this->question($conversation);
+        // Owner 2026-10-06: "نورتنا" is for someone new; the same line twice
+        // in a row is what a machine sends.
+        $talkedBefore = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')->exists();
+        $reply = self::GREETINGS[$first][1].($talkedBefore ? '. ' : '، نورتنا. ').$this->question($conversation, $talkedBefore);
+        $last = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')->where('sender_type', 'bot')->latest('id')->value('text');
+
+        return trim((string) $last) === $reply ? self::GREETINGS[$first][1].'، معاك.' : $reply;
     }
 
     /** "السلام عليكم ، مساء الخير 🌹" -> ['السلام عليكم', 'مساء الخير']; null when there is nothing to read. */
@@ -89,7 +97,7 @@ class GreetingReply
     }
 
     /** A new customer is asked what he is after; one we talked to before is invited to carry on. */
-    private function question(WhatsappConversation $conversation): string
+    private function question(WhatsappConversation $conversation, bool $talkedBefore): string
     {
         $hasApplication = $conversation->customer_id
             && Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->exists();
@@ -98,9 +106,6 @@ class GreetingReply
             return 'نكمّل في طلبك؟';
         }
 
-        $talkedBefore = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
-            ->where('direction', 'outgoing')->exists();
-
-        return $talkedBefore ? 'قولّي أقدر أساعدك في إيه؟' : 'بتدور على موتوسيكل ولا سكوتر؟';
+        return $talkedBefore ? 'قولّي محتاج إيه؟' : 'بتدور على موتوسيكل ولا سكوتر؟';
     }
 }
