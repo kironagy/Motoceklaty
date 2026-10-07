@@ -165,7 +165,7 @@ class OwnerReportFixesTest extends TestCase
 
         $this->assertSame('REAPPLY_OFFERED_AFTER_SUBMIT', $this->check('تحب أقدملك تاني؟', $conversation));
         $this->assertSame('REAPPLY_OFFERED_AFTER_SUBMIT', $this->check('تمام يا باشا، نبدأ إجراءات الطلب؟', $conversation));
-        $this->assertNull($this->check('أول قسط بيبدأ بعد شهر ونص من الاستلام.', $conversation));
+        $this->assertNull($this->check('تمام يا باشا، أي سؤال عن طلبك أنا معاك.', $conversation));
 
         // he asked for a second application himself
         $this->says($conversation, 'عايز اقدم طلب تاني لأخويا');
@@ -265,5 +265,21 @@ class OwnerReportFixesTest extends TestCase
         $read = [['name' => 'process_document', 'ok' => true, 'data' => ['results' => [['accepted' => true]]]]];
 
         $this->assertSame('DATA_CLAIMED_NOT_SAVED', app(ReplyGuard::class)->check(['messages' => ['تمام يا يوسف، رقم تليفونك اتسجل.']], $conversation, '', [], $read));
+    }
+
+    // ---- server comparison 2026-10-07
+
+    public function test_the_first_installment_timing_is_the_configured_number(): void
+    {
+        $conversation = $this->conversation();
+        config(['agent.installments.first_payment_after_days' => 30]);
+
+        $this->assertSame('FIRST_PAYMENT_NOT_SOURCED', $this->check('ميعاد أول قسط بيكون بعد شهر من تاريخ الاستلام.', $conversation));
+        $this->assertNotSame('FIRST_PAYMENT_NOT_SOURCED', $this->check('أول قسط بيبدأ بعد 30 يوم من الاستلام.', $conversation));
+    }
+
+    public function test_praise_like_very_suitable_and_practical_is_refused(): void
+    {
+        $this->assertSame('UNSOURCED_SALES_CLAIM', $this->check('الدايو 2 مناسبة جدا وعملية للمشاوير.', $this->conversation()));
     }
 }

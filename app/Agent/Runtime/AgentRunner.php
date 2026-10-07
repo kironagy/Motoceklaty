@@ -362,6 +362,7 @@ class AgentRunner
         'ACCEPTED_DOCUMENT_ASKED_AGAIN' => 'It asks for a paper that is already accepted.',
         'BUSINESS_NAME_UNCONFIRMED' => 'Ask him about the business name on his tax card.',
         'DATA_GIVEN_NOT_RECORDED' => 'He gave data in this message that is not recorded yet.',
+        'FIRST_PAYMENT_NOT_SOURCED' => 'The first installment\'s timing is a setting, not a guess.',
         'SUBMIT_NOT_CALLED' => 'Nothing is missing on his application: call submit_application now (it sends it); do not ask him to confirm or summarise it yourself.',
         'UNLISTED_DOCUMENT' => 'It asks for a paper no requirement list holds.',
         'DOCUMENTS_ASKED_WITHOUT_APPLICATION' => 'It asks him to send his papers but no application is open. He wants to apply: call start_application first (it asks what it still needs), then reply.',

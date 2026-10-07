@@ -169,15 +169,14 @@ class GeminiProvider implements AiProvider
                 // tries, so the turn retries soon with the whole pool intact.
                 if ($status === 429 && ! preg_match('/quota_?metric|QuotaFailure|quotaId|PerDay|per day|free_tier/i', $body)) {
                     $manager->markRateLimited(model: $modelRow, error: $body, dailyLimit: false, cooldownSeconds: 10);
-                    $transientFailures++;
 
                     Log::warning('Gemini capacity 429, trying next key', ['key_id' => $modelRow->gemini_api_key_id, 'model' => $modelRow->model_code]);
 
-                    if ($transientFailures <= $maxTransientFailovers) {
-                        continue;
-                    }
-
-                    throw new AiProviderException('Gemini is temporarily out of capacity.', retryable: true);
+                    // Server comparison 2026-10-07: api1..api9 share one Google project - all nine answered 429
+                    // while the keys of other accounts sat unused, and the customer got nothing after two tries.
+                    // A capacity 429 costs a fraction of a second: every other key is tried (the call's deadline
+                    // still bounds it), and only then the next model.
+                    continue;
                 }
 
                 if ($status === 429 || $this->isQuotaError($body)) {

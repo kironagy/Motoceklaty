@@ -317,8 +317,14 @@ class ReplyGuard
         // Real customers 2026-10-07: "الأكثر مبيعًا" and "معروفة إنها اقتصادية في البنزين" about bikes - nothing
         // in the system records sales, fuel economy or parts availability, so it is a made-up pitch.
         if (($claim = $this->unsourcedSalesClaim($replyText, $toolResultsBlob)) !== null) {
+            // server comparison 2026-10-07: "ايه الفرق؟" was answered by nothing once the pitch was cut - the real
+            // features the lookup returned are handed back, so the answer can be built from them
+            $features = collect($outcomes)->where('name', 'get_motorcycle_details')
+                ->flatMap(fn ($o) => [json_encode(array_intersect_key((array) ($o['data'] ?? []), array_flip(['name', 'features', 'specifications', 'cash_price', 'motorcycle', 'motorcycles'])), JSON_UNESCAPED_UNICODE)])
+                ->implode(' ');
             $this->detail = 'Nothing records "'.$claim.'" - say only what a tool returned about the motorcycle (price, specs, availability) and leave the pitch out. '
-                .'Asked the difference between two? get_motorcycle_details for both and name only the specs that differ; if none do, the difference is the version (استيراد / فرز تاني / الأصلي) and the price.';
+                .'Asked the difference between two? get_motorcycle_details for both and name only the specs that differ; if none do, the difference is the version (استيراد / فرز تاني / الأصلي) and the price.'
+                .($features !== '' ? ' What the lookup returned (say the difference from this): '.mb_substr($features, 0, 1500) : '');
 
             return 'UNSOURCED_SALES_CLAIM';
         }
@@ -398,6 +404,16 @@ class ReplyGuard
             $this->detail = '"'.$paper[0][0].'" is on no list. The papers are only what get_application_requirements / the application return.';
 
             return 'UNLISTED_DOCUMENT';
+        }
+
+        // Server comparison 2026-10-07: "ميعاد أول قسط بيكون بعد شهر" - from the model's head (45 days here,
+        // 30 on the server). When the first installment's timing is told, it is the configured number.
+        if (preg_match('/(?:أول|اول)\s+(?:قسط|دفع[ةه])[^.؟?\n]{0,40}(?:يوم|أيام|ايام|شهر|اسبوع|أسبوع)/u', $replyText)
+            && ! str_contains(strtr($replyText, ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9']),
+                (string) (int) config('agent.installments.first_payment_after_days', 45))) {
+            $this->detail = 'Say it exactly: "'.\App\Agent\Tools\GetInstallmentOfferTool::firstPaymentLine().'".';
+
+            return 'FIRST_PAYMENT_NOT_SOURCED';
         }
 
         // Owner 2026-10-07: "حضرتك تفضل أي مدة؟ يمكنك..." - parts of replies came out in فصحى.
@@ -891,7 +907,9 @@ class ReplyGuard
             // real-customer run 2026-10-07: "الفرق في جودة الخامات والتقفيل... مكونات أعلى في الاعتمادية والتحمل"
             .'|جود[ةه]\s+(?:ال)?(?:خامات|تقفيل|تصنيع|صناع[ةه])|(?:ال)?خامات|(?:ال)?تقفيل[ةه]?|(?:ال)?اعتمادي[ةه]|مكونات\s+(?:أعلى|اعلى|أحسن|احسن|أقوى|اقوى)'
             .'|(?:خيار|اختيار)\s+(?:ممتاز|مثالي|هايل|رائع|كويس\s+جدا)|(?:أقوى|اقوى|أمتن|امتن|أجمد|اجمد|أتقل|اتقل)\s+(?:من|في)|(?:ال)?شغل\s+(?:ال)?شاق'
-            .'|(?:مناسب[ةه]?|أنسب|انسب)\s+(?:أكتر\s+)?(?:لل|ل)(?:مشاوير|شغل|استخدام)/u';
+            .'|(?:مناسب[ةه]?|أنسب|انسب)\s+(?:أكتر\s+)?(?:لل|ل)(?:مشاوير|شغل|استخدام)'
+            // server comparison 2026-10-07: "مناسبة جدا وعملية"
+            .'|(?:مناسب[ةه]?|عملي[ةه]?|ممتاز[ةه]?)\s+(?:جدا|جدًا|جداً|أوي|اوي)|(?:و|،\s*)(?:عملي[ةه]|اقتصادي[ةه]|مريح[ةه])(?![\p{L}])/u';
 
         if (! preg_match($claims, $replyText, $m)) {
             return null;
