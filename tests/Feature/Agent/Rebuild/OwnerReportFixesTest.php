@@ -337,4 +337,19 @@ class OwnerReportFixesTest extends TestCase
     {
         $this->assertSame('UNSOURCED_SALES_CLAIM', $this->check('تمام، اختيار موفق. تحب أحسبلك القسط؟', $this->conversation()));
     }
+
+    public function test_a_shared_name_in_his_words_is_asked_about_even_without_a_search(): void
+    {
+        $conversation = $this->conversation();
+        $hogan = Brand::create(['name' => 'هوجان', 'image' => 'x.png']);
+        $vigory = Brand::create(['name' => 'فيجوري', 'image' => 'x.png']);
+        Machine::create(['name' => 'L250', 'brand_id' => $hogan->id, 'cash_price' => 68000, 'is_active' => true]);
+        Machine::create(['name' => 'L250', 'brand_id' => $vigory->id, 'cash_price' => 53000, 'is_active' => true]);
+        app()->forgetInstance(\App\Agent\Runtime\CatalogMentions::class);
+        \Illuminate\Support\Facades\Cache::flush();
+        $this->says($conversation, 'عندك L250؟ بكام');
+
+        $this->assertSame('AMBIGUOUS_MODEL_NOT_ASKED', $this->check('أيوه موجودة يا باشا. تحب أحسبلك القسط على كام شهر؟', $conversation));
+        $this->assertNotSame('AMBIGUOUS_MODEL_NOT_ASKED', $this->check('عندنا L250 من هوجان وفيجوري، تقصد أنهي؟', $conversation));
+    }
 }

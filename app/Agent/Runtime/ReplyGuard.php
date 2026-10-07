@@ -418,7 +418,7 @@ class ReplyGuard
 
         // Owner 2026-10-08: "عندك L250؟" - Hogan and Vigory both sell one. The search flags it; a reply that
         // names one brand's model or price without the other, before he said which, picked for him.
-        if (($ambiguous = $this->ambiguityIgnored($replyText, $outcomes)) !== null) {
+        if (($ambiguous = $this->ambiguityIgnored($replyText, $outcomes) ?? $this->ambiguityInHisWords($replyText, $conversation)) !== null) {
             $this->detail = 'The name is sold by '.$ambiguous.'. Ask him which one (or give both prices) - do not pick one.';
 
             return 'AMBIGUOUS_MODEL_NOT_ASKED';
@@ -1695,6 +1695,40 @@ class ReplyGuard
         return null;
     }
 
+    /** He wrote a name two brands share ("L250") and no brand; the agent answered without searching. */
+    private function ambiguityInHisWords(string $replyText, WhatsappConversation $conversation): ?string
+    {
+        $catalog = app(CatalogMentions::class);
+        $his = $this->customerTextSinceLastReply($conversation);
+        $ids = $catalog->fullNames($his);
+
+        if (count($ids) < 2) {
+            return null;
+        }
+
+        $squash = fn (string $v) => preg_replace('/\s+/u', '', mb_strtolower(trim($v)));
+        $groups = \App\Models\Machine::with('brand')->whereIn('id', $ids)->where('is_active', true)->get()
+            ->groupBy(fn ($m) => $squash((string) $m->name))
+            ->filter(fn ($g) => $g->pluck('brand_id')->unique()->count() > 1);
+        $hisNorm = $catalog->normalize($his);
+        $reply = $catalog->normalize($replyText);
+
+        foreach ($groups as $group) {
+            $brands = $group->map(fn ($m) => trim((string) $m->brand?->name))->unique()->values();
+
+            // he named the brand himself, or the reply asks / names every brand
+            if ($brands->contains(fn ($b) => str_contains($hisNorm, $catalog->normalize($b)))
+                || $brands->every(fn ($b) => str_contains($reply, $catalog->normalize($b)))
+                || preg_match('/أنهي|انهي|تقصد|قصدك/u', $replyText)) {
+                continue;
+            }
+
+            return $brands->implode(' and ');
+        }
+
+        return null;
+    }
+
     private function ambiguityIgnored(string $replyText, array $outcomes): ?string
     {
         $catalog = app(CatalogMentions::class);
@@ -1705,8 +1739,9 @@ class ReplyGuard
                 continue;
             }
 
-            foreach ((array) $outcome['data']['ambiguous_names'] as $group) {
-                $brands = array_map(fn ($entry) => trim(preg_replace('/\(id\s*\d+\)/u', '', (string) $entry)), (array) $group);
+            // the tool hands Collections inside the array - flatten whatever came
+            foreach (collect($outcome['data']['ambiguous_names'])->all() as $group) {
+                $brands = array_map(fn ($entry) => trim(preg_replace('/\(id\s*\d+\)/u', '', (string) $entry)), collect($group)->flatten()->all());
                 $named = array_filter($brands, function ($brand) use ($reply, $catalog) {
                     $brand = $catalog->normalize($brand);
 
