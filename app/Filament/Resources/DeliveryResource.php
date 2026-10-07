@@ -172,6 +172,41 @@ protected static function isHitler(): bool
             $set('administrative_fees', 0);
         }
     }
+    /**
+     * "١٥٬٠٠٠" / "15,000 ج.م" -> "15000"; null when nothing numeric was typed.
+     * A number box on a phone with an Arabic keyboard sent nothing at all, and
+     * the save crashed on deposit = null (owner 2026-10-07).
+     */
+    public static function moneyFromInput($value): ?string
+    {
+        if ($value === null || is_array($value)) {
+            return null;
+        }
+
+        $value = str_replace(['٫'], '.', self::toEnglishDigits((string) $value));
+        $value = preg_replace('/[^\d.]/', '', $value);
+
+        return is_numeric($value) ? $value : null;
+    }
+
+    /** Arabic digits and separators are fine; an empty or non-numeric box is a form error, never a crash. */
+    protected static function moneyRule(string $label, bool $required): \Closure
+    {
+        return fn () => function (string $attribute, $value, \Closure $fail) use ($label, $required) {
+            if (blank($value)) {
+                if ($required) {
+                    $fail("اكتب {$label} (0 لو مفيش)");
+                }
+
+                return;
+            }
+
+            if (self::moneyFromInput($value) === null) {
+                $fail("{$label} لازم يكون رقم");
+            }
+        };
+    }
+
     protected static function toEnglishDigits(?string $value): ?string
     {
         if ($value === null)
@@ -747,23 +782,20 @@ $requestType = request()->query('request_type') === 'fake'
                         Forms\Components\TextInput::make('machine_installment_price')
                             ->label('سعر المكنة بالتقسيط')
                             ->prefix('ج.م')
-                            ->numeric()
+                            // text, not a number box: Arabic digits from a phone keyboard arrive as typed
+                            ->inputMode('decimal')
                             ->dehydrated(true)
+                            ->dehydrateStateUsing(fn ($state) => self::moneyFromInput($state))
                             ->reactive()
-                            ->minValue(function (callable $get, $record) {
-                                $machineId = $get('machine_id') ?? $record?->machine_id;
-
-                                return (float) (
-                                    \App\Models\Machine::find($machineId)?->installment_price ?? 0
-                                );
-                            })
                             ->rules([
+                                self::moneyRule('سعر المكنة بالتقسيط', false),
                                 function (callable $get) {
                                     return function (string $attribute, $value, \Closure $fail) use ($get) {
                                         $machineId = $get('machine_id');
                                         $machine = \App\Models\Machine::find($machineId);
+                                        $value = self::moneyFromInput($value);
 
-                                        if (!$machine) {
+                                        if (!$machine || $value === null) {
                                             return;
                                         }
 
@@ -787,8 +819,12 @@ $requestType = request()->query('request_type') === 'fake'
                         Forms\Components\TextInput::make('deposit')
                             ->label('االمقدم بدون المصاريف الادارية')
                             ->prefix('ج.م')
-                            ->numeric()
+                            ->inputMode('decimal')
                             ->default(0)
+                            ->required()
+                            ->validationMessages(['required' => 'اكتب المقدم (0 لو مفيش)'])
+                            ->rules([self::moneyRule('المقدم', true)])
+                            ->dehydrateStateUsing(fn ($state) => self::moneyFromInput($state) ?? '0')
                             ->dehydrated(true),
                     ];
                 })
