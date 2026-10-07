@@ -107,22 +107,48 @@ class QuotedOffer
     }
 
     /**
-     * The quotes still true: given within the validity window and the
-     * motorcycle's price not edited since.
+     * Every quote in the ledger, newest first, split by validity: still true
+     * (given within the window and the motorcycle's price not edited since)
+     * or expired, with why. An expired quote is never a number source.
+     *
+     * @return array{valid: list<array<string, mixed>>, expired: list<array<string, mixed>>}
+     */
+    public static function classify(WhatsappConversation $conversation): array
+    {
+        $quotes = (array) (($conversation->state ?? [])[self::LEDGER_KEY] ?? []);
+        $versions = \App\Models\Machine::whereIn('id', array_column($quotes, 'motorcycle_id'))->pluck('updated_at', 'id');
+        $valid = [];
+        $expired = [];
+
+        foreach ($quotes as $quote) {
+            if (! isset($quote['at'])) {
+                continue;
+            }
+
+            $fresh = \Illuminate\Support\Carbon::parse($quote['at'])->gt(now()->subHours(self::VALID_HOURS));
+            $samePrice = ($versions[$quote['motorcycle_id'] ?? 0] ?? null)?->toIso8601String() === ($quote['price_version'] ?? null);
+
+            if ($fresh && $samePrice) {
+                $valid[] = $quote;
+            } else {
+                $expired[] = $quote + ['why' => $fresh ? 'price_changed' : 'older_than_24h'];
+            }
+        }
+
+        return ['valid' => $valid, 'expired' => $expired];
+    }
+
+    /**
+     * The quotes still true.
      *
      * @return list<array<string, mixed>>
      */
     public static function ledger(WhatsappConversation $conversation): array
     {
-        $quotes = (array) (($conversation->state ?? [])[self::LEDGER_KEY] ?? []);
-        $versions = \App\Models\Machine::whereIn('id', array_column($quotes, 'motorcycle_id'))->pluck('updated_at', 'id');
-
-        return array_values(array_map(
+        return array_map(
             fn ($q) => array_diff_key($q, ['price_version' => 1, 'motorcycle_id' => 1]),
-            array_filter($quotes, fn ($q) => isset($q['at'])
-                && \Illuminate\Support\Carbon::parse($q['at'])->gt(now()->subHours(self::VALID_HOURS))
-                && ($versions[$q['motorcycle_id'] ?? 0] ?? null)?->toIso8601String() === ($q['price_version'] ?? null)),
-        ));
+            self::classify($conversation)['valid'],
+        );
     }
 
     /** @return array{machine_id: int, months: int, plan_id: int, down_payment: float}|null */

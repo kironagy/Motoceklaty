@@ -50,7 +50,7 @@ class CustomerMemory
 
     private const STAGE_RANK = ['mentioned' => 1, 'asked_about' => 2, 'compared' => 3, 'interested' => 4, 'preferred' => 5, 'selected' => 6, 'applied' => 7];
 
-    private const STAGE_LABELS = [
+    public const STAGE_LABELS = [
         'mentioned' => 'اتذكر في الكلام بس', 'asked_about' => 'سأل عنه', 'compared' => 'بيقارن بيه', 'interested' => 'مهتم بيه',
         'preferred' => 'مفضّله', 'selected' => 'اختاره', 'applied' => 'قدّم عليه', 'rejected' => 'مش عايزه',
     ];
@@ -228,6 +228,17 @@ class CustomerMemory
     }
 
     /** The age he said himself, if any - never an inference. */
+    /**
+     * The memory as data for the facts view: expired items already dropped,
+     * nothing rendered. Read-only.
+     *
+     * @return array{facts: array, motorcycles: array, conversation: array, applicant_facts: array}
+     */
+    public function current(int $customerId): array
+    {
+        return $this->withoutExpired($this->get($customerId), $customerId);
+    }
+
     public function statedAge(int $customerId): ?int
     {
         $fact = $this->get($customerId)['facts']['age'] ?? null;
@@ -630,7 +641,7 @@ class CustomerMemory
     }
 
     /** "يومين" when the current burst comes 6+ hours after his previous message. */
-    private function silenceGap(int $conversationId): ?string
+    public function silenceGap(int $conversationId): ?string
     {
         $times = WhatsappMessage::where('whatsapp_conversation_id', $conversationId)->where('direction', 'incoming')
             ->latest('id')->limit(40)->pluck('created_at')->filter()->values();

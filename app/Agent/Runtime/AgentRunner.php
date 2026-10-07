@@ -314,6 +314,8 @@ class AgentRunner
         'UNSOURCED_FINANCE_COMPANY' => 'It names a finance company we do not work with.',
         'AGE_NOT_CHECKED' => 'Whether his age qualifies comes from check_eligibility only.',
         'WORK_REFUSAL_NOT_SOURCED' => 'A refusal of his work comes from check_eligibility / start_application only.',
+        'UNSOURCED_SALES_CLAIM' => 'It praises a motorcycle with a claim no tool returned (best seller, saves fuel, parts always available, tough).',
+        'MASCULINE_ADDRESS_TO_WOMAN' => 'She is recorded as a woman: speak to her in the feminine and drop "يا باشا / يا غالي / يا معلم" - use "يا فندم" or no title.',
         'REQUIRED_DOCUMENT_WAIVED' => 'Every document on his list is required; it cannot be waived.',
         'INTEREST_DENIED' => 'Installments do carry interest; it cannot be denied.',
         'REPEATED_REPLY' => 'He already got these exact words from you. Answer his new message itself in one short line in other words; a refusal he already heard = one short line ("زي ما قلتلك، للأسف مش هينفع وهو مش شغال") with no list of options again.',
@@ -591,7 +593,9 @@ class AgentRunner
         // customer to a colleague and the bot went quiet for twenty minutes
         // (18 times in a week). The first time it keeps the conversation
         // going with something true; only a second miss in a row hands off.
-        if ($this->recordFailure($conversation) < 2) {
+        // A customer who cannot bring a paper is not a failed turn: the guard's repair told the
+        // model the legal way out; a colleague is no better placed to waive it (real customers 2026-10-07).
+        if ($this->recordFailure($conversation) < 2 || $reason === 'REQUIRED_DOCUMENT_WAIVED') {
             $this->finishTrace($trace, 'fallback', $guardEvents, null, 'GUARD_UNRESOLVED_KEPT_GOING: '.$reason);
 
             return ['messages' => [$this->keepGoingReply($conversation)]];
@@ -648,6 +652,19 @@ class AgentRunner
             return ['معاك. لو حابب تشتري كاش من الفرع أو حد تاني شغال يقدّم باسمه قولّي.', 'الكاش متاح في الفرع في أي وقت، ولو حد تاني شغال يحب يقدّم باسمه قولّي.'];
         }
 
+        if (($step['type'] ?? null) === 'document' && filled($step['label'] ?? null) && $application) {
+            $rule = app(\App\Domain\Applications\SnapshotService::class)->for($application)['documents']['if_unavailable'] ?? null;
+
+            // He cannot bring it: ask the one question that decides the route, instead of the same demand again
+            if (($rule['rule'] ?? null) === 'card_only_last_resort') {
+                return ["لو مش هتقدر تجيب {$step['label']} خالص قولّي بوضوح وأكمّل معاك بالبطاقة بس.", "تقدر تجيب {$step['label']}؟ لو لأ قولّي ونكمّل بالبطاقة بس."];
+            }
+
+            if (($rule['rule'] ?? null) === 'insurance_print_then_card_only') {
+                return ['لو الشركة مش بتطلع مفردات، ابعتلي برنت التأمينات بداله. ولو مش هتقدر تجيب ولا واحد منهم قولّي ونكمّل بالبطاقة بس.'];
+            }
+        }
+
         if (in_array($step['type'] ?? null, ['field', 'document'], true) && filled($step['label'] ?? null)) {
             return ["تمام، ابعتلي {$step['label']}", "فاضل {$step['label']} ونكمّل."];
         }
@@ -660,6 +677,14 @@ class AgentRunner
 
         if ($application) {
             return ['معاك. نكمّل طلبك؟', 'تمام، نكمّل في الطلب؟'];
+        }
+
+        // No application yet: if he was quoted something that is still true, continue from it
+        // instead of asking him to explain himself again (real customers 2026-10-07)
+        $quote = \App\Domain\Conversations\QuotedOffer::classify($conversation)['valid'][0] ?? null;
+
+        if ($quote !== null) {
+            return ["تحب نكمّل على {$quote['motorcycle']} على {$quote['months']} شهر ونبدأ الطلب؟", "نبدأ طلب التقسيط على {$quote['motorcycle']}؟"];
         }
 
         return ['معلش وضّحلي قصدك أكتر؟', 'ممكن تقولّي تاني إنت محتاج إيه بالظبط؟'];

@@ -43,8 +43,10 @@ class SimulatorRun1FixesTest extends TestCase
 
         $system = app(ContextBuilder::class)->build($this->turnFor($conversation, 'بكام دايو 4 قسط'))->system;
 
-        $this->assertStringContainsString('"his_work":{"whose_work":"العميل نفسه","his_words":"اشتغل بيه على ديدي"', $system);
-        $this->assertStringContainsString('"customer_type":"self_employed","work_type":"delivery_app"', $system);
+        $this->assertStringContainsString('"applicant":{"person":"العميل نفسه"}', $system);
+        $this->assertStringContainsString('"work":{"occupation":"دليفري ديدي","customer_type":"self_employed","work_type":"delivery_app"', $system);
+        $this->assertStringContainsString('"his_words":"اشتغل بيه على ديدي"', $system);
+        $this->assertStringNotContainsString('still_to_ask', $system);
     }
 
     public function test_a_reply_of_only_brackets_is_empty(): void
@@ -62,13 +64,13 @@ class SimulatorRun1FixesTest extends TestCase
         $turn = $this->turnFor($conversation, 'على سنتين');
         $system = app(ContextBuilder::class)->build($turn)->system;
 
-        $this->assertStringContainsString('"cash_prices_shown":[{"motorcycle_id":'.$machine->id.',"motorcycle":"هوجن 4","cash_price":43000}]', $system);
+        $this->assertStringContainsString('"cash_prices":[{"motorcycle_id":'.$machine->id.',"motorcycle":"هوجن 4","cash_price":43000}]', $system);
         $this->assertNull(app(ReplyGuard::class)->check(['messages' => ['هوجن 4 كاش بـ 43,000 جنيه، تحب أحسبها على سنتين؟']], $conversation->refresh(), $system, [], []));
 
         // a price edited since is not a source any more
         $this->travel(1)->minutes();
         $machine->update(['cash_price' => 45000]);
-        $this->assertStringNotContainsString('"cash_prices_shown"', app(ContextBuilder::class)->build($turn)->system);
+        $this->assertStringNotContainsString('"cash_prices"', app(ContextBuilder::class)->build($turn)->system);
     }
 
     public function test_a_guarantor_field_his_application_does_not_need_is_refused(): void

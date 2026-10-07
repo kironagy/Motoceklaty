@@ -199,6 +199,7 @@ class StartApplicationTool implements WriteTool
         // the card-only route is also how a day's pay (tuk-tuk...) applies - staff see it the same way
         if ($cardOnly || (app(\App\Domain\Applications\WorkClassification::class)->reading($ctx->conversationId)['daily_labour_no_trade'] ?? false)) {
             \App\Domain\Applications\CardOnlyRoute::mark($outcome['application'], (string) $args['customer_type_quote']);
+            app(\App\Domain\Applications\WorkProfiles::class)->markCannotBringPapers($ctx->conversationId);
         }
 
         $snapshot = $this->snapshots->for($outcome['application']);

@@ -247,7 +247,18 @@ class DocumentPipeline
                 }
             }, $toRead);
 
+            $activeKeys = $activeTypes->pluck('key')->all();
+
             foreach ((array) $this->read($toRead, $ocrTexts, $activeTypes, $this->owedDocuments($application)) as $i => $parsed) {
+                // Real customers (2026-10-07): an ID front+back or a license sent together
+                // came back unclassified from the batch call and both photos were then
+                // marked "not a document" for good - sent alone, the same photos read
+                // fine. A batch entry that classified nothing is not an answer: that
+                // photo is read on its own, like one the batch left out.
+                if (! in_array($parsed['document_type_key'] ?? '', $activeKeys, true)) {
+                    continue;
+                }
+
                 $preRead[$toRead[$i]->id] = $parsed;
             }
         }

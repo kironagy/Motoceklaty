@@ -54,8 +54,11 @@ class HistoryWindowTest extends TestCase
         $this->assertSame(range(201 - count($history), 200), $numbers);
         $this->assertTrue(AiTrace::sole()->context_manifest['l7_trimmed']);
 
-        // what fell out (well over 200 tokens) goes to the summary
-        Queue::assertPushed(SummarizeConversation::class, fn ($job) => $job->upToMessageId === WhatsappMessage::where('text', $texts[0])->value('id'));
+        // what fell out (well over 200 tokens) goes to the summary, and so does everything
+        // before the last N raw messages (agent.context.recent_messages_count)
+        $keep = (int) config('agent.context.recent_messages_count');
+        $until = WhatsappMessage::where('text', $texts[max(0, count($texts) - $keep)])->value('id');
+        Queue::assertPushed(SummarizeConversation::class, fn ($job) => $job->upToMessageId === $until);
     }
 
     public function test_a_small_backlog_does_not_trigger_the_summary(): void
@@ -90,7 +93,7 @@ class HistoryWindowTest extends TestCase
         $this->assertSame(['شغال سواق في شركة نقل', 'من الجيزة'], SummarizeConversation::decode($conversation->refresh()->summary)['facts']);
 
         $system = app(ContextBuilder::class)->build($this->turnFor($conversation, 'تمام'))->system;
-        $this->assertStringContainsString("حقايق عنه:\n- شغال سواق في شركة نقل\n- من الجيزة", $system);
+        $this->assertStringContainsString("اتقال:\n- شغال سواق في شركة نقل\n- من الجيزة", $system);
         $this->assertStringContainsString("اتفقنا على:\n- اختار الهوجن 4 على سنة", $system);
         $this->assertStringContainsString("لسه مفتوح:\n- هيبعت ضهر البطاقة", $system);
     }
@@ -106,6 +109,6 @@ class HistoryWindowTest extends TestCase
 
         $this->assertSame('ملخص قديم نثر', $conversation->refresh()->summary);
         // a prose summary from before still reaches the model as it is
-        $this->assertStringContainsString("## ملخص المحادثة السابقة\nملخص قديم نثر", app(ContextBuilder::class)->build($this->turnFor($conversation, 'تمام'))->system);
+        $this->assertStringContainsString("## الكلام الأقدم (للسياق بس - مش مصدر للأرقام ولا للبيانات؛ لو اختلف مع الحقايق اللي فوق الحقايق هي الصح)\nملخص قديم نثر", app(ContextBuilder::class)->build($this->turnFor($conversation, 'تمام'))->system);
     }
 }

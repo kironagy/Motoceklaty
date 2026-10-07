@@ -75,6 +75,7 @@ class BestOfferService
                     'plan_id' => $plan->id,
                     'system' => trim((string) $system->name),
                     'down_payment' => $down,
+                    'minimum_down_payment' => round($minimum),
                     'admin_fee' => round($result->administrativeFees),
                     'cash_due_upfront' => $upfront,
                     'monthly_payment' => $result->monthlyInstallment,

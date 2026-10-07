@@ -62,6 +62,8 @@ class SnapshotService
             // Owner 2026-09-29: "المطلوب ايه؟" is answered with all of it -
             // a rider was told "البطاقة بس" and his license was never asked.
             'list' => collect($requirements['documents'])->where('required', true)->pluck('label')->values()->all(),
+            // asked once "if he has it" (the owner's note); he can finish without it
+            'optional_missing' => collect($requirements['documents'])->where('required', false)->pluck('key')->diff($acceptedKeys)->values()->all(),
             // false until his job is known: the job adds documents (license, app screenshots...)
             'list_complete' => ! $this->workTypeUnknown($customerType, $facts),
         ] + ($partial === [] ? [] : ['partial' => $partial]);

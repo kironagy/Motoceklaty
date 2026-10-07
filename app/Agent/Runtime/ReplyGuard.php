@@ -168,6 +168,15 @@ class ReplyGuard
             return 'DOCUMENT_CLAIMED_NOT_ACCEPTED';
         }
 
+        // Real customers 2026-10-07: "وصلت السكرينات" before any screenshot was sent, and
+        // "وصلوا يا باشا" about photos that were never read. A claim that something
+        // arrived is true only if what it names is accepted on the application.
+        if (($unreceived = $this->claimsUnreceivedDocument($assertions, $conversation, $outcomes)) !== null) {
+            $this->detail = $unreceived;
+
+            return 'DOCUMENT_CLAIMED_NOT_ACCEPTED';
+        }
+
         // "اقفل الطلب" got "قفلتلك الطلب" with nothing withdrawn, then a
         // "لسه معايا؟ طلبك ماشي" reminder.
         if ($this->claimsWithdrawal($assertions) && ! in_array('withdraw_application', $succeeded, true)) {
@@ -248,6 +257,21 @@ class ReplyGuard
         if (preg_match('/(?:بتتحفظ|تتحفظ|بيتحفظوا)|القرار (?:النهائي )?(?:بيكون |هيكون )?(?:عند|ليهم)|نقد(?:ّ)?م\s+ونشوف|(?:مش\s+(?:بتقبل|بيقبلوا|هتقبل|هيقبلوا)|مبتقبلش|مبيقبلوش|هيترفض|بيترفض|هيرفضوا|بيرفضوا)[^.؟?\n]{0,40}(?:شغل|وظيف|مهن|حكوم)|(?:شغل|وظيف|مهن|المدرسين|حكوم)[^.؟?\n]{0,60}(?:مش\s+(?:بتقبل|بيقبلوا|هتقبل)|مبتقبلش|هيترفض|بيترفض)/u', $replyText)
             && ! preg_match('/OCCUPATION_NOT_ACCEPTED|occupation_not_accepted|APPLICANT_HAS_NO_WORK|FEMALE_FREE_INCOME_NOT_ACCEPTED|GENDER_NOT_ACCEPTED_FOR_TYPE|FOREIGNER_NO_INSTALLMENTS|STATED_INCOME_BELOW_MINIMUM/', $toolResultsBlob)) {
             return 'WORK_REFUSAL_NOT_SOURCED';
+        }
+
+        // Real customers 2026-10-07: "الأكثر مبيعًا" and "معروفة إنها اقتصادية في البنزين" about bikes - nothing
+        // in the system records sales, fuel economy or parts availability, so it is a made-up pitch.
+        if (($claim = $this->unsourcedSalesClaim($replyText, $toolResultsBlob)) !== null) {
+            $this->detail = 'Nothing records "'.$claim.'" - say only what a tool returned about the motorcycle (price, specs, availability) and leave the pitch out.';
+
+            return 'UNSOURCED_SALES_CLAIM';
+        }
+
+        // Real customers 2026-10-07: a woman who wrote "انا ست" was answered "يا باشا" all the way.
+        // Once she is recorded as a woman (the work profile, or the conversation's gender) the
+        // masculine forms of address are wrong - structural: what was recorded, never her words.
+        if ($this->womanAddressedAsMan($replyText, $conversation)) {
+            return 'MASCULINE_ADDRESS_TO_WOMAN';
         }
 
         // Owner 2026-09-29: every document on his job's list is asked. A
@@ -654,6 +678,17 @@ class ReplyGuard
 
     private function waivesRequiredDocument(string $replyText, WhatsappConversation $conversation): bool
     {
+        if (! $this->waivesRequiredDocumentRaw($replyText, $conversation, $application)) {
+            return false;
+        }
+
+        $this->detail = $this->waiverHint($application);
+
+        return true;
+    }
+
+    private function waivesRequiredDocumentRaw(string $replyText, WhatsappConversation $conversation, ?Application &$application = null): bool
+    {
         $application = $conversation->customer_id
             ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->latest('id')->first()
             : null;
@@ -711,6 +746,60 @@ class ReplyGuard
     }
 
 
+    /**
+     * Real customers 2026-10-07 (3 of them): "معيش الورق ده خالص" got a reply that skipped
+     * the paper, the guard blocked it with only "cannot be waived", and the model never
+     * learned that the owner's rule has a legal way out - so the customer was handed to a
+     * colleague. The repair now says which way out his application has, and the exact call.
+     */
+    private function waiverHint(?Application $application): string
+    {
+        $rule = $application ? (app(\App\Domain\Applications\SnapshotService::class)->for($application)['documents']['if_unavailable'] ?? null) : null;
+        $call = 'call update_application_selection with route="card_only" and customer_type_quote = his exact words saying he cannot bring them, wait for it to succeed, and only then tell him it goes by his ID only';
+
+        return match ($rule['rule'] ?? null) {
+            'card_only_last_resort' => "Never skip a required paper on your own. If he said he truly cannot bring ".($rule['papers'] ?? 'his work papers')." at all: {$call}. "
+                .'If he only asked or has not said it, ask him once whether he can bring them - do not drop them.',
+            'insurance_print_then_card_only' => "The substitute for the missing paper is the insurance print (برنت التأمينات). Only if he says he cannot bring that either: {$call}. "
+                .'Until he says so, ask for the insurance print, do not drop the paper.',
+            'insurance_print_only' => 'The only substitute is the insurance print (برنت التأمينات); there is no ID-only route for him. Say so and ask for it.',
+            'no_salary_slip_needed' => 'His ID shows no job, so no salary slip is asked: say that plainly and ask for what is still missing.',
+            default => 'Every paper on his list is required and cannot be waived; if he cannot bring one, ask for what the application lists as its substitute (documents.if_unavailable) - never invent one.',
+        };
+    }
+
+
+    /** @return ?string the pitch phrase that no tool result backs */
+    private function unsourcedSalesClaim(string $replyText, string $toolResultsBlob): ?string
+    {
+        $claims = '/(?:ال)?(?:أكتر|اكتر|أكثر|اكثر)\s+(?:مكن[ةه]|موتوسيكل|موديل)?\s*(?:مبيع[اً]?|طلب[اً]?|انتشار[اً]?|استخدام[اً]?)'
+            .'|(?:ال)?(?:أكتر|اكتر|أكثر|اكثر)\s+(?:حاج[ةه]\s+)?(?:بتتباع|بيتباع|مطلوب[ةه]?)'
+            .'|(?:الأفضل|الافضل|الأحسن|الاحسن|أحسن|احسن|أفضل|افضل)\s+(?:مكن[ةه]|موتوسيكل|موديل|اختيار)'
+            .'|معروف[ةه]?\s+(?:إنها|انها|إنه|انه|بإنها|بانها)'
+            .'|(?:اقتصادي[ةه]|موفر[ةه]|موفّر[ةه])\s+(?:جدا\s+)?(?:في|ف)\s+(?:ال)?بنزين|(?:ال)?بنزين\s+(?:قليل|بسيط|موفر)'
+            .'|قطع\s+(?:ال)?غيار(?:ها|ه)?\s+(?:متوفر[ةه]|رخيص[ةه]|موجود[ةه]|سهل[ةه])|(?:سعر[ها]*|ثمن)\s+حنين'
+            .'|(?:بتستحمل|بيستحمل|تستحمل|يستحمل)\s+(?:ال)?(?:شغل|مشاوير|سواق[ةه]|الطريق)/u';
+
+        if (! preg_match($claims, $replyText, $m)) {
+            return null;
+        }
+
+        // a spec a tool returned (fuel use, parts) backs a plain statement of it
+        return str_contains($toolResultsBlob, trim($m[0])) ? null : trim($m[0]);
+    }
+
+    private function womanAddressedAsMan(string $replyText, WhatsappConversation $conversation): bool
+    {
+        $work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id);
+        $herself = ($work['applicant'] ?? 'customer') !== 'someone_else' && ($work['applicant_gender'] ?? null) === 'female';
+
+        if (! $herself && (($conversation->state ?? [])['customer_gender'] ?? null) !== 'female') {
+            return false;
+        }
+
+        return (bool) preg_match('/يا\s+(?:باشا|غالي|صاحبي|معلم|ريس|برنس|حاج|أستاذ|استاذ|هندسة|بيه|كبير)(?!\p{L})/u', $replyText);
+    }
+
     private function promisesColleagueSoon(string $replyText): bool
     {
         foreach (preg_split('/(?<=[.!؟?\n])/u', $replyText) as $sentence) {
@@ -763,6 +852,68 @@ class ReplyGuard
     {
         return (bool) preg_match('/(?:البطاق[ةه]|الصور[ةه]?|المستند|الورق[ةه]?|الرخص[ةه])\s+(?:\S+\s+){0,2}?و?(?:اتسجلت|اتقبلت|اتقبلوا|اتحفظت|اتقرت|تمام|سليم[ةه]|مقبول[ةه])(?!\p{L})'
             .'|(?:^|\s)و?(?:اتقبلت|اتقبلوا|اتسجلت)\s+(?:\S+\s+)?(?:ال)?(?:بطاق[ةه]|صور|ورق|مستند)/u', $assertions);
+    }
+
+    /** What the reply says arrived, by the document types it names (a general "وصلوا" names none). */
+    private const RECEIVED_NOUNS = [
+        'national_id_front' => 'بطاق[ةه]|وش\s+البطاق|هوي[ةه]',
+        'national_id_back' => 'ضهر\s+البطاق|ظهر\s+البطاق',
+        'driving_license' => 'رخص[ةه]',
+        'delivery_app_earnings' => 'سكرين(?:ات)?\s+(?:ال)?(?:أرباح|ارباح|دخل)|اثبات\s+(?:ال)?دخل',
+        'delivery_app_profile' => 'سكرين(?:ات)?\s+(?:ال)?(?:بروفايل|حساب)|البروفايل',
+        'salary_slip' => 'مفردات',
+        'tax_card' => 'ضريب|سجل\s+تجاري',
+        'business_place_photo' => 'اليافط|صور[ةه]\s+(?:ال)?(?:محل|مطعم|قهو|مكان|نشاط)|المحل|المطعم|القهو[ةه]',
+    ];
+
+    /**
+     * @return ?string what was claimed but is not accepted on the application, null when the claim is true or nothing is claimed
+     */
+    private function claimsUnreceivedDocument(string $assertions, WhatsappConversation $conversation, array $outcomes): ?string
+    {
+        // this turn read photos: the existing check judges those results
+        if (collect($outcomes)->contains(fn ($o) => $o['name'] === 'process_document')) {
+            return null;
+        }
+
+        $verb = '(?:وصل(?:ت|وا|و|تني|ني|تلي)|استلم(?:ت|نا)|اتقبل(?:ت|وا|و)|اتقر(?:ت|وا))';
+        $thing = '(?:ال)?(?:صور[ةه]?|ورق[ةه]?|مستند(?:ات)?|سكرين(?:ات)?|ملف(?:ات)?|بطاق[ةه]|رخص[ةه]|مفردات|ضريب\S*|يافط\S*)';
+
+        // the verb next to a paper ("وصلتني الصور", "السكرينات وصلت"), or the plural "وصلوا" ("وصلوا يا باشا")
+        // - never "وصلتني رسالتك"
+        if (! preg_match('/(?:^|\s)و?'.$verb.'\s+(?:\S+\s+)?'.$thing.'(?!\p{L})/u', $assertions)
+            && ! preg_match('/'.$thing.'\s+(?:\S+\s+)?و?'.$verb.'(?!\p{L})/u', $assertions)
+            && ! preg_match('/(?:^|\s)و?(?:وصلوا|وصلو|اتقبلوا|اتقبلو)(?:\s|$|[،.!؟?])/u', $assertions)) {
+            return null;
+        }
+
+        $application = $this->activeApplication($conversation);
+
+        if (! $application) {
+            return null;
+        }
+
+        $accepted = \App\Models\ApplicationDocument::where('application_id', $application->id)->where('status', 'accepted')->pluck('detected_type_key')->filter()->all();
+        $named = [];
+
+        foreach (self::RECEIVED_NOUNS as $type => $nouns) {
+            if (preg_match('/(?:'.$nouns.')/u', $assertions)) {
+                $named[] = $type;
+            }
+        }
+
+        if ($named !== []) {
+            // the ID front and the card in general: either side accepted counts for "البطاقة"
+            $unaccepted = array_values(array_filter($named, fn ($type) => ! in_array($type, $accepted, true)
+                && ! ($type === 'national_id_front' && in_array('national_id_back', $accepted, true) && ! preg_match('/وش/u', $assertions))));
+
+            return $unaccepted === [] ? null : 'claimed arrived but not accepted: '.implode(', ', $unaccepted);
+        }
+
+        // no document named ("وصلوا", "الصور وصلت"): true only if nothing is still missing
+        $missing = app(\App\Domain\Applications\SnapshotService::class)->for($application)['documents']['missing'] ?? [];
+
+        return $missing === [] ? null : 'claimed everything arrived, still missing: '.implode(', ', $missing);
     }
 
     private function documentAccepted(array $outcomes): bool
@@ -1384,7 +1535,10 @@ class ReplyGuard
     private function unverifiedNumbers(string $replyText, string $system, string $toolResultsBlob, array $contents, bool $earlierRepliesCount = true): array
     {
         $minValue = config('agent.guard.number_min_value');
-        $sourcedSystem = $this->removeBlock($system, '## فهرس الكتالوج');
+        // Phase 1: the older-conversation summary is context only - a number
+        // that appears nowhere but in it is not sourced (a price from a
+        // summary is exactly the stale figure the facts block exists to stop).
+        $sourcedSystem = $this->removeBlock($this->removeBlock($system, '## فهرس الكتالوج'), '## الكلام الأقدم');
         // What the customer wrote. Our own earlier replies used to count too
         // (to save re-lookups), and that is how a stale 50,000 and fees of
         // 3,220 / 2,730 were repeated in the 2026-10-04 runs: a figure is

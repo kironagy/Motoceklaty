@@ -2,20 +2,16 @@
 
 namespace App\Agent\Context;
 
+use App\Agent\Context\Facts\ConversationFacts;
+use App\Agent\Context\Facts\ToldSoFar;
 use App\Agent\Providers\AiRequest;
 use App\Agent\Tracing\Redactor;
-use App\Domain\Applications\ApplicationService;
-use App\Domain\Applications\SnapshotService;
 use App\Domain\Catalog\CatalogService;
 use App\Jobs\SummarizeConversation;
 use App\Models\AiTrace;
 use App\Models\Application;
-use App\Models\Customer;
-use App\Models\CustomerAttribute;
 use App\Models\CustomerType;
-use App\Models\Handoff;
 use App\Models\MessageMedia;
-use App\Models\RequirementField;
 use App\Models\WhatsappConversation;
 use App\Models\WhatsappMessage;
 use Illuminate\Support\Facades\Storage;
@@ -32,8 +28,8 @@ class ContextBuilder
 {
     public function __construct(
         private readonly CatalogService $catalog,
-        private readonly ApplicationService $applications,
-        private readonly SnapshotService $snapshots,
+        private readonly ConversationFacts $facts,
+        private readonly ToldSoFar $toldSoFar,
         private readonly \App\Domain\Settings\AgentInstructions $instructions,
     ) {
     }
@@ -41,26 +37,31 @@ class ContextBuilder
     public function build(object $turn): AiRequest
     {
         $conversation = WhatsappConversation::with('customer')->findOrFail($turn->whatsapp_conversation_id);
-        $customer = $conversation->customer;
-        $application = $customer ? $this->applications->activeFor($customer) : null;
-        $snapshot = $application ? $this->snapshots->for($application) : null;
+
+        // Phase 1: ONE factual view. Everything the agent knows about this
+        // customer, his application and his conversation comes from
+        // ConversationFacts; what he was already told from ToldSoFar. The
+        // stores are not read here.
+        $result = $this->facts->for($conversation, $turn->id);
+        $this->tidyAwaiting($conversation, $result->snapshot);
+        $application = $result->application;
 
         // Rebuild: ONE instruction source (L0). Pinned/scoped knowledge and
         // lessons are folded into it; what follows is data only - catalog
-        // names, customer-type keys, then what we know about this customer.
+        // names, customer-type keys, then the facts.
         $l0 = $this->buildL0();
         $l3 = $this->catalogIsRelevant($conversation, $application) ? $this->buildL3() : ['text' => null, 'count' => 0];
         $l3b = $this->buildL3b();
-        $l4 = $this->buildL4($conversation, $customer, $snapshot, $turn->id);
-        $l4m = $customer ? app(\App\Domain\Memory\CustomerMemory::class)->forPrompt($customer->id, $conversation->id, $application?->id) : null;
+        $l4 = $this->renderFacts($result->facts);
+        $told = $this->renderToldSoFar($this->toldSoFar->for($conversation, $application));
         $l6 = $this->buildL6($conversation);
         $l7 = $this->buildL7($conversation, $turn);
-        $l8 = $this->buildL8($conversation, $turn);
+        $l8 = $this->buildL8($conversation, $turn, $result->facts);
 
         $system = implode("\n\n", array_values(array_filter([
             // The same text for every customer goes first, so the provider's
             // cache covers it on every call.
-            $l0['text'], $l3['text'], $l3b['text'], $l4['text'], $l4m, $l6['text'], $this->ownStyleNote($conversation),
+            $l0['text'], $l3['text'], $l3b['text'], $l4['text'], $told['text'], $l6['text'], $this->ownStyleNote($conversation),
         ], fn ($block) => $block !== null && trim($block) !== '')));
 
         $request = new AiRequest(
@@ -74,7 +75,8 @@ class ContextBuilder
             'l3_count' => $l3['count'],
             'l3b_count' => $l3b['count'],
             'l4_present' => true,
-            'memory_tokens' => $l4m === null ? 0 : TokenEstimator::estimate($l4m),
+            'facts_tokens' => TokenEstimator::estimate($l4['text']),
+            'told_so_far_tokens' => $told['text'] === null ? 0 : TokenEstimator::estimate($told['text']),
             'l6_present' => $l6['text'] !== null,
             'l7_count' => count($l7['contents']),
             'l7_trimmed' => $l7['trimmed'],
@@ -83,7 +85,7 @@ class ContextBuilder
         ];
 
         $this->recordManifest($conversation, $turn, $l0['version'], $manifest);
-        $this->maybeTriggerSummary($conversation, $l7['oldest_included_id']);
+        $this->maybeTriggerSummary($conversation, $l7['summary_until_id']);
 
         return $request;
     }
@@ -231,197 +233,87 @@ class ContextBuilder
         ];
     }
 
-    /** @return array{text: string} */
-    private function buildL4(WhatsappConversation $conversation, ?Customer $customer, ?array $snapshot, ?int $turnId = null): array
-    {
-        $state = $this->cleanedState($conversation, $snapshot);
-
-        // With an open application its snapshot holds his values; the
-        // profile from earlier applications would only repeat them.
-        $profile = $customer && $snapshot === null ? $this->customerProfileFacts($customer) : [];
-
-        $handoff = ['status' => $conversation->status === 'awaiting_agent' ? 'awaiting_agent' : 'none'];
-
-        if ($handoff['status'] === 'awaiting_agent') {
-            $handoff['reason'] = Handoff::where('conversation_id', $conversation->id)
-                ->whereNull('closed_at')->latest('opened_at')->value('reason');
-
-            if (\App\Domain\Handoff\HandoffService::botKeepsAnswering($conversation)) {
-                // what to do meanwhile: the instructions (§٩)
-                $handoff = ['status' => 'call_requested'];
-            }
-        } else {
-            // Returned by the timeout with no staff reply: the agent should
-            // pick the conversation up itself, not promise a colleague again.
-            $last = Handoff::where('conversation_id', $conversation->id)->latest('opened_at')->first();
-
-            if ($last && $last->closed_at && $last->closed_by === null && $last->reason !== 'call_request' && $last->closed_at->gt(now()->subDay())) {
-                $handoff['last_handoff'] = 'returned_to_you_without_staff_reply';
-            }
-        }
-
-        // Whitelisted state only - no counters, timestamps or internal ids.
-        $payload = array_filter([
-            'customer_profile' => $profile,
-            'customer_gender' => $state['customer_gender'] ?? null,
-            'waiting_for' => array_values(array_map(fn ($a) => ['kind' => $a['kind'] ?? null, 'key' => $a['key'] ?? null], (array) ($state['awaiting'] ?? []))),
-            'conversation_ended' => isset($state['ended_at']) ? true : null,
-            // offers a tool really gave him, still valid (24 h, price unchanged): a number source
-            'quotes_given_to_him' => \App\Domain\Conversations\QuotedOffer::ledger($conversation),
-            // cash prices a tool showed him in the last 24 h (catalog price now): a number source
-            'cash_prices_shown' => \App\Domain\Conversations\QuotedOffer::cashPricesShown($conversation),
-            'application' => $this->afterFullList($conversation, $snapshot),
-            'handoff' => $handoff,
-        ], fn ($v) => $v !== null && $v !== []);
-
-        // "ايه المتاح؟" after an SRK 250 photo was answered with 150cc bikes.
-        if (($interest = $state['interest'] ?? null) && ($interest['cc'] ?? null)) {
-            $payload['customer_is_after'] = ['label' => $interest['label'] ?? null, 'cc' => (int) $interest['cc']];
-        }
-
-        // Simulator 2026-10-05: a Didi rider's work was recorded on his first
-        // message, but the reading was nowhere in the next turns - he was asked
-        // "بتشتغل إيه؟" eight times and no application could open.
-        if (($work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id)) && ($work['work_stated'] ?? false)) {
-            // whose work this is: "someone_else" alone let the bot say "أبوك" for a brother
-            $payload['his_work'] = array_filter([
-                'whose_work' => \App\Domain\Applications\Applicant::label(\App\Domain\Applications\Applicant::fromProfile($work)),
-                'his_words' => $work['evidence'] ?? null,
-                'occupation' => $work['occupation'] ?? null,
-                'customer_type' => $work['customer_type'] ?? null,
-                'work_type' => ($work['work_type'] ?? 'none') === 'none' ? null : $work['work_type'],
-                'insured' => ($work['insured'] ?? 'unknown') === 'unknown' ? null : $work['insured'],
-                'still_to_ask' => ($work['question'] ?? 'none') === 'none' ? null : $work['question'],
-            ], fn ($v) => $v !== null && $v !== '');
-        }
-
-        // "طلبي وصل لفين؟" - his submitted requests, customer-safe fields only.
-        $requests = app(\App\Domain\Applications\CustomerRequestStatus::class)->for($customer, $conversation);
-
-        if ($requests !== []) {
-            $payload['my_requests'] = $requests;
-        }
-
-        $unprocessed = $this->unprocessedMedia($conversation, $turnId);
-
-        if ($unprocessed !== []) {
-            $payload['unprocessed_media'] = $unprocessed;
-        }
-
-        return ['text' => "## اللي نعرفه عن العميل والطلب (بيانات حقيقية من الداتابيز)\n```json\n"
-            .json_encode($payload, JSON_UNESCAPED_UNICODE)."\n```"];
-    }
-
     /**
-     * Customer images from earlier messages that no tool ever looked at -
-     * a license sent in a burst, a pension statement sent while a colleague
-     * had the chat. The model could not reach them (it invented media ids),
-     * so the customer was asked to send them again.
+     * The facts as one block. The heading says what they are not: messages
+     * and the summary are context, not facts. That the facts are the only
+     * source of prices, installments, names and documents is in the instructions.
      *
-     * @return array<int, array{media_id: int, sent_at: string, caption: ?string}>
+     * @return array{text: string}
      */
-    private function unprocessedMedia(WhatsappConversation $conversation, ?int $currentTurnId): array
+    private function renderFacts(array $facts): array
     {
-        return MessageMedia::query()
-            ->whereHas('message', fn ($q) => $q->where('whatsapp_conversation_id', $conversation->id)
-                ->where('direction', 'incoming')
-                ->where('created_at', '>=', now()->subDays(7))
-                // This turn's own images are already in front of the model.
-                ->where(fn ($q) => $q->whereNull('turn_id')->orWhere('turn_id', '!=', (int) $currentTurnId)))
-            ->whereIn('media_type', ['image', 'document'])
-            ->whereNotIn('id', \App\Models\ApplicationDocument::whereNotNull('media_id')->select('media_id'))
-            ->with('message:id,text,created_at')
-            ->latest('id')
-            ->limit(10)
-            ->get()
-            ->filter(fn (MessageMedia $m) => ! isset(($m->analysis ?? [])['band']) && ! isset(($m->analysis ?? [])['not_a_document']))
-            ->map(fn (MessageMedia $m) => [
-                'media_id' => $m->id,
-                'sent_at' => $m->message?->created_at?->toIso8601String(),
-                'caption' => $m->message?->text,
-            ])
-            ->values()
-            ->all();
+        return ['text' => "## اللي نعرفه عن العميل والطلب (حقايق الداتابيز؛ الرسايل والملخص للسياق بس)\n```json\n"
+            .json_encode($facts === [] ? new \stdClass() : $facts, JSON_UNESCAPED_UNICODE)."\n```"];
     }
-
-    /** @return array<int, array{key: string, value: mixed, source: string, verified: bool}> */
-    private function customerProfileFacts(Customer $customer): array
-    {
-        return CustomerAttribute::where('customer_id', $customer->id)
-            ->get()
-            ->map(function (CustomerAttribute $attribute) {
-                $isSensitive = RequirementField::where('key', $attribute->field_key)->value('is_sensitive') ?? true;
-
-                return [
-                    'key' => $attribute->field_key,
-                    'value' => $isSensitive ? null : $attribute->value,
-                    'source' => $attribute->source,
-                    'verified' => $attribute->verified_at !== null,
-                ];
-            })
-            ->values()
-            ->all();
-    }
-
-    /**
-     * §3.2's deterministic clean-up: an `awaiting` entry drops out once its
-     * field is collected or its document is accepted in the snapshot -
-     * purely structural, never a read of message text.
-     */
-    private function cleanedState(WhatsappConversation $conversation, ?array $snapshot): array
-    {
-        $state = $conversation->state ?? [];
-        $awaiting = $state['awaiting'] ?? [];
-
-        if ($awaiting !== [] && $snapshot) {
-            $collected = $snapshot['fields']['collected'] ?? [];
-            $accepted = $snapshot['documents']['accepted'] ?? [];
-
-            $awaiting = array_values(array_filter($awaiting, function ($entry) use ($collected, $accepted) {
-                return match ($entry['kind']) {
-                    'field' => ! in_array($entry['key'], $collected, true),
-                    'document' => ! in_array($entry['key'], $accepted, true),
-                    default => true,
-                };
-            }));
-
-            if ($awaiting !== ($state['awaiting'] ?? [])) {
-                $state['awaiting'] = $awaiting;
-                $conversation->update(['state' => $state]);
-            }
-        }
-
-        return $state;
-    }
-
 
     /** @return array{text: ?string} */
+    private function renderToldSoFar(array $told): array
+    {
+        if ($told === []) {
+            return ['text' => null];
+        }
+
+        return ['text' => "## اللي اتقاله فعلاً في المحادثة دي (من الأدوات - لو قال \"تمام\" ما تعيدوش؛ لو سأل تاني جاوبه)\n```json\n"
+            .json_encode($told, JSON_UNESCAPED_UNICODE)."\n```"];
+    }
+
+    /**
+     * An `awaiting` entry drops out once its field is collected or its
+     * document accepted in the snapshot. The facts filter it at read time;
+     * this is the one explicit write that keeps the stored list tidy.
+     */
+    private function tidyAwaiting(WhatsappConversation $conversation, ?array $snapshot): void
+    {
+        $state = $conversation->state ?? [];
+        $stored = (array) ($state['awaiting'] ?? []);
+
+        if ($stored === [] || ! $snapshot) {
+            return;
+        }
+
+        $open = $this->facts->openAwaiting($state, $snapshot);
+
+        if ($open !== $stored) {
+            $state['awaiting'] = $open;
+            $conversation->update(['state' => $state]);
+        }
+    }
+
+    /**
+     * The older conversation, as context only. It is never a source of a
+     * price, a name, a document or any other fact: those come from the
+     * facts block, and a summary line never overrides one.
+     *
+     * @return array{text: ?string}
+     */
     private function buildL6(WhatsappConversation $conversation): array
     {
         if (blank($conversation->summary)) {
             return ['text' => null];
         }
 
+        $heading = '## الكلام الأقدم (للسياق بس - مش مصدر للأرقام ولا للبيانات؛ لو اختلف مع الحقايق اللي فوق الحقايق هي الصح)';
+
         // CTX-010: facts / decisions / still open; a summary written before is prose.
         $structured = SummarizeConversation::decode($conversation->summary);
 
         if ($structured === null) {
-            return ['text' => "## ملخص المحادثة السابقة\n{$conversation->summary}"];
+            return ['text' => "{$heading}\n{$conversation->summary}"];
         }
 
         $sections = [];
 
-        foreach (['facts' => 'حقايق عنه', 'decisions' => 'اتفقنا على', 'still_open' => 'لسه مفتوح'] as $key => $label) {
+        foreach (['facts' => 'اتقال', 'decisions' => 'اتفقنا على', 'still_open' => 'لسه مفتوح'] as $key => $label) {
             if ($structured[$key] !== []) {
                 $sections[] = "{$label}:\n- ".implode("\n- ", $structured[$key]);
             }
         }
 
-        return ['text' => $sections === [] ? null : "## ملخص المحادثة السابقة (الأقدم من الرسايل اللي تحت)\n".implode("\n", $sections)];
+        return ['text' => $sections === [] ? null : "{$heading}\n".implode("\n", $sections)];
     }
 
     /**
-     * @return array{contents: array, tokens: int, trimmed: bool, oldest_included_id: ?int}
+     * @return array{contents: array, tokens: int, trimmed: bool, oldest_included_id: ?int, summary_until_id: ?int}
      */
     private function buildL7(WhatsappConversation $conversation, object $turn): array
     {
@@ -434,6 +326,10 @@ class ContextBuilder
             ->orderByDesc('id');
 
         $budget = config('agent.context.recent_messages_tokens');
+        // Recent messages keep the talk natural; they are not a source of facts.
+        // Nothing vanishes: what the summary has not absorbed yet stays in
+        // view; the summary is asked to take everything before the last N.
+        $keepRaw = max(1, (int) config('agent.context.recent_messages_count', 8));
         $messages = [];
         $tokens = 0;
         $trimmed = false;
@@ -454,11 +350,17 @@ class ContextBuilder
 
         $messages = array_reverse($messages);
 
+        // Where the summary should reach: the last N raw messages stay raw,
+        // and whatever the token budget cut is summarized too.
+        $oldestIncluded = $messages === [] ? null : $messages[0]['message']->id;
+        $lastRaw = count($messages) > $keepRaw ? $messages[count($messages) - $keepRaw]['message']->id : null;
+
         return [
             'contents' => array_column($messages, 'content'),
             'tokens' => $tokens,
             'trimmed' => $trimmed,
-            'oldest_included_id' => $messages === [] ? null : $messages[0]['message']->id,
+            'oldest_included_id' => $oldestIncluded,
+            'summary_until_id' => $oldestIncluded === null ? null : max($oldestIncluded, $lastRaw ?? $oldestIncluded),
         ];
     }
 
@@ -526,7 +428,7 @@ class ContextBuilder
     }
 
     /** @return array{contents: array, tokens: int} */
-    private function buildL8(WhatsappConversation $conversation, object $turn): array
+    private function buildL8(WhatsappConversation $conversation, object $turn, array $facts = []): array
     {
         // CTX-005: the bot's own reply shares the turn_id; a turn retried
         // after it was sent showed the model that reply as customer text.
@@ -627,12 +529,19 @@ class ContextBuilder
         }
 
         // Replay of conversation 206: "اخويا عنده ٢٥ وشغال نجار" then "لا هو مش
-        // شغال دلوقتي" - the correction was never recorded and the bot kept
-        // collecting the brother's name and phone. What is recorded about the
-        // person applying sits next to his new message, to be checked against it.
-        if ($contents !== [] && ($recorded = $this->recordedApplicantNote($conversation)) !== null) {
-            $contents[count($contents) - 1]['parts'][] = ['type' => 'text', 'text' => $recorded];
-            $tokens += TokenEstimator::estimate($recorded);
+        // شغال دلوقتي" - the correction was never recorded. What is recorded is
+        // in the facts (`applicant`, `work`); this only reminds the agent, next to
+        // his newest message, to check that message against it. Measured in
+        // Phase 1: with the reminder only in the long instructions the agent
+        // recorded his work less often and fewer applications opened.
+        if ($contents !== []) {
+            $note = isset($facts['work']) || isset($facts['applicant'])
+                ? '[ملاحظة داخلية، ما تتقالش له ولا تقول إنك مسجل حاجة: لو رسالته دي بتغيّر مين اللي هيقدّم أو شغله (شغال/لأ، متأمن/لأ، نوع الشغل)، نادي record_work_profile بكلامه الجديد قبل الرد]'
+                // nothing recorded yet: a real cafe owner said "انا صاحب قهوة" in his first message and was asked
+                // "صاحبها ولا شغال فيها؟" because the first reply came before any record
+                : '[ملاحظة داخلية، ما تتقالش له: لو رسالته فيها شغله أو إنه ست/راجل أو جنسيته أو مين هيقدّم، نادي record_work_profile بكلامه قبل الرد، ومتسألوش على حاجة قالها]';
+            $contents[count($contents) - 1]['parts'][] = ['type' => 'text', 'text' => $note];
+            $tokens += TokenEstimator::estimate($note);
         }
 
         // Owner 2026-10-06: "بكام الهوجن 3 وبتقسطوا على كام سنة وفين الفرع؟"
@@ -661,56 +570,6 @@ class ContextBuilder
         $questions = array_filter($pieces, fn ($p) => preg_match('/(?:^|\s)'.self::QUESTION_WORDS.'(?:\s|$)/u', trim($p)));
 
         return count($questions) >= 2;
-    }
-
-    /**
-     * Owner 2026-10-05: the whole list once, when the application opens;
-     * then "تمام ابعتلي" + the next missing thing. With every list in front
-     * of it on every turn the model kept re-sending them all. Once a reply
-     * went after the application opened, only next_step stays.
-     */
-    private function afterFullList(WhatsappConversation $conversation, ?array $snapshot): ?array
-    {
-        if ($snapshot === null || ! isset($snapshot['application_id'])) {
-            return $snapshot;
-        }
-
-        $openedAt = Application::whereKey($snapshot['application_id'])->value('created_at');
-        $sent = $openedAt && WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
-            ->where('direction', 'outgoing')->where('sender_type', 'bot')->where('created_at', '>=', $openedAt)->exists();
-
-        if (! $sent) {
-            return $snapshot + ['full_list_sent' => false];
-        }
-
-        $next = $snapshot['next_step']['key'] ?? null;
-        unset($snapshot['full_list'], $snapshot['documents']['list']);
-
-        foreach (['fields', 'documents'] as $part) {
-            if (isset($snapshot[$part]['missing_hints'])) {
-                $snapshot[$part]['missing_hints'] = array_intersect_key($snapshot[$part]['missing_hints'], array_flip(array_filter([$next])));
-            }
-        }
-
-        return $snapshot + ['full_list_sent' => true];
-    }
-
-    private function recordedApplicantNote(WhatsappConversation $conversation): ?string
-    {
-        $work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id);
-
-        if ($work === null) {
-            return null;
-        }
-
-        $working = match ($work['working_now'] ?? 'unknown') {
-            'yes' => 'شغال', 'no' => 'مش شغال', 'not_yet' => 'لسه هيشتغل', default => 'مش معروف',
-        };
-
-        // "أنا مسجل كلامك عن والدتك" was said to him from this note: it is marked as not for him
-        return '[ملاحظة داخلية، ما تتقالش له ولا تقول إنك مسجل حاجة - اللي هيقدّم = '.\App\Domain\Applications\Applicant::label(\App\Domain\Applications\Applicant::fromProfile($work))
-            ." · شغله: {$working}".(filled($work['evidence'] ?? null) ? ' (من كلامه: "'.$work['evidence'].'")' : '')
-            .'. لو رسالته دي بتغيّر مين اللي هيقدّم أو شغله، نادي record_work_profile بكلامه الجديد قبل الرد.]';
     }
 
     /** "[العميل بعت لوكيشن: 30.04, 31.23 - اسم - عنوان]" or null when it is not a location. */

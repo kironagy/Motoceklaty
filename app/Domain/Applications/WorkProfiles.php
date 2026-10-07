@@ -66,10 +66,29 @@ class WorkProfiles
         return ['ok' => true, 'profile' => $profile];
     }
 
+    /** The customer said he cannot bring his work papers at all: the card-only route was taken on those words. */
+    public function markCannotBringPapers(int $conversationId): void
+    {
+        $conversation = WhatsappConversation::find($conversationId);
+        $profile = ($conversation?->state ?? [])[self::STATE_KEY] ?? null;
+
+        if ($conversation && is_array($profile) && ($profile['cannot_bring_work_papers'] ?? false) !== true) {
+            $conversation->update(['state' => array_merge($conversation->state ?? [], [self::STATE_KEY => ['cannot_bring_work_papers' => true] + $profile])]);
+        }
+    }
+
     /** @return array<string, mixed> */
     public static function clean(array $r): array
     {
         $pick = fn (string $key, array $allowed, string $default) => in_array($r[$key] ?? null, $allowed, true) ? $r[$key] : $default;
+
+        // business_owner IS "owns the place" (the tool's own definition). Two real customers 2026-10-07
+        // said "انا صاحبه" twice and were asked "صاحبه ولا شغال فيه؟" again because only the type was recorded.
+        $relation = $pick('relation_to_workplace', ['owner', 'works_for_someone', 'independent', 'unknown'], 'unknown');
+
+        if ($relation === 'unknown' && ($r['customer_type'] ?? null) === 'business_owner') {
+            $relation = 'owner';
+        }
 
         return [
             'applicant' => $pick('applicant', ['customer', 'someone_else'], 'customer'),
@@ -82,7 +101,7 @@ class WorkProfiles
             'occupation' => trim((string) ($r['occupation'] ?? '')),
             'evidence' => trim((string) ($r['evidence'] ?? '')),
             'working_now' => $pick('working_now', ['yes', 'no', 'not_yet', 'unknown'], 'unknown'),
-            'relation_to_workplace' => $pick('relation_to_workplace', ['owner', 'works_for_someone', 'independent', 'unknown'], 'unknown'),
+            'relation_to_workplace' => $relation,
             'insured' => $pick('insured', ['yes', 'no', 'unknown'], 'unknown'),
             'sector' => $pick('sector', ['government', 'private', 'unknown'], 'unknown'),
             'could_be_government' => (bool) ($r['could_be_government'] ?? false),

@@ -110,10 +110,9 @@ class WorkClassification
                 return ['code' => 'FEMALE_FREE_INCOME_NOT_ACCEPTED', 'hint' => ''];
             }
 
-            if (! $r['cannot_bring_work_papers'] && $r['customer_type'] !== 'self_employed') {
-                return ['code' => 'CARD_ONLY_LAST_RESORT', 'hint' => ''];
-            }
-
+            // The route call IS his declaration: the agent names it explicitly and the words behind it were
+            // checked against his real messages (statedQuote). Real customers 2026-10-07 stayed stuck because a
+            // second, separate record call was needed first and the model did not make it.
             return null;
         }
 

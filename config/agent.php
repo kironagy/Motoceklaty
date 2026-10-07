@@ -296,14 +296,22 @@ return [
         // summary (L6). The current turn (L8) is never cut. 4,000 tokens
         // = about 60-80 short WhatsApp lines.
         'recent_messages_tokens' => env('AGENT_CONTEXT_RECENT_MESSAGES_TOKENS', 4000),
+
+        // Phase 1: raw messages that stay raw once summarized - conversation
+        // for tone and continuity, never a source of facts. Older talk is
+        // the summary (context only); what is true is in the facts. A
+        // message the summary has not absorbed yet is never hidden: the
+        // summarizer is triggered (agent.summary) by messages older than
+        // these N, so a lower AGENT_SUMMARY_TRIGGER_MESSAGES shrinks the window.
+        'recent_messages_count' => env('AGENT_CONTEXT_RECENT_MESSAGES_COUNT', 8),
     ],
 
     'summary' => [
         // CTX-010: the summarizer runs once this many tokens of messages
         // fell out of the L7 window since the last summary.
         'trigger_tokens' => env('AGENT_SUMMARY_TRIGGER_TOKENS', 1500),
-        // Legacy count trigger (either one is enough). No default.
-        'trigger_messages' => env('AGENT_SUMMARY_TRIGGER_MESSAGES'),
+        // Messages older than the last agent.context.recent_messages_count raw ones that the summary has not absorbed yet (either trigger is enough).
+        'trigger_messages' => env('AGENT_SUMMARY_TRIGGER_MESSAGES', 6),
         // Items kept per section of the structured summary.
         'max_items' => 8,
     ],

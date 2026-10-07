@@ -98,7 +98,7 @@ class ContextBuilderTest extends TestCase
         $this->assertStringContainsString('بوكسر 150', $request->system);
         $this->assertStringContainsString((string) $application->id, $request->system);
         $this->assertStringNotContainsString('إرشاد مرحلة التحصيل', $request->system);
-        $this->assertStringContainsString('ملخص المحادثة السابقة', $request->system);
+        $this->assertStringContainsString('## الكلام الأقدم (للسياق بس', $request->system);
     }
 
     public function test_stage_scoped_memory_requires_matching_status_and_an_active_application(): void

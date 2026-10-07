@@ -219,6 +219,9 @@ class GetInstallmentOfferTool implements ReadTool
                 // the owner: the total is the motorcycle's - down payment (if any) + every installment.
                 // The admin fee is said on its own, never added to it.
                 'total_paid' => round($o['down_payment'] + $o['monthly_payment'] * $o['months']),
+                // Real customers 2026-10-07: "ايه أقل مقدم؟" was answered with the admin fee (2,730) and the
+                // next offer changed without a word. The minimum is the plan's, the admin fee is a fee.
+                'minimum_down_payment' => $o['minimum_down_payment'] ?? 0,
                 'breakdown' => $this->breakdown($machine, $o),
                 'line' => $this->line($o),
                 // internal: pass these to update_application_selection when he picks this offer - never say them
@@ -226,6 +229,8 @@ class GetInstallmentOfferTool implements ReadTool
                 'down_payment' => $o['down_payment'],
                 'plan_id' => $o['plan_id'],
             ], $shown),
+            // the one honest sentence for "what is the minimum down payment / what if I pay some now"
+            'down_payment_note' => 'المصاريف الإدارية رسوم مش مقدم. أقل مقدم هو minimum_down_payment؛ لو العميل حب يدفع مقدم أكتر القسط بيقل - احسبها بـ down_payment وقوله القسط الجديد والمصاريف الجديدة صراحة.',
             // once with the offer, or when he asks (owner's instructions)
             'first_payment' => self::firstPaymentLine(),
             // the owner's wording of why installments cost more than cash

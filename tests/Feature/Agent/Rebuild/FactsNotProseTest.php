@@ -84,7 +84,7 @@ class FactsNotProseTest extends TestCase
             'decided_by', 'AGE_CHANGED_AFTER_REFUSAL', 'age_checked', 'papers', 'cap_reason', 'difference_in_down_payment', 'line',
             'why_installment_costs_more', 'rejection_reason', 'earnings_months', 'id_shows_job', 'differs_from_file', 'different_person',
             'identity_replaced', 'not_documents', 'address_missing_place', 'ambiguous_names', 'not_carried', 'similar_available', 'closest_to',
-            'customer_is_after', 'vehicle_count', 'source_kind', 'no_branch_in_requested_area', 'nearest_branch', 'CUSTOMER_CONFIRMATION_REQUIRED',
+            'deal.interest', 'vehicle_count', 'source_kind', 'no_branch_in_requested_area', 'nearest_branch', 'CUSTOMER_CONFIRMATION_REQUIRED',
             'resubmitted', 'reopened', 'credit_record_final', 'call_requested', 'both_sides', 'ask_together', 'skipped_after_two_asks',
         ]));
 

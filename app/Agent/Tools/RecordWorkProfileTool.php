@@ -35,7 +35,7 @@ class RecordWorkProfileTool implements WriteTool
 
         return [
             'type' => 'object',
-            'required' => ['evidence', 'work_stated', 'customer_type', 'working_now'],
+            'required' => ['evidence', 'work_stated', 'customer_type', 'working_now', 'applicant_gender'],
             'properties' => [
                 'evidence' => ['type' => 'string', 'description' => 'His exact words about the work (checked against his messages).'],
                 'occupation' => ['type' => 'string', 'description' => 'The work in a few Arabic words, as he described it.'],
@@ -45,7 +45,7 @@ class RecordWorkProfileTool implements WriteTool
                 'applicant_quote' => ['type' => 'string', 'description' => 'His exact words naming that person (checked against his messages).'],
                 'people_named' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => \App\Domain\Applications\Applicant::RELATIONS],
                     'description' => 'Every person his latest message names as the one who might apply, as he wrote them ("اخ اخويا حبيب صاحب" = brother, friend). A word that can be a person or a job ("صاحب" = friend, or owner) is a person unless he said what that person owns. A person he denies ("مش ابويا") is not listed.'],
-                'applicant_gender' => ['type' => 'string', 'enum' => ['male', 'female', 'unknown']],
+                'applicant_gender' => ['type' => 'string', 'enum' => ['male', 'female', 'unknown'], 'description' => 'Of the person APPLYING. female when the customer is a woman or the applicant is (انا ست / عايزة / بشتغلي / مراتي / أمي...) - read it from how he or she writes (feminine verb and adjective forms) as well as from what is said; male likewise (عايز / انا راجل / أبويا...). unknown ONLY when nothing in the conversation shows it. The owner\'s rule for women depends on it.'],
                 'applicant_nationality' => ['type' => 'string', 'enum' => ['egyptian', 'foreign', 'unknown'], 'description' => 'foreign = not Egyptian.'],
                 'working_now' => ['type' => 'string', 'enum' => ['yes', 'no', 'not_yet', 'unknown'], 'description' => 'no = not working/housewife/student; not_yet = has clearly not started.'],
                 'customer_type' => ['type' => 'string', 'enum' => WorkProfiles::CUSTOMER_TYPES, 'description' => 'employee = salaried AND insured; business_owner = OWNS the place ("شغال في محل" is not owning); self_employed = works, neither; pension; unknown.'],

@@ -29,7 +29,9 @@ class ContextMessagesTest extends TestCase
     /** @return list<string> every text part the model sees, in order */
     private function texts(array $contents): array
     {
-        return collect($contents)->flatMap(fn ($c) => collect($c['parts'])->where('type', 'text')->pluck('text'))->values()->all();
+        // internal notes to the agent ("[ملاحظة داخلية ...]") are not customer text
+        return collect($contents)->flatMap(fn ($c) => collect($c['parts'])->where('type', 'text')->pluck('text'))
+            ->reject(fn ($t) => str_starts_with((string) $t, '[ملاحظة داخلية'))->values()->all();
     }
 
     public function test_a_replayed_finished_turn_does_not_show_the_bots_reply_as_customer_text(): void

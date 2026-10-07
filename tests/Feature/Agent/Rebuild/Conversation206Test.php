@@ -236,15 +236,18 @@ class Conversation206Test extends TestCase
         $this->assertStringStartsWith('للأسف اللي هيقدّم لازم يكون شغال', $result->data['other_applicant_line']);
     }
 
-    public function test_what_is_recorded_about_the_person_sits_next_to_his_new_message(): void
+    public function test_what_is_recorded_about_the_person_is_in_the_facts_every_turn(): void
     {
         $conversation = $this->conversation();
         $this->says($conversation->id, 'اخويا هيقدم عنده ٢٥ وشغال نجار');
-        $this->profile($conversation, ['evidence' => 'شغال نجار', 'applicant' => 'someone_else', 'applicant_relation' => 'brother', 'applicant_quote' => 'اخويا هيقدم', 'working_now' => 'yes']);
+        $this->profile($conversation, ['evidence' => 'شغال نجار', 'applicant' => 'someone_else', 'applicant_relation' => 'brother', 'applicant_quote' => 'اخويا هيقدم', 'working_now' => 'yes', 'work_stated' => true, 'occupation' => 'نجار']);
 
-        $note = (new \ReflectionMethod(\App\Agent\Context\ContextBuilder::class, 'recordedApplicantNote'))->invoke(app(\App\Agent\Context\ContextBuilder::class), $conversation);
+        $facts = app(\App\Agent\Context\Facts\ConversationFacts::class)->for($conversation->refresh())->facts;
 
-        $this->assertStringContainsString('اللي هيقدّم = أخوك · شغله: شغال (من كلامه: "شغال نجار")', $note);
+        $this->assertSame('أخوك', $facts['applicant']['person']);
+        $this->assertSame('yes', $facts['work']['working_now']);
+        $this->assertSame('شغال نجار', $facts['work']['his_words']);
+        $this->assertSame('نجار', $facts['work']['occupation']);
     }
 
     public function test_offering_options_is_not_naming_a_person(): void
@@ -309,29 +312,20 @@ class Conversation206Test extends TestCase
         $this->assertStringStartsWith('للأسف اللي هيقدّم لازم يكون شغال', $result->data['other_applicant_line']);
     }
 
-    public function test_the_full_list_once_then_only_the_next_thing(): void
+    public function test_the_full_list_is_told_once_and_then_it_is_known(): void
     {
-        // Owner 2026-10-05: everything in the first message, then "تمام" + the next missing thing
+        // Owner 2026-10-05: everything in the first message, then "تمام" + what is missing.
+        // The fact the agent reads is told_so_far.requirements_listed - no step, no list to hide.
         $conversation = $this->conversation();
         $type = CustomerType::create(['key' => 'self_employed', 'label' => 'عامل حر']);
         $application = Application::create(['customer_id' => $conversation->customer_id, 'origin_conversation_id' => $conversation->id, 'customer_type_id' => $type->id, 'status' => 'collecting']);
-        $builder = app(\App\Agent\Context\ContextBuilder::class);
-        $after = new \ReflectionMethod($builder, 'afterFullList');
-        $snapshot = ['application_id' => $application->id, 'full_list' => ['papers' => ['بطاقة'], 'data' => ['رقم التليفون']],
-            'documents' => ['list' => ['بطاقة']], 'fields' => ['missing_hints' => ['phone' => ['hint' => 'x'], 'address' => ['hint' => 'y']]],
-            'next_step' => ['type' => 'field', 'key' => 'phone']];
+        $told = app(\App\Agent\Context\Facts\ToldSoFar::class);
 
-        $first = $after->invoke($builder, $conversation, $snapshot);
-        $this->assertFalse($first['full_list_sent']);
-        $this->assertSame(['بطاقة'], $first['full_list']['papers']);
+        $this->assertArrayNotHasKey('requirements_listed', $told->for($conversation, $application));
 
         WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'outgoing', 'sender_type' => 'bot', 'type' => 'text', 'text' => 'المطلوب: ...']);
-        $later = $after->invoke($builder, $conversation, $snapshot);
 
-        $this->assertTrue($later['full_list_sent']);
-        $this->assertArrayNotHasKey('full_list', $later);
-        $this->assertArrayNotHasKey('list', $later['documents']);
-        $this->assertSame(['phone'], array_keys($later['fields']['missing_hints']));
+        $this->assertTrue($told->for($conversation, $application)['requirements_listed']);
     }
 
     public function test_the_same_long_reply_twice_is_stopped(): void

@@ -12,6 +12,9 @@ final class DocumentEquivalents
 {
     public const FOR = [
         'salary_slip' => ['insurance_print'],
+        // Owner's note for a shop owner: no tax card / commercial register = the sign (outside photo,
+        // required anyway) plus a photo of the inside of the shop.
+        'tax_card' => ['business_place_inside_photo'],
     ];
 
     /** @param  string[]  $accepted  accepted document keys; returns them plus every requirement they satisfy */

@@ -145,11 +145,12 @@ class DocumentBudgetTest extends TestCase
             ['image' => 2, 'document_type_key' => 'national_id_back', 'legibility' => 'good', 'confidence' => 0.9, 'fields' => []],
             ['image' => 3] + $this->slip(['full_name' => 'محمد احمد علي حسن', 'monthly_income' => '6000', 'salary_slip_date' => now()->subMonth()->toDateString()]),
             ['image' => 4, 'document_type_key' => '', 'legibility' => 'good', 'confidence' => 0.2, 'fields' => []],
-        ]]);
+        ]], ['document_type_key' => '', 'legibility' => 'good', 'confidence' => 0.2, 'fields' => []]);
+        // (the second answer: the bike the burst could not classify is read once on its own before it is called "not a document")
 
         $results = $this->process([$front, $back, $slip, $bike]);
 
-        $this->assertCount(1, $this->ai->requests());
+        $this->assertCount(2, $this->ai->requests());
         $request = $this->ai->requests()[0];
         $this->assertCount(4, collect($request->contents[0]['parts'])->where('type', 'inline_media'));
         $this->assertSame('array', $request->responseSchema['properties']['documents']['type']);
@@ -159,6 +160,29 @@ class DocumentBudgetTest extends TestCase
         $this->assertTrue($results[0]['accepted'], json_encode($results[0]['issues']));
         $this->assertTrue($results[2]['accepted'], json_encode($results[2]['issues']));
         $this->assertFalse($results[3]['accepted']);
+    }
+
+    public function test_a_photo_the_burst_could_not_classify_is_read_on_its_own_and_accepted(): void
+    {
+        // Real customers 2026-10-07: ID front + back sent together came back unclassified
+        // from the burst call and both were marked "not a document" for good.
+        $front = $this->photo('front');
+        $back = $this->photo('back');
+        $this->answers(
+            ['documents' => [
+                ['image' => 1, 'document_type_key' => '', 'legibility' => 'good', 'confidence' => 0.2, 'fields' => []],
+                ['image' => 2, 'document_type_key' => '', 'legibility' => 'good', 'confidence' => 0.2, 'fields' => []],
+            ]],
+            ['document_type_key' => 'national_id_front', 'legibility' => 'good', 'confidence' => 0.9, 'fields' => ['full_name' => 'محمد احمد علي حسن', 'national_id' => '29001010112345']],
+            ['document_type_key' => 'national_id_back', 'legibility' => 'good', 'confidence' => 0.9, 'fields' => []],
+        );
+
+        $results = $this->process([$front, $back]);
+
+        $this->assertCount(3, $this->ai->requests());
+        $this->assertSame(['national_id_front', 'national_id_back'], array_column($results, 'detected_type'));
+        $this->assertTrue($results[0]['accepted'], json_encode($results[0]['issues']));
+        $this->assertNull(($back->refresh()->analysis ?? [])['not_a_document'] ?? null);
     }
 
     public function test_a_photo_the_burst_answer_left_out_is_read_on_its_own(): void

@@ -156,6 +156,7 @@ class UpdateApplicationSelectionTool implements WriteTool
 
         if ($cardOnly) {
             \App\Domain\Applications\CardOnlyRoute::mark($application, (string) ($args['customer_type_quote'] ?? ''));
+            app(\App\Domain\Applications\WorkProfiles::class)->markCannotBringPapers($ctx->conversationId);
 
             if (! isset($args['plan_id']) && ! isset($args['months']) && ! isset($args['down_payment'])) {
                 \App\Domain\Applications\CardOnlyRoute::reprice($application);
