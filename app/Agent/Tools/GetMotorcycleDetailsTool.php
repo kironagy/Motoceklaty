@@ -21,7 +21,8 @@ class GetMotorcycleDetailsTool implements ReadTool
         return 'Authoritative details and prices for 1-3 motorcycles. Use before stating any price, spec, '
             .'color or offer, or when comparing models - call it again in every turn the customer asks about a spec, even if an earlier turn called it. '
             .'`specifications` is the showroom\'s own spec sheet (key: value) and wins over any other source. '
-            .'Do not use when you only need to know that a model exists.';
+            .'Do not use when you only need to know that a model exists. With 2-3 models `difference` is their real difference from the showroom data - '
+            .'when he asks "ايه الفرق؟" say it in your words and add nothing it does not hold.';
     }
 
     public function inputSchema(): array
@@ -75,6 +76,6 @@ class GetMotorcycleDetailsTool implements ReadTool
                 .($own !== [] ? '، ومكتوب فيها: '.implode('، ', $own) : '');
         }
 
-        return implode(' - ', $parts).'. (Say only this: anything not here is not known.)';
+        return implode(' - ', $parts).'.';
     }
 }

@@ -408,7 +408,7 @@ class ReplyGuard
 
         // Server comparison 2026-10-07: "ميعاد أول قسط بيكون بعد شهر" - from the model's head (45 days here,
         // 30 on the server). When the first installment's timing is told, it is the configured number.
-        if (preg_match('/(?:أول|اول)\s+(?:قسط|دفع[ةه])[^.؟?\n]{0,40}(?:يوم|أيام|ايام|شهر|اسبوع|أسبوع)/u', $replyText)
+        if (preg_match('/(?:أول|اول)\s+(?:قسط|دفع[ةه])[^.؟?\n]{0,40}(?:يوم|أيام|ايام|شهر|اسبوع|أسبوع)|(?:ميعاد|موعد)\s+(?:أول|اول)\s+(?:قسط|دفع[ةه])|(?:أول|اول)\s+(?:قسط|دفع[ةه])\s+(?:\S+\s+)?(?:بيبدأ|بيبدا|هيبدأ|هيبدا|يبدأ|يبدا|بيتحدد|هيتحدد|بيكون|هيكون|بينزل)/u', $replyText)
             && ! str_contains(strtr($replyText, ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9']),
                 (string) (int) config('agent.installments.first_payment_after_days', 45))) {
             $this->detail = 'Say it exactly: "'.\App\Agent\Tools\GetInstallmentOfferTool::firstPaymentLine().'".';

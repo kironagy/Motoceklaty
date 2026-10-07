@@ -275,6 +275,7 @@ class OwnerReportFixesTest extends TestCase
         config(['agent.installments.first_payment_after_days' => 30]);
 
         $this->assertSame('FIRST_PAYMENT_NOT_SOURCED', $this->check('ميعاد أول قسط بيكون بعد شهر من تاريخ الاستلام.', $conversation));
+        $this->assertSame('FIRST_PAYMENT_NOT_SOURCED', $this->check('ميعاد أول قسط بيتحدد بعد ما الطلب بيتقبل والزملاء بيبلغوك.', $conversation));
         $this->assertNotSame('FIRST_PAYMENT_NOT_SOURCED', $this->check('أول قسط بيبدأ بعد 30 يوم من الاستلام.', $conversation));
     }
 
