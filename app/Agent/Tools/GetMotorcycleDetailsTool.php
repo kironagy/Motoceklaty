@@ -53,6 +53,28 @@ class GetMotorcycleDetailsTool implements ReadTool
             return ToolResult::error('UNKNOWN_MOTORCYCLE', 'Unknown id(s): '.implode(', ', $result['unknown_ids']));
         }
 
-        return ToolResult::ok(['items' => $result['items']]);
+        return ToolResult::ok(['items' => $result['items']] + (count($result['items']) > 1 ? ['difference' => $this->difference($result['items'])] : []));
+    }
+
+    /**
+     * Server comparison 2026-10-07: "ايه الفرق بين ال43 وال50؟" got "جودة الخامات والتقفيل" or nothing.
+     * The difference is computed from the showroom's own data - price, size, and what each one lists
+     * that the other does not - and handed over as one line to say.
+     */
+    private function difference(array $items): string
+    {
+        $features = fn (array $item) => array_values(array_filter(array_map('trim', (array) ($item['features'] ?? []))));
+        $parts = [];
+
+        foreach ($items as $item) {
+            $others = collect($items)->reject(fn ($o) => $o['id'] === $item['id'])->flatMap($features)->all();
+            $own = array_values(array_diff($features($item), $others));
+            $price = $item['is_offer'] && $item['new_price'] ? $item['new_price'] : $item['cash_price'];
+            $parts[] = trim($item['name']).' سعرها كاش '.number_format((float) $price).' جنيه'
+                .($item['cc'] ? '، '.$item['cc'].' سي سي' : '')
+                .($own !== [] ? '، ومكتوب فيها: '.implode('، ', $own) : '');
+        }
+
+        return implode(' - ', $parts).'. (Say only this: anything not here is not known.)';
     }
 }

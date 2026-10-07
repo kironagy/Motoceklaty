@@ -915,8 +915,10 @@ class ReplyGuard
             return null;
         }
 
-        // a spec a tool returned (fuel use, parts) backs a plain statement of it
-        return str_contains($toolResultsBlob, trim($m[0])) ? null : trim($m[0]);
+        // a spec a tool returned (fuel use, parts) backs a plain statement of it ("واقتصادية" = "اقتصادية")
+        $claim = trim(preg_replace('/^(?:و|،)\s*/u', '', trim($m[0])));
+
+        return str_contains($toolResultsBlob, $claim) ? null : trim($m[0]);
     }
 
     private function womanAddressedAsMan(string $replyText, WhatsappConversation $conversation): bool
@@ -1904,7 +1906,10 @@ class ReplyGuard
             array_filter($contents, fn ($c) => $earlierRepliesCount && ($c['role'] ?? null) === 'user')
         ));
 
-        $haystackNumbers = $this->extractNumbers($toolResultsBlob.' '.$sourcedSystem.' '.$customerText);
+        // comparison 2026-10-07: "اول قسط امتى؟" before any offer - the configured days are a source only for a
+        // reply about the first installment (in the context they made "40-45 كيلو في اللتر" look sourced)
+        $firstPayment = preg_match('/(?:أول|اول)\s+(?:قسط|دفع[ةه])/u', $replyText) ? ' '.\App\Agent\Tools\GetInstallmentOfferTool::firstPaymentLine() : '';
+        $haystackNumbers = $this->extractNumbers($toolResultsBlob.' '.$sourcedSystem.' '.$customerText.$firstPayment);
 
         // "في حدود 60 او 65" is 60,000-65,000: an Egyptian budget is said in
         // thousands, and repeating it back is not an invented number.

@@ -282,4 +282,27 @@ class OwnerReportFixesTest extends TestCase
     {
         $this->assertSame('UNSOURCED_SALES_CLAIM', $this->check('الدايو 2 مناسبة جدا وعملية للمشاوير.', $this->conversation()));
     }
+
+    public function test_two_models_come_with_their_difference_from_the_showroom_data(): void
+    {
+        $brand = Brand::create(['name' => 'هوجان', 'image' => 'x.png']);
+        $a = Machine::create(['name' => 'هوجن 4 استيراد', 'brand_id' => $brand->id, 'cash_price' => 50000, 'is_active' => true, 'features' => [['title' => 'استيراد بالكامل']]]);
+        $b = Machine::create(['name' => 'هوجن 4', 'brand_id' => $brand->id, 'cash_price' => 43000, 'is_active' => true, 'features' => [['title' => 'ماتور استيراد شاسيه متين']]]);
+        $ctx = new \App\Agent\Tools\ToolContext(1, 1, null, 1, 1, new \App\Agent\Runtime\TurnResultBuilder());
+
+        $difference = app(\App\Agent\Tools\GetMotorcycleDetailsTool::class)->execute(['motorcycle_ids' => [$a->id, $b->id]], $ctx)->data['difference'];
+
+        $this->assertStringContainsString('استيراد بالكامل', $difference);
+        $this->assertStringContainsString('ماتور استيراد شاسيه متين', $difference);
+        $this->assertStringContainsString('50,000', $difference);
+    }
+
+    public function test_the_first_installment_days_source_only_a_reply_about_the_first_installment(): void
+    {
+        $conversation = $this->conversation();
+        config(['agent.installments.first_payment_after_days' => 45]);
+
+        $this->assertNull($this->check('أول قسط بيبدأ بعد 45 يوم من الاستلام.', $conversation));
+        $this->assertSame('UNVERIFIED_NUMBER', $this->check('دي بتعمل 40-45 كيلو في اللتر.', $conversation));
+    }
 }
