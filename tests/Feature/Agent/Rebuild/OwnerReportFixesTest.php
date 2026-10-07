@@ -321,4 +321,20 @@ class OwnerReportFixesTest extends TestCase
             $this->assertNotEmpty($result['ambiguous_names'] ?? [], $query);
         }
     }
+
+    public function test_a_name_sold_by_two_brands_is_never_picked_for_him(): void
+    {
+        $conversation = $this->conversation();
+        $search = [['name' => 'search_motorcycles', 'ok' => true, 'data' => ['items' => [], 'ambiguous_names' => [['هوجان (id 4)', 'فيجوري (id 53)']]]]];
+        $guard = app(ReplyGuard::class);
+        config(['agent.guard.number_min_value' => 1000]);
+
+        $this->assertSame('AMBIGUOUS_MODEL_NOT_ASKED', $guard->check(['messages' => ['أيوه موجودة يا باشا. تحب أحسبلك القسط على كام شهر؟']], $conversation, '', [], $search));
+        $this->assertNotSame('AMBIGUOUS_MODEL_NOT_ASKED', $guard->check(['messages' => ['عندنا L250 من هوجان ومن فيجوري، تقصد أنهي فيهم؟']], $conversation, '', [], $search));
+    }
+
+    public function test_a_good_choice_pitch_is_refused(): void
+    {
+        $this->assertSame('UNSOURCED_SALES_CLAIM', $this->check('تمام، اختيار موفق. تحب أحسبلك القسط؟', $this->conversation()));
+    }
 }

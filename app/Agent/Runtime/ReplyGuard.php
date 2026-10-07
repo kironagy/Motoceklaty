@@ -416,6 +416,14 @@ class ReplyGuard
             return 'FIRST_PAYMENT_NOT_SOURCED';
         }
 
+        // Owner 2026-10-08: "عندك L250؟" - Hogan and Vigory both sell one. The search flags it; a reply that
+        // names one brand's model or price without the other, before he said which, picked for him.
+        if (($ambiguous = $this->ambiguityIgnored($replyText, $outcomes)) !== null) {
+            $this->detail = 'The name is sold by '.$ambiguous.'. Ask him which one (or give both prices) - do not pick one.';
+
+            return 'AMBIGUOUS_MODEL_NOT_ASKED';
+        }
+
         // Owner 2026-10-07: "حضرتك تفضل أي مدة؟ يمكنك..." - parts of replies came out in فصحى.
         if (($formal = $this->formalArabic($replyText)) !== null) {
             $this->detail = 'Formal word: "'.$formal.'" - say it the way an Egyptian salesman talks on WhatsApp.';
@@ -909,7 +917,8 @@ class ReplyGuard
             .'|(?:خيار|اختيار)\s+(?:ممتاز|مثالي|هايل|رائع|كويس\s+جدا)|(?:أقوى|اقوى|أمتن|امتن|أجمد|اجمد|أتقل|اتقل)\s+(?:من|في)|(?:ال)?شغل\s+(?:ال)?شاق'
             .'|(?:مناسب[ةه]?|أنسب|انسب)\s+(?:أكتر\s+)?(?:لل|ل)(?:مشاوير|شغل|استخدام)'
             // server comparison 2026-10-07: "مناسبة جدا وعملية"
-            .'|(?:مناسب[ةه]?|عملي[ةه]?|ممتاز[ةه]?)\s+(?:جدا|جدًا|جداً|أوي|اوي)|(?:و|،\s*)(?:عملي[ةه]|اقتصادي[ةه]|مريح[ةه])(?![\p{L}])/u';
+            .'|(?:مناسب[ةه]?|عملي[ةه]?|ممتاز[ةه]?)\s+(?:جدا|جدًا|جداً|أوي|اوي)|(?:و|،\s*)(?:عملي[ةه]|اقتصادي[ةه]|مريح[ةه])(?![\p{L}])'
+            .'|(?:اختيار|اختيارك)\s+(?:موفق|صح|في\s+محله|هايل|جامد)/u';
 
         if (! preg_match($claims, $replyText, $m)) {
             return null;
@@ -1680,6 +1689,34 @@ class ReplyGuard
 
             if ($hasId && preg_match($words['national_id'], $sentence)) {
                 return 'national_id';
+            }
+        }
+
+        return null;
+    }
+
+    private function ambiguityIgnored(string $replyText, array $outcomes): ?string
+    {
+        $catalog = app(CatalogMentions::class);
+        $reply = $catalog->normalize($replyText);
+
+        foreach ($outcomes as $outcome) {
+            if ($outcome['name'] !== 'search_motorcycles' || empty($outcome['data']['ambiguous_names'])) {
+                continue;
+            }
+
+            foreach ((array) $outcome['data']['ambiguous_names'] as $group) {
+                $brands = array_map(fn ($entry) => trim(preg_replace('/\(id\s*\d+\)/u', '', (string) $entry)), (array) $group);
+                $named = array_filter($brands, function ($brand) use ($reply, $catalog) {
+                    $brand = $catalog->normalize($brand);
+
+                    return $brand !== '' && str_contains($reply, $brand);
+                });
+
+                // he is asked ("أنهي", "تقصد") or shown every brand
+                if (count($named) < count($brands) && ! preg_match('/أنهي|انهي|تقصد|قصدك|ولا\s/u', $replyText)) {
+                    return implode(' and ', $brands);
+                }
             }
         }
 
