@@ -116,6 +116,10 @@ class Conversation206Test extends TestCase
         EligibilityRule::create(['customer_type_id' => null, 'rule_type' => 'age_range', 'params' => ['min' => 21, 'max' => 62], 'is_active' => true]);
         $conversation = $this->conversation();
         $tool = app(CheckEligibilityTool::class);
+        // ages are checked only when he wrote them
+        $this->says($conversation->id, 'انا عندي 20 سنة');
+        $this->says($conversation->id, 'اخويا عنده 21');
+        $this->says($conversation->id, 'لا انا 22');
 
         $refusal = $tool->execute(['age' => 20], $this->ctx($conversation));
         $this->assertSame('not_eligible', $refusal->data['status']);

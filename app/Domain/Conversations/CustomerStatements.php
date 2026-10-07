@@ -196,4 +196,21 @@ class CustomerStatements
 
         return trim(preg_replace('/[^\p{L}\p{N}]+/u', ' ', $text));
     }
+
+    /**
+     * Real-customer run 2026-10-07: a pensioner who never said his age was refused at "65" - the
+     * model guessed it from "يا ابني". An age is his only when the number is in his own messages.
+     */
+    public function saidNumber(int $conversationId, int $number): bool
+    {
+        foreach ($this->recentTexts($conversationId) as $text) {
+            $text = strtr((string) $text, ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9']);
+
+            if (preg_match('/(?<!\d)'.$number.'(?!\d)/u', $text)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

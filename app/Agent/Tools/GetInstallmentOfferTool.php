@@ -156,7 +156,10 @@ class GetInstallmentOfferTool implements ReadTool
 
         // A 62-year-old was offered 3 years; the last installment must fall
         // by the age limit (eligibility rule max_age_at_end).
-        $maxMonths = $this->maxMonthsForAge(isset($args['age']) ? (int) $args['age'] : $this->applicantAge($ctx));
+        // an age he never wrote is a guess (real-customer run 2026-10-07): only his words or his ID count
+        $statedAge = isset($args['age']) && app(\App\Domain\Conversations\CustomerStatements::class)->saidNumber($ctx->conversationId, (int) $args['age'])
+            ? (int) $args['age'] : null;
+        $maxMonths = $this->maxMonthsForAge($statedAge ?? $this->applicantAge($ctx));
 
         if ($maxMonths !== null) {
             $tooLong = array_filter($offers, fn ($o) => $o['months'] > $maxMonths);

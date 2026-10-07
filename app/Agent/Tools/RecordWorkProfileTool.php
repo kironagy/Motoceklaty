@@ -39,6 +39,8 @@ class RecordWorkProfileTool implements WriteTool
             'properties' => [
                 'evidence' => ['type' => 'string', 'description' => 'His exact words about the work (checked against his messages).'],
                 'occupation' => ['type' => 'string', 'description' => 'The work in a few Arabic words, as he described it.'],
+                'job_title' => ['type' => 'string', 'description' => 'What he does exactly, his trade or role, from his words ("محاسب", "سواق نقل", "نجار مسلح", "عامل إنتاج", "كاشير"). "" when he only said a category - "موظف", "موظف في شركة", "صنايعي", "عامل", "شغال في مصنع" name no job.'],
+                'workplace_activity' => ['type' => 'string', 'description' => 'What the company/shop/factory he works at does, from his words ("شركة أدوية", "مصنع ملابس", "مطعم"), or "".'],
                 'work_stated' => ['type' => 'boolean', 'description' => 'His real work (or pension / not working) was said.'],
                 'applicant' => ['type' => 'string', 'enum' => ['customer', 'someone_else'], 'description' => 'someone_else = another person applies; then describe that person.'],
                 'applicant_relation' => ['type' => 'string', 'enum' => \App\Domain\Applications\Applicant::RELATIONS, 'description' => 'Who that person is to him, ONLY when his own words name that person (applicant_quote). Your guess, a bare "اه" to your own question, or two different people in his words ("اخ اخويا حبيب صاحب") = unclear - then ask him one short question: مين اللي هيقدّم؟'],

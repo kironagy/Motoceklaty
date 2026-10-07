@@ -354,6 +354,13 @@ class ConversationFactsTest extends TestCase
         $this->assertStringNotContainsString('موظف', str_replace('لا مش متأمن', '', preg_replace('/\\[ملاحظة.*\\]/u', '', $text))); // the note repeats no recorded value
     }
 
+    public function test_the_customer_reply_call_has_a_short_timeout_so_a_stalled_key_is_dropped_early(): void
+    {
+        $conversation = $this->conversation();
+
+        $this->assertSame(12, app(ContextBuilder::class)->build($this->turnFor($conversation, 'بكام؟'))->timeoutSeconds);
+    }
+
     public function test_a_customer_changing_his_answer_gives_the_latest_one(): void
     {
         $conversation = $this->conversation();

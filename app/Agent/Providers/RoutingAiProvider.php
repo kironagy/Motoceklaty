@@ -53,20 +53,27 @@ class RoutingAiProvider implements AiProvider
         }
 
         // One budget for the whole call, across keys and models.
-        $deadline = microtime(true) + (int) config('agent.provider_budget_seconds', 45);
+        // a document photo gets a longer budget: its reader and one fallback both get a real try
+        $deadline = microtime(true) + (int) config('agent.provider_budget_seconds', 45) * ($request->purpose === 'document' ? 1.5 : 1);
         $firstGemini = null;
 
         foreach ($models as $index => $model) {
+            // Real-customer run 2026-10-07: a clear tax card failed because the first model hung for the whole
+            // 45s budget and the next one never got its turn. While another model is left, one that has not
+            // answered in primary_timeout_seconds (documents: twice that - a photo takes longer) is given up on.
+            $cap = (int) config('agent.primary_timeout_seconds', 15) * ($request->purpose === 'document' ? 2 : 1);
+            $modelDeadline = $index < count($models) - 1 ? min($deadline, microtime(true) + $cap) : $deadline;
+
             try {
                 if (self::providerFor($model) === 'openai') {
-                    return $this->openai->chatWith($request, $model, $deadline);
+                    return $this->openai->chatWith($request, $model, $modelDeadline);
                 }
 
                 // Gemini's fallback thinking setting is for a Gemini model
                 // behind another Gemini model, as before GPT existed.
                 $firstGemini ??= $model;
 
-                return $this->gemini->chatWith($request, $model, isFallback: $model !== $firstGemini, deadline: $deadline);
+                return $this->gemini->chatWith($request, $model, isFallback: $model !== $firstGemini, deadline: $modelDeadline);
             } catch (AiProviderException $e) {
                 if (! $e->retryable || $index === count($models) - 1) {
                     throw $e;

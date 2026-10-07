@@ -95,7 +95,8 @@ class LegacyRequestProjector
             'request_type' => self::REQUEST_TYPE,
             'applicant_name' => $applicant['full_name'] ?? '',
             'applicant_phone' => $application->customer?->phone ?: ($applicant['phone'] ?? ''),
-            'applicant_phone_2' => $this->secondPhone($application, $applicant['phone'] ?? null),
+            // owner 2026-10-07: the second number he gave, else the typed one when it is not his WhatsApp number
+            'applicant_phone_2' => $this->secondPhone($application, $applicant['phone_2'] ?? null) ?? $this->secondPhone($application, $applicant['phone'] ?? null),
             'applicant_national_id' => $nationalId,
             'applicant_birthdate' => $applicantBirthdate?->toDateString(),
             'applicant_age_ok' => $this->ageOk($applicantBirthdate),
@@ -608,7 +609,7 @@ class LegacyRequestProjector
     {
         $profile = $this->workProfile($application, $applicant, $facts);
         $job = $profile['المهنة'] ?? $profile['الشغل بكلامه'] ?? (self::WORK_TYPE_LABELS[$applicant['work_type'] ?? ''] ?? null);
-        $place = $profile['مكان الشغل'] ?? null;
+        $place = $profile['مكان الشغل'] ?? $profile['نشاط مكان الشغل'] ?? null;
 
         if ($job === null) {
             return $place;
@@ -636,7 +637,12 @@ class LegacyRequestProjector
 
         $profile = [
             'نوع العميل' => trim((string) $application->customerType?->label) ?: null,
-            'المهنة' => filled($reading['occupation'] ?? null) ? $reading['occupation'] : $stated('job'),
+            // owner 2026-10-07: what he does exactly, then what he said
+            'المهنة' => filled($reading['job_title'] ?? null) ? $reading['job_title'] : (filled($reading['occupation'] ?? null) ? $reading['occupation'] : $stated('job')),
+            'نشاط مكان الشغل' => filled($reading['workplace_activity'] ?? null) ? $reading['workplace_activity'] : null,
+            // owner 2026-10-07: the tax card's business name he never wrote, and what he answered about it
+            'اسم النشاط في الورق ورد العميل' => ($paper = app(\App\Domain\Documents\BusinessNameCheck::class)->unstated($application))
+                ? '«'.$paper['name'].'» - رده: «'.(app(\App\Domain\Documents\BusinessNameCheck::class)->answer($application) ?? 'ما اتسألش').'»' : null,
             'الشغل بكلامه' => filled($reading['evidence'] ?? null) ? '«'.$reading['evidence'].'»' : (isset($memory['job']['quote']) ? '«'.$memory['job']['quote'].'»' : null),
             'نوع الشغل' => self::WORK_TYPE_LABELS[$applicant['work_type'] ?? ''] ?? null,
             'مكان الشغل' => $this->workPlaceName($application, $applicant, $facts) ?? $stated('workplace'),

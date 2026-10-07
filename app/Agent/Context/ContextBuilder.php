@@ -67,6 +67,10 @@ class ContextBuilder
         $request = new AiRequest(
             system: $system,
             contents: array_merge($l7['contents'], $l8['contents']),
+            // A customer reply healthy takes 2-4s. Real run 2026-10-07: Google stalled calls for 30s
+            // (then 15-20s each) while another model answered in 1.3s - a stalled call is dropped early
+            // and the next key/model takes over.
+            timeoutSeconds: (int) config('agent.reply_timeout_seconds', 12),
         );
 
         $manifest = [

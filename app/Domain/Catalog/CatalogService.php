@@ -186,8 +186,24 @@ class CatalogService
             ->values()->all();
     }
 
+    /** "العادية" / "المحلي": the plain version, not the import or second-grade one. */
+    private const PLAIN_WORDS = ['عادي', 'العادي', 'عاديه', 'العاديه', 'محلي', 'المحلي', 'الاساسي', 'اساسي'];
+
+    private const VARIANT_WORDS = ['استيراد', 'فرز', 'اصلي'];
+
     private function filterByNameQuery(Collection $machines, string $nameQuery): Collection
     {
+        // Owner simulation 2026-10-07: "دايو 2 العادية" listed دايو 2 and دايو 2 استيراد.
+        $words = preg_split('/\s+/u', ArabicTextNormalizer::normalize($nameQuery), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $plain = array_values(array_diff($words, self::PLAIN_WORDS));
+
+        if ($plain !== [] && count($plain) < count($words)) {
+            $found = $this->filterByNameQuery($machines, implode(' ', $plain));
+            $base = $found->reject(fn (Machine $m) => collect(self::VARIANT_WORDS)->contains(fn ($v) => str_contains(ArabicTextNormalizer::normalize((string) $m->name), $v)))->values();
+
+            return $base->isNotEmpty() ? $base : $found;
+        }
+
         $normalizedQuery = ArabicTextNormalizer::normalize($nameQuery);
 
         if ($normalizedQuery === '') {

@@ -43,7 +43,8 @@ class AgentSimulateCustomers extends Command
             }
 
             $answers = $messages['answers'] ?? [];
-            unset($messages['answers']);
+            $after = $messages['after'] ?? [];
+            unset($messages['answers'], $messages['after']);
 
             $this->info("== {$name}");
             $report[] = "## {$name}";
@@ -76,6 +77,12 @@ class AgentSimulateCustomers extends Command
                 // the script is done: he answers whatever the application still asks, until it is sent
                 if ($i === count($messages) - 1 && $answers !== []) {
                     $messages = array_merge($messages, $this->followUps($conversation, $answers));
+                }
+
+                // what he asks once the scripted part (and its application) is over
+                if ($i === count($messages) - 1 && $after !== []) {
+                    $messages = array_merge($messages, $after);
+                    $after = [];
                 }
             }
 
@@ -196,6 +203,30 @@ class AgentSimulateCustomers extends Command
                     'monthly_income' => 'مرتبي 9000', 'residence_ownership' => 'ملك',
                 ],
             ],
+            // Owner 2026-10-07: the problems he found testing the live bot
+            'owner-rates-durations' => [
+                'السلام عليكم عايز اقسط دايو 2',
+                'التقسيط بيبقى على كام سنة؟',
+                'الفايدة كام؟',
+                'طب خليها ٣٠٪ على السنتين',
+                'انا مش عايز مصاريف ادارية، احسبهالي من غيرها على سنتين',
+            ],
+            'owner-accountant-scooter' => [
+                'انا محاسب',
+                'عايز اسكوتر',
+                'ايه اللي عندك؟',
+            ],
+            'owner-employee-exact-job' => [
+                'السلام عليكم انا موظف في شركة ومتأمن عليا',
+                'عايز اقسط دايو 2 العادية على سنة',
+                'تمام عايز اقدم عليها',
+                'انا محاسب في شركة ادوية',
+            ],
+            'owner-craftsman-exact-job' => [
+                'انا صنايعي وعايز اقسط دايو 2 العادية على سنة',
+                'تمام عايز اقدم عليها',
+                'نجار مسلح',
+            ],
             'delivery-app-rider' => [
                 'عايز موتوسيكل اشتغل بيه على ديدي',
                 'بكام دايو 4 قسط',
@@ -217,6 +248,7 @@ class AgentSimulateCustomers extends Command
                     'delivery_app_profile' => ['البروفايل', array_slice($photos('ديدي وطلبات وغيره/اسكرين برنامج + اثبات دخل ٣ شهور', 9), 4, 4)],
                     'monthly_income' => 'بطلع حوالي 12 الف في الشهر', 'residence_ownership' => 'ايجار',
                 ],
+                'after' => ['هو اول قسط امتى؟', 'ما انا قدمت خلاص قبل كدا'],
             ],
             'shop-owner' => [
                 'السلام عليكم انا عندي قهوة وعايز اقسط مكنة',

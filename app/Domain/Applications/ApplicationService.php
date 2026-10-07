@@ -73,7 +73,9 @@ class ApplicationService
         // "الغي الطلب" then "لا خلاص كمّل": he is not asked for his ID and
         // address again - the application he cancelled comes back as it was.
         if ($reopened = $this->reopenWithdrawn($customer, $customerType, $machine, $plan, $downPayment, $applicant)) {
-            return ['application' => $reopened, 'created' => false, 'reopened' => true];
+            $this->defaultDownPayment($reopened);
+
+            return ['application' => $reopened->refresh(), 'created' => false, 'reopened' => true];
         }
 
         $application = Application::create([
@@ -97,7 +99,9 @@ class ApplicationService
             'data' => ['customer_type' => $customerType->key],
         ]);
 
-        return ['application' => $application, 'created' => true];
+        $this->defaultDownPayment($application);
+
+        return ['application' => $application->refresh(), 'created' => true];
     }
 
     /**
@@ -165,11 +169,36 @@ class ApplicationService
             ],
         ]);
 
+        $this->defaultDownPayment($application->refresh());
+
         $requiredAfter = collect($this->requirements->requirementsFor($application->refresh()->customerType)['documents'])
             ->where('required', true)->pluck('key');
         $noLongerRequired = $requiredBefore->diff($requiredAfter);
 
         return array_merge($selectionInvalidated, $this->supersedeDocumentsForKeys($application, $noLongerRequired->values()->all()));
+    }
+
+    /**
+     * A motorcycle and a plan are chosen but no down payment: the plan's own minimum is the down payment
+     * (0 unless the system or the financing cap asks for more), not a question to the customer. Real
+     * customers 2026-10-07 were asked "تحب تدفع كام مقدم؟" and an application sat blocked on it.
+     * What he says later (update_application_selection down_payment) replaces it.
+     */
+    private function defaultDownPayment(Application $application): void
+    {
+        $application->loadMissing(['machine', 'installmentPlan']);
+
+        if ($application->down_payment !== null || ! $application->machine || ! $application->installmentPlan) {
+            return;
+        }
+
+        $offers = app(\App\Domain\Installments\BestOfferService::class)
+            ->offers($application->machine, $application->customer_type_id, null, $application->installmentPlan->months);
+        $offer = collect($offers)->firstWhere('plan_id', $application->installmentPlan->id) ?? ($offers[0] ?? null);
+
+        if ($offer !== null) {
+            $application->update(['down_payment' => (float) $offer['down_payment']]);
+        }
     }
 
     private function reopenWithdrawn(Customer $customer, CustomerType $customerType, ?Machine $machine, ?InstallmentPlan $plan, ?float $downPayment, ?array $applicant = null): ?Application

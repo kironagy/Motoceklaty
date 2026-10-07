@@ -355,7 +355,9 @@ class ConversationFacts
         return array_map(function (array $row) {
             $asSubmitted = array_intersect_key($row, array_flip(['installment_price', 'monthly_installment', 'down_payment']));
 
-            return array_diff_key($row, $asSubmitted) + ($asSubmitted === [] ? [] : ['as_submitted' => $asSubmitted]);
+            // owner 2026-10-07: "اول قسط امتى؟" after applying had no source and the true answer was refused
+            return array_diff_key($row, $asSubmitted) + ($asSubmitted === [] ? [] : ['as_submitted' => $asSubmitted])
+                + ['first_payment' => \App\Agent\Tools\GetInstallmentOfferTool::firstPaymentLine()];
         }, $this->requestStatus->for($customer, $conversation));
     }
 

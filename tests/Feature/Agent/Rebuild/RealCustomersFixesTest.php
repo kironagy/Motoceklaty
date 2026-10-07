@@ -156,6 +156,23 @@ class RealCustomersFixesTest extends TestCase
         $this->assertSame('delivery_app_profile', $facts['application']['missing']['optional_documents'][0]['key']);
     }
 
+    public function test_offering_the_inside_photo_instead_of_the_tax_card_is_not_a_waiver(): void
+    {
+        $conversation = $this->conversation();
+        $application = $this->application($conversation, 'business_owner');
+        $this->require($application, 'tax_card');
+        $this->require($application, 'national_id_front');
+        $this->doc($application, 'national_id_front');
+
+        // Simulation 2026-10-07: this reply was cut down to "ابعتلي رقم التليفون"
+        $this->assertNull($this->check('لو مفيش بطاقة ضريبية ابعتلي صورة للمحل من جوا مع صورة اليافطة.', $conversation));
+        // skipping the paper with no substitute is still a waiver
+        $this->assertSame('REQUIRED_DOCUMENT_WAIVED', $this->check('مفيش مشكلة، بطاقة ضريبية مش شرط.', $conversation));
+        // the natural wording, with the article, used to slip through
+        $this->assertSame('REQUIRED_DOCUMENT_WAIVED', $this->check('مفيش مشكلة، البطاقة الضريبية مش شرط.', $conversation));
+        $this->assertSame('REQUIRED_DOCUMENT_WAIVED', $this->check('السجل التجاري اختياري.', $conversation));
+    }
+
     public function test_a_missing_paper_with_a_substitute_names_it_in_the_facts(): void
     {
         $conversation = $this->conversation();
@@ -236,5 +253,30 @@ class RealCustomersFixesTest extends TestCase
         $this->assertArrayHasKey('minimum_down_payment', $result->data['offers'][0]);
         $this->assertSame(0, (int) $result->data['offers'][0]['minimum_down_payment']);
         $this->assertStringContainsString('المصاريف الإدارية رسوم مش مقدم', $result->data['down_payment_note']);
+    }
+
+    public function test_choosing_a_plan_sets_the_plans_minimum_down_payment_instead_of_leaving_the_application_blocked(): void
+    {
+        $brand = \App\Models\Brand::create(['name' => 'B2', 'image' => 'b.jpg']);
+        $machine = \App\Models\Machine::create(['name' => 'دايو 2', 'brand_id' => $brand->id, 'cash_price' => 35500, 'installment_price' => 40000, 'is_active' => true, 'availability' => 'in_stock', 'type' => 'normal']);
+        $system = \App\Models\InstallmentSystem::create(['name' => 'S2', 'pricing_mode' => 'standard', 'plans' => [['months' => 24, 'interest' => 20]], 'administrative_fees' => 7]);
+        $machine->update(['installment_systems' => [$system->id]]);
+        $plan = \App\Models\InstallmentPlan::where('installment_system_id', $system->id)->where('months', 24)->firstOrFail();
+        $conversation = $this->conversation();
+        $application = $this->application($conversation, 'employee');
+
+        app(\App\Domain\Applications\ApplicationService::class)->updateSelection($application, $machine, $plan, null);
+
+        $this->assertSame(0.0, (float) $application->refresh()->down_payment);
+        $this->assertNotContains('down_payment', array_column(app(SnapshotService::class)->for($application)['blockers'], 'key'));
+
+        // an application OPENED with a plan gets it too (start_application does not go through updateSelection)
+        $other = $this->conversation('2013');
+        $started = app(\App\Domain\Applications\ApplicationService::class)->start($other->customer, $other->id, CustomerType::firstOrCreate(['key' => 'employee'], ['label' => 'e']), $machine, $plan, null);
+        $this->assertSame(0.0, (float) $started['application']->down_payment);
+
+        // what he says later wins
+        app(\App\Domain\Applications\ApplicationService::class)->updateSelection($application, null, null, 3000.0);
+        $this->assertSame(3000.0, (float) $application->refresh()->down_payment);
     }
 }

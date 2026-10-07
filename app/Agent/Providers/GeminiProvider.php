@@ -48,7 +48,14 @@ class GeminiProvider implements AiProvider
 
         foreach ($models as $index => $model) {
             try {
-                return $this->chatWith($request, $model, isFallback: $index > 0, deadline: $deadline);
+                // Simulation 2026-10-07: a hung flash-lite call waited the full 30s before the
+                // fallback model was tried - turns of 1-3 minutes. While another model is left,
+                // a model that has not answered in primary_timeout_seconds is given up on.
+                $attemptDeadline = $index < count($models) - 1
+                    ? min($deadline, microtime(true) + (int) config('agent.primary_timeout_seconds', 15))
+                    : $deadline;
+
+                return $this->chatWith($request, $model, isFallback: $index > 0, deadline: $attemptDeadline);
             } catch (AiProviderException $e) {
                 if (! $e->retryable || $index === count($models) - 1) {
                     throw $e;
@@ -190,7 +197,7 @@ class GeminiProvider implements AiProvider
                     // 2026-10-01/02: a 503 ("high demand") cooled each key for two
                     // minutes; a few busy turns put every key in cooldown and the
                     // bot answered nobody for minutes after Google had recovered.
-                    $manager->markError($modelRow, $body, 15);
+                    $manager->markError($modelRow, $body, 60);
                     $manager->refundReservation($modelRow);
                     $transientFailures++;
 

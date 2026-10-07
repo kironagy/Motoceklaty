@@ -64,6 +64,8 @@ class ProcessDocumentTool implements WriteTool
             'INVALID_FORMAT' => 'مقدرتش أقرا '.$label($issue['field'] ?? null).' كامل من الصورة - صوّرها تاني من قريب والكارت كله في الصورة.',
             'MISSING_DATA' => $label($issue['field'] ?? null).' مش ظاهر في الصورة - محتاجين صورة للمستند كله.',
             'WRONG_DOCUMENT' => 'دي مش الورقة المطلوبة دلوقتي.',
+            // our reading failed, not his photo
+            'OCR_UNAVAILABLE' => 'حصلت مشكلة عندنا في قراية الصورة دي (مش عيب فيها) - ابعتها تاني بعد شوية.',
             'NAME_MISMATCH', 'ID_MISMATCH' => 'البيانات اللي في الورقة دي مش زي البطاقة اللي اتبعتت قبل كده - الورقة دي بتاعة مين؟',
             default => null,
         };
@@ -179,6 +181,15 @@ class ProcessDocumentTool implements WriteTool
             $results[$result['media_id']] = $result;
         }
 
+        // Real-customer run 2026-10-07: the AI reading timed out on a clear tax card and he was told
+        // "محتاجين صورة أوضح". A reading that failed on our side is tried once more, alone.
+        foreach ($results as $mediaId => $r) {
+            if ($r !== null && ($r['status'] ?? null) === 'failed' && in_array('OCR_UNAVAILABLE', array_column($r['issues'] ?? [], 'code'), true)) {
+                \App\Models\ApplicationDocument::whereKey($r['document_id'] ?? 0)->delete();
+                $results[$mediaId] = $this->pipeline->process(MessageMedia::find($mediaId), $application->refresh(), $expectedByMedia[$mediaId] ?? null);
+            }
+        }
+
         $results = array_values($results);
 
         // QA 2026-10-04: front and back in one message, the back read first
@@ -235,6 +246,21 @@ class ProcessDocumentTool implements WriteTool
             $results = array_values($results);
         }
 
+        // Real-customer run 2026-10-07: the licence front was accepted and its blank back, sent with it,
+        // came back "rejected - not clear"; he was asked for the licence again. A rejected photo of a
+        // paper that is already accepted is an extra photo, not a missing paper.
+        $acceptedNow = \App\Models\ApplicationDocument::where('application_id', $application->id)->where('status', 'accepted')
+            ->pluck('detected_type_key')->filter()->all();
+        $results = array_map(fn (array $r) => ! ($r['accepted'] ?? false) && in_array($r['detected_type'] ?? null, $acceptedNow, true)
+            && ! isset($r['different_person'])
+            ? array_diff_key($r, ['rejection_reason' => 1, 'issues' => 1]) + ['status' => 'extra_photo', 'already_accepted' => true, 'ask_again' => false]
+            : $r, $results);
+
+        // Owner 2026-10-07: the paper's business name he never said is asked about now, not found by staff
+        if (($businessName = app(\App\Domain\Documents\BusinessNameCheck::class)->pending($application->refresh())) !== null) {
+            $askBusiness = 'البطاقة الضريبية باسم نشاط «'.$businessName.'»، ده نفس نشاط حضرتك؟';
+        }
+
         // QA 2026-10-04: after the swap the reply still asked "the name differs,
         // confirm it's yours" and spoke of the father's age.
         $replacedIdentity = ($args['replaces_previous'] ?? false) === true;
@@ -247,7 +273,8 @@ class ProcessDocumentTool implements WriteTool
             'results' => $results,
         ] + ($notDocuments !== [] ? ['not_documents' => $notDocuments] : [])
           + $this->earningsMonths($snapshot = $this->snapshots->for($application->refresh()))
-          + ($replacedIdentity ? ['identity_replaced' => true] : []) + [
+          + ($replacedIdentity ? ['identity_replaced' => true] : [])
+          + (isset($askBusiness) ? ['ask_him' => $askBusiness] : []) + [
             // TOOL-006: the compact status, not the whole snapshot again
             'application_now' => SnapshotService::compact($snapshot),
         ]);

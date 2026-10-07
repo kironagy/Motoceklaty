@@ -125,6 +125,24 @@ class RecordCustomerDataTool implements WriteTool
             : $this->customerData->record($customer, $application, $fields, $ctx->conversationId);
         $result['rejected'] = array_merge($result['rejected'], $notNeeded);
 
+        // Owner 2026-10-07: "رقمي X ولو مردتش ده رقم تاني Y" - Y was lost (one value per field).
+        // His message holds both: the number that is not his main one is saved as phone_2.
+        if (in_array('phone', $result['saved'], true) || in_array('phone', array_column($result['rejected'], 'key'), true)) {
+            $main = preg_replace('/\D/', '', (string) (collect($fields)->firstWhere('key', 'phone')['value'] ?? ''));
+            $said = strtr(app(\App\Agent\Runtime\ReplyGuard::class)->customerTextSinceLastReply(\App\Models\WhatsappConversation::findOrFail($ctx->conversationId)),
+                ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9']);
+            preg_match_all('/(?<!\d)01[0125]\d{8}(?!\d)/', $said, $numbers);
+            $other = collect($numbers[0])->unique()->first(fn ($n) => $n !== $main);
+
+            if ($other !== null && $main !== '') {
+                $second = $this->customerData->record($customer, $application, [['key' => 'phone_2', 'value' => $other, 'quote' => $other]], $ctx->conversationId);
+                if (in_array('phone_2', $second['saved'], true)) {
+                    $result['saved'] = array_merge($result['saved'], $second['saved']);
+                    $result['rejected'] = array_values(array_filter($result['rejected'], fn ($r) => ! ($r['key'] === 'phone' && $r['code'] === 'ONE_VALUE_PER_FIELD')));
+                }
+            }
+        }
+
         $data = [
             'saved' => $result['saved'],
             'rejected' => $result['rejected'],

@@ -252,7 +252,7 @@ class CodeChecksTest extends TestCase
     {
         config(['agent.understanding.enabled' => false, 'agent.reviewer.enabled' => true]);
         $fake = $this->fake();
-        $fake->queue($this->reply('تمام يا باشا، ابعت ضهر البطاقة.', 't1'));
+        $fake->queue($this->reply('تمام يا باشا، تحب نكمل؟', 't1'));
 
         app(AgentRunner::class)->run($this->turnWith('تمام'));
 

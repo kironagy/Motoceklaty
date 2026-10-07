@@ -78,6 +78,11 @@ class CheckEligibilityTool implements ReadTool
         // "age": 0 came with a work question and the age rule failed him -
         // the bot then made up "بتتحفظ على المهنة". No age = not checked.
         if (array_key_exists('age', $args) && (int) $args['age'] > 0) {
+            // real-customer run 2026-10-07: an age he never wrote ("يا ابني" read as 65) is no fact
+            if (! app(\App\Domain\Conversations\CustomerStatements::class)->saidNumber($ctx->conversationId, (int) $args['age'])) {
+                return ToolResult::error('AGE_NOT_STATED', 'He never wrote this age. Do not guess it: his ID decides; leave age out.');
+            }
+
             $facts['age'] = $args['age'];
         }
 

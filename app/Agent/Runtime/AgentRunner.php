@@ -178,18 +178,59 @@ class AgentRunner
 
                             // One repair, told plainly what is wrong. A second
                             // miss is not argued with: an honest short line.
+                            if (($repairs >= 1 || $limitReached) && $ctx->outbound->trailing() !== []) {
+                                // Real customers 2026-10-07: at the very last step ("اه" before the summary) two blocked
+                                // lines sent a ready customer to a colleague. The summary is already stored and queued;
+                                // the one sentence that goes before it is always the same, so code writes it.
+                                $this->resetFailureCounter($conversation);
+                                $this->finishTrace($trace, 'done', $guardEvents, $lastResponse);
+
+                                return ['messages' => array_merge(['ده ملخص طلبك، راجعه ولو كله تمام قولّي اه.'], $ctx->outbound->trailing())] + $ctx->outbound->toArray();
+                            }
+
+                            // Owner 2026-10-07: a complete application is sent, not summarised. The model kept writing
+                            // its own summary or asking "نبعته؟" - after one repair, code sends it (the summary only if
+                            // he asked to see it).
+                            if (($repairs >= 1 || $limitReached) && in_array($violation, ['SUMMARY_CLAIMED_NOT_SENT', 'SUBMIT_NOT_CALLED'], true) && $ctx->activeApplicationId) {
+                                $sent = $this->tools->execute('submit_application', ['confirm' => false], $ctx);
+                                $reference = $sent['data']['reference']['installment_request_id'] ?? null;
+
+                                if (($sent['ok'] ?? false) && ($sent['data']['submitted'] ?? false) === true) {
+                                    $guardEvents[] = ['code' => 'REWRITE:submitted_by_code', 'args' => []];
+                                    $this->resetFailureCounter($conversation);
+                                    $this->finishTrace($trace, 'done', $guardEvents, $lastResponse);
+
+                                    return ['messages' => ['تمام، طلبك اتبعت للمراجعة'.($reference ? " ورقمه #{$reference}" : '').'، وأي جديد هيوصلك هنا.']] + $ctx->outbound->toArray();
+                                }
+
+                                if ($ctx->outbound->trailing() !== []) {
+                                    $guardEvents[] = ['code' => 'REWRITE:stored_summary_sent', 'args' => []];
+                                    $this->resetFailureCounter($conversation);
+                                    $this->finishTrace($trace, 'done', $guardEvents, $lastResponse);
+
+                                    return ['messages' => array_merge(['ده ملخص طلبك، راجعه ولو كله تمام قولّي اه.'], $ctx->outbound->trailing())] + $ctx->outbound->toArray();
+                                }
+                            }
+
                             if ($repairs >= 1 || $limitReached) {
                                 // Replay of conversation 206 (Gemini): a second repeat ended
                                 // in "مش متأكد إني فهمتك" three times - worse than the repeat.
                                 // What he already got is dropped and the rest is sent.
                                 $trimmed = $violation === 'REPEATED_REPLY' ? $this->guard->withoutRepeatedSentences((array) ($toolCall['args']['messages'] ?? []), $conversation) : null;
+                                $step = 'repeated_sentences_dropped';
 
                                 if ($trimmed === null || $this->guard->check(['messages' => $trimmed] + $toolCall['args'], $conversation, $request->system, $contents, $outcomes) !== null) {
+                                    // owner 2026-10-07: keep the true sentences, drop the false ones
+                                    $trimmed = $this->guard->passingSentences($toolCall['args'], $conversation, $request->system, $contents, $outcomes);
+                                    $step = 'failing_sentences_dropped';
+                                }
+
+                                if ($trimmed === null) {
                                     return $this->unverifiedReply($conversation, $trace, $guardEvents, $violation);
                                 }
 
                                 $toolCall['args']['messages'] = $trimmed;
-                                $guardEvents[] = ['code' => 'REWRITE:repeated_sentences_dropped', 'args' => $toolCall['args']];
+                                $guardEvents[] = ['code' => 'REWRITE:'.$step, 'args' => $toolCall['args']];
                             } else {
                                 $repairs++;
                                 $detail = $this->guard->lastDetail();
@@ -201,6 +242,12 @@ class AgentRunner
                                 continue;
                             }
                         }
+                    }
+
+                    // Owner 2026-10-07: "حقك عليا، المفردات اتقبلت" and nothing more - he did not know what came
+                    // next. While his application is collecting, a reply that asks nothing says what is next.
+                    if ($toolCall['name'] === 'send_reply' && $ctx->activeApplicationId) {
+                        $toolCall['args'] = $this->rewritten($toolCall['args'], $guardEvents, ['next_step_added' => fn ($a) => $this->withNextStep($a, $ctx->activeApplicationId)]);
                     }
 
                     $result = $this->tools->execute($toolCall['name'], $toolCall['args'], $ctx);
@@ -309,6 +356,16 @@ class AgentRunner
         'UNVERIFIED_NUMBER' => 'A number in the reply is in no tool result or earlier verified data; look it up or leave it out.',
         'TOTAL_NOT_SOURCED' => 'The total it states is not in a tool result.',
         'PERCENT_DURATION_MISMATCH' => 'That rate does not belong to that duration in the active plans.',
+        'FORMAL_ARABIC' => 'Part of the reply is in فصحى; write it in plain Egyptian Arabic as he writes.',
+        'JOB_AS_TITLE' => 'Do not address him by his job; no title, or "يا باشا" (يا فندم for a woman) once in a while.',
+        'KIND_NOT_ASKED' => 'It offers a vehicle of a kind he did not ask for.',
+        'ACCEPTED_DOCUMENT_ASKED_AGAIN' => 'It asks for a paper that is already accepted.',
+        'BUSINESS_NAME_UNCONFIRMED' => 'Ask him about the business name on his tax card.',
+        'DATA_GIVEN_NOT_RECORDED' => 'He gave data in this message that is not recorded yet.',
+        'SUBMIT_NOT_CALLED' => 'Nothing is missing on his application: call submit_application now (it sends it); do not ask him to confirm or summarise it yourself.',
+        'UNLISTED_DOCUMENT' => 'It asks for a paper no requirement list holds.',
+        'DOCUMENTS_ASKED_WITHOUT_APPLICATION' => 'It asks him to send his papers but no application is open. He wants to apply: call start_application first (it asks what it still needs), then reply.',
+        'REAPPLY_OFFERED_AFTER_SUBMIT' => 'His request is already sent (see requests). Answer his question from it; do not offer to apply again or start a new request.',
         'BRANCH_NOT_SOURCED' => 'Branch facts come from get_branch_information only.',
         'MODEL_NOT_LOOKED_UP' => 'It names a motorcycle no tool returned this turn.',
         'UNSOURCED_FINANCE_COMPANY' => 'It names a finance company we do not work with.',
@@ -595,7 +652,8 @@ class AgentRunner
         // going with something true; only a second miss in a row hands off.
         // A customer who cannot bring a paper is not a failed turn: the guard's repair told the
         // model the legal way out; a colleague is no better placed to waive it (real customers 2026-10-07).
-        if ($this->recordFailure($conversation) < 2 || $reason === 'REQUIRED_DOCUMENT_WAIVED') {
+        // Owner 2026-10-07: a colleague only on a real trigger - three unresolved turns in a row, not two.
+        if ($this->recordFailure($conversation) < 3 || $reason === 'REQUIRED_DOCUMENT_WAIVED') {
             $this->finishTrace($trace, 'fallback', $guardEvents, null, 'GUARD_UNRESOLVED_KEPT_GOING: '.$reason);
 
             return ['messages' => [$this->keepGoingReply($conversation)]];
@@ -644,6 +702,15 @@ class AgentRunner
             $step = $application ? (app(\App\Domain\Applications\SnapshotService::class)->for($application)['next_step'] ?? null) : null;
         } catch (\Throwable) {
             $step = null;
+        }
+
+        // Owner 2026-10-07: a sent request still had next_step "submit" and he was
+        // asked "أقدّمهولك دلوقتي؟" about the request he had just sent.
+        if ($application && $application->status !== 'collecting') {
+            $number = \App\Models\InstallmentRequest::where('application_id', $application->id)->value('id');
+            $ref = $number ? " رقم #{$number}" : '';
+
+            return ["طلبك{$ref} اتبعت وبيتراجع، وأي جديد هيوصلك هنا. تحب تسأل عن حاجة فيه؟", "طلبك{$ref} عند المراجعة دلوقتي. قولّي عايز تعرف إيه وأنا معاك."];
         }
 
         // Simulator 2026-10-05: a 64-year-old already told installments are not
@@ -777,5 +844,30 @@ class AgentRunner
             // throw a DB truncation error, masking the original failure entirely.
             'error_code' => $errorCode !== null ? mb_substr($errorCode, 0, 255) : null,
         ]);
+    }
+
+    /** The reply plus "فاضل X" when it asks him nothing while his application still needs something. */
+    private function withNextStep(array $args, int $applicationId): array
+    {
+        $messages = array_values((array) ($args['messages'] ?? []));
+        $text = implode(' ', $messages);
+        $application = Application::find($applicationId);
+
+        // a question, or a request for something ("ابعتلي", "محتاج", "قولّي"), already says what is next
+        if ($messages === [] || ! $application || $application->status !== 'collecting'
+            || preg_match('/[؟?]|ابعت|تبعت|محتاج|قول(?:ّ)?ي|قوللي|اكتب(?:لي)?|فاضل|ناقص/u', $text)) {
+            return $args;
+        }
+
+        $step = app(\App\Domain\Applications\SnapshotService::class)->for($application)['next_step'] ?? [];
+        $label = trim((string) ($step['label'] ?? ''));
+
+        if (! in_array($step['type'] ?? null, ['field', 'document'], true) || $label === '' || str_contains($text, $label)) {
+            return $args;
+        }
+
+        $messages[count($messages) - 1] = rtrim($messages[count($messages) - 1]).($step['type'] === 'document' ? "\n\nفاضل تبعتلي {$label}." : "\n\nفاضل {$label}.");
+
+        return ['messages' => $messages] + $args;
     }
 }

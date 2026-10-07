@@ -54,7 +54,7 @@ class TurnResumeTest extends TestCase
         $this->seed(AgentCatalogSeeder::class);
         $conversation = $this->conversation();
         $turn = $this->turnFor($conversation, 'انا موظف متأمن عليا وعايز اقدم');
-        app(RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف متأمن عليا', 'occupation' => 'موظف', 'work_stated' => true,
+        app(RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف متأمن عليا', 'occupation' => 'موظف', 'job_title' => 'محاسب', 'work_stated' => true,
             'customer_type' => 'employee', 'working_now' => 'yes', 'relation_to_workplace' => 'works_for_someone', 'insured' => 'yes'],
             new ToolContext($conversation->customer_id, $conversation->id, null, 0, 1, new TurnResultBuilder()));
 
@@ -90,7 +90,7 @@ class TurnResumeTest extends TestCase
         $this->seed(AgentCatalogSeeder::class);
         $conversation = $this->conversation();
         $turn = $this->turnFor($conversation, 'انا موظف متأمن عليا وعايز اقدم');
-        app(RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف متأمن عليا', 'occupation' => 'موظف', 'work_stated' => true,
+        app(RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف متأمن عليا', 'occupation' => 'موظف', 'job_title' => 'محاسب', 'work_stated' => true,
             'customer_type' => 'employee', 'working_now' => 'yes', 'relation_to_workplace' => 'works_for_someone', 'insured' => 'yes'],
             new ToolContext($conversation->customer_id, $conversation->id, null, 0, 1, new TurnResultBuilder()));
         $start = ['id' => 'c1', 'name' => 'start_application', 'args' => ['customer_type' => 'employee', 'customer_type_quote' => 'انا موظف متأمن عليا']];

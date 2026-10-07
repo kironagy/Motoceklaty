@@ -131,9 +131,10 @@ class SimulatorRun1FixesTest extends TestCase
 
         $result = app(RecordCustomerDataTool::class)->execute(['fields' => [['key' => 'phone', 'value' => '01147709597'], ['key' => 'phone', 'value' => '01128884715']]], $this->ctx($conversation, $application->id));
 
-        $this->assertSame(['phone'], $result->data['saved']);
-        $this->assertSame('ONE_VALUE_PER_FIELD', $result->data['rejected'][0]['code']);
+        // owner 2026-10-07: the main number stays his phone, the other one is kept as phone_2 (it was lost)
+        $this->assertSame(['phone', 'phone_2'], $result->data['saved']);
         $this->assertSame('01147709597', ApplicationData::where('field_key', 'phone')->value('value'));
+        $this->assertSame('01128884715', ApplicationData::where('field_key', 'phone_2')->value('value'));
     }
 
     public function test_the_requirements_say_whether_a_guarantor_is_needed(): void

@@ -89,6 +89,8 @@ class SubmissionTest extends TestCase
     /** Shows the summary in turn 1 and records it as delivered to the customer. */
     private function presentSummary(WhatsappConversation $conversation, Application $application, bool $delivered = true): string
     {
+        // owner 2026-10-07: the summary is shown only when he asks to see it
+        WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'ابعتلي ملخص الطلب الأول']);
         $ctx = $this->ctx($conversation, $application, 1);
         $result = app(SubmitApplicationTool::class)->execute(['confirm' => true], $ctx);
 
@@ -350,7 +352,7 @@ class SubmissionTest extends TestCase
         app(\App\Agent\Tools\WithdrawApplicationTool::class)->execute(['reason_code' => 'customer_request'], $this->ctx($conversation, $application, 3));
 
         WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'لا خلاص كمل انا موظف']);
-        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف', 'occupation' => 'موظف', 'work_stated' => true, 'customer_type' => 'employee',
+        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف', 'occupation' => 'موظف', 'job_title' => 'محاسب', 'work_stated' => true, 'customer_type' => 'employee',
             'working_now' => 'yes', 'relation_to_workplace' => 'works_for_someone', 'insured' => 'yes'], $this->ctx($conversation, $application, 4));
         $result = app(\App\Agent\Tools\StartApplicationTool::class)->execute(['customer_type' => 'employee', 'customer_type_quote' => 'انا موظف'], $this->ctx($conversation, $application, 4));
 
@@ -692,4 +694,51 @@ class SubmissionTest extends TestCase
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/send-message') && $r['bot_id'] === (string) $live->id);
     }
 
+
+    // ---- owner 2026-10-07: a complete application is sent; the summary only when he asks
+
+    public function test_a_complete_application_is_sent_at_once_when_he_did_not_ask_for_a_summary(): void
+    {
+        [$application, $conversation] = $this->completeApplication();
+        WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'تمام']);
+
+        $result = app(SubmitApplicationTool::class)->execute(['confirm' => false], $this->ctx($conversation, $application));
+
+        $this->assertTrue($result->ok);
+        $this->assertTrue($result->data['submitted']);
+        $this->assertSame(1, InstallmentRequest::count());
+    }
+
+    public function test_a_complete_application_must_be_sent_not_asked_about(): void
+    {
+        [$application, $conversation] = $this->completeApplication();
+        $conversation->update(['customer_id' => $application->customer_id]);
+        config(['agent.guard.number_min_value' => 1000]);
+        $guard = app(\App\Agent\Runtime\ReplyGuard::class);
+
+        $this->assertSame('SUBMIT_NOT_CALLED', $guard->check(['messages' => ['تمام كده، أقدّمهولك؟']], $conversation, '', [], []));
+        // the owner's closing questions come first, once
+        $this->assertNotSame('SUBMIT_NOT_CALLED', $guard->check(['messages' => ['قدمت تقسيط في معرض تاني قبل كده؟']], $conversation, '', [], []));
+    }
+
+    public function test_a_business_name_he_never_wrote_is_put_to_him_before_sending(): void
+    {
+        [$application, $conversation] = $this->completeApplication();
+        $type = DocumentType::create(['key' => 'tax_card', 'label' => 'tax', 'description_for_ai' => 'x', 'accepted_mimes' => ['image/jpeg'], 'extraction_fields' => [], 'validation_rules' => [], 'is_active' => true]);
+        WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'القهوه اسمها جبل الحلال']);
+        $media = MessageMedia::create(['message_id' => WhatsappMessage::first()->id, 'media_type' => 'image', 'mime' => 'image/jpeg', 'disk' => 'local', 'path' => 't.jpg', 'size' => 1, 'sha256' => 'x']);
+        ApplicationDocument::create(['application_id' => $application->id, 'document_type_id' => $type->id, 'media_id' => $media->id, 'party' => 'applicant', 'status' => 'accepted', 'detected_type_key' => 'tax_card', 'extracted' => ['business_name' => 'اكلات المعلم']]);
+
+        $blocked = app(SubmitApplicationTool::class)->execute(['confirm' => false], $this->ctx($conversation, $application));
+        $this->assertSame('BUSINESS_NAME_UNCONFIRMED', $blocked->error['code']);
+        $this->assertStringContainsString('اكلات المعلم', $blocked->error['detail']);
+
+        // asked, and he answered: it is sent, and staff read his answer
+        WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'outgoing', 'sender_type' => 'bot', 'type' => 'text', 'text' => 'البطاقة الضريبية باسم نشاط اكلات المعلم، ده نفس نشاط حضرتك؟']);
+        WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'اه ده الاسم المسجل والقهوه اسمها جبل الحلال']);
+
+        $sent = app(SubmitApplicationTool::class)->execute(['confirm' => false], $this->ctx($conversation, $application, 2));
+        $this->assertTrue($sent->data['submitted'] ?? false);
+        $this->assertStringContainsString('جبل الحلال', (string) InstallmentRequest::first()->notes);
+    }
 }

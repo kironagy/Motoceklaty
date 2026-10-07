@@ -155,6 +155,50 @@ class WorkClassification
     }
 
     /**
+     * Words that say what KIND of work it is, never what he does. Owner
+     * 2026-10-07: requests reached staff as "موظف في شركة" or "صنايعي" -
+     * nobody knew what he actually does there. Not a list of jobs: a job is
+     * whatever is left once these are taken out.
+     */
+    private const NOT_A_JOB = ['موظف', 'موظفه', 'صنايعي', 'صنايعيه', 'صنايعى', 'عامل', 'عامله', 'شغال', 'شغاله', 'بشتغل', 'حرفي', 'حرفيه',
+        'شغل', 'حر', 'حره', 'اعمال', 'في', 'ف', 'فى', 'ب', 'عند', 'شركه', 'شركات', 'مصنع', 'محل', 'مكتب', 'مكان', 'خاص', 'خاصه', 'قطاع',
+        'متامن', 'عليا', 'عليه', 'مؤمن', 'مومن', 'تامين', 'تأمينات', 'و', 'انا', 'كبيره', 'صغيره', 'كويسه', 'باليوميه', 'يوميه'];
+
+    /**
+     * Owner 2026-10-07: what he does exactly must be known before his
+     * application opens - staff read it on the request. A delivery or app
+     * rider already said it (the app is the job); a pensioner has no job now.
+     *
+     * @return array{code: string, hint: string}|null
+     */
+    public function exactJobMissing(int $conversationId): ?array
+    {
+        $r = $this->reading($conversationId);
+
+        if ($r === null || ! $r['work_stated'] || $r['customer_type'] === 'pension'
+            || in_array($r['work_type'], ['delivery_app', 'delivery_app_bicycle', 'delivery_company'], true)) {
+            return null;
+        }
+
+        // job_title is the exact role; a model that left it out may still have named it in occupation
+        $title = \App\Support\ArabicTextNormalizer::normalize((string) (($r['job_title'] ?? '') !== '' ? $r['job_title'] : $r['occupation']));
+        // "موظف شركة مقاولات": the company's business is not his job (real-customer run 2026-10-07)
+        $place = preg_split('/[^\p{L}\p{N}]+/u', \App\Support\ArabicTextNormalizer::normalize(($r['workplace_activity'] ?? '').' '.($r['workplace_name'] ?? ''))) ?: [];
+        $place = array_merge($place, array_map(fn ($w) => preg_replace('/^ال/u', '', $w), $place));
+        $words = array_filter(preg_split('/[^\p{L}\p{N}]+/u', $title) ?: [], fn ($w) => $w !== '' && ! in_array($w, self::NOT_A_JOB, true)
+            && ! in_array($w, $place, true) && ! in_array(preg_replace('/^ال/u', '', $w), $place, true));
+
+        if ($words !== []) {
+            return null;
+        }
+
+        $place = $r['customer_type'] === 'employee' || $r['relation_to_workplace'] === 'works_for_someone'
+            ? ' والشركة/المكان شغال في إيه؟' : '';
+
+        return ['code' => 'ASK_EXACT_JOB', 'hint' => 'his words: "'.($r['evidence'] !== '' ? $r['evidence'] : $r['occupation']).'" name no job. Ask in one line: "بتشتغل إيه بالظبط؟'.$place.'" - then record_work_profile with job_title and call again.'];
+    }
+
+    /**
      * The customer's own words about his work: the quote the model gave
      * when it is really in his messages, otherwise the words the reading
      * found ("محاسب في قطاع خاص" was the model merging "انا محاسب" and

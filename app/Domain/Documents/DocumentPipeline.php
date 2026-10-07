@@ -505,9 +505,18 @@ class DocumentPipeline
             $hired = $fields['hire_date'] ?? null;
             $dateConflict = $issued && $hired && strtotime((string) $issued) && strtotime((string) $hired) && strtotime((string) $issued) < strtotime((string) $hired);
 
-            if (($missing !== [] || $dateConflict) && ! ($parsed['_reread'] ?? false)) {
-                $fields = $this->fillMissingFields($media, $ocrText.($dateConflict ? "\n\nNOTE: the issue date you read ({$issued}) is before the hire date ({$hired}) "
-                    .'on the same paper - that cannot be. Read the issue date again (a typo in the year is likely).' : ''), $type, $fields);
+            // Real-customer run 2026-10-07: the same letter came back with no hire date at all, so the
+            // conflict above could not be seen and it was rejected as old. A slip or statement that would
+            // be refused as expired is read once more, hire date included, before it is refused.
+            $tooOld = ! $dateConflict && $issued && strtotime((string) $issued) && strtotime((string) $issued) < strtotime('-90 days');
+
+            if (($missing !== [] || $dateConflict || $tooOld) && ! ($parsed['_reread'] ?? false)) {
+                $note = match (true) {
+                    $dateConflict => "\n\nNOTE: the issue date you read ({$issued}) is before the hire date ({$hired}) on the same paper - that cannot be. Read the issue date again (a typo in the year is likely).",
+                    $tooOld => "\n\nNOTE: the issue date you read ({$issued}) would make this paper too old. Read it again carefully: a malformed year (e.g. 20246, 2O26) is a typo for the nearest real year, and the paper cannot be issued before the date he started work (hire_date, e.g. \"اعتبارا من\") - read that too.",
+                    default => '',
+                };
+                $fields = $this->fillMissingFields($media, $ocrText.$note, $type, $fields);
                 $reread = true;
                 // checked again later (ID back after the front): the re-read is not paid twice
                 $this->readings[$media->id] = ['fields' => $fields, '_reread' => true] + $parsed;

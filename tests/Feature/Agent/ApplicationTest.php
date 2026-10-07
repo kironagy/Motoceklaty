@@ -81,7 +81,7 @@ class ApplicationTest extends TestCase
     /** Rebuild: start_application needs his work recorded first (record_work_profile). */
     private function insuredEmployee(WhatsappConversation $conversation): void
     {
-        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف', 'occupation' => 'موظف', 'work_stated' => true,
+        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف', 'occupation' => 'موظف', 'job_title' => 'محاسب', 'work_stated' => true,
             'customer_type' => 'employee', 'working_now' => 'yes', 'relation_to_workplace' => 'works_for_someone', 'insured' => 'yes'], $this->ctx($conversation));
     }
 

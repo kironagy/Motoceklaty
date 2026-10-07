@@ -119,7 +119,7 @@ class WriteToolSizeTest extends TestCase
             'whatsapp_bot_id' => $this->conversation->whatsapp_bot_id, 'whatsapp_conversation_id' => $this->conversation->id,
             'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'انا موظف متأمن عليا',
         ]);
-        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف متأمن عليا', 'occupation' => 'موظف', 'work_stated' => true,
+        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف متأمن عليا', 'occupation' => 'موظف', 'job_title' => 'محاسب', 'work_stated' => true,
             'customer_type' => 'employee', 'working_now' => 'yes', 'relation_to_workplace' => 'works_for_someone', 'insured' => 'yes'], $this->ctx(null));
 
         $opened = $tool->execute(['customer_type' => 'employee', 'customer_type_quote' => 'انا موظف'], $this->ctx(null));

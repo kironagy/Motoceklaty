@@ -99,6 +99,8 @@ class WorkProfiles
             'applicant_nationality' => $pick('applicant_nationality', ['egyptian', 'foreign', 'unknown'], 'unknown'),
             'work_stated' => (bool) ($r['work_stated'] ?? false),
             'occupation' => trim((string) ($r['occupation'] ?? '')),
+            'job_title' => trim((string) ($r['job_title'] ?? '')),
+            'workplace_activity' => trim((string) ($r['workplace_activity'] ?? '')),
             'evidence' => trim((string) ($r['evidence'] ?? '')),
             'working_now' => $pick('working_now', ['yes', 'no', 'not_yet', 'unknown'], 'unknown'),
             'relation_to_workplace' => $relation,

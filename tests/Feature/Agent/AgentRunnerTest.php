@@ -305,11 +305,12 @@ class AgentRunnerTest extends TestCase
         $this->assertSame(0, Handoff::where('conversation_id', $conversation->id)->count());
     }
 
-    public function test_two_unresolvable_replies_in_a_row_hand_off_with_the_waiting_message(): void
+    public function test_three_unresolvable_replies_in_a_row_hand_off_with_the_waiting_message(): void
     {
+        // owner 2026-10-07: a colleague only on a real trigger - the third unresolved turn, not the second
         config(['agent.handoff.waiting_message' => 'وصلتني رسالتك، زميلي هيرد عليك.']);
         $conversation = $this->conversation();
-        $conversation->update(['state' => ['failed_turns_since_success' => 1]]);
+        $conversation->update(['state' => ['failed_turns_since_success' => 2]]);
         $this->queueFourBadReplies($this->fake());
 
         $result = app(AgentRunner::class)->run($this->turnFor($conversation));
@@ -454,7 +455,7 @@ class AgentRunnerTest extends TestCase
         RequirementField::create(['key' => 'phone', 'label' => 'تليفون', 'data_type' => 'phone', 'scope' => 'application', 'is_active' => true]);
         WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'انا موظف ورقمي 01012345678']);
         // rebuild: his work is recorded before start_application
-        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف', 'occupation' => 'موظف', 'work_stated' => true, 'customer_type' => 'employee',
+        app(\App\Agent\Tools\RecordWorkProfileTool::class)->execute(['evidence' => 'انا موظف', 'occupation' => 'موظف', 'job_title' => 'محاسب', 'work_stated' => true, 'customer_type' => 'employee',
             'working_now' => 'yes', 'relation_to_workplace' => 'works_for_someone', 'insured' => 'yes'],
             new \App\Agent\Tools\ToolContext($conversation->customer_id, $conversation->id, null, 0, 1, new \App\Agent\Runtime\TurnResultBuilder()));
 

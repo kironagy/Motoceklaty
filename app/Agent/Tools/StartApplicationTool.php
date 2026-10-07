@@ -102,6 +102,11 @@ class StartApplicationTool implements WriteTool
             return ToolResult::error($problem['code'], $problem['hint']);
         }
 
+        // Owner 2026-10-07: "موظف في شركة" / "صنايعي" reached staff with no job in it.
+        if ($problem = app(\App\Domain\Applications\WorkClassification::class)->exactJobMissing($ctx->conversationId)) {
+            return ToolResult::error($problem['code'], $problem['hint']);
+        }
+
         // QA 2026-10-04: opened with no motorcycle and no plan although he
         // had just chosen the Boxer on 18 months - the quoted offer fills
         // what the call left out.

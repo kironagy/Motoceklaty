@@ -31,6 +31,8 @@ return [
 
     // Wall-clock cap for one provider call across keys and fallback models.
     'provider_budget_seconds' => env('AGENT_PROVIDER_BUDGET_SECONDS', 45),
+    // per model while a fallback model is still left to try (GeminiProvider)
+    'primary_timeout_seconds' => env('AGENT_PRIMARY_TIMEOUT_SECONDS', 15),
 
     // DEC-14: session gap length is still OPEN. No default - until decided,
     // IngestionService treats every message as belonging to the existing
@@ -90,6 +92,9 @@ return [
 
     // T06: tool classes the ToolRegistry loads. Each task that adds a tool
     // appends its class here - no central switch over tool names.
+    // Seconds a customer-reply model call may take before it is dropped for the next key/model.
+    'reply_timeout_seconds' => env('AGENT_REPLY_TIMEOUT_SECONDS', 12),
+
     'tools' => [
         \App\Agent\Tools\GetEarlierMessagesTool::class,
         \App\Agent\Tools\SendReplyTool::class,

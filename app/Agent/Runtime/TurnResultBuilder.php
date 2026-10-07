@@ -59,6 +59,12 @@ class TurnResultBuilder
         }
     }
 
+    /** @return string[] */
+    public function trailing(): array
+    {
+        return $this->trailing;
+    }
+
     public function hasMediaFor(int $motorcycleId): bool
     {
         foreach ($this->media as $item) {

@@ -43,9 +43,13 @@ class SubmissionService
      *
      * @throws SubmissionException NOT_READY (with blockers), APPLICATION_LOCKED, LEGACY_WORK_STATUS_NOT_MAPPED
      */
-    public function submit(Application $application, int $turnId, bool $customerConfirmed): array
+    /**
+     * @param  bool  $showSummary  owner 2026-10-07: the summary is shown only when the customer asked to see it,
+     *                             at the last step; otherwise a complete application is sent at once.
+     */
+    public function submit(Application $application, int $turnId, bool $customerConfirmed, bool $showSummary = true): array
     {
-        return DB::transaction(function () use ($application, $turnId, $customerConfirmed) {
+        return DB::transaction(function () use ($application, $turnId, $customerConfirmed, $showSummary) {
             $application = Application::whereKey($application->id)->lockForUpdate()->firstOrFail();
 
             if ($application->installment_request_id) {
@@ -86,7 +90,8 @@ class SubmissionService
                     ->where('text', $this->reviewText($this->review($application)))
                     ->exists();
 
-            if (! $confirmable) {
+            // once he asked for a summary, his OK to it (in a later turn) is what sends it - also after a change
+            if (($showSummary || $presented !== null) && ! $confirmable) {
                 $alreadyShownThisTurn = $presented
                     && ($presented->data['hash'] ?? null) === $hash
                     && (int) ($presented->data['turn_id'] ?? 0) === $turnId;
