@@ -249,10 +249,13 @@ class CatalogService
     {
         // "Z250" also listed L250, f250, H250 and Vg L250 by fuzzy match: a
         // model he named exactly is the answer on its own.
-        $exact = $machines->filter(function (Machine $machine) use ($normalizedQuery) {
+        // Owner 2026-10-08: "VLR 200" (Benelli) and "VLR200" (Vigory) are one name to a customer - compared
+        // without spaces, both come back and the agent asks which brand (ambiguous_names).
+        $squash = fn (string $v) => preg_replace('/\s+/u', '', mb_strtolower($v));
+        $exact = $machines->filter(function (Machine $machine) use ($normalizedQuery, $squash) {
             foreach (array_merge([$machine->name], $machine->aliases ?? []) as $candidate) {
-                $normalizedCandidate = mb_strtolower(ArabicTextNormalizer::normalize((string) $candidate));
-                if ($normalizedCandidate !== '' && ($normalizedCandidate === mb_strtolower($normalizedQuery)
+                $normalizedCandidate = trim(mb_strtolower(ArabicTextNormalizer::normalize((string) $candidate)));
+                if ($normalizedCandidate !== '' && ($squash($normalizedCandidate) === $squash($normalizedQuery)
                     || in_array(mb_strtolower($normalizedQuery), preg_split('/\s+/u', $normalizedCandidate), true))) {
                     return true;
                 }

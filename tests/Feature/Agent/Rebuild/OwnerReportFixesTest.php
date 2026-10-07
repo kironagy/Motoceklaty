@@ -306,4 +306,19 @@ class OwnerReportFixesTest extends TestCase
         $this->assertNull($this->check('أول قسط بيبدأ بعد 45 يوم من الاستلام.', $conversation));
         $this->assertSame('UNVERIFIED_NUMBER', $this->check('دي بتعمل 40-45 كيلو في اللتر.', $conversation));
     }
+
+    public function test_one_name_sold_by_two_brands_is_asked_about_whatever_the_spacing(): void
+    {
+        $benelli = Brand::create(['name' => 'بينيلي', 'image' => 'x.png']);
+        $vigory = Brand::create(['name' => 'فيجوري', 'image' => 'x.png']);
+        Machine::create(['name' => 'VLR 200', 'brand_id' => $benelli->id, 'cash_price' => 60000, 'is_active' => true]);
+        Machine::create(['name' => ' VLR200', 'brand_id' => $vigory->id, 'cash_price' => 50000, 'is_active' => true]);
+        $ctx = new \App\Agent\Tools\ToolContext(1, 1, null, 1, 1, new \App\Agent\Runtime\TurnResultBuilder());
+
+        foreach (['VLR 200', 'VLR200', 'vlr200'] as $query) {
+            $result = app(\App\Agent\Tools\SearchMotorcyclesTool::class)->execute(['name_query' => $query], $ctx)->data;
+            $this->assertCount(2, $result['items'], $query);
+            $this->assertNotEmpty($result['ambiguous_names'] ?? [], $query);
+        }
+    }
 }
