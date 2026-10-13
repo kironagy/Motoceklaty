@@ -30,6 +30,24 @@ class BrandResource extends Resource
                 Forms\Components\FileUpload::make('image')
                     ->image()
                     ->required(),
+                Forms\Components\Select::make('web_icon')
+                    ->label('أيقونة الماركة في فلتر المعرض على الموقع')
+                    ->options([
+                        'fa-solid fa-motorcycle' => 'موتوسيكل',
+                        'fa-solid fa-bolt' => 'برق',
+                        'fa-solid fa-gauge-high' => 'عداد سرعة',
+                        'fa-solid fa-shield-halved' => 'درع',
+                        'fa-solid fa-wind' => 'رياح (سكوتر)',
+                        'fa-solid fa-compass' => 'بوصلة',
+                        'fa-solid fa-feather' => 'ريشة',
+                        'fa-solid fa-fire' => 'نار',
+                        'fa-solid fa-truck-pickup' => 'تروسيكل',
+                        'fa-solid fa-star' => 'نجمة',
+                        'fa-solid fa-charging-station' => 'شحن كهربائي',
+                        'fa-solid fa-gem' => 'جوهرة',
+                        'fa-solid fa-crown' => 'تاج',
+                    ])
+                    ->placeholder('موتوسيكل (الافتراضي)'),
             ]);
     }
 

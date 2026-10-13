@@ -8,22 +8,15 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Carbon;
-use Google\Cloud\Vision\V1\ImageAnnotatorClient;
+use App\Domain\Documents\OcrProvider;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 
 class InstallmentRequestController extends Controller
 {
     public function show(Machine $machine)
     {
-        $plans = DB::table('installment_plans')
-            ->select('id', 'name', 'months_json', 'meta')
-            ->get()
-            ->mapWithKeys(fn($p) => [$p->name => json_decode($p->months_json, true) ?: []])
-            ->toArray();
-  
-    $allMachines = Machine::all();
-
-        return view('machines.show', compact('machine', 'plans' , 'allMachines '));
+        return redirect()->route('machines.show', $machine->id);
     }
 
 public function store(Request $request)
@@ -151,6 +144,10 @@ public function store(Request $request)
 
     $checks = [];
     $hardFails = false;
+
+    if ($this->ocrFailed) {
+        $checks[] = ['type' => 'warn', 'msg' => 'تعذّرت القراءة الآلية لبعض المستندات - هيتم مراجعتها يدوياً.'];
+    }
 
     // ✅ مطابقة وش وضهر البطاقة (عميل)
     $appFrontId = $this->extractNationalId($ocr['app_front']);
@@ -318,25 +315,38 @@ public function store(Request $request)
 
     /* ===================== Helpers ===================== */
 
-    private function makeVisionClient(): ImageAnnotatorClient
+    /** Set when any document couldn't be read, so the request is flagged for manual review. */
+    private bool $ocrFailed = false;
+
+    /**
+     * Same Vision provider the WhatsApp agent uses (API key from
+     * config('agent.ocr')), instead of the service-account key file that
+     * failed the whole submission whenever it was missing.
+     */
+    private function makeVisionClient(): OcrProvider
     {
-        // تأكد ان GOOGLE_APPLICATION_CREDENTIALS مضبوطة في .env
-        return new ImageAnnotatorClient([
-            'credentials' => base_path(env('GOOGLE_CLOUD_KEY_PATH'))
-        ]);
+        return app(OcrProvider::class);
     }
 
-    private function extractText(ImageAnnotatorClient $vision, string $realPath): string
+    private function extractText(OcrProvider $vision, string $realPath): string
     {
-        // يدعم صور + PDF (لو PDF هيقرأ الصفحة الأولى فقط بشكل افتراضي من Vision)
-        $image = file_get_contents($realPath);
-        $response = $vision->documentTextDetection($image);
-        $annotation = $response->getFullTextAnnotation();
-        $text = $annotation ? $annotation->getText() : '';
+        $mime = mime_content_type($realPath) ?: '';
 
-        $error = $response->getError();
-        if ($error && $error->getMessage()) {
-            $text .= "\n[OCR_ERROR] " . $error->getMessage();
+        // Vision's images:annotate reads images only; PDFs go to manual review.
+        if (! str_starts_with($mime, 'image/')) {
+            $this->ocrFailed = true;
+
+            return '';
+        }
+
+        try {
+            $text = $vision->extractText(base64_encode(file_get_contents($realPath)), $mime)->text;
+        } catch (\Throwable $e) {
+            // Never log image bytes or text (DEC-22) - only that it failed.
+            Log::warning('Website installment OCR unavailable', ['error' => $e->getMessage()]);
+            $this->ocrFailed = true;
+
+            return '';
         }
 
         return $this->normalizeArabic($text);

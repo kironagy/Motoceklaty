@@ -2,88 +2,76 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Machine;
 use App\Models\Brand;
-use App\Models\InstallmentSystem;
+use App\Models\Machine;
+use App\Support\InstallmentCalculatorCatalog;
 use Illuminate\Http\Request;
 
 class MachineController extends Controller
 {
     public function index(Request $request)
     {
-        // ✅ جلب كل الماركات مع المكن
-        $brands = Brand::with('machines')->get();
+        $categories = config('agent.catalog.categories', []);
+        $category = array_key_exists($request->query('category'), $categories) ? $request->query('category') : null;
+        $search = trim((string) $request->query('q', ''));
+        $brandId = $request->integer('brand') ?: $request->integer('brand_id') ?: null; // brand_id: old site links
 
-        // ✅ لو فيه brand_id في الرابط (يعني المستخدم اختار ماركة معينة)
-        if ($request->has('brand_id')) {
-            $brandId = $request->brand_id;
-            $brands = $brands->where('id', $brandId); // فلترة الماركات
-            $machines = Machine::where('brand_id', $brandId)
-                ->with('brand')
-                ->latest()
-                ->paginate(12);
-        } else {
-            // ✅ لو مفيش فلترة، اعرض الكل عادي
-            $machines = Machine::with('brand')->latest()->paginate(12);
+        // Everything except the brand filter - the chips count within this.
+        $base = Machine::query()
+            ->where('is_active', true)
+            ->when($category, fn ($q) => $q->where('category', $category))
+            ->when($search !== '', function ($q) use ($search) {
+                $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
+                $q->where(fn ($q) => $q->where('name', 'like', $like)
+                    ->orWhere('aliases', 'like', $like)
+                    ->orWhereHas('brand', fn ($b) => $b->where('name', 'like', $like)));
+            });
+
+        $counts = (clone $base)->selectRaw('brand_id, count(*) as total')->groupBy('brand_id')->pluck('total', 'brand_id');
+
+        $brands = Brand::query()
+            ->whereIn('id', $counts->keys())
+            ->orderBy('id')
+            ->get()
+            ->each(fn (Brand $brand) => $brand->visible_count = (int) ($counts[$brand->id] ?? 0));
+
+        if ($brandId && ! $brands->contains('id', $brandId)) {
+            $brandId = null; // brand has nothing under the current search/category
         }
 
-        return view('machines.index', compact('brands', 'machines'));
+        $machines = (clone $base)
+            ->when($brandId, fn ($q) => $q->where('brand_id', $brandId))
+            ->with('brand')
+            ->orderByDesc('is_featured')
+            ->latest()
+            ->paginate(max(1, (int) site('showroom.filter.per_page', 12)))
+            ->withQueryString()
+            ->fragment('vehiclesRow');
+
+        $activeCategory = $category ? $categories[$category] : null;
+        $totalAll = (int) $counts->sum();
+
+        return view('site.machines.index', compact('machines', 'brands', 'activeCategory', 'category', 'search', 'brandId', 'totalAll'));
     }
 
-public function show($id)
-{
-    // ✅ جلب المكنة مع الماركة
-    $machine = Machine::with('brand')->findOrFail($id);
+    public function show($id)
+    {
+        $machine = Machine::query()->where('is_active', true)->with('brand')->findOrFail($id);
 
-    // ✅ فكّ المميزات (لو متخزنة JSON)
-    $features = $machine->features ?? [];
-    if (is_string($features)) {
-        $features = json_decode($features, true);
+        $related = Machine::query()
+            ->where('is_active', true)
+            ->whereKeyNot($machine->id)
+            ->where(fn ($q) => $q->where('brand_id', $machine->brand_id)
+                ->when($machine->category, fn ($q) => $q->orWhere('category', $machine->category)))
+            ->with('brand')
+            ->orderByRaw('brand_id = ? desc', [$machine->brand_id])
+            ->latest()
+            ->take(4)
+            ->get();
+
+        $hasCalculator = collect(InstallmentCalculatorCatalog::payload()['machines'])
+            ->contains('id', $machine->id);
+
+        return view('site.machines.show', compact('machine', 'related', 'hasCalculator'));
     }
-    if (is_array($features)) {
-        $features = collect($features)
-            ->map(fn($f) => is_array($f) ? implode(' ', $f) : $f)
-            ->filter(fn($f) => !empty($f))
-            ->values()
-            ->toArray();
-    }
-    $machine->features = $features;
-
-    // ✅ فكّ الألوان (لو متخزنة JSON)
-    $colors = $machine->colors ?? [];
-    if (is_string($colors)) {
-        $colors = json_decode($colors, true);
-    }
-    $machine->colors = is_array($colors) ? $colors : [];
-
-    // ✅ مكن مشابه حسب الماركة
-    $relatedMachines = Machine::where('brand_id', $machine->brand_id)
-        ->where('id', '!=', $machine->id)
-        ->take(4)
-        ->get();
-
-    // ✅ جلب جميع البيانات المطلوبة لقسم "احسب قسط مكنتك"
-    $brands = Brand::all();
-    $allMachines = Machine::all();
-    $installmentSystems = InstallmentSystem::all();
-
-    // ✅ إعداد الخطط لكل نظام تقسيط
-    $plans = [];
-    foreach ($installmentSystems as $system) {
-        $plans[$system->name] = is_string($system->plans)
-            ? json_decode($system->plans, true)
-            : (is_array($system->plans) ? $system->plans : []);
-    }
-
-    // ✅ تمرير كل البيانات للـ View
-    return view('machines.show', compact(
-        'machine',
-        'relatedMachines',
-        'plans',
-        'brands',
-        'allMachines',
-        'installmentSystems'
-    ));
-}
-
 }

@@ -12,6 +12,7 @@ class Brand extends Model
     protected $fillable = [
         'name',
         'image',
+        'web_icon',
     ];
     public function machines()
     {

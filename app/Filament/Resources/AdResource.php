@@ -17,6 +17,9 @@ class AdResource extends Resource
 {
     protected static ?string $model = Ad::class;
 
+    // The MotoGate site doesn't render sliders/ads; hero and banners live in Website Settings.
+    protected static bool $shouldRegisterNavigation = false;
+
     protected static ?string $navigationIcon = 'heroicon-o-adjustments-vertical';
     protected static ?string $navigationLabel = ' الاعلانات';
     protected static ?string $pluralLabel = ' الاعلانات';

@@ -2,28 +2,28 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Machine;
 use App\Models\InstallmentSystem;
+use App\Models\Machine;
+use Illuminate\Http\Request;
 
 class ApplyInstallmentController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        // هنجلب كل المكن علشان المستخدم يختار اللي هيقدّم عليه
-        $machines = Machine::select('id', 'name')->get();
+        $machines = Machine::where('is_active', true)->orderBy('name')->get(['id', 'name']);
 
-        // أنظمة التقسيط
-        $plans = InstallmentSystem::select('name', 'plans')
-            ->get()
-            ->mapWithKeys(function ($item) {
-                $decoded = is_array($item->plans)
-                    ? $item->plans
-                    : json_decode($item->plans, true);
-
-                return [$item->name => $decoded ?? []];
-            })
+        // Keyed by system name: InstallmentRequestController stores installment_type as the name.
+        $plans = InstallmentSystem::query()
+            ->where('is_active', true)
+            ->orderByDesc('priority')
+            ->get(['name', 'plans'])
+            ->mapWithKeys(fn ($system) => [
+                $system->name => is_array($system->plans) ? $system->plans : (json_decode($system->plans, true) ?? []),
+            ])
             ->toArray();
 
-        return view('installments.apply-form', compact('machines', 'plans'));
+        $selectedMachineId = $request->integer('machine_id') ?: null;
+
+        return view('site.installments.apply', compact('machines', 'plans', 'selectedMachineId'));
     }
 }

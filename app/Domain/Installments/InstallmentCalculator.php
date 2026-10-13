@@ -8,10 +8,12 @@ use App\Models\Machine;
 
 /**
  * DEC-01 (agreed 2026-09-23): reproduces the two formulas already live on
- * the website (resources/views/layouts/app.blade.php ~L1160-1172) exactly,
+ * the old website calculator (formerly resources/views/layouts/app.blade.php) exactly,
  * unchanged - only the branch selector moved from name-matching
  * ("زيرو مصاريف") to InstallmentSystem::pricing_mode. No other formula,
- * default or rounding rule may be invented here.
+ * default or rounding rule may be invented here. The MotoGate website now
+ * calls this class too (InstallmentController::calculate), so the site and
+ * the WhatsApp agent can never disagree on a number.
  */
 class InstallmentCalculator
 {

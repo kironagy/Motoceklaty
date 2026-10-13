@@ -14,6 +14,9 @@ class SliderResource extends Resource
 {
     protected static ?string $model = Slider::class;
 
+    // The MotoGate site doesn't render sliders/ads; hero and banners live in Website Settings.
+    protected static bool $shouldRegisterNavigation = false;
+
     protected static ?string $navigationIcon = 'heroicon-o-photo';
     protected static ?string $navigationLabel = 'السلايدر';
     protected static ?string $pluralLabel = 'السلايدر';

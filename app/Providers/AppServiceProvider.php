@@ -29,6 +29,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // site(), site_url()... for the website views. Loaded here rather than
+        // through composer "files" because deploy.sh never re-runs composer.
+        require_once app_path('helpers.php');
+
         // picks Gemini or OpenAI by the model name
         $this->app->bind(AiProvider::class, RoutingAiProvider::class);
         $this->app->bind(VoiceTranscriber::class, \App\Domain\Conversations\OpenAiVoiceTranscriber::class);

@@ -1,6 +1,10 @@
 <?php
 
 use App\Http\Controllers\AboutController;
+use App\Http\Controllers\BlogController;
+use App\Http\Controllers\ContactController;
+use App\Http\Controllers\NewsletterController;
+use App\Http\Controllers\TeamController;
 use App\Http\Controllers\ApplyInstallmentController;
 use App\Http\Controllers\BrandController;
 use App\Http\Controllers\HomeController;
@@ -24,7 +28,9 @@ Route::get('/machines', [MachineController::class, 'index'])->name('machines.ind
 Route::get('/machines/{id}', [MachineController::class, 'show'])->name('machines.show');
 
 Route::get('/installment', [InstallmentController::class, 'index'])->name('installment.index');
-Route::post('/installment/calculate', [InstallmentController::class, 'calculate'])->name('installment.calculate');
+Route::post('/installment/calculate', [InstallmentController::class, 'calculate'])
+    ->middleware('throttle:60,1')
+    ->name('installment.calculate');
 
 Route::get('/brands', [BrandController::class, 'index'])->name('brands.index');
 Route::get('/brands/{id}', [BrandController::class, 'show'])->name('brands.show');
@@ -34,6 +40,23 @@ Route::post('/installments', [InstallmentRequestController::class, 'store'])->na
 
 Route::get('/apply-installment', [ApplyInstallmentController::class, 'index'])
     ->name('installments.apply.form');
+
+Route::get('/blog', [BlogController::class, 'index'])->name('blog.index');
+Route::get('/blog/{post:slug}', [BlogController::class, 'show'])->name('blog.show');
+Route::post('/blog/{post:slug}/comments', [BlogController::class, 'comment'])
+    ->middleware('throttle:5,1')
+    ->name('blog.comment');
+
+Route::get('/team', [TeamController::class, 'index'])->name('team.index');
+
+Route::get('/contact', [ContactController::class, 'index'])->name('contact');
+Route::post('/contact', [ContactController::class, 'store'])
+    ->middleware('throttle:5,1')
+    ->name('contact.store');
+
+Route::post('/newsletter', [NewsletterController::class, 'store'])
+    ->middleware('throttle:5,1')
+    ->name('newsletter.store');
 
 
     use App\Http\Controllers\ReferralController;
@@ -104,7 +127,6 @@ Schedule::command('requests:transfer-expired-paused')
 
 
 
-Route::view('/contact', 'contact');
 
 Route::get('/staff/media/{messageMedia}', [\App\Http\Controllers\MessageMediaController::class, 'show'])
     ->middleware('auth:filament')

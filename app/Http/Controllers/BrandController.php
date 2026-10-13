@@ -2,16 +2,16 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Brand;
-use Illuminate\Http\Request;
-
+/** Brands live as filter chips on the showroom grid now. */
 class BrandController extends Controller
 {
     public function index()
     {
-        $brands = Brand::all();
-        return view('brands.index', compact('brands'));
+        return redirect()->route('machines.index');
     }
 
-
+    public function show($id)
+    {
+        return redirect()->route('machines.index', ['brand_id' => $id]);
+    }
 }

@@ -7,6 +7,7 @@ use Spatie\Sitemap\Sitemap;
 use Spatie\Sitemap\Tags\Url;
 use App\Models\Machine;
 use App\Models\Brand;
+use App\Models\Post;
 use Carbon\Carbon;
 
 class GenerateSitemap extends Command
@@ -28,6 +29,9 @@ class GenerateSitemap extends Command
             '/brands',
             '/about',
             '/apply-installment',
+            '/blog',
+            '/team',
+            '/contact',
         ];
 
         foreach ($staticPages as $page) {
@@ -41,7 +45,7 @@ class GenerateSitemap extends Command
         // ========================
         // صفحات المكن الديناميكية
         // ========================
-        $machines = Machine::all();
+        $machines = Machine::where('is_active', true)->get();
 
         foreach ($machines as $machine) {
             $sitemap->add(
@@ -61,6 +65,17 @@ class GenerateSitemap extends Command
                 Url::create("/brands/{$brand->id}")
                     ->setPriority(0.7)
                     ->setLastModificationDate($brand->updated_at ?? now())
+            );
+        }
+
+        // ========================
+        // مقالات المدونة
+        // ========================
+        foreach (Post::published()->get() as $post) {
+            $sitemap->add(
+                Url::create(route('blog.show', $post, false))
+                    ->setPriority(0.7)
+                    ->setLastModificationDate($post->updated_at ?? now())
             );
         }
 

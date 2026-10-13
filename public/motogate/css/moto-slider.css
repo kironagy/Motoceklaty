@@ -1,0 +1,285 @@
+/* ==========================================================================
+   Global Viewport & Overflow Safety (Prevents any horizontal white gap)
+   ========================================================================== */
+html, body {
+    overflow-x: hidden !important;
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+.page-wraper {
+    overflow-x: hidden !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    position: relative !important;
+}
+
+.twm-home-1-banner-wrap {
+    overflow: hidden !important;
+}
+
+/* ==========================================================================
+   MotoGate Hero Motorcycle Auto-Slider
+   ========================================================================== */
+
+/* Slider Container */
+.twm-banner-right-section {
+    position: relative;
+    height: 100%;
+    min-height: 540px;
+    overflow: hidden;
+}
+
+/* Individual Slide Layers */
+.twm-moto-slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* Default / Waiting state (Positioned on the Right side of the virtual circle) */
+.twm-moto-slide .twm-banner-media img {
+    transform: translate3d(320px, 80px, 0) rotate(-16deg) scale(0.85);
+    opacity: 0;
+    filter: blur(4px) drop-shadow(0 5px 10px rgba(0, 0, 0, 0.3));
+    transition: transform 1.15s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.85s cubic-bezier(0.22, 1, 0.36, 1),
+                filter 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform, opacity, filter;
+}
+
+/* Active State (Enters smoothly as the stage clears with no overlap) */
+.twm-moto-slide.active {
+    z-index: 3;
+}
+
+.twm-moto-slide.active .twm-banner-media img {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+    opacity: 1;
+    filter: blur(0px) drop-shadow(0 20px 30px rgba(0, 0, 0, 0.8));
+    transition: transform 1.15s cubic-bezier(0.22, 1, 0.36, 1) 0.1s,
+                opacity 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.1s,
+                filter 1s cubic-bezier(0.22, 1, 0.36, 1) 0.1s;
+}
+
+/* Outgoing State (Old bike sweeps down-left and fades out smoothly & quickly) */
+.twm-moto-slide.outgoing {
+    z-index: 2;
+}
+
+.twm-moto-slide.outgoing .twm-banner-media img {
+    transform: translate3d(-300px, 150px, 0) rotate(18deg) scale(0.8);
+    opacity: 0;
+    filter: blur(4px);
+    transition: transform 0.85s cubic-bezier(0.3, 0, 0.2, 1),
+                opacity 0.42s ease-out,
+                filter 0.45s ease-out;
+}
+
+/* Title Orbit Transition */
+.twm-moto-slide .twm-bnr-title {
+    transform: translate3d(70px, -20px, 0);
+    opacity: 0;
+    filter: blur(6px);
+    transition: transform 1s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.8s cubic-bezier(0.22, 1, 0.36, 1),
+                filter 0.8s ease;
+    will-change: transform, opacity, filter;
+}
+
+.twm-moto-slide.active .twm-bnr-title {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.4;
+    filter: blur(0px);
+    transition-delay: 0.1s;
+}
+
+.twm-moto-slide.outgoing .twm-bnr-title {
+    transform: translate3d(-60px, 20px, 0);
+    opacity: 0;
+    filter: blur(6px);
+    transition: transform 0.65s cubic-bezier(0.3, 0, 0.2, 1),
+                opacity 0.38s ease-out,
+                filter 0.4s ease-out;
+}
+
+/* ==========================================================================
+   Mobile & Tablet Responsive Enhancements
+   ========================================================================== */
+
+@media (max-width: 991px) {
+    .twm-home-1-banner-wrap {
+        padding-bottom: 70px !important;
+        margin-bottom: 40px !important;
+    }
+
+    .twm-banner-right {
+        display: block !important;
+        width: 100% !important;
+        margin-top: 50px !important;
+        padding: 0 !important;
+        position: relative !important;
+        clear: both !important;
+    }
+
+    .twm-banner-right-section {
+        min-height: 500px !important;
+        height: 500px !important;
+        position: relative !important;
+        width: 100% !important;
+        margin: 0 auto !important;
+    }
+
+    .twm-moto-slide {
+        width: 100% !important;
+        height: 100% !important;
+    }
+
+    .twm-moto-slide .twm-banner-r-content {
+        display: flex !important;
+        justify-content: center !important;
+        align-items: flex-start !important;
+        width: 100% !important;
+    }
+
+    .twm-moto-slide .twm-banner-r-bx {
+        width: 320px !important;
+        height: 360px !important;
+        margin: 0 auto !important;
+        border-radius: 0px 0px 50% 50% !important;
+        background: linear-gradient(to bottom, rgb(16, 16, 16) 7%, rgb(255, 97, 0) 90%) !important;
+        box-shadow: 0 15px 40px rgba(255, 97, 0, 0.35) !important;
+        text-align: center !important;
+    }
+
+    .twm-moto-slide .twm-bnr-title {
+        font-size: 58px !important;
+        margin-top: 25px !important;
+        margin-left: 0 !important;
+        opacity: 0.45 !important;
+        text-align: center !important;
+    }
+
+    .twm-moto-slide .twm-banner-media {
+        position: absolute !important;
+        bottom: 0px !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        width: 100% !important;
+        max-width: 380px !important;
+        display: flex !important;
+        justify-content: center !important;
+        margin: 0 !important;
+    }
+
+    .twm-moto-slide .twm-banner-media img {
+        width: 100% !important;
+        max-width: 350px !important;
+        height: auto !important;
+        object-fit: contain !important;
+    }
+
+    /* Mobile Circular Motion Trajectory adjustments */
+    .twm-moto-slide .twm-banner-media img {
+        transform: translate3d(180px, 50px, 0) rotate(-14deg) scale(0.85);
+    }
+
+    .twm-moto-slide.active .twm-banner-media img {
+        transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+    }
+
+    .twm-moto-slide.outgoing .twm-banner-media img {
+        transform: translate3d(-180px, 80px, 0) rotate(15deg) scale(0.8);
+    }
+
+    .twm-explore-section-wrap {
+        margin-top: 50px !important;
+        position: relative !important;
+        z-index: 10 !important;
+    }
+}
+
+@media (max-width: 575px) {
+    .twm-home-1-banner-wrap {
+        padding-bottom: 60px !important;
+    }
+
+    .twm-banner-right-section {
+        min-height: 440px !important;
+        height: 440px !important;
+    }
+
+    .twm-moto-slide .twm-banner-r-bx {
+        width: 280px !important;
+        height: 310px !important;
+    }
+
+    .twm-moto-slide .twm-bnr-title {
+        font-size: 50px !important;
+        margin-top: 20px !important;
+    }
+
+    .twm-moto-slide .twm-banner-media {
+        max-width: 330px !important;
+        bottom: 10px !important;
+    }
+
+    .twm-moto-slide .twm-banner-media img {
+        max-width: 310px !important;
+    }
+}
+
+/* ==========================================================================
+   Loader Fullscreen Video (Fixed Viewport, No Scrollbar Leak)
+   ========================================================================== */
+.loading-area {
+    width: 100% !important;
+    height: 100% !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background-color: #000000 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    z-index: 999999 !important;
+    overflow: hidden !important;
+}
+
+.loading-area .loading-box {
+    display: none !important;
+}
+
+.loading-area .loading-pic {
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    transform: none !important;
+    overflow: hidden !important;
+}
+
+.loading-area .loading-pic .loader-video,
+.loading-area .loading-pic .loader-gif {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: cover !important;
+    object-position: center center !important;
+    pointer-events: none !important;
+    border: none !important;
+    outline: none !important;
+}

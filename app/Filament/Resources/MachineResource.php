@@ -110,6 +110,22 @@ public static function form(Form $form): Form
             ])
             ->columns(1),
 
+        // 🌐 العرض على الموقع
+        Forms\Components\Section::make('العرض على الموقع')
+            ->description('بيانات بتظهر في الموقع بس - البوت مش بيستخدمها.')
+            ->schema([
+                Forms\Components\Toggle::make('is_featured')
+                    ->label('موديل مميز (يظهر أولاً في الرئيسية والمعرض)')
+                    ->default(false),
+
+                Forms\Components\TextInput::make('video_url')
+                    ->label('رابط فيديو المراجعة (يوتيوب)')
+                    ->url()
+                    ->placeholder('https://www.youtube.com/watch?v=...'),
+            ])
+            ->columns(2)
+            ->collapsible(),
+
         // ⚙️ مميزات المكنة
         Forms\Components\Section::make('مميزات المكنة')
             ->schema([
