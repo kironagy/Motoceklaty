@@ -201,7 +201,10 @@ class StaffDecisionService
     {
         // Staff sign-offs ("وشكرا") are for each other, not the customer.
         $reason = trim((string) preg_replace('/[\s.،,]*(و\s*)?شكر[اًا]?[\s.!]*$/u', '', trim((string) $reason)));
-        $name = trim((string) strtok(trim((string) $request->applicant_name), ' ')) ?: 'يا فندم';
+        // Live 2026-10-04: "عبد الرحمن جمال" was greeted "يا عبد" - a compound first name keeps its second word.
+        $words = preg_split('/\s+/u', trim((string) $request->applicant_name), -1, PREG_SPLIT_NO_EMPTY);
+        $name = isset($words[1]) && in_array($words[0], ['عبد', 'ابو', 'أبو', 'ام', 'أم'], true) ? $words[0].' '.$words[1] : ($words[0] ?? '');
+        $name = $name !== '' ? $name : 'يا فندم';
         $to = $name === 'يا فندم' ? $name : "يا {$name}";
         $action = (string) $request->customer_action;
         $documentType = $action !== '' ? DocumentType::where('key', $action)->first() : null;

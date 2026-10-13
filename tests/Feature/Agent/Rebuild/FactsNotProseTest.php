@@ -40,21 +40,6 @@ class FactsNotProseTest extends TestCase
         return new ToolContext($conversation->customer_id, $conversation->id, $applicationId, 1, $trace->id, new TurnResultBuilder());
     }
 
-    public function test_a_tool_on_another_model_than_the_words_he_wrote_is_not_blocked_by_php(): void
-    {
-        // the old gate read "دايو 4" in his message and refused a call on هوجن 4
-        $conversation = $this->conversation();
-        $brand = Brand::create(['name' => 'هوجان', 'image' => 'b.jpg']);
-        Brand::create(['name' => 'دايو', 'image' => 'd.jpg']);
-        $machine = Machine::create(['name' => 'هوجن 4', 'brand_id' => $brand->id, 'cash_price' => 60000, 'is_active' => true, 'availability' => 'in_stock', 'type' => 'normal']);
-        $this->says($conversation, 'بكام دايو 4؟');
-
-        $result = app(\App\Agent\Tools\ToolRegistry::class)->execute('get_motorcycle_details', ['motorcycle_ids' => [$machine->id]], $this->ctx($conversation));
-
-        $this->assertNotSame('NOT_THE_MODEL_HE_NAMED', $result['error']['code'] ?? null);
-        $this->assertTrue($result['ok'], json_encode($result));
-    }
-
     public function test_none_for_an_address_part_needs_the_agents_flag_and_his_own_words(): void
     {
         $conversation = $this->conversation();

@@ -178,4 +178,29 @@ class CatalogServiceTest extends TestCase
         $linesAfter = app(CatalogService::class)->indexLines();
         $this->assertStringContainsString('اسم جديد', $linesAfter[0]);
     }
+
+    public function test_an_engine_size_he_adds_finds_the_model_of_that_size(): void
+    {
+        // live 2026-10-03/04: "هوجن ٤ ١٥٠ سي سي" and "هوجن 150 استيراد" were told "مش متوفر"
+        $hogan = Brand::create(['name' => 'هوجان', 'image' => 'b.jpg']);
+        Machine::create(['name' => 'هوجن ٤ استيراد فرز تاني', 'brand_id' => $hogan->id, 'cash_price' => 40000, 'cc' => 150, 'is_active' => true, 'availability' => 'in_stock', 'type' => 'normal']);
+        Machine::create(['name' => '(cc200) هوجن ٤', 'brand_id' => $hogan->id, 'cash_price' => 45000, 'cc' => 200, 'is_active' => true, 'availability' => 'in_stock', 'type' => 'normal']);
+
+        $names = fn (string $q) => array_column(app(CatalogService::class)->search(['name_query' => $q])['items'], 'name');
+
+        $this->assertSame(['هوجن ٤ استيراد فرز تاني'], $names('هوجن ٤ ١٥٠ سي سي'));
+        $this->assertSame(['هوجن ٤ استيراد فرز تاني'], $names('هوجن 150 استيراد'));
+    }
+
+    public function test_a_model_name_written_together_is_found_under_another_brand_row(): void
+    {
+        // live 2026-10-03 (conversations 860, 900): "keeway xroad 200" was "مش متوفر"
+        Brand::create(['name' => 'كيواي', 'image' => 'k.jpg']);
+        $scooters = Brand::create(['name' => 'Scooters', 'image' => 's.jpg']);
+        Machine::create(['name' => 'Scooter X Road i', 'brand_id' => $scooters->id, 'cash_price' => 59000, 'cc' => 200, 'is_active' => true, 'availability' => 'in_stock', 'type' => 'normal']);
+
+        $result = app(CatalogService::class)->search(['name_query' => 'keeway xroad 200']);
+
+        $this->assertSame(['Scooter X Road i'], array_column($result['items'], 'name'));
+    }
 }

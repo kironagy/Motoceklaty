@@ -222,4 +222,22 @@ class ReplyGuardGapsTest extends TestCase
         $this->assertNull(app(ReplyGuard::class)->check($reply, $conversation, '', [], $lookup('10 الصبح - 10 بالليل')));
     }
 
+
+    public function test_a_new_question_may_reuse_what_the_last_reply_said(): void
+    {
+        // simulator 2026-10-13: "وايه الفرق بين ال40 وال45" was cut to "تحب أحسبلك القسط؟"
+        $conversation = $this->conversation();
+        $old = 'هوجن 4 (cc200) سعرها كاش بتيجي بموتور 200 سي سي وشاسيه متين واقتصادية جدا في البنزين ومناسبة للشغل والمشاوير اليومية';
+        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'outgoing', 'sender_type' => 'bot', 'type' => 'text', 'text' => $old]);
+        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'وايه الفرق بين ال40 وال45']);
+        $answer = 'هوجن 4 استيراد فرز تاني موتورها 150 سي سي وشكلها نفس الاستيراد بس تشطيبها فرز تاني، وده سبب إن سعرها أقل بكتير ومناسبة لو ميزانيتك محدودة. '
+            .'أما '.$old.'.';
+
+        $this->assertNotSame('REPEATED_REPLY', app(ReplyGuard::class)->check(['messages' => [$answer]], $conversation, '', [], []));
+
+        // the same reply again to "تمام" is still the loop
+        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'outgoing', 'sender_type' => 'bot', 'type' => 'text', 'text' => $answer]);
+        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'تمام']);
+        $this->assertSame('REPEATED_REPLY', app(ReplyGuard::class)->check(['messages' => [$answer]], $conversation, '', [], []));
+    }
 }

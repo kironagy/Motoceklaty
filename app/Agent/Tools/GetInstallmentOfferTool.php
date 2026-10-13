@@ -197,6 +197,8 @@ class GetInstallmentOfferTool implements ReadTool
 
         if ($months === null && $asked === [] && ($args['all_durations'] ?? false) !== true) {
             return ToolResult::ok([
+                // conversation 639: id 4 was priced as "هوجن 4" - the result names what it priced
+                'motorcycle' => $this->label($machine),
                 'cash_price' => (float) $machine->cash_price,
                 'durations' => array_map(fn (array $o) => $this->duration($o['months']), $offers),
             ] + $cap);
@@ -212,6 +214,7 @@ class GetInstallmentOfferTool implements ReadTool
         }
 
         return ToolResult::ok([
+            'motorcycle' => $this->label($machine),
             'cash_price' => (float) $machine->cash_price,
             'offers' => array_map(fn (array $o) => [
                 'months' => $o['months'],
@@ -342,5 +345,11 @@ class GetInstallmentOfferTool implements ReadTool
             48 => '٤ سنين',
             default => $months.' شهر',
         };
+    }
+
+    /** Brand + model, as the reply must name it - two brands share model names. */
+    private function label(Machine $machine): string
+    {
+        return trim(($machine->brand?->name ? trim($machine->brand->name).' ' : '').trim((string) $machine->name));
     }
 }

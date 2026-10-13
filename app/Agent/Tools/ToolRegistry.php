@@ -78,9 +78,12 @@ class ToolRegistry
         }
 
         try {
-            // Rebuild: which model he means is the agent's call (no phrase
-            // list on his text); every result names the motorcycle it used.
-            $result = $this->executeWithReconnect($tool, $args, $ctx);
+            // Every tool that takes a motorcycle takes the one he just named
+            // (conversation 639: "هوجان ٤" was quoted and pictured as L250, id 4).
+            $conflict = $name === 'search_motorcycles' ? null : $this->mentionedMotorcycleConflict($args, $ctx);
+            $result = $conflict !== null
+                ? ToolResult::error('NOT_THE_MODEL_HE_NAMED', $conflict)->toArray()
+                : $this->executeWithReconnect($tool, $args, $ctx);
         } catch (\Throwable $e) {
             // submit_application crashed on a null plan and nothing anywhere
             // said why - the exception was swallowed whole. Log where it
@@ -136,6 +139,24 @@ class ToolRegistry
 
             return $tool->execute($args, $ctx)->toArray();
         }
+    }
+
+    /** An error detail when a motorcycle in the args is not the model he named this turn, else null. */
+    private function mentionedMotorcycleConflict(array $args, ToolContext $ctx): ?string
+    {
+        $ids = array_filter(array_merge((array) ($args['motorcycle_ids'] ?? []), isset($args['motorcycle_id']) ? [$args['motorcycle_id']] : []), 'is_numeric');
+
+        if ($ids === []) {
+            return null;
+        }
+
+        foreach (\App\Models\Machine::whereIn('id', $ids)->get() as $machine) {
+            if ($conflict = \App\Domain\Conversations\MentionedMotorcycle::conflict($ctx->conversationId, $ctx->turnId, $machine)) {
+                return $conflict;
+            }
+        }
+
+        return null;
     }
 
     /**

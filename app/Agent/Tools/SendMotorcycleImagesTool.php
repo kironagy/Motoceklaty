@@ -53,8 +53,12 @@ class SendMotorcycleImagesTool implements WriteTool
         }
 
         // "VLR 200" (بينيلي, 20) and "VLR200" (فيجوري, 31): the customer
-        // was quoted the Figuri and got the Benelli's photos.
-        if ($mismatch = \App\Domain\Conversations\QuotedMotorcycle::mismatch($ctx->conversationId, (int) $args['motorcycle_id'], ($args['different_motorcycle_confirmed'] ?? false) === true)) {
+        // was quoted the Figuri and got the Benelli's photos. Only a model of
+        // the same name is that slip - "وريني الصور" of three Hogan 4 versions
+        // sent one (simulator 2026-10-13); the model he named is checked by
+        // the tool registry.
+        if ($this->sameNameAsLastQuoted($ctx->conversationId, (int) $args['motorcycle_id'])
+            && ($mismatch = \App\Domain\Conversations\QuotedMotorcycle::mismatch($ctx->conversationId, (int) $args['motorcycle_id'], ($args['different_motorcycle_confirmed'] ?? false) === true))) {
             return ToolResult::error('MOTORCYCLE_DIFFERS_FROM_LAST_QUOTED', $mismatch);
         }
 
@@ -124,5 +128,19 @@ class SendMotorcycleImagesTool implements WriteTool
             'sent_photo_colors' => array_values(array_filter($images['colors'])),
             'colors_available' => $images['colors_available'],
         ]);
+    }
+
+    private function sameNameAsLastQuoted(int $conversationId, int $motorcycleId): bool
+    {
+        $last = \App\Domain\Conversations\QuotedMotorcycle::last($conversationId);
+
+        if ($last === null || $last === $motorcycleId) {
+            return false;
+        }
+
+        $squash = fn ($name) => preg_replace('/[\s\-]+/u', '', mb_strtolower(\App\Support\ArabicTextNormalizer::normalize((string) $name)));
+        $names = \App\Models\Machine::whereIn('id', [$last, $motorcycleId])->pluck('name', 'id');
+
+        return isset($names[$last], $names[$motorcycleId]) && $squash($names[$last]) === $squash($names[$motorcycleId]);
     }
 }

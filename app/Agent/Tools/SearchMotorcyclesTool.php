@@ -101,7 +101,9 @@ class SearchMotorcyclesTool implements ReadTool
 
             if ($cc !== null) {
                 $result['not_carried'] = true;
-                $result['similar_available'] = $this->catalog->similar($cc, 'motorcycle', null, 5);
+                // simulator 2026-10-13: a 200cc scooter not found got 200cc motorcycles as "similar"
+                $kind = in_array($args['kind'] ?? null, \App\Domain\Catalog\CatalogService::KINDS, true) ? $args['kind'] : 'motorcycle';
+                $result['similar_available'] = $this->catalog->similar($cc, $kind, null, 5);
                 $result['similar_cc'] = $cc;
             }
         } elseif ($this->isGeneric($args) && ($wanted = $interest::get($ctx->conversationId)) && ($wanted['cc'] ?? null)) {

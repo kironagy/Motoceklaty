@@ -77,7 +77,10 @@ class ReplyGuard
 
         // Replay of conversation 206 on Gemini: the same four-line refusal,
         // word for word, five replies running while he kept insisting.
-        if ($this->repeatsAnEarlierReply($replyText, $conversation)) {
+        // Simulator 2026-10-13: "وايه الفرق بين ال40 وال45" - the right answer reuses what the
+        // last reply said about the 45, was refused as a repeat and cut down to "تحب أحسبلك القسط؟".
+        // A new question answered with mostly new words is not the conversation-206 loop.
+        if ($this->repeatsAnEarlierReply($replyText, $conversation) && ! $this->answersNewQuestion($replyText, $conversation)) {
             return 'REPEATED_REPLY';
         }
 
@@ -1339,6 +1342,38 @@ class ReplyGuard
         }
 
         return $kept === [] ? null : [implode(' ', $kept)];
+    }
+
+    /** He asked something new since our last reply, and under 60% of the reply was said before. */
+    private function answersNewQuestion(string $replyText, WhatsappConversation $conversation): bool
+    {
+        $asked = \App\Support\ArabicTextNormalizer::normalize($this->customerTextSinceLastReply($conversation));
+
+        if (! preg_match('/[؟?]|(?<!\p{L})و?(?:ايه|اي|ازاي|كام|بكام|فين|امتى|امتي|ليه|مين|انهي|هل|فرق|الفرق)(?!\p{L})/u', $asked)) {
+            return false;
+        }
+
+        $words = fn (string $t) => preg_split('/\s+/u', trim(preg_replace('/[.،,؟?!:\n]+/u', ' ', \App\Support\ArabicTextNormalizer::normalize($t))), -1, PREG_SPLIT_NO_EMPTY);
+        $said = [];
+
+        foreach (WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'outgoing')
+            ->where('sender_type', 'bot')->latest('id')->limit(3)->pluck('text') as $text) {
+            $before = $words((string) $text);
+
+            for ($i = 0; $i + 6 <= count($before); $i++) {
+                $said[implode(' ', array_slice($before, $i, 6))] = true;
+            }
+        }
+
+        $reply = $words($replyText);
+        $total = max(1, count($reply) - 5);
+        $repeated = 0;
+
+        for ($i = 0; $i + 6 <= count($reply); $i++) {
+            $repeated += isset($said[implode(' ', array_slice($reply, $i, 6))]) ? 1 : 0;
+        }
+
+        return $repeated / $total < 0.6;
     }
 
     /** 12+ words in a row already sent in one of the last three replies. */

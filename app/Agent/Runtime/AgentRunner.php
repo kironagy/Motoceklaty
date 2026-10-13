@@ -167,7 +167,10 @@ class AgentRunner
 
                     if ($toolCall['name'] === 'send_reply') {
                         // Only technical cleanup (emoji, markdown, dashes) - never his words changed.
-                        $toolCall['args'] = $this->rewritten($toolCall['args'], $guardEvents, ['tidy' => fn ($a) => $this->guard->tidy($a)]);
+                        $toolCall['args'] = $this->rewritten($toolCall['args'], $guardEvents, [
+                            'tidy' => fn ($a) => $this->guard->tidy($a),
+                            'silence' => fn ($a) => $this->silenceWrittenAsText($a, $ctx),
+                        ]);
 
                         // PHP checks only what the AI may not decide: claims of
                         // actions, numbers and facts no tool gave, promises.
@@ -436,6 +439,24 @@ class AgentRunner
         $callsSeen[$byName] = ($callsSeen[$byName] ?? 0) + 1;
 
         return $repeated || (! in_array($toolCall['name'], ReplyGuard::WRITE_TOOLS, true) && $callsSeen[$byName] >= 3);
+    }
+
+    /**
+     * Simulator 2026-10-13: "حبيبي" after our goodbye - flash-lite wrote
+     * "no_reply: true / messages: []" as the message text, then sent [];
+     * both were refused as empty and he got "معلش وضّحلي قصدك أكتر؟". A
+     * reply with no Arabic in it, where staying silent is allowed, is the
+     * silence it meant.
+     */
+    private function silenceWrittenAsText(array $args, ToolContext $ctx): array
+    {
+        $text = trim(implode(' ', (array) ($args['messages'] ?? [])));
+
+        if (($args['no_reply'] ?? false) === true || preg_match('/\p{Arabic}/u', $text) || ! \App\Agent\Tools\SendReplyTool::mayStaySilent($ctx)) {
+            return $args;
+        }
+
+        return ['messages' => [], 'no_reply' => true] + $args;
     }
 
     /**

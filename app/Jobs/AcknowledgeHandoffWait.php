@@ -50,7 +50,10 @@ class AcknowledgeHandoffWait implements ShouldQueue
         }
 
         $interval = (int) config('agent.handoff.waiting_ack_interval_minutes');
-        $recentAck = (clone $since)->where('sender_type', 'system')
+        // Live 2026-10-01/02 (conversations 731, 735): a handoff reopened every few turns and each one
+        // sent this line again - "الرساله دي اتبعتت لي مليون مره". Once per interval per chat, any handoff.
+        $recentAck = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('sender_type', 'system')->where('text', $message)
             ->where('created_at', '>=', now()->subMinutes($interval))
             ->exists();
 

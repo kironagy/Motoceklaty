@@ -193,6 +193,34 @@ class CatalogService
 
     private function filterByNameQuery(Collection $machines, string $nameQuery): Collection
     {
+        $found = $this->filterByNameQueryAsWritten($machines, $nameQuery);
+
+        if ($found->isNotEmpty()) {
+            return $found;
+        }
+
+        // Live 2026-10-03/04: "هوجن ٤ ١٥٠ سي سي" and "هوجن 150 استيراد" were told "مش متوفر" -
+        // the engine size is not part of the model's name. Without it, kept to that size.
+        $normalized = ArabicTextNormalizer::normalize($nameQuery);
+
+        if (preg_match('/(?<![\p{L}\d])(\d{3})(?!\d)\s*(?:cc|سي\s?سي|سى\s?سى|س\s?س)?(?![\p{L}\d])/iu', $normalized, $m) && (int) $m[1] >= 50 && (int) $m[1] <= 400) {
+            $withoutCc = trim(preg_replace('/\s+/u', ' ', str_replace($m[0], ' ', $normalized)));
+
+            if ($withoutCc !== '') {
+                $found = $this->filterByNameQueryAsWritten($machines, $withoutCc)
+                    ->filter(fn (Machine $machine) => self::engineCc($machine) === (int) $m[1])->values();
+
+                if ($found->isNotEmpty()) {
+                    return $found;
+                }
+            }
+        }
+
+        return $found;
+    }
+
+    private function filterByNameQueryAsWritten(Collection $machines, string $nameQuery): Collection
+    {
         // Owner simulation 2026-10-07: "دايو 2 العادية" listed دايو 2 and دايو 2 استيراد.
         $words = preg_split('/\s+/u', ArabicTextNormalizer::normalize($nameQuery), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         $plain = array_values(array_diff($words, self::PLAIN_WORDS));
@@ -242,7 +270,32 @@ class CatalogService
             }
         }
 
-        return $this->matchName($machines, $normalizedQuery);
+        $found = $this->matchName($machines, $normalizedQuery);
+
+        // Live 2026-10-03 (conversations 860, 900): "keeway xroad 200" / "كيواي اكس رود" was told
+        // "مش متوفر" while "Scooter X Road i" is in stock - another brand row, written together.
+        // His model words alone, any brand, without spaces; the result names its own brand.
+        if ($found->isEmpty() && $brandWords !== [] && preg_match('/\p{L}{3,}/u', $rest)) {
+            $found = $this->matchName($machines, $rest);
+        }
+
+        if ($found->isEmpty()) {
+            $squashedRest = preg_replace('/[\s\d]+/u', '', mb_strtolower($rest !== '' ? $rest : $normalizedQuery));
+
+            if (mb_strlen((string) $squashedRest) >= 4) {
+                $found = $machines->filter(function (Machine $machine) use ($squashedRest) {
+                    foreach (array_merge([$machine->name], $machine->aliases ?? []) as $candidate) {
+                        if (str_contains((string) preg_replace('/[\s\-]+/u', '', mb_strtolower(ArabicTextNormalizer::normalize((string) $candidate))), $squashedRest)) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                })->values();
+            }
+        }
+
+        return $found;
     }
 
     private function matchName(Collection $machines, string $normalizedQuery): Collection
