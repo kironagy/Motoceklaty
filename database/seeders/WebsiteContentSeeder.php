@@ -13,7 +13,9 @@ use Illuminate\Support\Carbon;
 /**
  * The MotoGate design's sample articles, team and testimonials, so the new
  * pages aren't empty on day one. Each table is only filled when empty - safe
- * to re-run, never overwrites what was edited in the dashboard.
+ * to re-run, never overwrites what was edited in the dashboard. The sample
+ * team and reviews are invented people, so they go in hidden: the owner
+ * replaces them with real ones and switches them on from the dashboard.
  *
  *   php artisan db:seed --class=WebsiteContentSeeder
  */
@@ -85,7 +87,7 @@ class WebsiteContentSeeder extends Seeder
                 'role' => $role,
                 'image' => null, // the design's team photos are grey placeholders
                 'show_on_about' => $i < 4,
-                'is_active' => true,
+                'is_active' => false,
                 'sort' => $i + 1,
             ]);
         }
@@ -107,7 +109,7 @@ class WebsiteContentSeeder extends Seeder
                 'image' => null, // the design's testimonial photos are grey placeholders
                 'review' => $review,
                 'rating' => 5,
-                'is_active' => true,
+                'is_active' => false,
                 'sort' => $i + 1,
             ]);
         }

@@ -13,11 +13,13 @@
                 <x-site.section-head align="center" :small="site('team.small_title')" :title="site('team.title')" />
 
                 <div class="row" dir="rtl">
-                    @foreach ($members as $member)
+                    @forelse ($members as $member)
                         <div class="col-lg-3 col-md-6 col-sm-6 m-b30 wow fadeInDown" data-wow-delay="0.{{ ($loop->index % 4) + 1 }}">
                             <x-site.team-card :member="$member" />
                         </div>
-                    @endforeach
+                    @empty
+                        <div class="col-12 text-center site-text-gray">قريباً نعرّفك على فريق موتوجيت.</div>
+                    @endforelse
                 </div>
             </div>
         </div>
