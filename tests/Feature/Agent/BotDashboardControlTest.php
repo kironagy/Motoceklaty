@@ -122,7 +122,7 @@ class BotDashboardControlTest extends TestCase
         $this->app->instance(AiProvider::class, $fake);
         $fake->queue(new AiResponse([], [['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['الهوجن 4 موجودة']]]], 'STOP', ['input_tokens' => 10, 'output_tokens' => 5], 'gemini-test', null, 10));
 
-        $admin = \App\Models\Staff::create(['name' => 'A', 'email' => 'admin@x.test', 'password' => 'secret', 'is_admin' => true]);
+        $admin = \App\Models\Staff::create(['name' => 'A', 'email' => 'admin@x.test', 'password' => 'secret', 'is_admin' => true, 'is_hitler' => true]);
         $this->actingAs($admin);
 
         \Livewire\Livewire::test(\App\Filament\Pages\ConversationSimulatorPage::class)
@@ -136,7 +136,7 @@ class BotDashboardControlTest extends TestCase
 
     public function test_the_settings_and_instructions_pages_save(): void
     {
-        $admin = \App\Models\Staff::create(['name' => 'A', 'email' => 'admin2@x.test', 'password' => 'secret', 'is_admin' => true]);
+        $admin = \App\Models\Staff::create(['name' => 'A', 'email' => 'admin2@x.test', 'password' => 'secret', 'is_admin' => true, 'is_hitler' => true]);
         $this->actingAs($admin);
 
         \Livewire\Livewire::test(\App\Filament\Pages\BotSettings::class)

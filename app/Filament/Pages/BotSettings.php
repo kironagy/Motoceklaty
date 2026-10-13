@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Support\HitlerOnly;
 use App\Domain\Settings\AgentInstructions;
 use App\Domain\Settings\AgentSettings;
 use Filament\Actions\Action;
@@ -22,6 +23,8 @@ use Filament\Pages\Page;
  */
 class BotSettings extends Page implements HasForms
 {
+    use HitlerOnly;
+
     use InteractsWithForms;
 
     protected static ?string $navigationIcon = 'heroicon-o-adjustments-horizontal';
@@ -33,11 +36,6 @@ class BotSettings extends Page implements HasForms
     protected static string $view = 'filament.pages.bot-settings';
 
     public ?array $data = [];
-
-    public static function canAccess(): bool
-    {
-        return (bool) auth()->user()?->isAdmin();
-    }
 
     public function mount(): void
     {

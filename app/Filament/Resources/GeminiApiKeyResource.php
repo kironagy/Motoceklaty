@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Filament\Resources\GeminiApiKeyResource\Pages;
 use App\Filament\Resources\GeminiApiKeyResource\RelationManagers\ModelsRelationManager;
 use App\Models\GeminiApiKey;
@@ -13,6 +14,8 @@ use Filament\Tables\Table;
 
 class GeminiApiKeyResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = GeminiApiKey::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-key';
@@ -173,9 +176,7 @@ class GeminiApiKeyResource extends Resource
 
     public static function canViewAny(): bool
     {
-        $user = auth()->user();
-
-        return $user && ((bool) $user->is_bot || (bool) $user->is_hitler);
+        return static::isHitler();
     }
 
     public static function shouldRegisterNavigation(): bool

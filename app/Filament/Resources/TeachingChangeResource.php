@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Domain\Teaching\ChangeApplier;
 use App\Domain\Teaching\EditableEntities;
 use App\Filament\Resources\TeachingChangeResource\Pages;
@@ -13,6 +14,8 @@ use Filament\Tables\Table;
 
 class TeachingChangeResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = TeachingChange::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-clock';
@@ -28,7 +31,7 @@ class TeachingChangeResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return (bool) auth()->user()?->isAdmin();
+        return static::isHitler();
     }
 
     public static function canCreate(): bool

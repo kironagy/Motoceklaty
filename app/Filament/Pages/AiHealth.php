@@ -2,10 +2,10 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Support\HitlerOnly;
 use App\Filament\Widgets\AiHealthOverview;
 use App\Models\GeminiApiKey;
 use Filament\Pages\Page;
-use Illuminate\Support\Facades\Auth;
 
 /**
  * Plan task 4.2. The panel's own Dashboard page renders an empty view, so
@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\Auth;
  */
 class AiHealth extends Page
 {
+    use HitlerOnly;
+
     protected static ?string $navigationIcon = 'heroicon-o-cpu-chip';
 
     protected static ?string $navigationLabel = 'صحة الـ AI';
@@ -25,13 +27,6 @@ class AiHealth extends Page
     protected static ?int $navigationSort = 90;
 
     protected static string $view = 'filament.pages.ai-health';
-
-    public static function canAccess(): bool
-    {
-        $user = Auth::user();
-
-        return (bool) ($user?->is_super_admin || $user?->role === 'super_admin');
-    }
 
     protected function getHeaderWidgets(): array
     {

@@ -311,7 +311,7 @@ class TeachModeTest extends TestCase
 
     public function test_simulator_and_teaching_pages_render_a_session(): void
     {
-        $staff = Staff::create(['name' => 'A', 'email' => 'a'.uniqid().'@x.com', 'password' => 'secret', 'is_admin' => true]);
+        $staff = Staff::create(['name' => 'A', 'email' => 'a'.uniqid().'@x.com', 'password' => 'secret', 'is_admin' => true, 'is_hitler' => true]);
         $this->actingAs($staff);
 
         $sim = app(\App\Domain\Simulation\ConversationSimulator::class);

@@ -2,13 +2,13 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Support\HitlerOnly;
 use App\Models\AiModelPrice;
 use App\Models\AiUsageLog;
 use App\Models\GeminiApiKey;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -18,6 +18,8 @@ use Illuminate\Support\Facades\DB;
  */
 class AiCosts extends Page
 {
+    use HitlerOnly;
+
     protected static ?string $navigationIcon = 'heroicon-o-currency-dollar';
 
     protected static ?string $navigationLabel = 'تكلفة الذكاء الاصطناعي';
@@ -35,13 +37,6 @@ class AiCosts extends Page
 
     /** @var array<int, array{input: mixed, cached: mixed, output: mixed}> */
     public array $prices = [];
-
-    public static function canAccess(): bool
-    {
-        $user = Auth::user();
-
-        return (bool) ($user?->is_super_admin || $user?->role === 'super_admin');
-    }
 
     public function mount(): void
     {

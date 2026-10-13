@@ -2,6 +2,7 @@
 
 namespace App\Filament\Clusters\WebsiteSettings\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Filament\Clusters\WebsiteSettings;
 use App\Filament\Clusters\WebsiteSettings\Resources\PostResource\Pages;
 use App\Models\Post;
@@ -13,6 +14,8 @@ use Filament\Tables\Table;
 
 class PostResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = Post::class;
 
     protected static ?string $cluster = WebsiteSettings::class;

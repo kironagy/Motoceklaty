@@ -2,13 +2,15 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Support\HitlerOnly;
 use App\Domain\Monitoring\ReplyQuality;
 use Filament\Pages\Page;
-use Illuminate\Support\Facades\Auth;
 
 /** Owner 2026-10-04: the bot's mistakes as numbers, every day, not screenshots. */
 class ReplyQualityPage extends Page
 {
+    use HitlerOnly;
+
     protected static ?string $navigationIcon = 'heroicon-o-check-badge';
 
     protected static ?string $navigationLabel = 'جودة الردود';
@@ -24,13 +26,6 @@ class ReplyQualityPage extends Page
     protected static string $view = 'filament.pages.reply-quality';
 
     public int $days = 1;
-
-    public static function canAccess(): bool
-    {
-        $user = Auth::user();
-
-        return (bool) ($user?->is_super_admin || $user?->role === 'super_admin');
-    }
 
     public function getSummary(): array
     {

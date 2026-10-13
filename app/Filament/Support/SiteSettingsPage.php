@@ -22,6 +22,7 @@ use Illuminate\Support\HtmlString;
  */
 abstract class SiteSettingsPage extends Page implements HasForms
 {
+    use HitlerOnly;
     use InteractsWithFormActions;
     use InteractsWithForms;
 

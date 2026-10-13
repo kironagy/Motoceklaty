@@ -2,6 +2,7 @@
 
 namespace App\Filament\Clusters\WebsiteSettings\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Filament\Clusters\WebsiteSettings;
 use App\Filament\Clusters\WebsiteSettings\Resources\ContactMessageResource\Pages;
 use App\Models\ContactMessage;
@@ -14,6 +15,8 @@ use Illuminate\Database\Eloquent\Collection;
 
 class ContactMessageResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = ContactMessage::class;
 
     protected static ?string $cluster = WebsiteSettings::class;

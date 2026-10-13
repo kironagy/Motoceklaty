@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Domain\Teaching\RegressionRunner;
 use App\Filament\Resources\TeachingCaseResource\Pages;
 use App\Models\TeachingCase;
@@ -12,6 +13,8 @@ use Filament\Tables\Table;
 
 class TeachingCaseResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = TeachingCase::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-beaker';
@@ -23,7 +26,7 @@ class TeachingCaseResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return (bool) auth()->user()?->isAdmin();
+        return static::isHitler();
     }
 
     public static function canCreate(): bool

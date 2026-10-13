@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Filament\Resources\WhatsappBotResource\Pages;
 use App\Models\Staff;
 use App\Models\WhatsappBot;
@@ -17,6 +18,8 @@ use Illuminate\Support\HtmlString;
 
 class WhatsappBotResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = WhatsappBot::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-chat-bubble-left-right';
@@ -445,9 +448,7 @@ class WhatsappBotResource extends Resource
 
     public static function canViewAny(): bool
     {
-        $user = auth()->user();
-
-        return $user && ((bool) $user->is_bot || (bool) $user->is_hitler);
+        return static::isHitler();
     }
 
     public static function canCreate(): bool

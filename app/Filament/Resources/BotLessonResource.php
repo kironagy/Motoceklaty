@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Domain\Teaching\LessonBook;
 use App\Filament\Resources\BotLessonResource\Pages;
 use App\Models\BotLesson;
@@ -14,6 +15,8 @@ use Filament\Tables\Table;
 
 class BotLessonResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = BotLesson::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-academic-cap';
@@ -25,7 +28,7 @@ class BotLessonResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return (bool) auth()->user()?->isAdmin();
+        return static::isHitler();
     }
 
     public static function canCreate(): bool

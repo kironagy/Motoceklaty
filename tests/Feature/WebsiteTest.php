@@ -260,7 +260,7 @@ class WebsiteTest extends TestCase
     {
         return Staff::create([
             'name' => 'Admin', 'email' => uniqid() . '@x.com', 'password' => 'secret',
-            'is_admin' => true, 'is_super_admin' => true,
+            'is_admin' => true, 'is_super_admin' => true, 'is_hitler' => true,
         ]);
     }
 }

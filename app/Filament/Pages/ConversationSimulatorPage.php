@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Support\HitlerOnly;
 use App\Domain\Applications\ApplicationService;
 use App\Domain\Applications\SnapshotService;
 use App\Domain\Simulation\ConversationSimulator;
@@ -25,6 +26,8 @@ use Livewire\WithFileUploads;
  */
 class ConversationSimulatorPage extends Page
 {
+    use HitlerOnly;
+
     use WithFileUploads;
 
     protected static ?string $navigationIcon = 'heroicon-o-chat-bubble-left-ellipsis';
@@ -62,11 +65,6 @@ class ConversationSimulatorPage extends Page
         'انت بوت؟',
         'في خصم؟',
     ];
-
-    public static function canAccess(): bool
-    {
-        return (bool) auth()->user()?->isAdmin();
-    }
 
     public function mount(): void
     {

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Support\HitlerOnly;
 use App\Agent\Context\TokenEstimator;
 use App\Agent\Tools\ToolRegistry;
 use App\Domain\Settings\AgentInstructions;
@@ -27,6 +28,8 @@ use Illuminate\Support\HtmlString;
  */
 class BotInstructions extends Page implements HasForms, HasTable
 {
+    use HitlerOnly;
+
     use InteractsWithForms;
     use InteractsWithTable;
 
@@ -39,11 +42,6 @@ class BotInstructions extends Page implements HasForms, HasTable
     protected static string $view = 'filament.pages.bot-instructions';
 
     public ?array $data = [];
-
-    public static function canAccess(): bool
-    {
-        return (bool) auth()->user()?->isAdmin();
-    }
 
     public function mount(): void
     {

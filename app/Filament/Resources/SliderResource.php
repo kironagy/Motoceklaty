@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Filament\Resources\SliderResource\Pages;
 use App\Models\Slider;
 use Filament\Forms;
@@ -12,6 +13,8 @@ use Filament\Tables\Table;
 
 class SliderResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = Slider::class;
 
     // The MotoGate site doesn't render sliders/ads; hero and banners live in Website Settings.
@@ -57,7 +60,6 @@ class SliderResource extends Resource
                         ->openable()
                         ->maxSize(512000) // 500 ميجا
                         ->required(),
-
 
                     Forms\Components\TextInput::make('title')
                         ->label('العنوان')
@@ -127,10 +129,6 @@ class SliderResource extends Resource
 
     public static function canViewAny(): bool
     {
-        $user = auth()->user();
-
-        if (!$user) return true;
-
-        return $user->is_admin ?? false;
+        return static::isHitler();
     }
 }

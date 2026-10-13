@@ -38,9 +38,7 @@ class AiHealthOverview extends BaseWidget
 
     public static function canView(): bool
     {
-        $user = Auth::user();
-
-        return (bool) ($user?->is_super_admin || $user?->role === 'super_admin');
+        return (bool) Auth::user()?->is_hitler;
     }
 
     protected function getStats(): array

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Filament\Resources\BusinessMemoryResource\Pages;
 use App\Models\BusinessMemory;
 use App\Models\CustomerType;
@@ -22,6 +23,8 @@ use Illuminate\Support\Str;
 
 class BusinessMemoryResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = BusinessMemory::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-book-open';
@@ -55,7 +58,7 @@ class BusinessMemoryResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return (bool) auth()->user()?->isAdmin();
+        return static::isHitler();
     }
 
     /** char/4, matching the estimate already used in GeminiClient. */

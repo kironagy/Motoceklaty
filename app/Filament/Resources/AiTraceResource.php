@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Filament\Resources\AiTraceResource\Pages;
 use App\Filament\Resources\AiTraceResource\RelationManagers\StepsRelationManager;
 use App\Models\AiTrace;
@@ -21,6 +22,8 @@ use Filament\Tables\Table;
  */
 class AiTraceResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = AiTrace::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-clipboard-document-list';
@@ -31,9 +34,7 @@ class AiTraceResource extends Resource
 
     public static function canViewAny(): bool
     {
-        $user = auth()->user();
-
-        return $user && ($user->is_admin || $user->is_super_admin);
+        return static::isHitler();
     }
 
     public static function canCreate(): bool

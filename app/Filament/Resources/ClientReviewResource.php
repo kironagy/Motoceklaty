@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Filament\Clusters\WebsiteSettings;
 use App\Filament\Resources\ClientReviewResource\Pages;
 use App\Models\ClientReview;
@@ -13,6 +14,8 @@ use Filament\Tables;
 
 class ClientReviewResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = ClientReview::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-chat-bubble-bottom-center-text';

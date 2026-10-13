@@ -86,7 +86,7 @@ class SalesmanRebuildTest extends TestCase
         $this->assertSame(1, $summary['fallbacks']);
         $this->assertSame(['ENGLISH_WORD' => 1], $summary['codes']);
 
-        $this->actingAs(Staff::create(['name' => 'A', 'email' => 'q'.uniqid().'@x.test', 'password' => 'secret', 'is_admin' => true, 'is_super_admin' => true]));
+        $this->actingAs(Staff::create(['name' => 'A', 'email' => 'q'.uniqid().'@x.test', 'password' => 'secret', 'is_admin' => true, 'is_super_admin' => true, 'is_hitler' => true]));
         \Livewire\Livewire::test(\App\Filament\Pages\ReplyQualityPage::class)->assertSee('كلمة إنجليزي')->assertSee('رد احتياطي');
     }
 }

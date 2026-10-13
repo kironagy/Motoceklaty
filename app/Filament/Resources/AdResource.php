@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Filament\Resources\AdResource\Pages;
 use App\Filament\Resources\AdResource\RelationManagers;
 use App\Models\Ad;
@@ -15,6 +16,8 @@ use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class AdResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = Ad::class;
 
     // The MotoGate site doesn't render sliders/ads; hero and banners live in Website Settings.
@@ -76,16 +79,9 @@ class AdResource extends Resource
             'edit' => Pages\EditAd::route('/{record}/edit'),
         ];
     }
+
     public static function canViewAny(): bool
     {
-        $user = auth()->user();
-
-        // لو مفيش يوزر (لسه بيعمل لوجين مثلاً) نعرضها بشكل طبيعي
-        if (!$user) {
-            return true;
-        }
-
-        // السماح فقط للأدمن يشوف الريسورس دي
-        return $user->is_admin == 1;
+        return static::isHitler();
     }
 }

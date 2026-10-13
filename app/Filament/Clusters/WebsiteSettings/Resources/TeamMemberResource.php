@@ -2,6 +2,7 @@
 
 namespace App\Filament\Clusters\WebsiteSettings\Resources;
 
+use App\Filament\Support\HitlerOnly;
 use App\Filament\Clusters\WebsiteSettings;
 use App\Filament\Clusters\WebsiteSettings\Resources\TeamMemberResource\Pages;
 use App\Models\TeamMember;
@@ -13,6 +14,8 @@ use Filament\Tables\Table;
 
 class TeamMemberResource extends Resource
 {
+    use HitlerOnly;
+
     protected static ?string $model = TeamMember::class;
 
     protected static ?string $cluster = WebsiteSettings::class;
