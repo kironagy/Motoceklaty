@@ -74,9 +74,13 @@ class AttendanceMonthStats
                 $a = $days[$date] ?? null;
                 $onVacation = $myVacations->contains(fn ($v) => $date >= Carbon::parse($v->from_date)->toDateString() && $date <= Carbon::parse($v->to_date)->toDateString());
 
+                // Late by the point when the day has one, else by its late minutes (days before points).
+                $isLate = $a && $a->check_in_at && ($a->point
+                    ? in_array($a->point->color, [AttendancePoints::RED, AttendancePoints::BLACK], true)
+                    : (int) $a->late_minutes > $grace);
+
                 $state = match (true) {
-                    $a && $a->check_in_at && $a->point => $a->point->status === AttendancePoints::CANCELED ? 'canceled' : $a->point->color,
-                    $a && $a->check_in_at => 'present',
+                    $a && $a->check_in_at => $isLate ? 'late' : 'ontime',
                     $onVacation || $a?->status === 'vacation' => 'vacation',
                     in_array($day->dayOfWeek, $offDays, true) => 'off',
                     $day->greaterThanOrEqualTo(today()) => 'future',
@@ -88,11 +92,17 @@ class AttendanceMonthStats
                     $absent++;
                 }
 
-                $strip[] = ['day' => $day->day, 'state' => $state, 'date' => $date];
+                $strip[] = [
+                    'day' => $day->day,
+                    'state' => $state,
+                    'date' => $date,
+                    'in' => $a?->check_in_at?->format('g:i'),
+                    'late' => $isLate ? (int) $a->late_minutes : 0,
+                ];
             }
 
             $present = $days->filter(fn (Attendance $a) => $a->check_in_at)->count();
-            $late = $days->filter(fn (Attendance $a) => $a->check_in_at && (int) $a->late_minutes > $grace)->count();
+            $late = collect($strip)->where('state', 'late')->count();
             $overtime = (int) $days->sum('overtime_minutes');
             $earned = fn (string $color) => $myPoints->where('color', $color)->count();
             $active = $myPoints->where('status', AttendancePoints::ACTIVE);

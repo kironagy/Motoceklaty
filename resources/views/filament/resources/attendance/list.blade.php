@@ -193,8 +193,8 @@
 
                                 <div class="at-strip" aria-label="أيام الشهر">
                                     @foreach ($c['strip'] as $d)
-                                        @php($k = match ($d['state']) { 'green', 'present' => 'p', 'red', 'black', 'canceled' => 'l', 'absent' => 'a', default => 'n' })
-                                        <i class="at-d {{ $k }}" title="{{ $d['date'] }}{{ ['p' => ' - حضر', 'l' => ' - اتأخر', 'a' => ' - غاب', 'n' => ''][$k] }}">{{ $d['day'] }}</i>
+                                        @php($k = ['ontime' => 'p', 'late' => 'l', 'absent' => 'a'][$d['state']] ?? 'n')
+                                        <i class="at-d {{ $k }}" title="{{ $d['date'] }}{{ match ($k) { 'p' => ' - حضر '.$d['in'], 'l' => ' - اتأخر '.$d['late'].' دقيقة (حضر '.$d['in'].')', 'a' => ' - غاب', default => '' } }}">{{ $d['day'] }}</i>
                                     @endforeach
                                 </div>
 
