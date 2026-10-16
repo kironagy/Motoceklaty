@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources;
 
-use App\Support\FinanceAccess;
 use App\Models\Warehouse;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -30,7 +29,7 @@ class WarehouseResource extends Resource
 
     $user = auth()->user();
 
-            return FinanceAccess::isSuper();
+            return \App\Support\Access::allows(static::class, 'view');
 
 
     }

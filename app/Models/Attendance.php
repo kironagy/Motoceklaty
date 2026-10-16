@@ -20,6 +20,7 @@ class Attendance extends Model
         'deduction_amount',
         'status',
         'notes',
+        'overtime_minutes',
     ];
 
     protected $casts = [
@@ -30,8 +31,21 @@ class Attendance extends Model
         'deduction_amount' => 'decimal:2',
     ];
 
+    protected static function booted(): void
+    {
+        // Late / overtime minutes and the day's point follow the check-in and check-out times,
+        // from the clock-in widget or an admin's edit.
+        static::saving(fn (Attendance $attendance) => \App\Domain\Attendance\AttendancePoints::beforeSave($attendance));
+        static::saved(fn (Attendance $attendance) => \App\Domain\Attendance\AttendancePoints::afterSave($attendance));
+    }
+
     public function staff()
     {
         return $this->belongsTo(Staff::class);
+    }
+
+    public function point()
+    {
+        return $this->hasOne(AttendancePoint::class);
     }
 }

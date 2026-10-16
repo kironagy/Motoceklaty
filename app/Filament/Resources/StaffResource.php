@@ -4,7 +4,6 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\StaffResource\Pages;
 use App\Models\Staff;
-use App\Support\FinanceAccess;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
@@ -126,84 +125,62 @@ Forms\Components\Select::make('installmentSystems')
                 ->collapsible()
                 ->columnSpanFull(),
 
-            // From the finance / showroom system (env). Only a finance super admin sees or edits it;
+            // Branch, clock-in and salary. Only who can open the salaries page sees or edits it;
             // hidden fields aren't saved, so nobody else can change these values.
-            Forms\Components\Section::make('نظام المعرض والحسابات')
-                ->description('صلاحية الموظف في المخزون والجوابات والخزنة والحضور والمرتبات.')
-                ->visible(fn () => FinanceAccess::isSuper())
+            Forms\Components\Section::make('الفرع والحضور والمرتب')
+                ->description('الموظف بيبصم من مكان الفرع بتاعه (Latitude / Longitude الفرع من صفحة الفروع).')
+                ->visible(fn () => static::canManagePay())
                 ->schema([
-                    Forms\Components\ToggleButtons::make('finance_role')
-                        ->label('صلاحية نظام المعرض')
-                        ->options(FinanceAccess::ROLES)
-                        ->helperText('فاضي = الموظف مش بيشوف نظام المعرض خالص.')
-                        ->inline()
-                        ->nullable(),
-                    Forms\Components\Toggle::make('is_showroom_employee')
-                        ->label('موظف معرض')
-                        ->helperText('فعّلها لو الموظف هيتحسب عليه حضور وانصراف ومرتب.')
-                        ->live(),
+                    Forms\Components\Select::make('branch_id')
+                        ->label('الفرع')
+                        ->relationship('branch', 'name')
+                        ->helperText(fn (Get $get) => ($branch = \App\Models\Branch::find($get('branch_id'))) && ($branch->latitude === null || $branch->longitude === null)
+                            ? '⚠️ الفرع ده لسه ملوش Latitude / Longitude - حددهم من صفحة الفروع عشان البصمة تشتغل.'
+                            : null)
+                        ->searchable()
+                        ->preload()
+                        ->live()
+                        ->nullable()
+                        ->required(fn (Get $get) => (bool) $get('is_showroom_employee')),
                     Forms\Components\Select::make('warehouse_id')
-                        ->label('المخزن / المعرض')
+                        ->label('المعرض / الخزنة')
+                        ->helperText('اللي بيشوف خزنته من غير صلاحية كاملة.')
                         ->relationship('warehouse', 'name')
                         ->searchable()
                         ->preload()
                         ->nullable(),
-                ])
-                ->columns(3)
-                ->columnSpanFull(),
-
-            Forms\Components\Section::make('بيانات الحضور والمرتب')
-                ->visible(fn (Get $get) => FinanceAccess::isSuper() && (bool) $get('is_showroom_employee'))
-                ->schema([
+                    Forms\Components\Toggle::make('is_showroom_employee')
+                        ->label('بيبصم وبيتحسب له مرتب')
+                        ->helperText('فعّلها لو الموظف بيسجل حضور وانصراف وبيتحسب له مرتب ونقط.')
+                        ->live(),
                     Forms\Components\TextInput::make('monthly_salary')
                         ->label('المرتب الشهري')
                         ->numeric()
                         ->prefix('ج')
                         ->minValue(0)
+                        ->visible(fn (Get $get) => (bool) $get('is_showroom_employee'))
                         ->required(fn (Get $get) => (bool) $get('is_showroom_employee')),
                     Forms\Components\TimePicker::make('attendance_time')
-                        ->label('وقت الحضور الرسمي')
+                        ->label('ميعاد الحضور')
+                        ->helperText('في المعاد أو قبله = نقطة خضرا، بعده = حمرا، 3 ساعات أو أكتر = سودا.')
                         ->seconds(false)
+                        ->visible(fn (Get $get) => (bool) $get('is_showroom_employee'))
                         ->required(fn (Get $get) => (bool) $get('is_showroom_employee')),
                     Forms\Components\TimePicker::make('departure_time')
-                        ->label('وقت الانصراف الرسمي')
+                        ->label('ميعاد الانصراف')
                         ->seconds(false)
+                        ->visible(fn (Get $get) => (bool) $get('is_showroom_employee'))
                         ->required(fn (Get $get) => (bool) $get('is_showroom_employee')),
-                    Forms\Components\TextInput::make('attendance_latitude')
-                        ->label('Latitude')
-                        ->numeric()
-                        ->placeholder('مثال: 30.044420'),
-                    Forms\Components\TextInput::make('attendance_longitude')
-                        ->label('Longitude')
-                        ->numeric()
-                        ->placeholder('مثال: 31.235712'),
-                    Forms\Components\Repeater::make('attendanceDeductionRules')
-                        ->relationship()
-                        ->label('قواعد خصم التأخير')
-                        ->schema([
-                            Forms\Components\TextInput::make('from_minute')->label('من دقيقة')->numeric()->minValue(0)->required(),
-                            Forms\Components\TextInput::make('to_minute')->label('إلى دقيقة')->numeric()->minValue(1)->required(),
-                            Forms\Components\Select::make('deduction_days')
-                                ->label('قيمة الخصم')
-                                ->options([
-                                    '0.25' => 'ربع يوم',
-                                    '0.50' => 'نص يوم',
-                                    '1.00' => 'يوم',
-                                    '2.00' => 'يومين',
-                                    '3.00' => '3 أيام',
-                                ])
-                                ->required(),
-                        ])
-                        ->columns(3)
-                        ->defaultItems(0)
-                        ->reorderable(false)
-                        ->collapsible()
-                        ->addActionLabel('إضافة قاعدة خصم')
-                        ->columnSpanFull(),
                 ])
                 ->columns(3)
                 ->columnSpanFull(),
           ]);
+    }
+
+    /** Branch, salary and clock-in times follow the salaries page: whoever may open it may set them. */
+    protected static function canManagePay(): bool
+    {
+        return \App\Support\Access::allows(\App\Filament\Pages\Salaries::class, 'view');
     }
 
     public static function table(Table $table): Table
@@ -236,16 +213,10 @@ Tables\Columns\IconColumn::make('is_company_employee')
     ->boolean()
     ->label('موظف شركة'),
 
-Tables\Columns\TextColumn::make('finance_role')
-    ->label('صلاحية المعرض')
-    ->badge()
-    ->formatStateUsing(fn ($state) => FinanceAccess::ROLES[$state] ?? $state)
+Tables\Columns\TextColumn::make('branch.name')
+    ->label('الفرع')
     ->placeholder('—')
-    ->visible(fn () => FinanceAccess::isSuper()),
-Tables\Columns\TextColumn::make('warehouse.name')
-    ->label('المعرض')
-    ->placeholder('—')
-    ->visible(fn () => FinanceAccess::isSuper()),
+    ->toggleable(),
 Tables\Columns\TextColumn::make('installmentSystems.name')
     ->label('الشركات')
     ->badge()
@@ -382,7 +353,7 @@ public static function mutateFormDataBeforeSave(
             return false;
         }
 
-        return $user->is_admin || $user->is_super_admin || FinanceAccess::isSuper($user);
+        return $user->is_admin || $user->is_super_admin || (bool) $user->is_hitler;
     }
 }
 

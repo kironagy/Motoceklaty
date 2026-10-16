@@ -50,6 +50,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // The sidebar follows the layout the owner set on the dashboard settings page.
+        $this->app->scoped(\Filament\Navigation\NavigationManager::class, fn () => new \App\Filament\Support\LayoutNavigationManager);
+
         \App\Domain\Settings\AgentSettings::apply();
 
         InstallmentRequest::observe(InstallmentRequestObserver::class);

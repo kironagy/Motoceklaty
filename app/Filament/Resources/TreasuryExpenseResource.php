@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources;
 
-use App\Support\FinanceAccess;
 use App\Filament\Resources\TreasuryExpenseResource\Pages;
 use App\Models\Letter;
 use App\Models\TreasuryExpense;
@@ -22,6 +21,7 @@ use Illuminate\Support\HtmlString;
 class TreasuryExpenseResource extends Resource
 {
     use \App\Filament\Concerns\RoleGatedResource;
+    use \App\Filament\Concerns\HasFullAccess;
     protected static ?string $model = TreasuryExpense::class;
 
     protected static ?string $navigationLabel = 'الخزنة';
@@ -33,9 +33,7 @@ class TreasuryExpenseResource extends Resource
 
     protected static function isSuperAdmin($user = null): bool
     {
-        $user ??= Auth::user();
-
-        return FinanceAccess::isSuper($user);
+        return $user ? \App\Support\Access::full(static::class, $user) : static::fullAccess();
     }
 
     protected static function isItemLockedForCurrentUser($itemRecord = null): bool
@@ -50,7 +48,7 @@ class TreasuryExpenseResource extends Resource
 
         $creator = Staff::find($createdBy);
 
-        return $creator ? FinanceAccess::isSuper($creator) : false;
+        return $creator ? \App\Support\Access::full(static::class, $creator) : false;
     }
 
     protected static function canCurrentUserControlItem($itemRecord = null): bool
@@ -81,9 +79,7 @@ class TreasuryExpenseResource extends Resource
             return $allowed;
         }
 
-        $user = Auth::user();
-
-        return FinanceAccess::canManage($user);
+        return \App\Support\Access::allows(static::class, 'view');
     }
 
     public static function getEloquentQuery(): Builder

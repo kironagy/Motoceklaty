@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources;
 
-use App\Support\FinanceAccess;
 use App\Filament\Resources\TargetResource\Pages;
 use App\Models\Target;
 use Filament\Forms;
@@ -14,6 +13,7 @@ use Filament\Tables\Table;
 class TargetResource extends Resource
 {
     use \App\Filament\Concerns\RoleGatedResource;
+    use \App\Filament\Concerns\HasFullAccess;
     protected static ?string $model = Target::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-flag';
@@ -30,7 +30,7 @@ class TargetResource extends Resource
         return (bool) (
             $user &&
             (
-                FinanceAccess::isSuper($user)
+                \App\Support\Access::allows(static::class, 'view')
             )
         );
     }

@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources;
 
-use App\Support\FinanceAccess;
 use App\Filament\Resources\LetterResource\Pages;
 use App\Models\Letter;
 use App\Models\Warehouse;
@@ -18,6 +17,7 @@ use Filament\Tables\Table;
 class LetterResource extends Resource
 {
     use \App\Filament\Concerns\RoleGatedResource;
+    use \App\Filament\Concerns\HasFullAccess;
     protected static ?string $model = Letter::class;
 
     protected static ?string $navigationLabel = 'الجوابات';
@@ -33,7 +33,7 @@ class LetterResource extends Resource
             return $allowed;
         }
 
-        return FinanceAccess::canManage();
+        return \App\Support\Access::allows(static::class, 'view');
     }
 protected static function isSuperAdmin(): bool
 {
@@ -42,7 +42,7 @@ protected static function isSuperAdmin(): bool
     return (bool) (
         $user
         && (
-            FinanceAccess::isSuper($user)
+            static::fullAccess()
         )
     );
 }
@@ -53,7 +53,7 @@ protected static function isSuperAdmin(): bool
         return (bool) (
             $user
             && (
-                FinanceAccess::isAdmin($user)
+                ! static::fullAccess()
             )
         );
     }

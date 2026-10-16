@@ -40,6 +40,10 @@ class BranchResource extends Resource
                 TextInput::make('city')->label('المدينة')->required(),
                 TextInput::make('address')->label('العنوان')->required(),
                 TextInput::make('map_url')->label('رابط الخريطة')->url(),
+                // Staff of this branch clock in within config('attendance_points.radius_meters') of this point.
+                TextInput::make('latitude')->label('Latitude (مكان البصمة)')->numeric()->placeholder('مثال: 30.044420')
+                    ->helperText('موظفين الفرع بيبصموا من حوالين النقطة دي.'),
+                TextInput::make('longitude')->label('Longitude (مكان البصمة)')->numeric()->placeholder('مثال: 31.235712'),
                 TagsInput::make('phones')->label('أرقام التليفون'),
                 TagsInput::make('services')->label('الخدمات المتاحة'),
                 KeyValue::make('working_hours')

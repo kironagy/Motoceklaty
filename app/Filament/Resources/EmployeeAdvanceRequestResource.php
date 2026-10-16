@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources;
 
-use App\Support\FinanceAccess;
 use App\Filament\Resources\EmployeeAdvanceRequestResource\Pages;
 use App\Models\EmployeeAdvanceRequest;
 use Filament\Forms\Form;
@@ -21,6 +20,7 @@ use Illuminate\Database\Eloquent\Builder;
 class EmployeeAdvanceRequestResource extends Resource
 {
     use \App\Filament\Concerns\RoleGatedResource;
+    use \App\Filament\Concerns\HasFullAccess;
     protected static ?string $model = EmployeeAdvanceRequest::class;
 
     protected static ?string $navigationLabel = 'طلبات السلف';
@@ -34,14 +34,14 @@ class EmployeeAdvanceRequestResource extends Resource
             return $allowed;
         }
 
-        return FinanceAccess::hasAccess();
+        return \App\Support\Access::allows(static::class, 'view');
     }
 
     public static function getNavigationBadge(): ?string
     {
         $user = auth()->user();
 
-        if (! FinanceAccess::isSuper($user)) {
+        if (! static::fullAccess()) {
             return null;
         }
 
@@ -63,7 +63,7 @@ class EmployeeAdvanceRequestResource extends Resource
 
         $user = auth()->user();
 
-        if (! FinanceAccess::isSuper($user)) {
+        if (! static::fullAccess()) {
             $query->where('staff_id', $user->id);
         }
 
@@ -102,13 +102,13 @@ class EmployeeAdvanceRequestResource extends Resource
                         'rejected' => 'مرفوضة',
                     ])
                     ->default('pending')
-                    ->visible(fn () => FinanceAccess::isSuper())
+                    ->visible(fn () => static::fullAccess())
                     ->required()
                     ->live(),
 
                 Textarea::make('admin_notes')
                     ->label('ملاحظات الإدارة')
-                    ->visible(fn () => FinanceAccess::isSuper())
+                    ->visible(fn () => static::fullAccess())
                     ->rows(3),
             ]);
     }
@@ -122,7 +122,7 @@ class EmployeeAdvanceRequestResource extends Resource
 
     public static function mutateFormDataBeforeSave(array $data): array
     {
-        if (FinanceAccess::isSuper()) {
+        if (static::fullAccess()) {
             $data['reviewed_by'] = auth()->id();
             $data['reviewed_at'] = now();
         }
@@ -137,7 +137,7 @@ class EmployeeAdvanceRequestResource extends Resource
             ->columns([
                 TextColumn::make('staff.name')
                     ->label('الموظف')
-                    ->visible(fn () => FinanceAccess::isSuper()),
+                    ->visible(fn () => static::fullAccess()),
 
                 TextColumn::make('amount')
                     ->label('المبلغ')
@@ -166,7 +166,7 @@ class EmployeeAdvanceRequestResource extends Resource
                 TextColumn::make('reviewer.name')
                     ->label('تمت بواسطة')
                     ->placeholder('—')
-                    ->visible(fn () => FinanceAccess::isSuper()),
+                    ->visible(fn () => static::fullAccess()),
 
                 TextColumn::make('created_at')
                     ->label('وقت الطلب')
@@ -179,7 +179,7 @@ class EmployeeAdvanceRequestResource extends Resource
                 Tables\Actions\DeleteAction::make()
                     ->label('حذف')
                     ->visible(fn ($record) =>
-                        FinanceAccess::isSuper()
+                        static::fullAccess()
                         || $record->status === 'pending'
                     ),
             ]);
@@ -191,7 +191,7 @@ class EmployeeAdvanceRequestResource extends Resource
             return $allowed;
         }
 
-        return FinanceAccess::isShowroomEmployee();
+        return \App\Support\Access::allows(static::class, 'create');
     }
 
     public static function getPages(): array

@@ -10,7 +10,7 @@ class PrintRaedLetterController extends Controller
     public function __invoke(Letter $letter): View
     {
         // منع أي مستخدم غير مسجّل من الوصول لرابط الطباعة مباشرة.
-        abort_unless(\App\Support\FinanceAccess::hasAccess(), 403);
+        abort_unless(\App\Support\Access::allows(\App\Filament\Resources\LetterResource::class, 'view'), 403);
 
         $letter->loadMissing('inventory.product', 'inventory.warehouse');
 

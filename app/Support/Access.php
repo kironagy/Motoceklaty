@@ -25,6 +25,16 @@ class Access
 
     public const PAGE_ABILITIES = ['view' => 'يشوف الصفحة'];
 
+    /**
+     * The extra column of the showroom / accounts / HR tabs. Without it a user works on his own
+     * records (his attendance, his requests, his showroom); with it he sees everyone, approves,
+     * edits money and transfers stock.
+     */
+    public const FULL = ['all' => 'صلاحية كاملة'];
+
+    /** Every column of the matrix, in order. */
+    public const COLUMNS = self::ABILITIES + self::FULL;
+
     public static function user(): ?Staff
     {
         $user = auth('filament')->user();
@@ -48,6 +58,33 @@ class Access
         }
 
         return null;
+    }
+
+    /**
+     * Full access to a showroom / accounts / HR tab: the role's "all" column, and always for the
+     * owner. Staff without a role get none - these tabs never fall back to built-in rules.
+     */
+    public static function full(string $class, ?Staff $staff = null): bool
+    {
+        $staff ??= static::user();
+
+        if ((bool) $staff?->is_hitler) {
+            return true;
+        }
+
+        return (bool) static::check($class, 'all', $staff);
+    }
+
+    /** Owner, or a role that opens this ability of the tab. Staff without a role get nothing. */
+    public static function allows(string $class, string $ability, ?Staff $staff = null): bool
+    {
+        $staff ??= static::user();
+
+        if ((bool) $staff?->is_hitler) {
+            return true;
+        }
+
+        return (bool) static::check($class, $ability, $staff);
     }
 
     public static function check(string $class, string $ability, ?Staff $staff = null): ?bool
@@ -82,9 +119,14 @@ class Access
             $cluster = $class::getCluster();
 
             $tabs[class_basename($class)] = [
-                'label' => $isPage ? ($class::getNavigationLabel() ?: $class::getTitle()) : $class::getNavigationLabel(),
+                'label' => \App\Filament\Support\NavigationLayout::labelFor(
+                    class_basename($class),
+                    (string) ($isPage ? ($class::getNavigationLabel() ?: $class::getTitle()) : $class::getNavigationLabel()),
+                ),
                 'group' => $cluster ? ($cluster::getNavigationGroup() ?? 'أخرى').' — '.$cluster::getNavigationLabel() : ($class::getNavigationGroup() ?? 'عام'),
-                'abilities' => $isPage ? self::PAGE_ABILITIES : self::ABILITIES,
+                'abilities' => $isPage
+                    ? self::PAGE_ABILITIES + (method_exists($class, 'hasFullAccessColumn') && $class::hasFullAccessColumn() ? self::FULL : [])
+                    : self::ABILITIES + (method_exists($class, 'hasFullAccessColumn') && $class::hasFullAccessColumn() ? self::FULL : []),
                 'class' => $class,
                 'sort' => [$class::getNavigationSort() ?? 0],
             ];

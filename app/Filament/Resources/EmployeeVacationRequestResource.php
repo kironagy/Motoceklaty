@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources;
 
-use App\Support\FinanceAccess;
 use App\Filament\Resources\EmployeeVacationRequestResource\Pages;
 use App\Models\EmployeeVacationRequest;
 use Filament\Forms\Form;
@@ -20,6 +19,7 @@ use Illuminate\Database\Eloquent\Builder;
 class EmployeeVacationRequestResource extends Resource
 {
     use \App\Filament\Concerns\RoleGatedResource;
+    use \App\Filament\Concerns\HasFullAccess;
     protected static ?string $model = EmployeeVacationRequest::class;
 
     protected static ?string $navigationLabel = 'طلبات الإجازات';
@@ -31,7 +31,7 @@ class EmployeeVacationRequestResource extends Resource
     {
         $user = auth()->user();
 
-        if (! FinanceAccess::isSuper($user)) {
+        if (! static::fullAccess()) {
             return null;
         }
 
@@ -53,7 +53,7 @@ class EmployeeVacationRequestResource extends Resource
 
         $user = auth()->user();
 
-        if (! FinanceAccess::isSuper($user)) {
+        if (! static::fullAccess()) {
             $query->where('staff_id', $user->id);
         }
 
@@ -68,7 +68,7 @@ class EmployeeVacationRequestResource extends Resource
 
         $user = auth()->user();
 
-        return FinanceAccess::isSuper() || FinanceAccess::isShowroomEmployee();
+        return static::fullAccess() || \App\Support\Access::allows(static::class, 'create');
     }
 
     public static function canCreate(): bool
@@ -77,7 +77,7 @@ class EmployeeVacationRequestResource extends Resource
             return $allowed;
         }
 
-        return FinanceAccess::isShowroomEmployee();
+        return \App\Support\Access::allows(static::class, 'create');
     }
 
     public static function form(Form $form): Form
@@ -121,12 +121,12 @@ class EmployeeVacationRequestResource extends Resource
                         'rejected' => 'مرفوضة',
                     ])
                     ->default('pending')
-                    ->visible(fn () => FinanceAccess::isSuper())
+                    ->visible(fn () => static::fullAccess())
                     ->required(),
 
                 Textarea::make('admin_notes')
                     ->label('ملاحظات الإدارة')
-                    ->visible(fn () => FinanceAccess::isSuper())
+                    ->visible(fn () => static::fullAccess())
                     ->rows(3),
             ]);
     }
@@ -141,7 +141,7 @@ class EmployeeVacationRequestResource extends Resource
 
     public static function mutateFormDataBeforeSave(array $data): array
     {
-        if (FinanceAccess::isSuper()) {
+        if (static::fullAccess()) {
             $data['reviewed_by'] = auth()->id();
             $data['reviewed_at'] = now();
         }
@@ -156,7 +156,7 @@ class EmployeeVacationRequestResource extends Resource
             ->columns([
                 TextColumn::make('staff.name')
                     ->label('الموظف')
-                    ->visible(fn () => FinanceAccess::isSuper()),
+                    ->visible(fn () => static::fullAccess()),
 
                 TextColumn::make('from_date')
                     ->label('من')
@@ -195,7 +195,7 @@ class EmployeeVacationRequestResource extends Resource
                 TextColumn::make('reviewer.name')
                     ->label('تمت بواسطة')
                     ->placeholder('—')
-                    ->visible(fn () => FinanceAccess::isSuper()),
+                    ->visible(fn () => static::fullAccess()),
 
                 TextColumn::make('created_at')
                     ->label('وقت الطلب')
@@ -208,7 +208,7 @@ class EmployeeVacationRequestResource extends Resource
                 Tables\Actions\DeleteAction::make()
                     ->label('حذف')
                     ->visible(fn ($record) =>
-                        FinanceAccess::isSuper()
+                        static::fullAccess()
                         || $record->status === 'pending'
                     ),
             ]);

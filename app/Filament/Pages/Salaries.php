@@ -2,7 +2,6 @@
 
 namespace App\Filament\Pages;
 
-use App\Support\FinanceAccess;
 use App\Models\Attendance;
 use App\Models\EmployeeAdvanceRequest;
 use App\Models\EmployeeBonus;
@@ -39,13 +38,7 @@ class Salaries extends Page
 
     public static function canAccess(): bool
     {
-        if (($allowed = \App\Support\Access::check(static::class, 'view')) !== null) {
-            return $allowed;
-        }
-
-        $user = auth()->user();
-
-        return FinanceAccess::isSuper();
+        return \App\Support\Access::allows(static::class, 'view');
     }
 
     public function openBonusModal(int $userId): void
@@ -98,7 +91,7 @@ class Salaries extends Page
 
         return Staff::query()
             ->where('is_showroom_employee', true)
-            ->with('warehouse')
+            ->with('branch')
             ->orderBy('name')
             ->get()
             ->map(function (Staff $user) use ($start, $end) {
@@ -124,18 +117,29 @@ class Salaries extends Page
                 $presentDays = $attendances->whereNotNull('check_in_at')->count();
                 $lateDays = $attendances->where('late_minutes', '>', 0)->count();
                 $lateMinutes = $attendances->sum('late_minutes');
-                $attendanceDeductions = (float) $attendances->sum('deduction_amount');
+                // Days before the points system keep their old deduction; since then the standing
+                // red / black points (from clock-in or added by hand) are the deduction.
+                $points = \App\Domain\Attendance\AttendancePoints::monthSummary($user->id, $start);
+                $legacyDeductions = (float) Attendance::query()
+                    ->where('staff_id', $user->id)
+                    ->whereBetween('attendance_date', [$start->toDateString(), $end->toDateString()])
+                    ->whereDoesntHave('point')
+                    ->sum('deduction_amount');
+                $attendanceDeductions = $legacyDeductions + $points['deductions'];
+                $overtimeMinutes = (int) $attendances->sum('overtime_minutes');
 
                 $netSalary = $monthlySalary - $attendanceDeductions - (float) $approvedAdvances + (float) $bonuses;
 
                 return [
                     'user' => $user,
-                    'warehouse' => $user->warehouse?->name ?? '—',
+                    'warehouse' => $user->branch?->name ?? '—',
                     'monthly_salary' => $monthlySalary,
                     'day_salary' => round($daySalary, 2),
                     'present_days' => $presentDays,
                     'late_days' => $lateDays,
                     'late_minutes' => $lateMinutes,
+                    'points' => $points,
+                    'overtime' => $overtimeMinutes > 0 ? \App\Filament\Widgets\AttendanceCheckWidget::hoursText($overtimeMinutes) : '—',
                     'attendance_deductions' => round($attendanceDeductions, 2),
                     'approved_advances' => round((float) $approvedAdvances, 2),
                     'bonuses' => round((float) $bonuses, 2),

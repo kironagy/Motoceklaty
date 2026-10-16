@@ -21,7 +21,7 @@ class PermissionMatrix
             ->view('filament.forms.permission-matrix')
             ->viewData([
                 'groups' => static::groups(),
-                'abilities' => Access::ABILITIES,
+                'abilities' => Access::COLUMNS,
             ])
             ->hintActions([
                 static::applyTemplateAction(),

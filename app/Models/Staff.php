@@ -27,16 +27,14 @@ class Staff extends Authenticatable
 'installment_system_id',
 'is_hitler',
         'attendance_rules',
-        'finance_role',
         'role_id',
         'permissions',
         'warehouse_id',
+        'branch_id',
         'is_showroom_employee',
         'monthly_salary',
         'attendance_time',
         'departure_time',
-        'attendance_latitude',
-        'attendance_longitude',
         'lat',
 'lng',
 'distance_m',
@@ -125,6 +123,12 @@ public function installmentSystems()
     public function warehouse()
     {
         return $this->belongsTo(\App\Models\Warehouse::class);
+    }
+
+    /** The branch he works at; attendance is checked against its location. */
+    public function branch()
+    {
+        return $this->belongsTo(\App\Models\Branch::class);
     }
 
     public function attendanceDeductionRules()

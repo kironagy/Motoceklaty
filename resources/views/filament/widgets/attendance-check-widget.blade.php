@@ -48,6 +48,9 @@
             class="attendance-box"
         >
             <style>
+                .attendance-points { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-top: 1rem; }
+                .attendance-point { font-size: .85rem; font-weight: 700; padding: .35rem .8rem; border-radius: 999px; background: rgba(255,255,255,.08); border: 1px solid rgba(148,163,184,.3); }
+                .attendance-points-hint { flex-basis: 100%; font-size: .78rem; opacity: .7; }
                 .attendance-box {
                     display: grid;
                     gap: 18px;
@@ -167,7 +170,7 @@
                 <div>
                     <h2 class="attendance-title">بصمة الحضور والانصراف</h2>
                     <div class="attendance-subtitle">
-                        لازم تسمح باللوكيشن عشان البصمة تتسجل من مكان المعرض.
+                        لازم تسمح باللوكيشن عشان البصمة تتسجل من مكان الفرع بتاعك.
                     </div>
                 </div>
 
@@ -182,6 +185,17 @@
                         {{ $this->todayAttendance?->check_out_at ? $this->todayAttendance->check_out_at->format('h:i A') : 'لسه' }}
                     </div>
 
+                    @if($this->todayAttendance && ! $this->todayAttendance->attendance_date->isToday())
+                        <div class="attendance-pill">وردية {{ $this->todayAttendance->attendance_date->format('Y-m-d') }} لسه مفتوحة</div>
+                    @endif
+
+                    @if(($this->todayAttendance?->overtime_minutes ?? 0) > 0)
+                        <div class="attendance-pill">
+                            وقت زيادة:
+                            {{ \App\Filament\Widgets\AttendanceCheckWidget::hoursText((int) $this->todayAttendance->overtime_minutes) }}
+                        </div>
+                    @endif
+
                     @if(($this->todayAttendance?->deduction_amount ?? 0) > 0)
                         <div class="attendance-pill">
                             الخصم:
@@ -189,6 +203,19 @@
                         </div>
                     @endif
                 </div>
+            </div>
+
+            @php($points = $this->monthPoints)
+            <div class="attendance-points" title="نقطك الشهر ده">
+                <span class="attendance-point">🟢 {{ $points['green'] }} خضرا متاحة</span>
+                <span class="attendance-point">🔴 {{ $points['red'] }} حمرا</span>
+                <span class="attendance-point">⚫ {{ $points['black'] }} سودا</span>
+                @if($points['canceled'])
+                    <span class="attendance-point">✅ {{ $points['canceled'] }} اتلغت</span>
+                @endif
+                <span class="attendance-points-hint">
+                    {{ \App\Domain\Attendance\AttendancePoints::greensNeeded('red') }} خضرا بعد الحمرا يلغوها، و{{ \App\Domain\Attendance\AttendancePoints::greensNeeded('black') }} خضرا بعد السودا يلغوها - من صفحة النقط.
+                </span>
             </div>
 
             <div class="attendance-actions">

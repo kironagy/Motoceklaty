@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Support\FinanceAccess;
 use App\Models\InventoryItem;
 use App\Models\Letter;
 use Illuminate\Http\Request;
@@ -14,12 +13,12 @@ class LetterReturnController extends Controller
     {
         $user = auth()->user();
 
-        $isSuperAdmin = FinanceAccess::isSuper($user);
+        $isSuperAdmin = \App\Support\Access::full(\App\Filament\Resources\LetterResource::class, $user);
 
         if (! $isSuperAdmin) {
             return back()->with(
                 'error',
-                'لا يمكن تنفيذ المرتجع. السوبر أدمن فقط هو المسموح له بذلك.'
+                'لا يمكن تنفيذ المرتجع. محتاج صلاحية كاملة على الجوابات.'
             );
         }
 

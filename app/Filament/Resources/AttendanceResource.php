@@ -2,8 +2,8 @@
 
 namespace App\Filament\Resources;
 
-use App\Support\FinanceAccess;
 use App\Filament\Resources\AttendanceResource\Pages;
+use App\Domain\Attendance\AttendancePoints;
 use App\Models\Attendance;
 use App\Models\Staff;
 use Filament\Forms\Form;
@@ -18,11 +18,14 @@ use Filament\Forms\Components\Textarea;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 
 class AttendanceResource extends Resource
 {
     use \App\Filament\Concerns\RoleGatedResource;
+    use \App\Filament\Concerns\HasFullAccess;
     protected static ?string $model = Attendance::class;
 
     protected static ?string $navigationLabel = 'الحضور والانصراف';
@@ -40,19 +43,18 @@ class AttendanceResource extends Resource
 
         $user = auth()->user();
 
-        return FinanceAccess::isSuper();
+        return static::fullAccess();
     }
 
     public static function getEloquentQuery(): Builder
     {
-        $query = parent::getEloquentQuery()->with(['staff', 'staff.warehouse']);
+        $query = parent::getEloquentQuery()->with(['staff', 'staff.branch', 'point']);
 
         $user = auth()->user();
 
-        if (FinanceAccess::isAdmin($user)) {
-            $query->whereHas('staff', function (Builder $q) use ($user) {
-                $q->where('warehouse_id', $user->warehouse_id);
-            });
+        // Without full access an employee sees only his own days.
+        if (! static::fullAccess()) {
+            $query->where('staff_id', $user?->id);
         }
 
         return $query;
@@ -69,7 +71,7 @@ class AttendanceResource extends Resource
 
                         return Staff::query()
                             ->where('is_showroom_employee', true)
-                            ->when(FinanceAccess::isAdmin($auth), fn ($q) => $q->where('warehouse_id', $auth->warehouse_id))
+                            ->when(! static::fullAccess(), fn ($q) => $q->whereKey($auth->id))
                             ->orderBy('name')
                             ->pluck('name', 'id');
                     })
@@ -89,21 +91,19 @@ class AttendanceResource extends Resource
                     ->label('وقت الانصراف')
                     ->seconds(false),
 
+                // Worked out from the check-in time when the day is saved (AttendancePoints::apply).
                 TextInput::make('late_minutes')
                     ->label('دقائق التأخير')
-                    ->numeric()
-                    ->default(0),
-
-                TextInput::make('deduction_days')
-                    ->label('أيام الخصم')
-                    ->numeric()
-                    ->default(0),
+                    ->helperText('بتتحسب لوحدها من وقت الحضور وميعاد الموظف.')
+                    ->disabled()
+                    ->dehydrated(false),
 
                 TextInput::make('deduction_amount')
                     ->label('قيمة الخصم')
-                    ->numeric()
                     ->prefix('ج')
-                    ->default(0),
+                    ->helperText('حمرا 200 ج، سودا 1000 ج، وبتتشال لو النقطة اتلغت.')
+                    ->disabled()
+                    ->dehydrated(false),
 
                 Select::make('status')
                     ->label('الحالة')
@@ -139,8 +139,8 @@ class AttendanceResource extends Resource
                     ->searchable()
                     ->sortable(),
 
-                TextColumn::make('staff.warehouse.name')
-                    ->label('المعرض')
+                TextColumn::make('staff.branch.name')
+                    ->label('الفرع')
                     ->placeholder('—'),
 
                 TextColumn::make('check_in_at')
@@ -158,8 +158,32 @@ class AttendanceResource extends Resource
                     ->suffix(' دقيقة')
                     ->sortable(),
 
-                TextColumn::make('deduction_days')
-                    ->label('أيام الخصم')
+                TextColumn::make('point.color')
+                    ->label('النقطة')
+                    ->badge()
+                    ->formatStateUsing(fn ($state, Attendance $record) => (AttendancePoints::ICONS[$state] ?? '').' '.match ($state) {
+                        AttendancePoints::GREEN => 'خضرا',
+                        AttendancePoints::RED => 'حمرا',
+                        AttendancePoints::BLACK => 'سودا',
+                        default => $state,
+                    }.match ($record->point?->status) {
+                        AttendancePoints::USED => ' (اتستخدمت)',
+                        AttendancePoints::CANCELED => ' (اتلغت)',
+                        default => '',
+                    })
+                    ->color(fn ($state, Attendance $record) => $record->point?->status === AttendancePoints::ACTIVE
+                        ? match ($state) {
+                            AttendancePoints::GREEN => 'success',
+                            AttendancePoints::RED => 'danger',
+                            default => 'gray',
+                        }
+                        : 'gray')
+                    ->placeholder('—'),
+
+                TextColumn::make('overtime_minutes')
+                    ->label('وقت زيادة')
+                    ->formatStateUsing(fn ($state) => $state ? \App\Filament\Widgets\AttendanceCheckWidget::hoursText((int) $state) : null)
+                    ->placeholder('—')
                     ->sortable(),
 
                 TextColumn::make('deduction_amount')
@@ -195,6 +219,16 @@ class AttendanceResource extends Resource
                         ->orderBy('name')
                         ->pluck('name', 'id')),
 
+                SelectFilter::make('point')
+                    ->label('النقطة')
+                    ->options([
+                        AttendancePoints::GREEN => 'خضرا',
+                        AttendancePoints::RED => 'حمرا',
+                        AttendancePoints::BLACK => 'سودا',
+                    ])
+                    ->query(fn (Builder $query, array $data) => $query->when($data['value'] ?? null,
+                        fn ($q, $color) => $q->whereHas('point', fn ($p) => $p->where('color', $color)))),
+
                 SelectFilter::make('status')
                     ->label('الحالة')
                     ->options([
@@ -223,11 +257,11 @@ class AttendanceResource extends Resource
 
                 Tables\Actions\DeleteAction::make()
                     ->label('حذف')
-                    ->visible(fn () => FinanceAccess::isSuper()),
+                    ->visible(fn () => static::fullAccess()),
             ])
             ->bulkActions([
                 Tables\Actions\DeleteBulkAction::make()
-                    ->visible(fn () => FinanceAccess::isSuper()),
+                    ->visible(fn () => static::fullAccess()),
             ]);
     }
 

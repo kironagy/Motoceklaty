@@ -315,6 +315,8 @@
                         <th>الحضور</th>
                         <th>التأخير</th>
                         <th>دقائق التأخير</th>
+                        <th>النقط</th>
+                        <th>وقت زيادة</th>
                         <th>خصومات التأخير</th>
                         <th>السلف</th>
                         <th>البونص</th>
@@ -361,6 +363,17 @@
                             <td>
                                 {{ $row['late_minutes'] }} دقيقة
                             </td>
+
+                            <td style="white-space: nowrap;" title="خضرا متاحة / حمرا / سودا قائمة - واللي اتلغت">
+                                🟢 {{ $row['points']['green'] }}
+                                🔴 {{ $row['points']['red'] }}
+                                ⚫ {{ $row['points']['black'] }}
+                                @if($row['points']['canceled'])
+                                    <span style="opacity:.7">✅ {{ $row['points']['canceled'] }}</span>
+                                @endif
+                            </td>
+
+                            <td style="white-space: nowrap;">{{ $row['overtime'] }}</td>
 
                             <td>
                                 <span class="salary-pill salary-deduction">

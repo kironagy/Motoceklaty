@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources;
 
-use App\Support\FinanceAccess;
 use App\Filament\Resources\InventoryResource\Pages;
 use App\Models\Inventory;
 use App\Models\InventoryItem;
@@ -26,6 +25,7 @@ use Illuminate\Support\Facades\DB;
 class InventoryResource extends Resource
 {
     use \App\Filament\Concerns\RoleGatedResource;
+    use \App\Filament\Concerns\HasFullAccess;
     protected static ?string $model = Inventory::class;
 
     protected static ?string $navigationLabel = 'المخزون';
@@ -38,7 +38,7 @@ class InventoryResource extends Resource
             return $allowed;
         }
 
-        return FinanceAccess::hasAccess();
+        return \App\Support\Access::allows(static::class, 'view');
     }
 
     protected static ?string $navigationIcon = 'heroicon-o-archive-box';
@@ -141,7 +141,7 @@ class InventoryResource extends Resource
                            
     Action::make('transfer_item')
         ->visible(fn () =>
-            FinanceAccess::isSuper()
+            static::fullAccess()
         )
         ->label('تحويل لمعرض آخر')
         ->icon('heroicon-o-arrow-path-rounded-square')
@@ -325,10 +325,10 @@ class InventoryResource extends Resource
                 Tables\Actions\ViewAction::make(),
 
                 Tables\Actions\EditAction::make()
-                    ->visible(fn () => FinanceAccess::canManage()),
+                    ->visible(fn () => \App\Support\Access::allows(static::class, 'update')),
 
                 Tables\Actions\DeleteAction::make()
-                    ->visible(fn () => FinanceAccess::canManage()),
+                    ->visible(fn () => \App\Support\Access::allows(static::class, 'delete')),
             ]);
     }
 

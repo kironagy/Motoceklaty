@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources;
 
-use App\Support\FinanceAccess;
 use App\Models\Product;
 use App\Filament\Resources\ProductResource\Pages;
 use Filament\Forms;
@@ -32,7 +31,7 @@ class ProductResource extends Resource
 
         $user = auth()->user();
 
-        return FinanceAccess::isSuper();
+        return \App\Support\Access::allows(static::class, 'view');
     }
     // 🧾 الفورم
     public static function form(Form $form): Form

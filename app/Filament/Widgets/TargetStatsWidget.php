@@ -2,7 +2,6 @@
 
 namespace App\Filament\Widgets;
 
-use App\Support\FinanceAccess;
 use App\Models\Target;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
@@ -20,7 +19,7 @@ class TargetStatsWidget extends StatsOverviewWidget
 
     public static function canView(): bool
     {
-        return FinanceAccess::hasAccess();
+        return \App\Support\Access::allows(\App\Filament\Resources\TargetResource::class, 'view');
     }
 
     protected function getStats(): array
@@ -30,9 +29,7 @@ class TargetStatsWidget extends StatsOverviewWidget
         $targets = Target::query()
             ->where('is_active', true)
             ->when(
-                ! (
-                    FinanceAccess::isSuper($user)
-                ),
+                ! \App\Support\Access::full(\App\Filament\Resources\TargetResource::class, $user),
                 fn ($q) => $q->where('warehouse_id', $user->warehouse_id)
             )
             ->with('warehouse')

@@ -2,12 +2,17 @@
 
 namespace App\Filament\Widgets;
 
-use App\Support\FinanceAccess;
+use App\Domain\Attendance\AttendancePoints;
 use App\Models\Attendance;
-use Carbon\Carbon;
+use App\Models\Branch;
+use App\Models\Staff;
 use Filament\Notifications\Notification;
 use Filament\Widgets\Widget;
 
+/**
+ * Clock in / out from inside the employee's branch (its latitude / longitude), plus his points this month.
+ * The point and deduction of the day are set by the Attendance model (AttendancePoints::apply).
+ */
 class AttendanceCheckWidget extends Widget
 {
     protected static string $view = 'filament.widgets.attendance-check-widget';
@@ -23,61 +28,62 @@ class AttendanceCheckWidget extends Widget
 
     public static function canView(): bool
     {
-        return FinanceAccess::isShowroomEmployee();
+        return (bool) auth()->user()?->is_showroom_employee;
     }
 
+    /** The shift on screen: one still open (also from yesterday, past midnight), else today's. */
     public function loadTodayAttendance(): void
     {
-        $this->todayAttendance = Attendance::query()
-            ->where('staff_id', auth()->id())
-            ->whereDate('attendance_date', today())
+        $this->todayAttendance = static::openShift((int) auth()->id())
+            ?? Attendance::query()
+                ->where('staff_id', auth()->id())
+                ->whereDate('attendance_date', today())
+                ->first();
+    }
+
+    /**
+     * A check-in without a check-out from today or yesterday, younger than max_shift_hours - someone
+     * working past midnight still checks out of it. An older one was forgotten and doesn't block today.
+     */
+    public static function openShift(int $staffId): ?Attendance
+    {
+        return Attendance::query()
+            ->where('staff_id', $staffId)
+            ->whereNotNull('check_in_at')
+            ->whereNull('check_out_at')
+            ->whereDate('attendance_date', '>=', today()->subDay())
+            ->where('check_in_at', '>=', now()->subHours(config('attendance_points.max_shift_hours')))
+            ->latest('check_in_at')
             ->first();
+    }
+
+    public function getMonthPointsProperty(): array
+    {
+        return AttendancePoints::monthSummary((int) auth()->id(), now());
     }
 
     public function checkIn(float $latitude, float $longitude): void
     {
         $user = auth()->user();
 
-        if (! $user?->is_showroom_employee) {
+        if (! $branch = $this->allowedBranch($user, $latitude, $longitude, 'الحضور')) {
+            return;
+        }
+
+        if (static::openShift($user->id)) {
             Notification::make()
-                ->title('غير مسموح')
-                ->body('البصمة متاحة لموظفين المعرض فقط.')
-                ->danger()
+                ->title('عندك وردية مفتوحة')
+                ->body('سجّل انصراف الوردية اللي فاتت الأول.')
+                ->warning()
                 ->send();
 
             return;
         }
 
-        if (! $user->attendance_latitude || ! $user->attendance_longitude) {
-            Notification::make()
-                ->title('مكان البصمة غير محدد')
-                ->body('لازم السوبر أدمن يحدد Lat و Long للموظف الأول.')
-                ->danger()
-                ->send();
-
-            return;
-        }
-
-        if (! $this->isInsideAllowedLocation($latitude, $longitude, (float) $user->attendance_latitude, (float) $user->attendance_longitude)) {
-            Notification::make()
-                ->title('أنت خارج مكان البصمة')
-                ->body('لا يمكن تسجيل الحضور إلا من داخل المعرض.')
-                ->danger()
-                ->send();
-
-            return;
-        }
-
-        $attendance = Attendance::query()
-            ->firstOrCreate(
-                [
-                    'staff_id' => $user->id,
-                    'attendance_date' => today()->toDateString(),
-                ],
-                [
-                    'status' => 'present',
-                ]
-            );
+        $attendance = Attendance::query()->firstOrCreate(
+            ['staff_id' => $user->id, 'attendance_date' => today()->toDateString()],
+            ['status' => 'present'],
+        );
 
         if ($attendance->check_in_at) {
             Notification::make()
@@ -89,80 +95,59 @@ class AttendanceCheckWidget extends Widget
             return;
         }
 
-        $now = now();
-        $lateMinutes = $this->calculateLateMinutes($user->attendance_time, $now);
-        $deductionDays = $this->getDeductionDays($user->id, $lateMinutes);
-        $deductionAmount = $this->calculateDeductionAmount((float) $user->monthly_salary, $deductionDays);
-
         $attendance->update([
-            'check_in_at' => $now,
+            'check_in_at' => now(),
             'check_in_latitude' => $latitude,
             'check_in_longitude' => $longitude,
-            'late_minutes' => $lateMinutes,
-            'deduction_days' => $deductionDays,
-            'deduction_amount' => $deductionAmount,
-            'notes' => $deductionAmount > 0
-                ? "تأخير {$lateMinutes} دقيقة - خصم {$deductionDays} يوم"
-                : null,
         ]);
+        $attendance->refresh();
+        $point = $attendance->point?->color;
+
+        $attendance->forceFill(['notes' => match ($point) {
+            AttendancePoints::RED => "تأخير {$attendance->late_minutes} دقيقة - نقطة حمرا",
+            AttendancePoints::BLACK => "تأخير {$attendance->late_minutes} دقيقة - نقطة سودا",
+            default => null,
+        }])->saveQuietly();
 
         $this->loadTodayAttendance();
 
-        if ($deductionAmount > 0) {
-            Notification::make()
-                ->title('تم تسجيل الحضور مع خصم')
-                ->body("أنت اتأخرت {$lateMinutes} دقيقة، وتم خصم {$deductionAmount} ج من المرتب. التزم في التأخير وأنا هلتزم في الخصم.")
+        $amount = number_format((float) $attendance->deduction_amount);
+
+        match ($point) {
+            AttendancePoints::GREEN => Notification::make()
+                ->title('تم تسجيل الحضور - نقطة خضرا 🟢')
+                ->body('جيت في معادك. النقط الخضرا بتلغي الخصم أو بتتحول بونص آخر الشهر.')
+                ->success()
+                ->send(),
+            AttendancePoints::RED => Notification::make()
+                ->title('تم تسجيل الحضور - نقطة حمرا 🔴')
+                ->body("اتأخرت {$attendance->late_minutes} دقيقة، خصم {$amount} ج. تقدر تلغيه لو جيت في معادك ".AttendancePoints::greensNeeded(AttendancePoints::RED)." أيام بعد كده.")
                 ->warning()
-                ->send();
-
-            return;
-        }
-
-        Notification::make()
-            ->title('تم تسجيل الحضور')
-            ->body('تم تسجيل حضورك بنجاح بدون خصم.')
-            ->success()
-            ->send();
+                ->send(),
+            AttendancePoints::BLACK => Notification::make()
+                ->title('تم تسجيل الحضور - نقطة سودا ⚫')
+                ->body("اتأخرت {$attendance->late_minutes} دقيقة، خصم {$amount} ج. تقدر تلغيه لو جيت في معادك ".AttendancePoints::greensNeeded(AttendancePoints::BLACK)." أيام بعد كده.")
+                ->danger()
+                ->send(),
+            default => Notification::make()
+                ->title('تم تسجيل الحضور')
+                ->body('ميعاد حضورك الرسمي مش متسجل، فمتحسبتلكش نقطة النهارده. كلّم الإدارة.')
+                ->warning()
+                ->send(),
+        };
     }
 
     public function checkOut(float $latitude, float $longitude): void
     {
         $user = auth()->user();
 
-        if (! $user?->is_showroom_employee) {
-            Notification::make()
-                ->title('غير مسموح')
-                ->body('البصمة متاحة لموظفين المعرض فقط.')
-                ->danger()
-                ->send();
-
+        if (! $this->allowedBranch($user, $latitude, $longitude, 'الانصراف')) {
             return;
         }
 
-        if (! $user->attendance_latitude || ! $user->attendance_longitude) {
-            Notification::make()
-                ->title('مكان البصمة غير محدد')
-                ->body('لازم السوبر أدمن يحدد Lat و Long للموظف الأول.')
-                ->danger()
-                ->send();
-
-            return;
-        }
-
-        if (! $this->isInsideAllowedLocation($latitude, $longitude, (float) $user->attendance_latitude, (float) $user->attendance_longitude)) {
-            Notification::make()
-                ->title('أنت خارج مكان البصمة')
-                ->body('لا يمكن تسجيل الانصراف إلا من داخل المعرض.')
-                ->danger()
-                ->send();
-
-            return;
-        }
-
-        $attendance = Attendance::query()
-            ->where('staff_id', $user->id)
-            ->whereDate('attendance_date', today())
-            ->first();
+        // The open shift, even when it started yesterday and it's past midnight now.
+        $attendance = static::openShift($user->id)
+            ?? Attendance::query()->where('staff_id', $user->id)->whereDate('attendance_date', today())->first();
 
         if (! $attendance || ! $attendance->check_in_at) {
             Notification::make()
@@ -189,106 +174,79 @@ class AttendanceCheckWidget extends Widget
             'check_out_latitude' => $latitude,
             'check_out_longitude' => $longitude,
         ]);
+        $attendance->refresh();
 
         $this->loadTodayAttendance();
 
+        $overtime = (int) $attendance->overtime_minutes;
+
         Notification::make()
             ->title('تم تسجيل الانصراف')
-            ->body('تم تسجيل انصرافك بنجاح.')
+            ->body($overtime > 0
+                ? 'تم تسجيل انصرافك. اتحسبلك '.static::hoursText($overtime).' زيادة بعد ميعادك.'
+                : 'تم تسجيل انصرافك بنجاح.')
             ->success()
             ->send();
     }
 
-    protected function calculateLateMinutes(?string $attendanceTime, Carbon $now): int
+    /** The employee's branch when he is standing inside it; otherwise tells him why not and returns null. */
+    protected function allowedBranch(?Staff $user, float $latitude, float $longitude, string $what): ?Branch
     {
-        if (! $attendanceTime) {
-            return 0;
+        if (! $user?->is_showroom_employee) {
+            $this->refuse('غير مسموح', 'البصمة متاحة للموظفين اللي بيتحسب عليهم حضور بس.');
+
+            return null;
         }
 
-        $officialTime = Carbon::parse(today()->toDateString() . ' ' . $attendanceTime);
+        $branch = $user->branch;
 
-        if ($now->lessThanOrEqualTo($officialTime)) {
-            return 0;
+        if (! $branch) {
+            $this->refuse('مش متحدد لك فرع', 'الإدارة لازم تحدد الفرع اللي أنت شغال فيه من صفحة الموظفين.');
+
+            return null;
         }
 
-        return $officialTime->diffInMinutes($now);
+        if ($branch->latitude === null || $branch->longitude === null) {
+            $this->refuse('مكان الفرع مش متحدد', "الإدارة لازم تحدد Latitude و Longitude لـ {$branch->name} من صفحة الفروع.");
+
+            return null;
+        }
+
+        $distance = $this->distanceInMeters($latitude, $longitude, (float) $branch->latitude, (float) $branch->longitude);
+
+        if ($distance > config('attendance_points.radius_meters')) {
+            $this->refuse('أنت خارج مكان البصمة', "لا يمكن تسجيل {$what} إلا من داخل {$branch->name}.");
+
+            return null;
+        }
+
+        return $branch;
     }
 
-    protected function getDeductionDays(int $userId, int $lateMinutes): float
+    public static function hoursText(int $minutes): string
     {
-        if ($lateMinutes <= 0) {
-            return 0;
-        }
+        $h = intdiv($minutes, 60);
+        $m = $minutes % 60;
 
-        $rules = auth()->user()
-            ->attendanceDeductionRules()
-            ->orderBy('from_minute')
-            ->get();
-
-        if ($rules->isEmpty()) {
-            return 0;
-        }
-
-        $matchedRule = $rules->first(function ($rule) use ($lateMinutes) {
-            return $lateMinutes >= $rule->from_minute
-                && $lateMinutes <= $rule->to_minute;
-        });
-
-        if ($matchedRule) {
-            return (float) $matchedRule->deduction_days;
-        }
-
-        return (float) $rules->last()->deduction_days;
+        return trim(($h ? $h.' ساعة ' : '').($m ? $m.' دقيقة' : ''));
     }
 
-    protected function calculateDeductionAmount(float $monthlySalary, float $deductionDays): float
+    protected function refuse(string $title, string $body): void
     {
-        if ($monthlySalary <= 0 || $deductionDays <= 0) {
-            return 0;
-        }
-
-        $daySalary = $monthlySalary / 30;
-
-        return round($daySalary * $deductionDays, 2);
+        Notification::make()->title($title)->body($body)->danger()->send();
     }
 
-    protected function isInsideAllowedLocation(
-        float $currentLat,
-        float $currentLng,
-        float $allowedLat,
-        float $allowedLng
-    ): bool {
-        $allowedDistanceInMeters = 80;
-
-        return $this->calculateDistanceInMeters(
-            $currentLat,
-            $currentLng,
-            $allowedLat,
-            $allowedLng
-        ) <= $allowedDistanceInMeters;
-    }
-
-    protected function calculateDistanceInMeters(
-        float $lat1,
-        float $lon1,
-        float $lat2,
-        float $lon2
-    ): float {
-        $earthRadius = 6371000;
-
+    protected function distanceInMeters(float $lat1, float $lon1, float $lat2, float $lon2): float
+    {
         $latFrom = deg2rad($lat1);
-        $lonFrom = deg2rad($lon1);
         $latTo = deg2rad($lat2);
-        $lonTo = deg2rad($lon2);
-
         $latDelta = $latTo - $latFrom;
-        $lonDelta = $lonTo - $lonFrom;
+        $lonDelta = deg2rad($lon2) - deg2rad($lon1);
 
         $angle = 2 * asin(sqrt(
-            pow(sin($latDelta / 2), 2) +
-            cos($latFrom) * cos($latTo) * pow(sin($lonDelta / 2), 2)
+            pow(sin($latDelta / 2), 2) + cos($latFrom) * cos($latTo) * pow(sin($lonDelta / 2), 2)
         ));
 
-        return $earthRadius * $angle;
+        return 6371000 * $angle;
     }
 }

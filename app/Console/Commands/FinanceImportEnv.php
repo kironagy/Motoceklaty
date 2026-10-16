@@ -201,14 +201,11 @@ class FinanceImportEnv extends Command
             }
 
             $finance = [
-                'finance_role' => ($u->is_super_admin ?? false) ? 'super_admin' : ($u->role ?: 'employee'),
                 'warehouse_id' => $this->opt('warehouses', $u->warehouse_id),
                 'is_showroom_employee' => (bool) $u->is_showroom_employee,
                 'monthly_salary' => $u->monthly_salary,
                 'attendance_time' => $u->attendance_time,
                 'departure_time' => $u->departure_time,
-                'attendance_latitude' => $u->attendance_latitude,
-                'attendance_longitude' => $u->attendance_longitude,
                 'updated_at' => now(),
             ];
 
