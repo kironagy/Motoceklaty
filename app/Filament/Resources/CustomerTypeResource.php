@@ -14,9 +14,11 @@ use Filament\Tables\Table;
 
 class CustomerTypeResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = CustomerType::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-user-group';
+    protected static ?int $navigationSort = 4;
     protected static ?string $navigationGroup = 'إعدادات الطلبات';
     protected static ?string $navigationLabel = 'أنواع العملاء';
     protected static ?string $modelLabel = 'نوع عميل';

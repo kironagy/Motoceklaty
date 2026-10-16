@@ -14,6 +14,7 @@ use Filament\Tables\Table;
 
 class GeminiApiKeyResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     use HitlerOnly;
 
     protected static ?string $model = GeminiApiKey::class;
@@ -176,6 +177,10 @@ class GeminiApiKeyResource extends Resource
 
     public static function canViewAny(): bool
     {
+        if (($allowed = static::roleAllows('view')) !== null) {
+            return $allowed;
+        }
+
         return static::isHitler();
     }
 
@@ -186,16 +191,28 @@ class GeminiApiKeyResource extends Resource
 
     public static function canCreate(): bool
     {
+        if (($allowed = static::roleAllows('create')) !== null) {
+            return $allowed;
+        }
+
         return static::canViewAny();
     }
 
     public static function canEdit($record): bool
     {
+        if (($allowed = static::roleAllows('update')) !== null) {
+            return $allowed;
+        }
+
         return static::canViewAny();
     }
 
     public static function canDelete($record): bool
     {
+        if (($allowed = static::roleAllows('delete')) !== null) {
+            return $allowed;
+        }
+
         return static::canViewAny();
     }
 }

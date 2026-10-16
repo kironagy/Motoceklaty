@@ -22,9 +22,12 @@ use Illuminate\Support\Facades\Auth;
 use Filament\Notifications\Notification;
 class DeliveryResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = InstallmentRequest::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-identification';
+    protected static ?int $navigationSort = 3;
+    protected static ?string $navigationGroup = 'الطلبات والعملاء';
     protected static ?string $pluralLabel = 'تسليم الطلبات';
     protected static ?string $navigationLabel = 'تسليم الطلبات';
 
@@ -78,6 +81,11 @@ class DeliveryResource extends Resource
     }
     public static function canEdit($record): bool
     {
+        // A role can close this action; when it opens it, the 48-hour lock below still applies.
+        if (static::roleAllows('update') === false) {
+            return false;
+        }
+
         if (static::isAdminOrSuperAdmin()) {
             return true;
         }
@@ -86,6 +94,11 @@ class DeliveryResource extends Resource
     }
 public static function canDelete($record): bool
 {
+        // A role can close this action; when it opens it, the 48-hour lock below still applies.
+        if (static::roleAllows('delete') === false) {
+            return false;
+        }
+
     $user = Auth::user();
 
     if ($user?->is_hitler) {
@@ -2370,6 +2383,10 @@ Tables\Actions\Action::make('force_delete')
 
     public static function canViewAny(): bool
     {
+        if (($allowed = static::roleAllows('view')) !== null) {
+            return $allowed;
+        }
+
         return true;
     }
 }

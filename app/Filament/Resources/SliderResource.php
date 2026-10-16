@@ -13,6 +13,7 @@ use Filament\Tables\Table;
 
 class SliderResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     use HitlerOnly;
 
     protected static ?string $model = Slider::class;
@@ -129,6 +130,10 @@ class SliderResource extends Resource
 
     public static function canViewAny(): bool
     {
+        if (($allowed = static::roleAllows('view')) !== null) {
+            return $allowed;
+        }
+
         return static::isHitler();
     }
 }

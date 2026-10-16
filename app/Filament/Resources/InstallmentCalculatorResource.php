@@ -15,9 +15,11 @@ use Filament\Tables\Table;
 
 class InstallmentCalculatorResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = InstallmentCalculator::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-calculator';
+    protected static ?int $navigationSort = 4;
 
     protected static ?string $navigationLabel = 'احسب الأقساط';
 
@@ -25,7 +27,7 @@ class InstallmentCalculatorResource extends Resource
 
     protected static ?string $pluralModelLabel = 'حسابات الأقساط';
 
-    protected static ?string $navigationGroup = 'التقسيط';
+    protected static ?string $navigationGroup = 'الطلبات والعملاء';
 
     public static function form(Form $form): Form
     {

@@ -16,10 +16,12 @@ use Illuminate\Support\Facades\Http;
 
 class AwaitingAgentConversationResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = WhatsappConversation::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-lifebuoy';
-    protected static ?string $navigationGroup = 'واتساب';
+    protected static ?int $navigationSort = 2;
+    protected static ?string $navigationGroup = 'الطلبات والعملاء';
     protected static ?string $navigationLabel = 'الرسائل المنتظر الرد عليها';
     protected static ?string $modelLabel = 'محادثة منتظرة الرد';
     protected static ?string $pluralModelLabel = 'الرسائل المنتظر الرد عليها';
@@ -31,6 +33,10 @@ class AwaitingAgentConversationResource extends Resource
 
     public static function canViewAny(): bool
     {
+        if (($allowed = static::roleAllows('view')) !== null) {
+            return $allowed;
+        }
+
         $user = auth()->user();
 
         return $user && ((bool) $user->is_bot || (bool) $user->is_hitler);

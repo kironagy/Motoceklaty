@@ -14,12 +14,14 @@ use Filament\Tables\Table;
 
 class MachineResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = Machine::class;
     protected static ?string $navigationIcon = 'heroicon-o-cog-6-tooth';
+    protected static ?int $navigationSort = 1;
     protected static ?string $navigationLabel = 'المكن';
     protected static ?string $pluralLabel = 'المكن';
     protected static ?string $label = 'مكينة';
-    protected static ?string $navigationGroup = 'المعرض';
+    protected static ?string $navigationGroup = 'الموتوسيكلات والفروع';
 
 public static function form(Form $form): Form
 {

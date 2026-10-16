@@ -14,6 +14,7 @@ use Filament\Tables\Table;
 
 class TeamMemberResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     use HitlerOnly;
 
     protected static ?string $model = TeamMember::class;

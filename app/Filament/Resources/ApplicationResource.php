@@ -27,16 +27,22 @@ use Filament\Tables\Table;
  */
 class ApplicationResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = Application::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-document-text';
-    protected static ?string $navigationGroup = 'واتساب';
+    protected static ?int $navigationSort = 1;
+    protected static ?string $navigationGroup = 'الطلبات والعملاء';
     protected static ?string $navigationLabel = 'طلبات التمويل';
     protected static ?string $modelLabel = 'طلب';
     protected static ?string $pluralModelLabel = 'طلبات التمويل';
 
     public static function canViewAny(): bool
     {
+        if (($allowed = static::roleAllows('view')) !== null) {
+            return $allowed;
+        }
+
         $user = auth()->user();
 
         return $user && ($user->is_admin || $user->is_super_admin);

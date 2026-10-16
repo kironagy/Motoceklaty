@@ -14,6 +14,7 @@ use Filament\Tables\Table;
 
 class TeachingChangeResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     use HitlerOnly;
 
     protected static ?string $model = TeachingChange::class;
@@ -31,6 +32,10 @@ class TeachingChangeResource extends Resource
 
     public static function canViewAny(): bool
     {
+        if (($allowed = static::roleAllows('view')) !== null) {
+            return $allowed;
+        }
+
         return static::isHitler();
     }
 

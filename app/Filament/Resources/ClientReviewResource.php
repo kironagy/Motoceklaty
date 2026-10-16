@@ -14,6 +14,7 @@ use Filament\Tables;
 
 class ClientReviewResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     use HitlerOnly;
 
     protected static ?string $model = ClientReview::class;

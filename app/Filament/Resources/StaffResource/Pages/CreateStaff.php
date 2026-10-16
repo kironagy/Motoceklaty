@@ -19,6 +19,6 @@ class CreateStaff extends CreateRecord
         $data['installmentSystems'] = [];
     }
 
-    return $data;
+    return StaffResource::prepareAccessData($data);
 }
 }

@@ -17,10 +17,12 @@ use Filament\Tables\Table;
 
 class BranchResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = Branch::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-map-pin';
-    protected static ?string $navigationGroup = 'المعرض';
+    protected static ?int $navigationSort = 4;
+    protected static ?string $navigationGroup = 'الموتوسيكلات والفروع';
     protected static ?string $navigationLabel = 'الفروع';
     protected static ?string $modelLabel = 'فرع';
     protected static ?string $pluralModelLabel = 'الفروع';

@@ -11,9 +11,13 @@ use Livewire\WithPagination;
 
 class Notifications extends Page
 {
+    use \App\Filament\Concerns\RoleGatedPage;
     use WithPagination;
 
     protected static ?string $navigationIcon = 'heroicon-o-bell';
+    protected static ?string $navigationLabel = 'الإشعارات';
+    protected static ?string $title = 'الإشعارات';
+    protected static ?int $navigationSort = -1;
     protected static string $view = 'filament.pages.notifications';
 
     /** عدد الإشعارات المعروضة في كل صفحة. */

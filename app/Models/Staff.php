@@ -27,6 +27,16 @@ class Staff extends Authenticatable
 'installment_system_id',
 'is_hitler',
         'attendance_rules',
+        'finance_role',
+        'role_id',
+        'permissions',
+        'warehouse_id',
+        'is_showroom_employee',
+        'monthly_salary',
+        'attendance_time',
+        'departure_time',
+        'attendance_latitude',
+        'attendance_longitude',
         'lat',
 'lng',
 'distance_m',
@@ -38,7 +48,9 @@ class Staff extends Authenticatable
         'is_super_admin' => 'boolean', // ✅ جديد
         'requests_count' => 'integer',
         'is_company_employee' => 'boolean',
-
+        'is_showroom_employee' => 'boolean',
+        'monthly_salary' => 'decimal:2',
+        'permissions' => 'array',
 
     ];
 
@@ -101,9 +113,34 @@ public function installmentSystems()
         });
     }
     public function attendances()
+    {
+        return $this->hasMany(\App\Models\Attendance::class, 'staff_id');
+    }
+
+    public function legacyAttendances()
+    {
+        return $this->hasMany(\App\Models\LegacyAttendance::class, 'staff_id');
+    }
+
+    public function warehouse()
+    {
+        return $this->belongsTo(\App\Models\Warehouse::class);
+    }
+
+    public function attendanceDeductionRules()
+    {
+        return $this->hasMany(\App\Models\AttendanceDeductionRule::class, 'staff_id');
+    }
+
+    public function isShowroomEmployee(): bool
+    {
+        return (bool) $this->is_showroom_employee;
+    }
+public function role()
 {
-    return $this->hasMany(\App\Models\Attendance::class, 'staff_id');
+    return $this->belongsTo(\App\Models\Role::class);
 }
+
 public function whatsappBot()
 {
     return $this->hasOne(\App\Models\WhatsappBot::class);

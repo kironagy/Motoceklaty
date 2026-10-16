@@ -63,6 +63,20 @@ return [
             ]) : [],
         ],
 
+        // Read-only copy of the env.motocyklaty.store finance database, used by `finance:import-env`.
+        'env_source' => [
+            'driver' => 'mysql',
+            'host' => env('ENV_SOURCE_DB_HOST', env('DB_HOST', '127.0.0.1')),
+            'port' => env('ENV_SOURCE_DB_PORT', env('DB_PORT', '3306')),
+            'database' => env('ENV_SOURCE_DB_DATABASE', 'env_motocyklaty_src'),
+            'username' => env('ENV_SOURCE_DB_USERNAME', env('DB_USERNAME', 'root')),
+            'password' => env('ENV_SOURCE_DB_PASSWORD', env('DB_PASSWORD', '')),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'strict' => true,
+        ],
+
         'mariadb' => [
             'driver' => 'mariadb',
             'url' => env('DB_URL'),

@@ -39,11 +39,21 @@ class AdminPanelProvider extends PanelProvider
             ->colors([
                 'primary' => Color::Amber,
             ])
+            // Sidebar order: daily work first, settings last.
+            ->navigationGroups([
+                'الطلبات والعملاء',
+                'إدارة المعرض',
+                'إدارة الموظفين',
+                'الموتوسيكلات والفروع',
+                'إعدادات الطلبات',
+                'البوت الذكي',
+                'الموقع الإلكتروني',
+            ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->discoverClusters(in: app_path('Filament/Clusters'), for: 'App\\Filament\\Clusters')
             ->pages([
-                Pages\Dashboard::class,
+                \App\Filament\Pages\Dashboard::class,
             ])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
             ->widgets([

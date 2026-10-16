@@ -19,9 +19,11 @@ use Filament\Tables\Table;
 
 class ApplicationRequirementResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = ApplicationRequirement::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-clipboard-document-check';
+    protected static ?int $navigationSort = 1;
     protected static ?string $navigationGroup = 'إعدادات الطلبات';
     protected static ?string $navigationLabel = 'متطلبات الطلب';
     protected static ?string $modelLabel = 'متطلب';

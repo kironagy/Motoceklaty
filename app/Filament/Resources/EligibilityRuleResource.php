@@ -15,9 +15,11 @@ use Filament\Tables\Table;
 
 class EligibilityRuleResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = EligibilityRule::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-shield-check';
+    protected static ?int $navigationSort = 5;
     protected static ?string $navigationGroup = 'إعدادات الطلبات';
     protected static ?string $navigationLabel = 'قواعد الأهلية';
     protected static ?string $modelLabel = 'قاعدة أهلية';

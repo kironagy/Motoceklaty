@@ -23,9 +23,11 @@ use Illuminate\Support\Str;
 
 class DocumentTypeResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = DocumentType::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-document-text';
+    protected static ?int $navigationSort = 3;
     protected static ?string $navigationGroup = 'إعدادات الطلبات';
     protected static ?string $navigationLabel = 'أنواع المستندات';
     protected static ?string $modelLabel = 'نوع مستند';

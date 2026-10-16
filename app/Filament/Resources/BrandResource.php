@@ -15,10 +15,13 @@ use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 class BrandResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = Brand::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-building-storefront';
-    protected static ?string $navigationLabel = ' الشركات';
+    protected static ?int $navigationSort = 2;
+    protected static ?string $navigationGroup = 'الموتوسيكلات والفروع';
+    protected static ?string $navigationLabel = 'الشركات';
     protected static ?string $pluralLabel = ' الشركات';
     public static function form(Form $form): Form
     {
@@ -97,6 +100,10 @@ class BrandResource extends Resource
     }
     public static function canViewAny(): bool
     {
+        if (($allowed = static::roleAllows('view')) !== null) {
+            return $allowed;
+        }
+
         $user = auth()->user();
 
         // 🟢 لو المستخدم لسه مش مسجل (auth null) => غالباً الأدمن داخل أول مرة => نعرضها

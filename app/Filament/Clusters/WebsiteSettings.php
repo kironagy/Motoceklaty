@@ -12,10 +12,11 @@ use Filament\Clusters\Cluster;
 class WebsiteSettings extends Cluster
 {
     protected static ?string $navigationIcon = 'heroicon-o-globe-alt';
+    protected static ?string $navigationGroup = 'الموقع الإلكتروني';
 
-    protected static ?string $navigationLabel = 'Website Settings';
+    protected static ?string $navigationLabel = 'إعدادات الموقع';
 
-    protected static ?string $clusterBreadcrumb = 'Website Settings';
+    protected static ?string $clusterBreadcrumb = 'إعدادات الموقع';
 
     protected static ?int $navigationSort = 1;
 }

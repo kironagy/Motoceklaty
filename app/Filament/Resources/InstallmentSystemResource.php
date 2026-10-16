@@ -12,9 +12,12 @@ use Filament\Tables\Table;
 
 class InstallmentSystemResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = InstallmentSystem::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-credit-card';
+    protected static ?int $navigationSort = 3;
+    protected static ?string $navigationGroup = 'الموتوسيكلات والفروع';
     protected static ?string $navigationLabel = 'أنظمة التقسيط';
     protected static ?string $pluralLabel = 'أنظمة التقسيط';
     protected static ?string $label = 'نظام التقسيط';
@@ -170,6 +173,10 @@ class InstallmentSystemResource extends Resource
 
     public static function canViewAny(): bool
     {
+        if (($allowed = static::roleAllows('view')) !== null) {
+            return $allowed;
+        }
+
         $user = auth()->user();
 
         if (!$user) {

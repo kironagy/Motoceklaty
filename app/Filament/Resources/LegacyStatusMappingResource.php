@@ -18,9 +18,11 @@ use Filament\Tables\Table;
  */
 class LegacyStatusMappingResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = LegacyStatusMapping::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-arrows-right-left';
+    protected static ?int $navigationSort = 6;
     protected static ?string $navigationGroup = 'إعدادات الطلبات';
     protected static ?string $navigationLabel = 'ربط حالات الطلبات القديمة';
     protected static ?string $modelLabel = 'ربط حالة';

@@ -53,6 +53,6 @@ class EditStaff extends EditRecord
             );
         }
 
-        return $data;
+        return StaffResource::prepareAccessData($data, $this->record);
     }
 }

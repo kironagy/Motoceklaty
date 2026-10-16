@@ -15,6 +15,7 @@ use Filament\Tables\Table;
 
 class BotLessonResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     use HitlerOnly;
 
     protected static ?string $model = BotLesson::class;
@@ -28,6 +29,10 @@ class BotLessonResource extends Resource
 
     public static function canViewAny(): bool
     {
+        if (($allowed = static::roleAllows('view')) !== null) {
+            return $allowed;
+        }
+
         return static::isHitler();
     }
 

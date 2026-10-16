@@ -17,9 +17,11 @@ use Filament\Tables\Table;
 
 class RequirementFieldResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     protected static ?string $model = RequirementField::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-identification';
+    protected static ?int $navigationSort = 2;
     protected static ?string $navigationGroup = 'إعدادات الطلبات';
     protected static ?string $navigationLabel = 'حقول البيانات';
     protected static ?string $modelLabel = 'حقل';

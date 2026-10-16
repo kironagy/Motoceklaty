@@ -22,11 +22,13 @@ use Filament\Tables\Table;
  */
 class AiTraceResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     use HitlerOnly;
 
     protected static ?string $model = AiTrace::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-clipboard-document-list';
+    protected static ?int $navigationSort = 92;
     protected static ?string $navigationGroup = 'البوت الذكي';
     protected static ?string $navigationLabel = 'سجلات الذكاء الاصطناعي';
     protected static ?string $modelLabel = 'سجل';
@@ -34,6 +36,10 @@ class AiTraceResource extends Resource
 
     public static function canViewAny(): bool
     {
+        if (($allowed = static::roleAllows('view')) !== null) {
+            return $allowed;
+        }
+
         return static::isHitler();
     }
 

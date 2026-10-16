@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Collection;
 
 class PostCommentResource extends Resource
 {
+    use \App\Filament\Concerns\RoleGatedResource;
     use HitlerOnly;
 
     protected static ?string $model = PostComment::class;
