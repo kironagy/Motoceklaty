@@ -14,7 +14,7 @@ class WhatsAppWebhookController extends Controller
     {
         // Verification
         if ($request->isMethod('get')) {
-            $verifyToken = 'motocyklaty_ai_token';
+            $verifyToken = 'motogate_ai_token';
 
             if (
                 $request->get('hub_mode') === 'subscribe' &&

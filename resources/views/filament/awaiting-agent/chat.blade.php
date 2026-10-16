@@ -6,7 +6,7 @@
     <div
         wire:poll.5s="$refresh"
         dir="rtl"
-        class="motoceklaty-chat"
+        class="motogate-chat"
     >
         {{-- الهيدر: هوية العميل وحالة التحويل --}}
         <div class="mc-header">
@@ -144,7 +144,7 @@
     </div>
 
     <style>
-        .motoceklaty-chat {
+        .motogate-chat {
             --ink: #101217;
             --ink-soft: #1a1d24;
             --canvas: #15171d;
@@ -363,7 +363,7 @@
         }
 
         @media (max-width: 640px) {
-            .motoceklaty-chat { height: 82vh; border-radius: 0; }
+            .motogate-chat { height: 82vh; border-radius: 0; }
             .mc-bubble { max-width: 85%; }
         }
     </style>
