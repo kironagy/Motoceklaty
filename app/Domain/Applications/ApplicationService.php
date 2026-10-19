@@ -25,7 +25,7 @@ class ApplicationService
     {
         return Application::query()
             ->where('customer_id', $customer->id)
-            ->whereIn('status', Application::ACTIVE_STATUSES)
+            ->whereIn('status', Application::agentActiveStatuses())
             ->latest('id')
             ->first();
     }

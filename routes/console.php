@@ -31,8 +31,19 @@ Schedule::call(fn () => app(\App\Domain\Applications\ApplicationNudgeService::cl
     ->name('application-nudges')
     ->withoutOverlapping();
 
+// Dynamic Links: expires old links and follows up a customer who has not sent his form.
+Schedule::call(fn () => app(\App\Domain\Forms\FormLinkFollowUpService::class)->run())
+    ->everyMinute()
+    ->name('form-link-followups')
+    ->withoutOverlapping();
+
 // A correction whose background run was cut off (deploy, restart) is picked up again.
 Schedule::call(fn () => app(\App\Domain\Teaching\TeachingCoach::class)->recoverStuck())
     ->everyFiveMinutes()
     ->name('teaching-recover-stuck')
     ->withoutOverlapping();
+
+// Attendance: whoever hasn't clocked in by 3 PM (and isn't on vacation or a day off) is absent - black
+// point. The 23:50 run catches a day the 3 PM run missed.
+Schedule::command('attendance:mark-absences')->dailyAt('15:00')->timezone('Africa/Cairo')->withoutOverlapping();
+Schedule::command('attendance:mark-absences')->dailyAt('23:50')->timezone('Africa/Cairo')->withoutOverlapping();

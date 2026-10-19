@@ -116,6 +116,7 @@ return [
         \App\Agent\Tools\WithdrawApplicationTool::class,
         \App\Agent\Tools\SubmitApplicationTool::class,
         \App\Agent\Tools\ProcessDocumentTool::class,
+        \App\Agent\Tools\SendApplicationLinkTool::class,
     ],
 
     // T11: field validator registry, keyed by requirement_fields.data_type.
@@ -231,6 +232,36 @@ return [
         'nudge_after_minutes' => env('AGENT_APPLICATION_NUDGE_AFTER_MINUTES'),
         'nudge_quiet_from' => env('AGENT_APPLICATION_NUDGE_QUIET_FROM', 23),
         'nudge_quiet_to' => env('AGENT_APPLICATION_NUDGE_QUIET_TO', 9),
+
+        // Dynamic Links (spec 2026-10-18): form_links = the bot sends a form link and takes no
+        // application in the chat; bot = the old in-chat intake (the way back).
+        'mode' => env('AGENT_APPLICATIONS_MODE', 'form_links'),
+    ],
+
+    'form_links' => [
+        // tools of the chat intake the bot does not get in form_links mode (ToolRegistry).
+        // record_work_profile stays: offers and "ينفع أقسّط وأنا ...؟" still depend on his work.
+        'chat_intake_tools' => [
+            \App\Agent\Tools\RecordCustomerDataTool::class,
+            \App\Agent\Tools\StartApplicationTool::class,
+            \App\Agent\Tools\UpdateApplicationSelectionTool::class,
+            \App\Agent\Tools\SubmitApplicationTool::class,
+        ],
+        // where customers open their form: the public site (https://motogate-eg.com) on the server;
+        // locally the Mac's Wi-Fi address so a phone on the same network can open it - never
+        // "localhost", which on his phone is the phone itself. Empty = APP_URL.
+        'base_url' => env('FORM_LINKS_BASE_URL'),
+        'expires_after_days' => env('AGENT_FORM_LINK_EXPIRES_DAYS', 7),
+        // silence (no form activity and no WhatsApp message) before the first follow-up
+        'followup_after_minutes' => env('AGENT_FORM_LINK_FOLLOWUP_MINUTES', 15),
+        // the second (last) follow-up waits this long after the first
+        'second_followup_after_hours' => env('AGENT_FORM_LINK_SECOND_FOLLOWUP_HOURS', 24),
+        'max_followups' => 2,
+        'received_message' => 'استلمنا طلبك بنجاح ✅ هنراجع البيانات ونتواصل معاك في أقرب وقت.',
+        'followup_not_opened' => 'حضرتك لسه الطلب مظهرش عندي، فيه مشكلة قابلتك في الرابط؟ لو محتاج مساعدة قولّي.',
+        'followup_warned' => 'فيه صورة محتاجة تتعدّل في طلبك ({label}): {problem} ارفعها تاني من نفس الرابط: {url}',
+        'followup_partial' => 'فاضلك حاجات بسيطة وطلبك يكمل: {missing}. كمّل من نفس الرابط: {url}',
+        'fix_message' => 'محتاجين نعدّل حاجة في طلبك: {reason}. افتح الرابط ده وعدّلها وابعته تاني: {url}',
     ],
 
     'handoff' => [

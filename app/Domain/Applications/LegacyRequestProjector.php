@@ -39,9 +39,9 @@ class LegacyRequestProjector
     private const WORK_FIELDS = ['work_address' => 'street', 'work_building_no' => 'building_number', 'work_landmark' => 'landmark'];
 
     /** شرط السن: من 21 لـ 62 سنة */
-    private const MIN_AGE = 21;
+    public const MIN_AGE = 21;
 
-    private const MAX_AGE = 62;
+    public const MAX_AGE = 62;
 
     private const WORK_TYPE_LABELS = [
         'delivery_app' => 'دليفري تطبيق (موتوسيكل)',
@@ -444,8 +444,9 @@ class LegacyRequestProjector
     {
         $columns = [];
 
+        // needs_review: a form upload the AI warned about - staff still see it in its place
         $documents = ApplicationDocument::where('application_id', $application->id)
-            ->where('status', 'accepted')
+            ->whereIn('status', ['accepted', 'needs_review'])
             ->with('documentType')
             ->orderBy('id')
             ->get();
@@ -519,8 +520,9 @@ class LegacyRequestProjector
     {
         $facts = [];
 
+        // needs_review: a form upload the AI warned about - staff still see it in its place
         $documents = ApplicationDocument::where('application_id', $application->id)
-            ->where('status', 'accepted')
+            ->whereIn('status', ['accepted', 'needs_review'])
             ->with('documentType')
             ->orderBy('id')
             ->get();

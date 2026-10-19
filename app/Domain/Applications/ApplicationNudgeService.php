@@ -40,7 +40,9 @@ class ApplicationNudgeService
     {
         $after = config('agent.applications.nudge_after_minutes');
 
-        if ($after === null || $after === '' || ! config('agent.enabled') || $this->quietHours()) {
+        // Dynamic Links: no application is collected in the chat - the form link has its own follow-ups
+        if ($after === null || $after === '' || ! config('agent.enabled') || $this->quietHours()
+            || \App\Domain\Forms\FormLinkService::formsMode()) {
             return 0;
         }
 

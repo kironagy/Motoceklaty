@@ -38,6 +38,7 @@ class InstallmentRequest extends Model
  
   protected $fillable = [
     'application_id',
+    'form_link_id',
     'request_type',
 
     // 🔹 بيانات المكنة والنظام
@@ -185,6 +186,11 @@ public function scopeFake($query)
 protected static function booted()
 {
     static::creating(function ($model) {
+        // Every request starts as "طلب جديد"; "انتظار" (new) stays only on old rows.
+        if (blank($model->status) || $model->status === 'new') {
+            $model->status = 'new_request';
+        }
+
         if (auth('staff')->check()) {
             $model->staff_id = auth('staff')->id();
         } elseif (auth('filament')->check()) {
@@ -192,7 +198,18 @@ protected static function booted()
         }
     });
 
+    // SMS to the customer: his request is under review.
+    static::created(fn ($model) => \App\Jobs\SendNewRequestSms::dispatch($model->id)->afterCommit());
+
     static::updating(function ($model) {
+        // Amaan Giza and Amaan Cairo are different companies: only the owner moves a request between them.
+        if ($model->isDirty('installment_type')
+            && $model->getOriginal('installment_type') === 'امان - الجيزة'
+            && $model->installment_type === 'امان - القاهرة'
+            && ! static::currentActor()?->is_hitler) {
+            $model->installment_type = $model->getOriginal('installment_type');
+        }
+
         // طلبات هتلر محدش يسحبها غير هتلر
         if ($model->isDirty('staff_id') && ! $model->canBeReassignedBy(static::currentActor())) {
             $model->staff_id = $model->getOriginal('staff_id');

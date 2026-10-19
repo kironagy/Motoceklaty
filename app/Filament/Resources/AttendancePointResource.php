@@ -104,9 +104,11 @@ class AttendancePointResource extends Resource
                     ->color(fn ($state) => $state === AttendancePoints::ACTIVE ? 'warning' : 'gray'),
                 TextColumn::make('source')
                     ->label('من')
-                    ->formatStateUsing(fn ($state, AttendancePoint $record) => $state === 'manual'
-                        ? 'إضافة يدوي'.($record->creator ? ' - '.$record->creator->name : '')
-                        : 'البصمة'),
+                    ->formatStateUsing(fn ($state, AttendancePoint $record) => match ($state) {
+                        'manual' => 'إضافة يدوي'.($record->creator ? ' - '.$record->creator->name : ''),
+                        'absence' => 'غياب بدون إجازة',
+                        default => 'البصمة',
+                    }),
                 TextColumn::make('reason')->label('السبب')->placeholder('—')->wrap(),
             ])
             ->filters([

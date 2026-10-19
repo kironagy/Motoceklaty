@@ -52,4 +52,16 @@ return [
         'path' => env('STORAGE_SYNC_PATH'),
     ],
 
+
+    // SMS to customers ("your request is under review" for every new request) through ZADX
+    // (smsportal.zadx.net → Apps → Moto Gate). Until SMS_ENABLED and both keys are set, nothing is
+    // sent and each message is logged as skipped in sms_logs.
+    'sms' => [
+        'enabled' => (bool) env('SMS_ENABLED', false),
+        'url' => env('SMS_API_URL', 'https://smsapi.zadx.net/api/v1/sms/send'),
+        'key' => env('SMS_API_KEY'),
+        'secret' => env('SMS_API_SECRET'),
+        'sender' => env('SMS_SENDER_ID', 'Moto Gate'),
+        'new_request_message' => 'عميلنا العزيز، شكرًا لاختيارك موتوجيت. طلبك #:id قيد المراجعة، وسنتواصل معك قريبًا.',
+    ],
 ];

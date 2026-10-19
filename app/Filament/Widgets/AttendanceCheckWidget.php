@@ -95,7 +95,9 @@ class AttendanceCheckWidget extends Widget
             return;
         }
 
+        // A day the 3 PM run marked absent turns into a (late) working day.
         $attendance->update([
+            'status' => 'present',
             'check_in_at' => now(),
             'check_in_latitude' => $latitude,
             'check_in_longitude' => $longitude,
@@ -194,6 +196,23 @@ class AttendanceCheckWidget extends Widget
     {
         if (! $user?->is_showroom_employee) {
             $this->refuse('غير مسموح', 'البصمة متاحة للموظفين اللي بيتحسب عليهم حضور بس.');
+
+            return null;
+        }
+
+        // Moved between branches: clocks in at whichever branch he is standing in.
+        if ($user->can_clock_in_any_branch) {
+            $branches = Branch::query()->whereNotNull('latitude')->whereNotNull('longitude')->get();
+            $nearest = $branches
+                ->map(fn (Branch $b) => [$b, $this->distanceInMeters($latitude, $longitude, (float) $b->latitude, (float) $b->longitude)])
+                ->sortBy(fn ($pair) => $pair[1])
+                ->first();
+
+            if ($nearest && $nearest[1] <= config('attendance_points.radius_meters')) {
+                return $nearest[0];
+            }
+
+            $this->refuse('أنت خارج مكان البصمة', "لا يمكن تسجيل {$what} إلا من داخل أحد الفروع.");
 
             return null;
         }

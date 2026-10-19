@@ -31,6 +31,7 @@ class Staff extends Authenticatable
         'permissions',
         'warehouse_id',
         'branch_id',
+        'can_clock_in_any_branch',
         'is_showroom_employee',
         'monthly_salary',
         'attendance_time',
@@ -47,6 +48,7 @@ class Staff extends Authenticatable
         'requests_count' => 'integer',
         'is_company_employee' => 'boolean',
         'is_showroom_employee' => 'boolean',
+        'can_clock_in_any_branch' => 'boolean',
         'monthly_salary' => 'decimal:2',
         'permissions' => 'array',
 

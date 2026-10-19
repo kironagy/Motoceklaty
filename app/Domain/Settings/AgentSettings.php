@@ -46,6 +46,15 @@ class AgentSettings
             'turns.max_wait_seconds' => ['timing', 'أقصى انتظار قبل الرد (ثانية)', 'int', null],
             'session_gap_hours' => ['timing', 'بعد كام ساعة سكوت تبدأ محادثة جديدة', 'int', null],
 
+            'applications.mode' => ['form_links', 'طريقة التقديم', 'select', 'form_links = البوت يبعت رابط الفورم ومبيستلمش طلبات في الشات. bot = الطريقة القديمة (البوت يجمع الطلب في الشات).', ['form_links' => 'رابط الفورم (Dynamic Links)', 'bot' => 'البوت يجمع الطلب (القديم)']],
+            'form_links.expires_after_days' => ['form_links', 'الرابط ينتهي بعد (يوم)', 'int', null],
+            'form_links.followup_after_minutes' => ['form_links', 'أول متابعة بعد سكوت (دقيقة)', 'int', 'من آخر حركة في الفورم وآخر رسالة منه على الواتس. مفيش متابعة بالليل.'],
+            'form_links.second_followup_after_hours' => ['form_links', 'المتابعة التانية والأخيرة بعد (ساعة)', 'int', null],
+            'form_links.received_message' => ['form_links', 'رسالة استلام الطلب', 'text', 'بتتبعت على الواتس أول ما العميل يبعت الفورم.'],
+            'form_links.followup_not_opened' => ['form_links', 'متابعة: لسه مقدمش', 'text', 'لو مفتحش الرابط أو مكتبش حاجة.'],
+            'form_links.followup_warned' => ['form_links', 'متابعة: صورة محتاجة تتعدّل', 'text', '{label} = اسم المستند، {problem} = المشكلة، {url} = الرابط.'],
+            'form_links.followup_partial' => ['form_links', 'متابعة: ملا جزء', 'text', '{missing} = اللي فاضل، {url} = الرابط.'],
+            'form_links.fix_message' => ['form_links', 'رسالة تعديل البيانات', 'text', 'لما الموظف يطلب تصحيح بيانات: {reason} = سبب الموظف، {url} = الرابط.'],
             'applications.nudge_after_minutes' => ['handoff', 'فكّر العميل اللي سكت في نص التقديم بعد (دقيقة)', 'int', 'رسالة قصيرة بالحاجة الوحيدة الناقصة، وتانية بعد يوم، ومفيش بالليل. فاضي = مفيش تذكير.'],
             'handoff.max_failed_turns' => ['handoff', 'حوّل لموظف بعد كام رد فاشل', 'int', null],
             'handoff.waiting_message' => ['handoff', 'رسالة الانتظار وقت التحويل لموظف', 'text', 'بتتبعت للعميل لو كتب والموظف لسه ما ردش.'],
@@ -83,6 +92,7 @@ class AgentSettings
             'memory' => 'الذاكرة والسياق',
             'documents' => 'الصور والمستندات',
             'sales' => 'البيع والتقسيط',
+            'form_links' => 'روابط التقديم',
             'teaching' => 'وضع التعليم',
         ];
     }

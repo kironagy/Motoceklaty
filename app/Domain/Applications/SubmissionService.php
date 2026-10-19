@@ -141,7 +141,7 @@ class SubmissionService
                     'months' => $application->installmentPlan->months,
                     'machine_installment_price' => $application->machine->installment_price,
                     'deposit' => $application->down_payment,
-                    'status' => 'new',
+                    'status' => 'new_request',
                 ],
             ));
 

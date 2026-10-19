@@ -88,6 +88,13 @@ class StaffDecisionService
             'installment_request_id' => $request->id,
         ]]);
 
+        // Dynamic Links: a request that came from the form gets its data fixed on the form - the
+        // same answers reopened with the staff's reason on top (a document is still asked in the chat).
+        if (! $documentType && $action !== self::ACTION_BRANCH && \App\Domain\Forms\FormLinkService::formsMode()
+            && ($submitted = \App\Models\FormLink::where('application_id', $application->id)->where('status', 'submitted')->latest('id')->first())) {
+            app(\App\Domain\Forms\FormLinkService::class)->reopenForFix($submitted, trim((string) $reason) ?: 'تصحيح البيانات');
+        }
+
         $conversation = $request->whatsappConversation;
 
         if ($conversation && $conversation->status === 'awaiting_agent') {
@@ -211,6 +218,16 @@ class StaffDecisionService
 
         $machine = trim((string) $request->machine?->name) ?: null;
         $on = $machine ? " على {$machine}" : '';
+
+        // Dynamic Links: a data fix asked on a form request is done on the reopened form
+        if ($status === 'paused' && $documentType === null && $action !== self::ACTION_BRANCH && $request->application_id
+            && ($fix = \App\Models\FormLink::where('application_id', $request->application_id)->where('purpose', 'fix')
+                ->whereIn('status', \App\Models\FormLink::OPEN_STATUSES)->latest('id')->first())) {
+            return "{$to}، ".strtr((string) config('agent.form_links.fix_message'), [
+                '{reason}' => $reason !== '' ? $reason : 'تصحيح في البيانات',
+                '{url}' => $fix->url(),
+            ]);
+        }
 
         return match ($status) {
             'approved' => "ألف مبروك {$to} 🎉\nطلب التقسيط بتاعك رقم #{$request->id}{$on} اتوافق عليه.\n"

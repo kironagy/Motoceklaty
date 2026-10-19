@@ -100,7 +100,7 @@ class GreetingReply
     private function question(WhatsappConversation $conversation, bool $talkedBefore): string
     {
         $hasApplication = $conversation->customer_id
-            && Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->exists();
+            && Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::agentActiveStatuses())->exists();
 
         if ($hasApplication) {
             return 'نكمّل في طلبك؟';

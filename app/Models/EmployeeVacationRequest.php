@@ -35,6 +35,14 @@ class EmployeeVacationRequest extends Model
                 $request->status = 'pending';
             }
         });
+
+        // Approved days are vacation in the attendance; a change of status or dates, or a delete, re-syncs them.
+        static::saved(function (EmployeeVacationRequest $request) {
+            if ($request->wasRecentlyCreated || $request->wasChanged(['status', 'from_date', 'to_date', 'staff_id'])) {
+                \App\Domain\Attendance\VacationAttendance::sync($request);
+            }
+        });
+        static::deleted(fn (EmployeeVacationRequest $request) => \App\Domain\Attendance\VacationAttendance::sync($request, deleted: true));
     }
 
     public function staff()

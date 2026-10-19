@@ -61,9 +61,11 @@ class BotSettings extends Page implements HasForms
         foreach (AgentSettings::groups() as $group => $label) {
             $fields = [];
 
-            foreach (AgentSettings::definitions() as $key => [$fieldGroup, $fieldLabel, $type, $help]) {
+            foreach (AgentSettings::definitions() as $key => $definition) {
+                [$fieldGroup, $fieldLabel, $type, $help] = $definition;
+
                 if ($fieldGroup === $group) {
-                    $fields[] = $this->component($key, $fieldLabel, $type, $help);
+                    $fields[] = $this->component($key, $fieldLabel, $type, $help, $definition[4] ?? []);
                 }
             }
 
@@ -73,7 +75,7 @@ class BotSettings extends Page implements HasForms
         return $form->schema([Tabs::make('settings')->tabs($tabs)->persistTabInQueryString()])->statePath('data');
     }
 
-    private function component(string $key, string $label, string $type, ?string $help): Component
+    private function component(string $key, string $label, string $type, ?string $help, array $options = []): Component
     {
         $default = AgentSettings::envDefault($key);
         $defaultText = match (true) {
@@ -90,6 +92,7 @@ class BotSettings extends Page implements HasForms
             'int' => TextInput::make($this->field($key))->numeric()->integer()->minValue(0)->placeholder($defaultText),
             'float' => TextInput::make($this->field($key))->numeric()->minValue(0)->maxValue(1)->step(0.01)->placeholder($defaultText),
             'text' => Textarea::make($this->field($key))->rows(2)->placeholder($defaultText)->columnSpanFull(),
+            'select' => Select::make($this->field($key))->options($options)->placeholder('زي ملف .env ('.($options[$defaultText] ?? $defaultText).')'),
             default => TextInput::make($this->field($key))->placeholder($defaultText),
         };
 

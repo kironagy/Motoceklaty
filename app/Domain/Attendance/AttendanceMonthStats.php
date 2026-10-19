@@ -82,6 +82,7 @@ class AttendanceMonthStats
                 $state = match (true) {
                     $a && $a->check_in_at => $isLate ? 'late' : 'ontime',
                     $onVacation || $a?->status === 'vacation' => 'vacation',
+                    $a?->status === 'absent' => 'absent',
                     in_array($day->dayOfWeek, $offDays, true) => 'off',
                     $day->greaterThanOrEqualTo(today()) => 'future',
                     ! $start || $day->lessThan($start) => 'none',

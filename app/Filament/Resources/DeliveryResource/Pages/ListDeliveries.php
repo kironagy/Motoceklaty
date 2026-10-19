@@ -10,10 +10,36 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Components\Tab;
 use Filament\Resources\Pages\ListRecords;
 use Illuminate\Database\Eloquent\Builder;
+use Livewire\Attributes\Url;
 
 class ListDeliveries extends ListRecords
 {
     protected static string $resource = DeliveryResource::class;
+
+    /** cards | table - like the attendance page; the last choice is remembered for the session. */
+    #[Url(as: 'view')]
+    public string $mode = '';
+
+    public function mount(): void
+    {
+        if (! in_array($this->mode, ['cards', 'table'], true)) {
+            $this->mode = session('deliveries_view', 'table');
+        }
+
+        session(['deliveries_view' => $this->mode]);
+
+        parent::mount();
+    }
+
+    protected function viewSwitch(string $mode, string $label, string $icon): Actions\Action
+    {
+        return Actions\Action::make('view_'.$mode)
+            ->label($label)
+            ->icon($icon)
+            ->color(fn () => $this->mode === $mode ? 'primary' : 'gray')
+            ->outlined(fn () => $this->mode !== $mode)
+            ->url(fn () => DeliveryResource::getUrl('index', ['view' => $mode, 'activeTab' => $this->activeTab]));
+    }
 
     /**
      * ============================================================
@@ -76,6 +102,13 @@ class ListDeliveries extends ListRecords
     |--------------------------------------------------------------------------
     */
     if ($this->isHitler()) {
+
+        // Transfers of the owner's requests waiting for his OK.
+        $tabs['transfers'] = Tab::make('طلبات التحويل')
+            ->icon('heroicon-o-arrow-path')
+            ->badge(fn (): int => DeliveryResource::getEloquentQuery()->whereNotNull('pending_staff_id')->whereNotNull('transfer_requested_by')->count())
+            ->badgeColor('danger')
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->whereNotNull('pending_staff_id')->whereNotNull('transfer_requested_by'));
 
         $tabs['deleted'] = Tab::make('الطلبات المحذوفة')
             ->icon('heroicon-o-trash')
@@ -145,6 +178,9 @@ protected function getDeletedRequestsCount(): int
     protected function getHeaderActions(): array
     {
         return [
+            $this->viewSwitch('cards', 'كاردات', 'heroicon-o-squares-2x2'),
+            $this->viewSwitch('table', 'جدول', 'heroicon-o-table-cells'),
+
 
             Actions\Action::make('new_installment_request')
 

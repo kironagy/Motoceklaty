@@ -17,7 +17,17 @@ class ToolRegistry
 
     public function __construct(private readonly JsonSchemaValidator $validator)
     {
+        // Dynamic Links: in form mode the bot takes no application in the chat - it sends the
+        // form link instead; in bot mode the link tool is off and the chat intake is back.
+        $skip = \App\Domain\Forms\FormLinkService::formsMode()
+            ? config('agent.form_links.chat_intake_tools', [])
+            : [SendApplicationLinkTool::class];
+
         foreach (config('agent.tools', []) as $class) {
+            if (in_array($class, $skip, true)) {
+                continue;
+            }
+
             $tool = app($class);
             $this->tools[$tool->name()] = $tool;
         }

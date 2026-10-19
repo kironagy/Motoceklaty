@@ -71,6 +71,35 @@ class DocumentPipeline
     }
 
     /**
+     * Dynamic Links: one form upload read the same way as a WhatsApp photo (OCR + the one
+     * classification call), with the document the form field asks for as the likeliest type.
+     * Records nothing. Null when the reader is down.
+     *
+     * @return array{type: ?string, legibility: string, confidence: float, fields: array}|null
+     */
+    public function readForForm(MessageMedia $media, ?string $expectedTypeKey): ?array
+    {
+        $activeTypes = DocumentType::where('is_active', true)->get();
+
+        try {
+            $ocrText = $this->ocr($media);
+        } catch (OcrException $e) {
+            Log::warning('Form document OCR failed', ['media_id' => $media->id, 'error' => $e->getMessage()]);
+            $ocrText = '';
+        }
+
+        $classification = $this->classify($media, $ocrText, $activeTypes, $expectedTypeKey ? [$expectedTypeKey] : []);
+
+        if (! $classification) {
+            return null;
+        }
+
+        [$typeKey, $legibility, $confidence, $fields] = $classification;
+
+        return ['type' => $typeKey, 'legibility' => $legibility, 'confidence' => (float) $confidence, 'fields' => $fields];
+    }
+
+    /**
      * @return array{media_id: int, document_id: ?int, detected_type: ?string, accepted: bool, status: string, issues: array, applied_fields: string[]}
      */
     public function process(MessageMedia $media, Application $application, ?string $expectedTypeKey = null, bool $replacesPrevious = false, ?array $preRead = null): array

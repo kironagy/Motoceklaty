@@ -110,11 +110,23 @@ class ProcessDocumentTool implements WriteTool
     {
         $application = $ctx->activeApplicationId ? Application::find($ctx->activeApplicationId) : null;
 
+        if (! $application && \App\Domain\Forms\FormLinkService::formsMode()) {
+            return ToolResult::error('UPLOAD_ON_FORM', 'Papers are uploaded on his application form, not in the chat: call send_application_link '
+                .'and tell him to upload this photo there (it takes a minute). Never say his photo was received or reviewed.');
+        }
+
         if (! $application) {
             // Replay of conversation 206: "ماقدرش أراجع الصور... مافيش طلب مفتوح"
             // three times - our mechanics are not his problem.
             return ToolResult::error('NO_ACTIVE_APPLICATION', 'The photos arrived; they are read once an application is open. Never tell him about an open application or reviewing photos. '
                 .'If the person applying is clear and allowed, call start_application and then process_document; otherwise just answer where the conversation stands (who applies), without repeating a refusal you already gave.');
+        }
+
+        // Dynamic Links: papers are uploaded on the form. In the chat a photo is read for his
+        // application only when staff asked him for one after he applied.
+        if (\App\Domain\Forms\FormLinkService::formsMode() && $application->status !== 'needs_more_info') {
+            return ToolResult::error('UPLOAD_ON_FORM', 'Papers are uploaded on his application form, not in the chat. If he has not applied yet, '
+                .'call send_application_link (his photo is not lost - he uploads it on the form). If he already applied, tell him it is under review.');
         }
 
         $expected = $args['expected_document_type'] ?? null;
@@ -269,9 +281,24 @@ class ProcessDocumentTool implements WriteTool
             $results = array_map(fn ($r) => array_diff_key($r, ['differs_from_file' => 1, 'different_person' => 1]), $results);
         }
 
+        // Dynamic Links: the paper staff asked for is in - the request goes back to them at once
+        // (there is no submit_application in form mode).
+        $resubmitted = null;
+        $application->refresh();
+
+        if (\App\Domain\Forms\FormLinkService::formsMode() && $application->status === 'needs_more_info'
+            && is_array($application->staff_request) && app(\App\Domain\Applications\StaffDecisionService::class)->resolved($application)) {
+            try {
+                $resubmitted = app(\App\Domain\Applications\StaffDecisionService::class)->resubmit($application)['reference'] ?? null;
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Auto resubmit after staff document failed', ['application_id' => $application->id, 'error' => $e->getMessage()]);
+            }
+        }
+
         return ToolResult::ok([
             'results' => $results,
-        ] + ($notDocuments !== [] ? ['not_documents' => $notDocuments] : [])
+        ] + ($resubmitted !== null ? ['request_back_to_review' => $resubmitted] : [])
+          + ($notDocuments !== [] ? ['not_documents' => $notDocuments] : [])
           + $this->earningsMonths($snapshot = $this->snapshots->for($application->refresh()))
           + ($replacedIdentity ? ['identity_replaced' => true] : [])
           + (isset($askBusiness) ? ['ask_him' => $askBusiness] : []) + [

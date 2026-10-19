@@ -285,7 +285,7 @@ public function store(Request $request)
 
         // نظام
         'staff_id'                => $staffId,
-        'status'                  => 'new',
+        'status'                  => 'new_request',
         'checks_report'           => json_encode($checks, JSON_UNESCAPED_UNICODE),
     ]);
 

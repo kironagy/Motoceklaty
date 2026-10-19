@@ -35,6 +35,17 @@ class ReplyGuard
     /** What exactly the last refusal found (which model, which missing item) - added to its hint. */
     private ?string $detail = null;
 
+    /**
+     * Dynamic Links: checks that only judge the chat intake (data recorded, summary sent,
+     * documents asked) do not apply when the customer applies on the form.
+     */
+    public const CHAT_INTAKE_CODES = ['DOCUMENT_PHOTO_NOT_PROCESSED', 'PERSON_NOT_RECORDED', 'SUMMARY_CLAIMED_NOT_SENT', 'SUBMISSION_DENIED_BUT_DONE', 'DATA_CLAIMED_NOT_SAVED', 'DATA_GIVEN_NOT_RECORDED', 'DATA_OVERCLAIMED', 'SUBMIT_NOT_CALLED', 'REAPPLY_OFFERED_AFTER_SUBMIT', 'SELECTION_CLAIMED_NOT_SET', 'COMPLETION_OVERCLAIMED', 'DOCUMENTS_ASKED_WITHOUT_APPLICATION', 'ACCEPTED_DOCUMENT_ASKED_AGAIN'];
+
+    private function applies(string $code): bool
+    {
+        return ! (\App\Domain\Forms\FormLinkService::formsMode() && in_array($code, self::CHAT_INTAKE_CODES, true));
+    }
+
     public function lastDetail(): ?string
     {
         return $this->detail;
@@ -72,7 +83,9 @@ class ReplyGuard
         // QA 2026-10-04: he sent the back of his ID and the reply asked him
         // for "a clearer back" - the photo was never read.
         if ($this->ignoresNewDocumentPhoto($conversation, $outcomes)) {
-            return 'DOCUMENT_PHOTO_NOT_PROCESSED';
+            if ($this->applies('DOCUMENT_PHOTO_NOT_PROCESSED')) {
+                return 'DOCUMENT_PHOTO_NOT_PROCESSED';
+            }
         }
 
         // Replay of conversation 206 on Gemini: the same four-line refusal,
@@ -87,7 +100,9 @@ class ReplyGuard
         // Conversation 206: "اخ اخويا حبيب صاحب" got "أخوك سنه كام؟" and "اخ" +
         // "اه" got "التقديم باسم أبوك" - a person nobody recorded from his words.
         if ($this->speaksOfUnrecordedPerson($replyText, $conversation)) {
-            return 'PERSON_NOT_RECORDED';
+            if ($this->applies('PERSON_NOT_RECORDED')) {
+                return 'PERSON_NOT_RECORDED';
+            }
         }
 
         // Claims are judged on assertions only: "لو غيرت رأيك أنا موجود"
@@ -109,14 +124,18 @@ class ReplyGuard
             $this->detail = collect($outcomes)->contains(fn ($o) => $o['name'] === 'submit_application' && ($o['data']['code'] ?? null) === 'NOT_READY')
                 ? 'submit_application said NOT_READY: there is no summary. Ask for what its blockers name; if he already gave it, record it first.' : null;
 
-            return 'SUMMARY_CLAIMED_NOT_SENT';
+            if ($this->applies('SUMMARY_CLAIMED_NOT_SENT')) {
+                return 'SUMMARY_CLAIMED_NOT_SENT';
+            }
         }
 
         // Simulator 2026-10-05: submit_application succeeded (#3672) and he was
         // told "الطلب ما اتبعتش" - the opposite of what happened.
         if ($this->submittedThisTurn($outcomes)
             && preg_match('/(?:الطلب|طلبك)\s+(?:\S+\s+){0,2}?(?:ما\s*|م)(?:اتبعت|اتقدم|اتقدّم|اترفع|وصل)(?:ش)|(?:ما\s*|م)(?:اتبعتش|اتقدمش|اترفعش|وصلش)/u', $assertions)) {
-            return 'SUBMISSION_DENIED_BUT_DONE';
+            if ($this->applies('SUBMISSION_DENIED_BUT_DONE')) {
+                return 'SUBMISSION_DENIED_BUT_DONE';
+            }
         }
 
         // Request 4272, rejected by the finance company: "الطلب اتبعت على
@@ -140,14 +159,18 @@ class ReplyGuard
                 || preg_match('/(?:الرقم|رقمك|العنوان|عنوانك|بياناتك|البيانات|الاسم|اسمك)\s+(?:\S+\s+)?(?:وصل|وصلت|وصلني|وصلتني|اتسجل|اتسجلت|اتعدل|اتعدلت|اتحفظ)(?:\s|$|[،.!])/u', $assertions))
             // his work recorded is a save too (owner simulation 2026-10-07: "سجلت شغلك" was refused)
             && array_intersect($succeeded, [...self::WRITE_TOOLS, 'record_work_profile']) === []) {
-            return 'DATA_CLAIMED_NOT_SAVED';
+            if ($this->applies('DATA_CLAIMED_NOT_SAVED')) {
+                return 'DATA_CLAIMED_NOT_SAVED';
+            }
         }
 
         // Real-customer run 2026-10-07: "رقم تليفونك اتسجل" while only his photos were read - any write
         // let it through. A named detail (phone, address, name...) is saved by record_customer_data only.
         if (preg_match('/(?:الرقم|رقمك|رقم\s+(?:تليفونك|التليفون|موبايلك)|تليفونك|العنوان|عنوانك|عنوان\s+(?:السكن|الشغل)|بيانات\s+السكن|الاسم|اسمك)\s+(?:\S+\s+)?(?:وصل|وصلت|وصلني|اتسجل|اتسجلت|اتحفظ|اتحفظت|سجلته|سجلتها|حفظته)(?:\s|$|[،.!])/u', $assertions)
             && ! in_array('record_customer_data', $succeeded, true) && ! in_array('start_application', $succeeded, true)) {
-            return 'DATA_CLAIMED_NOT_SAVED';
+            if ($this->applies('DATA_CLAIMED_NOT_SAVED')) {
+                return 'DATA_CLAIMED_NOT_SAVED';
+            }
         }
 
         // Real-customer rerun 2026-10-07: "رقمي 011... ولو مردتش ده رقم تاني 011..." came with the salary
@@ -159,14 +182,18 @@ class ReplyGuard
             && ! \App\Models\ApplicationData::where('application_id', $open->id)->where('field_key', 'phone')->where('status', 'valid')->exists()) {
             $this->detail = 'He wrote '.$number[0].' - call record_customer_data with it as phone (a second number he gave is kept on its own), then reply.';
 
-            return 'DATA_GIVEN_NOT_RECORDED';
+            if ($this->applies('DATA_GIVEN_NOT_RECORDED')) {
+                return 'DATA_GIVEN_NOT_RECORDED';
+            }
         }
 
         // "سجلت بياناتك" after only the work type was saved: the customer
         // thought he was done and stopped sending the rest.
         if (preg_match('/(?:سجلت|سجّلت|اتسجلت|حفظت)\s+(?:كل\s+)?(?:بياناتك|البيانات|بيانات\s+حضرتك)|(?:بياناتك|البيانات)\s+(?:اتسجلت|اتحفظت)/u', $assertions)
             && $this->savedFieldCount($outcomes) < 2) {
-            return 'DATA_OVERCLAIMED';
+            if ($this->applies('DATA_OVERCLAIMED')) {
+                return 'DATA_OVERCLAIMED';
+            }
         }
 
         // Real-customer run 2026-10-07: "بياناتك كلها اتسجلت" with his phone still missing - he was then
@@ -179,7 +206,9 @@ class ReplyGuard
             if ($left !== []) {
                 $this->detail = 'Still missing: '.implode(', ', $left).'. Ask for it; if he already gave it in his messages, record it first.';
 
+                if ($this->applies('DATA_OVERCLAIMED')) {
                 return 'DATA_OVERCLAIMED';
+            }
             }
         }
 
@@ -232,13 +261,17 @@ class ReplyGuard
             && ($open = $this->activeApplication($conversation)) && $open->status === 'collecting'
             && ! preg_match('/معرض\s+تاني|قرض|قروض|قسطت|قسّطت/u', $replyText)
             && (app(\App\Domain\Applications\SnapshotService::class)->for($open->refresh())['can_submit'] ?? false)) {
-            return 'SUBMIT_NOT_CALLED';
+            if ($this->applies('SUBMIT_NOT_CALLED')) {
+                return 'SUBMIT_NOT_CALLED';
+            }
         }
 
         // Owner 2026-10-07: after applying, "اول قسط امتى؟" got "أقدملك تاني؟", and
         // "انت قدمت قبل كدا" was handed to staff. A sent request is answered from, not re-offered.
         if ($this->offersToApplyAgain($replyText, $conversation, $outcomes)) {
-            return 'REAPPLY_OFFERED_AFTER_SUBMIT';
+            if ($this->applies('REAPPLY_OFFERED_AFTER_SUBMIT')) {
+                return 'REAPPLY_OFFERED_AFTER_SUBMIT';
+            }
         }
 
         // "فتحتلك الطلب" / "بدأتلك الطلب" is only true in the turn that opened
@@ -252,7 +285,9 @@ class ReplyGuard
         if (($set = $this->selectionClaimedNotSet($assertions, $conversation)) !== null) {
             $this->detail = $set;
 
-            return 'SELECTION_CLAIMED_NOT_SET';
+            if ($this->applies('SELECTION_CLAIMED_NOT_SET')) {
+                return 'SELECTION_CLAIMED_NOT_SET';
+            }
         }
 
         // "تمام كده كملنا التسجيل" with the work landmark still missing: he
@@ -260,7 +295,9 @@ class ReplyGuard
         if (($left = $this->completionOverclaimed($assertions, $replyText, $conversation)) !== null) {
             $this->detail = $left;
 
-            return 'COMPLETION_OVERCLAIMED';
+            if ($this->applies('COMPLETION_OVERCLAIMED')) {
+                return 'COMPLETION_OVERCLAIMED';
+            }
         }
 
         // "المكنة محجوزة باسمك", "بتخلص في نفس اليوم", "بضمان المعرض":
@@ -389,7 +426,9 @@ class ReplyGuard
         if (! $this->activeApplication($conversation) && ! $this->openedThisTurn($outcomes)
             && ! collect($outcomes)->contains(fn ($o) => $o['name'] === 'process_document')
             && preg_match('/(?:ابعت|تبعت|هات|تجيب|ارفع|ترفع)(?:لي|لنا|هم|ها|هملي)?\s+(?:\S+\s+){0,3}?(?:صور[ةه]?\s+)?(?:ال)?(?:بطاق|مفردات|رخص|سكرين|البرنت|برنت)/u', $replyText)) {
-            return 'DOCUMENTS_ASKED_WITHOUT_APPLICATION';
+            if ($this->applies('DOCUMENTS_ASKED_WITHOUT_APPLICATION')) {
+                return 'DOCUMENTS_ASKED_WITHOUT_APPLICATION';
+            }
         }
 
         // Owner 2026-10-07: a paper already accepted is never asked for again ("الرخصة محتاجين صورة تانية"
@@ -397,7 +436,9 @@ class ReplyGuard
         if (($again = $this->asksForAcceptedDocument($replyText, $conversation)) !== null) {
             $this->detail = $again.' is already accepted on his application - do not ask for it again.';
 
-            return 'ACCEPTED_DOCUMENT_ASKED_AGAIN';
+            if ($this->applies('ACCEPTED_DOCUMENT_ASKED_AGAIN')) {
+                return 'ACCEPTED_DOCUMENT_ASKED_AGAIN';
+            }
         }
 
         // Real-customer run 2026-10-07: a pensioner was told to bring "إيصال مرافق حديث" before anything
@@ -634,7 +675,7 @@ class ReplyGuard
             ->where('direction', 'incoming')->latest('id')->value('turn_id');
 
         $applicationIds = \App\Models\Application::where('customer_id', $conversation->customer_id)
-            ->whereIn('status', \App\Models\Application::ACTIVE_STATUSES)->pluck('id');
+            ->whereIn('status', \App\Models\Application::agentActiveStatuses())->pluck('id');
 
         if (! $turnId || $applicationIds->isEmpty()) {
             return false;
@@ -823,7 +864,7 @@ class ReplyGuard
     private function waivesRequiredDocumentRaw(string $replyText, WhatsappConversation $conversation, ?Application &$application = null): bool
     {
         $application = $conversation->customer_id
-            ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->latest('id')->first()
+            ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::agentActiveStatuses())->latest('id')->first()
             : null;
 
         if (! $application) {
@@ -1103,7 +1144,7 @@ class ReplyGuard
     private function activeApplication(WhatsappConversation $conversation): ?Application
     {
         return $conversation->customer_id
-            ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->latest('id')->first()
+            ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::agentActiveStatuses())->latest('id')->first()
             : null;
     }
 
@@ -1829,9 +1870,11 @@ class ReplyGuard
                 continue;
             }
 
-            // "انا محاسب" + "يا أستاذ محاسب": his own job word after يا
+            // "انا محاسب" + "يا أستاذ محاسب": his own job word after يا. Simulator 2026-10-19:
+            // "اسمي كريم سامي" + "يا كريم" was refused twice - a name he gives is no job.
             if (preg_match('/(?<![\p{L}])(?:ال)?'.preg_quote($word, '/').'(?![\p{L}])/u', $said)
-                && ! $this->isPersonName($word, $conversation)) {
+                && ! $this->isPersonName($word, $conversation)
+                && ! preg_match('/(?:اسمي|اسم[يى]|انا اسمي|معاك)\s+(?:[\p{L}]+\s+){0,2}?'.preg_quote($word, '/').'(?![\p{L}])/u', $said)) {
                 return trim($match[0]);
             }
         }

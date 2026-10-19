@@ -34,6 +34,20 @@ class Application extends Model
     /** Statuses that count as "still open" for the active-application policy (T13 §3). */
     public const ACTIVE_STATUSES = ['collecting', 'submitted', 'under_review', 'needs_more_info'];
 
+    /**
+     * What the bot treats as his open application. Dynamic Links: no application is collected
+     * in the chat, so a half-done chat application (collecting) from before is not resumed -
+     * he gets a form link like anyone else (owner 2026-10-18: old ones are left as they are).
+     *
+     * @return string[]
+     */
+    public static function agentActiveStatuses(): array
+    {
+        return \App\Domain\Forms\FormLinkService::formsMode()
+            ? array_values(array_diff(self::ACTIVE_STATUSES, ['collecting']))
+            : self::ACTIVE_STATUSES;
+    }
+
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);

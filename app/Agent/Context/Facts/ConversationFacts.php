@@ -197,6 +197,7 @@ class ConversationFacts
             'needs_new_lookup' => array_map(fn ($q) => ['motorcycle' => $q['motorcycle'], 'months' => $q['months'], 'why' => $q['why']], $quotes['expired']),
             'application' => $application && $snapshot ? $this->applicationFacts($application, $snapshot) : null,
             'requests' => $customer ? $this->requests($customer, $conversation) : [],
+            'application_link' => $this->applicationLink($conversation),
             'asked_and_waiting_for' => array_map(fn ($a) => ['kind' => $a['kind'] ?? null, 'key' => $a['key'] ?? null], $awaiting),
             'handoff' => ($handoff = $this->handoff($conversation)) === ['status' => 'none'] ? null : $handoff,
             'unprocessed_media' => $this->unprocessedMedia($conversation, $turnId),
@@ -215,6 +216,35 @@ class ConversationFacts
     }
 
     /** @return array<string, mixed> */
+    /**
+     * Dynamic Links: where his form link stands, so "الرابط مش بيفتح" / "مش عارف أرفع"
+     * gets real help. Null when none was sent.
+     */
+    private function applicationLink(WhatsappConversation $conversation): ?array
+    {
+        if (! \App\Domain\Forms\FormLinkService::formsMode()) {
+            return null;
+        }
+
+        $link = \App\Models\FormLink::where('whatsapp_conversation_id', $conversation->id)->latest('id')->first();
+
+        if (! $link) {
+            return null;
+        }
+
+        $open = $link->isOpen();
+        $progress = $open ? app(\App\Domain\Forms\FormLinkService::class)->progress($link) : null;
+
+        return array_filter([
+            'status' => $link->status === 'sent' ? 'sent_not_opened_yet' : ($open ? $link->status : ($link->status === 'submitted' ? 'submitted' : 'expired_send_again')),
+            'purpose' => $link->purpose === 'fix' ? 'staff_asked_to_fix_data: '.$link->staff_note : null,
+            'sent_minutes_ago' => (int) $link->created_at->diffInMinutes(now()),
+            'filled_percent' => $progress['percent'] ?? null,
+            'still_missing' => $progress ? array_slice($progress['missing'], 0, 6) : null,
+            'warned_uploads' => $open ? $link->files()->where('check_status', 'warning')->pluck('message')->filter()->take(3)->values()->all() : null,
+        ], fn ($v) => $v !== null && $v !== []);
+    }
+
     private function applicationFacts(Application $application, array $snapshot): array
     {
         $fields = $snapshot['fields'] ?? [];

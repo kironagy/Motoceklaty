@@ -126,16 +126,35 @@ class AttendancePoints
         return $leave;
     }
 
-    /** The day's point follows its check-in; a used or canceled point never changes. */
+    /**
+     * The day's point follows its check-in; a used or canceled point never changes. A day with no
+     * check-in marked absent (by the 3 PM absence run or by hand) is a black point - absence without
+     * leave; turning it into a vacation removes it.
+     */
     public static function afterSave(Attendance $attendance): void
     {
-        if (! $attendance->wasChanged(['check_in_at', 'attendance_date']) && ! $attendance->wasRecentlyCreated) {
+        if (! $attendance->wasChanged(['check_in_at', 'attendance_date', 'status']) && ! $attendance->wasRecentlyCreated) {
             return;
         }
 
         $point = AttendancePoint::query()->where('attendance_id', $attendance->id)->first();
 
         if ($point && $point->status !== self::ACTIVE) {
+            return;
+        }
+
+        if (! $attendance->check_in_at && $attendance->status === 'absent') {
+            $point = AttendancePoint::query()->updateOrCreate(['attendance_id' => $attendance->id], [
+                'staff_id' => $attendance->staff_id,
+                'color' => self::BLACK,
+                'amount' => static::amountFor(self::BLACK),
+                'earned_on' => $attendance->attendance_date,
+                'status' => self::ACTIVE,
+                'source' => 'absence',
+                'reason' => 'غياب بدون إجازة',
+            ]);
+            static::mirrorDeduction($attendance, $point);
+
             return;
         }
 

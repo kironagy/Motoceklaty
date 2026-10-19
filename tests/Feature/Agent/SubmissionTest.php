@@ -196,7 +196,7 @@ class SubmissionTest extends TestCase
         $this->assertSame('Mohamed Ali', $ir->applicant_name);
         $this->assertSame('01012345678', $ir->applicant_phone);
         $this->assertSame(12, $ir->months);
-        $this->assertSame('new', $ir->status);
+        $this->assertSame('new_request', $ir->status);
         $this->assertSame($application->id, $ir->application_id);
     }
 
@@ -561,7 +561,7 @@ class SubmissionTest extends TestCase
         $this->assertSame(1, InstallmentRequest::count());
 
         $request->refresh();
-        $this->assertSame('new', $request->status);
+        $this->assertSame('new_request', $request->status);
         $this->assertSame('Mohamed Ali Hassan', $request->applicant_name);
         $this->assertSame('submitted', $application->refresh()->status);
         $this->assertNull($application->staff_request);

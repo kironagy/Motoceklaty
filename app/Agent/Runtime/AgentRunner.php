@@ -36,6 +36,48 @@ class AgentRunner
     /** @return array{messages: string[], quote_wa_message_id?: ?string, media?: array, focus_motorcycle_ids?: array} */
     public function run(object $turn): array
     {
+        return $this->withApplicationLink($turn, $this->runTurn($turn));
+    }
+
+    /**
+     * Dynamic Links: the form link send_application_link made this turn goes out as its own
+     * message after the reply - also when a guard rewrote the reply or a fallback replaced it,
+     * so "ده رابط التقديم" never arrives without the link.
+     */
+    private function withApplicationLink(object $turn, array $result): array
+    {
+        $link = \App\Models\FormLink::where('whatsapp_conversation_id', $turn->whatsapp_conversation_id)
+            ->where('prefill->_sent_turn_id', (int) $turn->id)
+            ->latest('id')
+            ->first();
+
+        // "ده رابط التقديم" without the tool (he asked for it again): his open link - or, when
+        // there is none (live 2026-10-19: staff had cancelled it and he got the dead one twice),
+        // a new one with everything he wrote, unless a request of his waits for a decision
+        if (! $link && \App\Domain\Forms\FormLinkService::formsMode()
+            && preg_match('/(?:ال)?رابط/u', implode(' ', (array) ($result['messages'] ?? [])))) {
+            $link = $this->openFormLink((int) $turn->whatsapp_conversation_id) ?? $this->freshFormLink((int) $turn->whatsapp_conversation_id, (int) $turn->id);
+        }
+
+        if (! $link || ! $link->isOpen()) {
+            return $result;
+        }
+
+        $url = $link->url();
+        $messages = (array) ($result['messages'] ?? []);
+
+        if (! collect($messages)->contains(fn ($m) => str_contains((string) $m, $url))) {
+            $messages[] = $url;
+        }
+
+        unset($result['no_reply']);
+
+        return ['messages' => $messages] + $result;
+    }
+
+    /** @return array{messages: string[], quote_wa_message_id?: ?string, media?: array, focus_motorcycle_ids?: array} */
+    private function runTurn(object $turn): array
+    {
         $purpose = \App\Services\GeminiKeyManager::isTestPhone(WhatsappConversation::whereKey($turn->whatsapp_conversation_id)->value('phone'))
             ? 'simulator' : 'reply';
 
@@ -54,7 +96,7 @@ class AgentRunner
         $conversation = WhatsappConversation::with('customer')->findOrFail($turn->whatsapp_conversation_id);
         $customer = $conversation->customer;
         $activeApplication = $customer
-            ? Application::where('customer_id', $customer->id)->whereIn('status', Application::ACTIVE_STATUSES)->latest('id')->first()
+            ? Application::where('customer_id', $customer->id)->whereIn('status', Application::agentActiveStatuses())->latest('id')->first()
             : null;
 
         $trace = AiTrace::firstOrCreate(
@@ -94,7 +136,10 @@ class AgentRunner
         }
 
         // read first, so the context shows each photo as its result, not as the image again
-        $preread = $activeApplication ? $this->prereadDocuments($turn, $ctx) : null;
+        // Dynamic Links: papers come on the form; a photo in the chat is read for his
+        // application only when staff asked him for a document (needs_more_info)
+        $readsPhotos = $activeApplication && (! \App\Domain\Forms\FormLinkService::formsMode() || $activeApplication->status === 'needs_more_info');
+        $preread = $readsPhotos ? $this->prereadDocuments($turn, $ctx) : null;
 
         // Rebuild: the model understands and records his facts itself
         // (record_customer_data); no separate understanding call before it.
@@ -170,6 +215,7 @@ class AgentRunner
                         $toolCall['args'] = $this->rewritten($toolCall['args'], $guardEvents, [
                             'tidy' => fn ($a) => $this->guard->tidy($a),
                             'silence' => fn ($a) => $this->silenceWrittenAsText($a, $ctx),
+                            'link_written' => fn ($a) => $this->withoutWrittenLink($a, $outcomes, $conversation->id),
                         ]);
 
                         // PHP checks only what the AI may not decide: claims of
@@ -258,7 +304,7 @@ class AgentRunner
 
                     // Owner 2026-10-07: "حقك عليا، المفردات اتقبلت" and nothing more - he did not know what came
                     // next. While his application is collecting, a reply that asks nothing says what is next.
-                    if ($toolCall['name'] === 'send_reply' && $ctx->activeApplicationId) {
+                    if ($toolCall['name'] === 'send_reply' && $ctx->activeApplicationId && ! \App\Domain\Forms\FormLinkService::formsMode()) {
                         $toolCall['args'] = $this->rewritten($toolCall['args'], $guardEvents, ['next_step_added' => fn ($a) => $this->withNextStep($a, $ctx->activeApplicationId)]);
                     }
 
@@ -465,6 +511,74 @@ class AgentRunner
      *
      * @param  array<string, callable(array): array>  $steps
      */
+    /**
+     * Dynamic Links: the real form link goes out by itself after the reply. A URL the model
+     * typed anyway (simulator 2026-10-18: "https://motoget.com/apply/123456789", then
+     * "[رابط التقديم]") is dropped, never sent.
+     */
+    private function freshFormLink(int $conversationId, int $turnId): ?\App\Models\FormLink
+    {
+        $conversation = WhatsappConversation::find($conversationId);
+        $tool = app(\App\Agent\Tools\SendApplicationLinkTool::class);
+
+        if (! $conversation || $tool->openRequest($conversation)) {
+            return null;
+        }
+
+        try {
+            $link = $tool->linkForChat($conversation);
+            $link->update(['prefill' => array_merge((array) $link->prefill, ['_sent_turn_id' => $turnId])]);
+
+            return $link;
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Fresh form link failed', ['conversation_id' => $conversationId, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
+    private function openFormLink(int $conversationId): ?\App\Models\FormLink
+    {
+        if (! \App\Domain\Forms\FormLinkService::formsMode()) {
+            return null;
+        }
+
+        $link = \App\Models\FormLink::where('whatsapp_conversation_id', $conversationId)
+            ->whereIn('status', \App\Models\FormLink::OPEN_STATUSES)->latest('id')->first();
+
+        return $link?->isOpen() ? $link : null;
+    }
+
+    private function withoutWrittenLink(array $args, array $outcomes, ?int $conversationId = null): array
+    {
+        $linkSent = collect($outcomes)->contains(fn ($o) => $o['name'] === 'send_application_link' && $o['ok']
+            && ($o['data']['link_sent_after_your_reply'] ?? false))
+            || ($conversationId !== null && $this->openFormLink($conversationId) !== null);
+
+        if (! isset($args['messages'])) {
+            return $args;
+        }
+
+        // a form link copied from the history may be cancelled or expired: only the one the
+        // system attaches after the reply is ever sent
+        if (! $linkSent) {
+            $args['messages'] = array_values(array_filter(array_map(
+                fn ($m) => trim((string) preg_replace(['/\S*\/f\/[A-Za-z0-9]{32,64}\S*/u', '/[ \t]*:[ \t]*$/mu'], ['', ''], (string) $m)),
+                $args['messages']
+            ), fn ($m) => $m !== ''));
+
+            return $args;
+        }
+
+        $args['messages'] = array_values(array_filter(array_map(fn ($m) => trim((string) preg_replace(
+            ['/https?:\/\/\S+|www\.\S+/iu', '/[\[(][^\])]*رابط[^\])]*[\])]/u', '/[ \t]*:[ \t]*$/mu', '/\n{3,}/u'],
+            ['', '', '', "\n\n"],
+            (string) $m
+        )), $args['messages']), fn ($m) => $m !== ''));
+
+        return $args;
+    }
+
     private function rewritten(array $args, array &$guardEvents, array $steps): array
     {
         foreach ($steps as $step => $rewrite) {
@@ -727,7 +841,7 @@ class AgentRunner
     private function keepGoingLines(WhatsappConversation $conversation): array
     {
         $application = $conversation->customer_id
-            ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::ACTIVE_STATUSES)->latest('id')->first()
+            ? Application::where('customer_id', $conversation->customer_id)->whereIn('status', Application::agentActiveStatuses())->latest('id')->first()
             : null;
 
         try {
@@ -776,6 +890,21 @@ class AgentRunner
 
         if ($application) {
             return ['معاك. نكمّل طلبك؟', 'تمام، نكمّل في الطلب؟'];
+        }
+
+        // Dynamic Links: applying means the form link - an open one is offered, never "نبدأ الطلب"
+        if (\App\Domain\Forms\FormLinkService::formsMode()) {
+            $link = \App\Models\FormLink::where('whatsapp_conversation_id', $conversation->id)->whereIn('status', \App\Models\FormLink::OPEN_STATUSES)->latest('id')->first();
+
+            if ($link?->isOpen()) {
+                return ['ده رابط التقديم، املا بياناتك وارفع ورقك عليه، ولو وقفت في حاجة قولّي.', 'كمّل طلبك من رابط التقديم، وكل اللي كتبته محفوظ. لو فيه حاجة مش واضحة قولّي.'];
+            }
+
+            $quote = \App\Domain\Conversations\QuotedOffer::classify($conversation)['valid'][0] ?? null;
+
+            if ($quote !== null) {
+                return ["تحب أبعتلك رابط التقديم على {$quote['motorcycle']} على {$quote['months']} شهر؟", "أبعتلك رابط التقديم على {$quote['motorcycle']}؟"];
+            }
         }
 
         // No application yet: if he was quoted something that is still true, continue from it

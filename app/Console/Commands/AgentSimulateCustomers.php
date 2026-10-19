@@ -128,7 +128,7 @@ class AgentSimulateCustomers extends Command
     {
         static $given = [];
         $application = \App\Models\Application::where('customer_id', $conversation->fresh()->customer_id)
-            ->whereIn('status', \App\Models\Application::ACTIVE_STATUSES)->latest('id')->first();
+            ->whereIn('status', \App\Models\Application::agentActiveStatuses())->latest('id')->first();
 
         if (! $application || $application->status !== 'collecting' || ($given[$conversation->id] = ($given[$conversation->id] ?? 0) + 1) > 8) {
             return [];

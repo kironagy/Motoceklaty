@@ -142,6 +142,10 @@ Forms\Components\Select::make('installmentSystems')
                         ->live()
                         ->nullable()
                         ->required(fn (Get $get) => (bool) $get('is_showroom_employee')),
+                    Forms\Components\Toggle::make('can_clock_in_any_branch')
+                        ->label('يبصم من أي فرع')
+                        ->helperText('للموظف اللي بيتنقل بين الفروع: البصمة بتتقبل من أي فرع ليه Latitude / Longitude.')
+                        ->inline(false),
                     Forms\Components\Select::make('warehouse_id')
                         ->label('المعرض / الخزنة')
                         ->helperText('اللي بيشوف خزنته من غير صلاحية كاملة.')

@@ -111,7 +111,7 @@ public static function canDelete($record): bool
 
     return !static::isLocked($record);
 }
-protected static function isHitler(): bool
+public static function isHitler(): bool
 {
     return (bool) (Auth::user()?->is_hitler ?? false);
 }
@@ -358,9 +358,12 @@ protected static function isHitler(): bool
              |--------------------------------------------------------------------------
              */
 
+            // Owner 2026-10-18: the same person may apply again once his request is decided -
+            // only a request still waiting for a decision blocks the number / national id.
             $exists = InstallmentRequest::query()
                 ->where($column, $value)
                 ->where('request_type', $requestType)
+                ->whereIn('status', \App\Domain\Forms\FormSubmissionService::UNDECIDED_STATUSES)
                 ->when(
                     $record,
                     fn ($query) =>
@@ -726,6 +729,14 @@ $requestType = request()->query('request_type') === 'fake'
                                 fn($state, callable $set) =>
                                 self::loadSystemData($state, $set)
                             )
+                            // A request filed on Amaan Giza moves to Amaan Cairo only by the owner.
+                            ->rule(fn ($record) => function (string $attribute, $value, \Closure $fail) use ($record) {
+                                if ($record?->getOriginal('installment_type') === 'امان - الجيزة'
+                                    && $value === 'امان - القاهرة'
+                                    && ! static::isHitler()) {
+                                    $fail('الطلب مرفوع على أمان الجيزة، ومحدش يقدر يحوله لأمان القاهرة غير هتلر.');
+                                }
+                            })
                             ->required(),
 
                         // 🟢 المصاريف الإدارية
@@ -973,7 +984,7 @@ $complete =
                         ->maxLength(11)
                         ->minLength(11)
                         ->rule('regex:/^\d{11}$/')
-                        ->rule(self::uniqueIfChangedRule('applicant_phone', 'رقم الهاتف دا متسجل قبل كدا.'))
+                        ->rule(self::uniqueIfChangedRule('applicant_phone', 'رقم الهاتف دا عليه طلب لسه تحت المراجعة.'))
                         ->validationMessages([
                             'regex' => 'رقم الهاتف يجب أن يكون 11 رقمًا بالضبط.',
                         ]),
@@ -991,7 +1002,7 @@ $complete =
                         ->dehydrateStateUsing(fn($state) => self::normalizeEgyptianPhone($state))
                         ->maxLength(11)
                         ->rule('regex:/^\d{11}$/')
-                        ->rule(self::uniqueIfChangedRule('applicant_phone_2', 'رقم الهاتف الثاني دا متسجل قبل كدا.'))
+                        ->rule(self::uniqueIfChangedRule('applicant_phone_2', 'رقم الهاتف الثاني دا عليه طلب لسه تحت المراجعة.'))
                         ->validationMessages([
                             'regex' => 'رقم الهاتف الثاني يجب أن يكون 11 رقمًا بالضبط.',
                         ]),
@@ -1019,7 +1030,7 @@ $complete =
                         ->minLength(14)
                         ->maxLength(14)
                         ->rule('regex:/^\d{14}$/')
-                        ->rule(self::uniqueIfChangedRule('applicant_national_id', 'الرقم القومي دا متسجل قبل كدا.'))
+                        ->rule(self::uniqueIfChangedRule('applicant_national_id', 'الرقم القومي دا عليه طلب لسه تحت المراجعة.'))
                         ->validationMessages([
                             'regex' => 'الرقم القومي يجب أن يكون 14 رقمًا بالضبط.',
                         ]),
@@ -1810,6 +1821,17 @@ if ($complete) {
                 ])
                 ->columns(3),
 
+// Dynamic Links: answers not tied to a column, and uploads the AI warned about
+Forms\Components\Section::make('بيانات إضافية من فورم التقديم')
+    ->icon('heroicon-o-document-duplicate')
+    ->visible(fn ($record) => filled($record?->form_link_id))
+    ->collapsible()
+    ->schema([
+        Forms\Components\Placeholder::make('form_extras')
+            ->hiddenLabel()
+            ->content(fn ($record) => $record ? app(\App\Domain\Forms\FormRequestExtras::class)->html($record) : null),
+    ]),
+
 Forms\Components\Section::make('الملاحظات')
     ->icon('heroicon-o-chat-bubble-left-right')
     ->collapsible()
@@ -1848,7 +1870,7 @@ Forms\Components\Section::make('الملاحظات')
                                 'delivered' => 'استلم المكنة',
                                 'canceled' => 'الطلب ملغي',
                             ])
-                            ->default('new')
+                            ->default('new_request')
                             ->live()
                             ->disabled(!$isAdmin)
                             ->dehydrated($isAdmin),
@@ -1886,11 +1908,76 @@ Forms\Components\Section::make('الملاحظات')
     }
 
     // ✅ جدول العرض
+    public const STATUS_LABELS = [
+        'new' => 'انتظار',
+        'new_request' => 'طلب جديد',
+        'pending' => 'تحت الاستعلام',
+        'work_check' => 'استعلام عمل',
+        'approved' => 'موافقة',
+        'rejected' => 'رفض',
+        'paused' => 'متوقف',
+        'transferred' => 'رد ادارة',
+        'delivered' => 'استلم المكنة',
+        'canceled' => 'الطلب ملغي',
+    ];
+
+    public const STATUS_COLORS = [
+        'new' => 'primary',
+        'new_request' => 'info',
+        'pending' => 'warning',
+        'work_check' => 'warning',
+        'approved' => 'success',
+        'rejected' => 'danger',
+        'paused' => 'gray',
+        'transferred' => 'info',
+        'delivered' => 'success',
+        'canceled' => 'danger',
+    ];
+
+    protected static function statusColumn(): Tables\Columns\TextColumn
+    {
+        return Tables\Columns\TextColumn::make('status')
+            ->label('الحالة')
+            ->badge()
+            ->color(fn ($state) => static::STATUS_COLORS[$state] ?? 'gray')
+            ->formatStateUsing(fn ($state) => static::STATUS_LABELS[$state] ?? '-');
+    }
+
+    protected static function formFlagColumn(): Tables\Columns\TextColumn
+    {
+        // Dynamic Links: ⚠️ = a form upload the AI warned about; 📝 = came from the form
+        return Tables\Columns\TextColumn::make('form_flag')
+            ->label('')
+            ->state(fn ($record) => ! $record->form_link_id ? null
+                : (\App\Models\ApplicationDocument::where('application_id', $record->application_id)->where('status', 'needs_review')->exists() ? '⚠️' : '📝'))
+            ->tooltip(fn ($state) => $state === '⚠️' ? 'من الفورم - فيه مستند الـ AI نبّه عليه' : ($state ? 'اتقدم من الفورم' : null));
+    }
+
+    /** The list as cards (ListDeliveries::$mode = cards): one card per request, same search, filters and actions. */
+    protected static function cardColumns(): array
+    {
+        return [Tables\Columns\Layout\Stack::make([
+            Tables\Columns\ViewColumn::make('id')
+                ->view('filament.resources.deliveries.card')
+                ->sortable()
+                ->searchable(query: fn (Builder $query, string $search) => $query->where(fn ($q) => $q
+                    ->where('installment_requests.id', $search)
+                    ->orWhere('applicant_name', 'like', "%{$search}%")
+                    ->orWhere('applicant_phone', 'like', "%{$search}%")
+                    ->orWhereHas('staff', fn ($s) => $s->where('name', 'like', "%{$search}%")))),
+        ])];
+    }
+
+    // ✅ جدول العرض
     public static function table(Table $table): Table
     {
+        $cards = ($table->getLivewire()->mode ?? 'table') === 'cards';
+
         return $table
-            ->paginated([5, 10, 25, 50, 100])
-            ->columns([
+            ->paginated($cards ? [12, 24, 48, 96] : [5, 10, 25, 50, 100])
+            ->contentGrid($cards ? ['md' => 2, 'xl' => 3] : null)
+            ->recordClasses($cards ? 'delivery-card' : null)
+            ->columns($cards ? static::cardColumns() : [
                 Tables\Columns\TextColumn::make('id')
                     ->label('رقم الطلب')
                     ->searchable()
@@ -1911,70 +1998,35 @@ Forms\Components\Section::make('الملاحظات')
                 Tables\Columns\TextColumn::make('machine.name')
                     ->label('المكنة'),
 
-
-
                 Tables\Columns\TextColumn::make('staff.name')
                     ->label('اسم الموظف')
                     ->sortable()
                     ->searchable(),
-               
 
-Tables\Columns\TextColumn::make('deletedBy.name')
-    ->label('محذوف بواسطة')
-    ->badge()
-    ->color('danger')
-    ->placeholder('غير محدد')
-    ->sortable()
-    ->searchable()
-    ->visible(
-        fn ($livewire): bool =>
-            $livewire->activeTab === 'deleted'
-    ),
+                Tables\Columns\TextColumn::make('pendingStaff.name')
+                    ->label('تحويل مستني موافقة')
+                    ->formatStateUsing(fn ($state, $record) => $state.' (طلب '.($record->transferRequester?->name ?? '—').')')
+                    ->color('danger')
+                    ->visible(fn ($livewire): bool => $livewire->activeTab === 'transfers'),
 
-Tables\Columns\TextColumn::make('deleted_at')
-    ->label('اتحذف بتاريخ')
-    ->dateTime('d/m/Y H:i')
-    ->placeholder('غير محدد')
-    ->sortable()
-    ->visible(
-        fn ($livewire): bool =>
-            $livewire->activeTab === 'deleted'
-    ),
-
-                Tables\Columns\TextColumn::make('status')
-                    ->label('الحالة')
+                Tables\Columns\TextColumn::make('deletedBy.name')
+                    ->label('محذوف بواسطة')
                     ->badge()
-                    ->color(fn($state) => match ($state) {
-                        'new' => 'primary',         // طلب جديد
-                        'new_request' => 'info',
+                    ->color('danger')
+                    ->placeholder('غير محدد')
+                    ->sortable()
+                    ->searchable()
+                    ->visible(fn ($livewire): bool => $livewire->activeTab === 'deleted'),
 
-                        'pending' => 'warning',     // تحت الاستعلام
-                        'work_check' => 'warning',  // استعلام عمل (لون أصفر)
-                        'approved' => 'success',    // موافقة
-                        'rejected' => 'danger',     // رفض
-                        'paused' => 'gray',         // متوقف
-                        'transferred' => 'info',    // محول (سماوي)
-                        'delivered' => 'success',   // استلم المكنة (أخضر)
-                        'canceled' => 'danger',     // الطلب ملغي (أحمر)
-                        default => 'gray',
-                    })
-                    ->formatStateUsing(fn($state) => match ($state) {
-                        'new' => 'انتظار',
-                        'new_request' => 'طلب جديد',
+                Tables\Columns\TextColumn::make('deleted_at')
+                    ->label('اتحذف بتاريخ')
+                    ->dateTime('d/m/Y H:i')
+                    ->placeholder('غير محدد')
+                    ->sortable()
+                    ->visible(fn ($livewire): bool => $livewire->activeTab === 'deleted'),
 
-                        'pending' => 'تحت الاستعلام',
-                        'work_check' => 'استعلام عمل',
-                        'approved' => 'موافقة',
-                        'rejected' => 'رفض',
-                        'paused' => 'متوقف',
-                        'transferred' => 'رد ادارة',
-                        'delivered' => 'استلم المكنة',
-                        'canceled' => 'الطلب ملغي',
-                        default => '-',
-                    }),
-
-
-
+                static::formFlagColumn(),
+                static::statusColumn(),
 
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('تاريخ الإنشاء')
@@ -2025,21 +2077,14 @@ Tables\Columns\TextColumn::make('deleted_at')
 
                         return $query->where('staff_id', $staffId);
                     }),
+                // Dynamic Links: a form upload the AI warned about (needs_review)
+                Tables\Filters\Filter::make('form_warning')
+                    ->label('⚠️ فيه تنبيه على مستند من الفورم')
+                    ->query(fn ($query) => $query->whereNotNull('form_link_id')
+                        ->whereIn('application_id', \App\Models\ApplicationDocument::where('status', 'needs_review')->select('application_id'))),
                 Tables\Filters\SelectFilter::make('status')
                     ->label('حالة الطلب')
-                    ->options([
-                        'new_request' => 'طلب جديد',
-
-                        'pending' => 'تحت الاستعلام',
-                        'new' => 'انتظار',
-                        'work_check' => 'استعلام عمل',
-                        'approved' => 'موافقة',
-                        'rejected' => 'رفض',
-                        'paused' => 'متوقف',
-                        'transferred' => 'رد ادارة',
-                        'delivered' => 'استلم المكنة',
-                        'canceled' => 'الطلب ملغي',
-                    ]),
+                    ->options(static::STATUS_LABELS),
 
                 // ⭐⭐⭐ الفلتر الجديد ⭐⭐⭐
                 Tables\Filters\Filter::make('created_at_date')
@@ -2075,7 +2120,18 @@ Tables\Actions\Action::make('force_delete')
             && $livewire->activeTab === 'deleted'
             && $record->trashed()
     )
-    ->requiresConfirmation()
+    ->form([
+        Forms\Components\TextInput::make('password')
+            ->label('اكتب الباسورد بتاعك عشان تأكد الحذف النهائي')
+            ->password()
+            ->revealable()
+            ->required()
+            ->rule(fn () => function (string $attribute, $value, \Closure $fail) {
+                if (! \Illuminate\Support\Facades\Hash::check((string) $value, (string) Auth::user()?->password)) {
+                    $fail('الباسورد غلط، الطلب متمسحش.');
+                }
+            }),
+    ])
     ->modalHeading('حذف الطلب نهائيًا')
     ->modalDescription(
         fn ($record) =>
@@ -2175,44 +2231,56 @@ Tables\Actions\Action::make('force_delete')
 
         $user = Auth::user();
 
-        // حماية إضافية
-        abort_unless(
-            $user && ($user->is_admin || $user->is_super_admin),
-            403
-        );
+        abort_unless($user && ($user->is_admin || $user->is_super_admin), 403);
 
-        if (! $record->canBeReassignedBy($user)) {
+        $newStaff = Staff::findOrFail($data['new_staff_id']);
+        $oldStaffName = $record->staff?->name ?? 'غير محدد';
+
+        if (\App\Domain\Applications\RequestTransfer::move($record, $newStaff, $user) === 'asked') {
             Notification::make()
-                ->title('ممنوع التحويل')
-                ->body('ده طلب هتلر، محدش يقدر يسحبه غير هتلر.')
-                ->danger()
+                ->title('مستني موافقة هتلر')
+                ->body("الطلب #{$record->id} بتاع هتلر، اتبعتله إشعار إنك عايز تحوله لـ {$newStaff->name}. هيتحول أول ما يوافق.")
+                ->warning()
                 ->send();
 
             return;
         }
 
-        $newStaff = Staff::findOrFail($data['new_staff_id']);
-
-        $oldStaffName = $record->staff?->name ?? 'غير محدد';
-
-        // ✅ تحويل مباشر للأدمن والسوبر أدمن
-        $record->update([
-            'staff_id' => $newStaff->id,
-
-            // تصفير أي طلب تحويل قديم
-            'pending_staff_id' => null,
-            'transfer_requested_by' => null,
-            'transfer_requested_at' => null,
-        ]);
-
         Notification::make()
             ->title('تم تحويل الطلب بنجاح')
-            ->body(
-                "تم تحويل الطلب رقم {$record->id} من {$oldStaffName} إلى {$newStaff->name}"
-            )
+            ->body("تم تحويل الطلب رقم {$record->id} من {$oldStaffName} إلى {$newStaff->name}")
             ->success()
             ->send();
     }),
+
+                // Owner's requests: a transfer someone asked for waits for his OK.
+                Tables\Actions\Action::make('approve_transfer')
+                    ->label(fn ($record) => 'موافقة على التحويل لـ '.($record->pendingStaff?->name ?? '—'))
+                    ->icon('heroicon-o-check-circle')
+                    ->color('success')
+                    ->visible(fn ($record) => static::isHitler() && \App\Domain\Applications\RequestTransfer::isWaiting($record))
+                    ->requiresConfirmation()
+                    ->modalHeading(fn ($record) => ($record->transferRequester?->name ?? 'حد').' عايز ياخد الطلب #'.$record->id)
+                    ->modalDescription(fn ($record) => 'هيتحول لـ '.($record->pendingStaff?->name ?? '—').'. موافق؟')
+                    ->modalSubmitActionLabel('موافق')
+                    ->action(function ($record) {
+                        \App\Domain\Applications\RequestTransfer::approve($record, Auth::user());
+                        Notification::make()->title('الطلب اتحول')->success()->send();
+                    }),
+
+                Tables\Actions\Action::make('reject_transfer')
+                    ->label('رفض التحويل')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->visible(fn ($record) => static::isHitler() && \App\Domain\Applications\RequestTransfer::isWaiting($record))
+                    ->requiresConfirmation()
+                    ->modalHeading('رفض التحويل')
+                    ->modalSubmitActionLabel('ارفض')
+                    ->action(function ($record) {
+                        \App\Domain\Applications\RequestTransfer::reject($record, Auth::user());
+                        Notification::make()->title('اترفض، والطلب فضل معاك')->success()->send();
+                    }),
+
                 Tables\Actions\Action::make('edit_guarded')
                     ->label('تعديل')
                     ->icon('heroicon-o-pencil-square')
@@ -2287,47 +2355,28 @@ Tables\Actions\Action::make('force_delete')
 
         $newStaff = Staff::findOrFail($data['new_staff_id']);
 
-        $blocked = $records->reject(fn ($record) => $record->canBeReassignedBy($user));
-        $records = $records->diff($blocked);
+        $results = \Illuminate\Support\Facades\DB::transaction(
+            fn () => $records->map(fn ($record) => \App\Domain\Applications\RequestTransfer::move($record, $newStaff, $user))
+        );
 
-        if ($blocked->isNotEmpty()) {
+        $moved = $results->filter(fn ($r) => $r === 'moved')->count();
+        $asked = $results->filter(fn ($r) => $r === 'asked')->count();
+
+        if ($asked > 0) {
             Notification::make()
-                ->title("تم استبعاد {$blocked->count()} طلب")
-                ->body('دي طلبات هتلر، محدش يقدر يسحبها غير هتلر.')
+                ->title("{$asked} طلب مستني موافقة هتلر")
+                ->body('دي طلبات هتلر، اتبعتله إشعار وهتتحول أول ما يوافق.')
                 ->warning()
                 ->send();
         }
 
-        $recordsCount = $records->count();
-
-        if ($recordsCount === 0) {
-            return;
+        if ($moved > 0) {
+            Notification::make()
+                ->title("تم تحويل {$moved} طلب بنجاح")
+                ->body("تم تحويل الطلبات مباشرة إلى {$newStaff->name}")
+                ->success()
+                ->send();
         }
-
-        \Illuminate\Support\Facades\DB::transaction(
-            function () use ($records, $newStaff): void {
-
-                foreach ($records as $record) {
-
-                    $record->update([
-                        'staff_id' => $newStaff->id,
-
-                        // تنظيف أي تحويل معلق قديم
-                        'pending_staff_id' => null,
-                        'transfer_requested_by' => null,
-                        'transfer_requested_at' => null,
-                    ]);
-                }
-            }
-        );
-
-        Notification::make()
-            ->title("تم تحويل {$recordsCount} طلب بنجاح")
-            ->body(
-                "تم تحويل الطلبات مباشرة إلى {$newStaff->name}"
-            )
-            ->success()
-            ->send();
     })
 
     ->deselectRecordsAfterCompletion(),
