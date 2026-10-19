@@ -202,11 +202,9 @@ protected static function booted()
     static::created(fn ($model) => \App\Jobs\SendNewRequestSms::dispatch($model->id)->afterCommit());
 
     static::updating(function ($model) {
-        // Amaan Giza and Amaan Cairo are different companies: only the owner moves a request between them.
+        // Amaan Giza and Amaan Cairo are different companies: a request never moves between them, either way.
         if ($model->isDirty('installment_type')
-            && $model->getOriginal('installment_type') === 'امان - الجيزة'
-            && $model->installment_type === 'امان - القاهرة'
-            && ! static::currentActor()?->is_hitler) {
+            && static::isAmaanCrossMove($model->getOriginal('installment_type'), $model->installment_type)) {
             $model->installment_type = $model->getOriginal('installment_type');
         }
 
@@ -227,6 +225,17 @@ protected static function booted()
             }
         }
     });
+}
+
+public const AMAAN_GIZA = 'امان - الجيزة';
+public const AMAAN_CAIRO = 'امان - القاهرة';
+
+/** Giza -> Cairo or Cairo -> Giza: two companies, a request stays where it was filed. */
+public static function isAmaanCrossMove(?string $from, ?string $to): bool
+{
+    $pair = [self::AMAAN_GIZA, self::AMAAN_CAIRO];
+
+    return $from !== $to && in_array($from, $pair, true) && in_array($to, $pair, true);
 }
 
 public static function currentActor(): ?Staff

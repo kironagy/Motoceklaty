@@ -729,12 +729,12 @@ $requestType = request()->query('request_type') === 'fake'
                                 fn($state, callable $set) =>
                                 self::loadSystemData($state, $set)
                             )
-                            // A request filed on Amaan Giza moves to Amaan Cairo only by the owner.
+                            // Amaan Giza and Amaan Cairo: a request never moves between them, either way (InstallmentRequest::isAmaanCrossMove).
                             ->rule(fn ($record) => function (string $attribute, $value, \Closure $fail) use ($record) {
-                                if ($record?->getOriginal('installment_type') === 'امان - الجيزة'
-                                    && $value === 'امان - القاهرة'
-                                    && ! static::isHitler()) {
-                                    $fail('الطلب مرفوع على أمان الجيزة، ومحدش يقدر يحوله لأمان القاهرة غير هتلر.');
+                                $from = $record?->getOriginal('installment_type');
+
+                                if (InstallmentRequest::isAmaanCrossMove($from, $value)) {
+                                    $fail("الطلب مرفوع على {$from}، ومينفعش يتحول لـ {$value}. أمان الجيزة وأمان القاهرة شركتين مختلفتين.");
                                 }
                             })
                             ->required(),
