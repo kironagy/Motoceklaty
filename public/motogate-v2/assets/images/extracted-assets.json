@@ -1,0 +1,102 @@
+{
+  "engine": {
+    "file": "icons/engine.png",
+    "source": "machines.jpeg",
+    "bounds": [
+      279,
+      214,
+      312,
+      245
+    ]
+  },
+  "stroke": {
+    "file": "icons/stroke.png",
+    "source": "machines.jpeg",
+    "bounds": [
+      239,
+      283,
+      272,
+      315
+    ]
+  },
+  "radiator": {
+    "file": "icons/radiator.png",
+    "source": "machines.jpeg",
+    "bounds": [
+      204,
+      341,
+      239,
+      375
+    ]
+  },
+  "transmission": {
+    "file": "icons/transmission.png",
+    "source": "machines.jpeg",
+    "bounds": [
+      746,
+      245,
+      775,
+      276
+    ]
+  },
+  "brake": {
+    "file": "icons/brake.png",
+    "source": "machines.jpeg",
+    "bounds": [
+      762,
+      316,
+      795,
+      347
+    ]
+  },
+  "shield-check": {
+    "file": "icons/shield-check.png",
+    "source": "home screen.jpeg",
+    "bounds": [
+      84,
+      1047,
+      121,
+      1087
+    ]
+  },
+  "gear": {
+    "file": "icons/gear.png",
+    "source": "home screen.jpeg",
+    "bounds": [
+      83,
+      1130,
+      122,
+      1171
+    ]
+  },
+  "tag": {
+    "file": "icons/tag.png",
+    "source": "home screen.jpeg",
+    "bounds": [
+      779,
+      1049,
+      815,
+      1088
+    ]
+  },
+  "headset": {
+    "file": "icons/headset.png",
+    "source": "home screen.jpeg",
+    "bounds": [
+      780,
+      1130,
+      817,
+      1170
+    ]
+  },
+  "chart-bars": {
+    "file": "icons/chart-bars.png",
+    "source": "home screen.jpeg",
+    "bounds": [
+      429,
+      1090,
+      469,
+      1135
+    ]
+  }
+}

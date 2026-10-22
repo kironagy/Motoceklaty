@@ -54,12 +54,71 @@ abstract class SiteSettingsPage extends Page implements HasForms
 
     public function form(Form $form): Form
     {
-        return $form->schema($this->formSchema())->statePath('data');
+        return $form->schema(array_merge($this->approvedSchema(), $this->designSchema()))->statePath('data');
+    }
+
+    /** Controls correspond to the approved source, on the existing page URLs. */
+    protected function approvedSchema(): array
+    {
+        $section = fn ($title, $fields) => Forms\Components\Section::make($title)->schema($fields)->collapsible();
+        $repeater = fn ($key, $label, $fields) => Forms\Components\Repeater::make($key)->label($label)->schema($fields)->reorderable()->collapsible()->defaultItems(0);
+        return match (static::contentGroup()) {
+            'home' => [static::seoSection(), $section('الهيرو والحاسبة', [
+                static::image('hero.bg_image', 'خلفية الهيرو'), static::image('hero.calculator_image', 'صورة الحاسبة'),
+                static::text('hero.calc_title', 'عنوان الحاسبة'),
+                $repeater('hero.slides', 'صور سلايدر الهيرو', [static::text('title', 'الموديل'), static::image('image', 'الصورة')]),
+                static::link('about.video_url', 'رابط فيديو حكايتنا'),
+            ]), $section('الأقسام الموجودة في التصميم', [
+                static::toggle('about.enabled', 'إظهار حكايتنا'), static::toggle('fleet.enabled', 'إظهار الموديلات'),
+                Forms\Components\Select::make('fleet.source')->label('مصدر الموديلات')->options(['featured'=>'المميزة', 'offers'=>'العروض', 'all'=>'الكل']),
+                Forms\Components\TextInput::make('fleet.limit')->label('عدد الموديلات')->numeric()->minValue(1)->maxValue(30),
+                static::toggle('blog.enabled', 'إظهار المجلة'), Forms\Components\TextInput::make('blog.limit')->label('عدد المقالات')->numeric()->minValue(1)->maxValue(30),
+                static::toggle('why.enabled', 'إظهار المزايا'), static::toggle('categories.enabled', 'إظهار الفئات'),
+                $repeater('categories.items', 'كروت الفئات', [static::text('label', 'الاسم'), Forms\Components\Select::make('category')->label('الفئة')->options(static::categoryOptions()), static::image('image', 'الصورة')]),
+            ])],
+            'about' => [static::seoSection(), $section('الفريق والآراء والأسئلة', [
+                static::toggle('features.enabled', 'إظهار شريط المميزات'), static::toggle('why.enabled', 'إظهار أسباب الاختيار'),
+                static::toggle('team.enabled', 'إظهار بطاقات الموظفين'), Forms\Components\TextInput::make('team.limit')->label('عدد الموظفين')->numeric()->minValue(1)->maxValue(50),
+                static::toggle('testimonial.enabled', 'إظهار آراء العملاء'), static::toggle('cta.enabled', 'إظهار الانضمام والتعاون'),
+                static::toggle('faq.enabled', 'إظهار الأسئلة'), static::text('faq.title', 'عنوان الأسئلة'),
+                $repeater('faq.items', 'الأسئلة', [static::text('question', 'السؤال'), static::textarea('answer', 'الإجابة')]),
+                $repeater('stats.items', 'الأرقام المعروضة في عداد الصفحة الرئيسية', [static::text('number', 'الرقم'),static::text('suffix', 'اللاحقة'),static::text('label', 'الوصف')]),
+            ])],
+            'contact' => [static::seoSection(), $section('النموذج والفروع', [
+                static::textarea('form.text', 'وصف إرسال النموذج'), static::text('form.submit', 'نص زر الإرسال'),
+                static::textarea('form.success', 'رسالة النجاح'),
+                $repeater('form.subjects', 'موضوعات الاستفسار', [static::text('label', 'الموضوع')]),
+                static::toggle('show_branches', 'إظهار بيانات الفروع في مكان الزيارة'), static::text('branch_map_label', 'نص رابط الخريطة'),
+            ])],
+            default => $this->formSchema(),
+        };
+    }
+
+    /** Copy and meaningful images from the approved source sections. */
+    protected function designSchema(): array
+    {
+        $schema = [];
+        foreach (SiteContent::group(static::contentGroup())['design'] ?? [] as $section => $values) {
+            $fields = [];
+            foreach ($values as $key => $value) {
+                $path = 'design.' . $section . '.' . $key;
+                if (str_starts_with($key, 'image_')) {
+                    $fields[] = static::image($path, 'صورة ' . substr($key, 6), 'site/design');
+                } else {
+                    $label = \Illuminate\Support\Str::limit((string) $value, 70);
+                    $fields[] = static::textarea($path, $label ?: $key, 2);
+                }
+            }
+            $schema[] = Forms\Components\Section::make('التصميم المعتمد — ' . str_replace('_', ' ', $section))
+                ->description('تعديل محتوى نفس عناصر التصميم، دون إضافة أقسام للواجهة.')
+                ->schema($fields)->collapsible()->collapsed();
+        }
+        return $schema;
     }
 
     public function save(): void
     {
-        SiteContent::save(static::contentGroup(), $this->form->getState());
+        SiteContent::save(static::contentGroup(), SiteContent::merge(SiteContent::group(static::contentGroup()), $this->form->getState()));
 
         Notification::make()->success()->title('تم حفظ التعديلات ونشرها على الموقع')->send();
     }

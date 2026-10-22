@@ -4,12 +4,24 @@ namespace App\Http\Controllers;
 
 use App\Models\Brand;
 use App\Models\Machine;
-use App\Support\InstallmentCalculatorCatalog;
 use Illuminate\Http\Request;
 
 class MachineController extends Controller
 {
     public function index(Request $request)
+    {
+        return $this->showroom($request);
+    }
+
+    /** The approved design has no separate model page: a model is shown on the showroom platform. */
+    public function show(Request $request, $id)
+    {
+        $machine = Machine::query()->where('is_active', true)->with('brand')->findOrFail($id);
+
+        return $this->showroom($request, $machine);
+    }
+
+    private function showroom(Request $request, ?Machine $selected = null)
     {
         $categories = config('agent.catalog.categories', []);
         $category = array_key_exists($request->query('category'), $categories) ? $request->query('category') : null;
@@ -51,27 +63,7 @@ class MachineController extends Controller
         $activeCategory = $category ? $categories[$category] : null;
         $totalAll = (int) $counts->sum();
 
-        return view('site.machines.index', compact('machines', 'brands', 'activeCategory', 'category', 'search', 'brandId', 'totalAll'));
-    }
-
-    public function show($id)
-    {
-        $machine = Machine::query()->where('is_active', true)->with('brand')->findOrFail($id);
-
-        $related = Machine::query()
-            ->where('is_active', true)
-            ->whereKeyNot($machine->id)
-            ->where(fn ($q) => $q->where('brand_id', $machine->brand_id)
-                ->when($machine->category, fn ($q) => $q->orWhere('category', $machine->category)))
-            ->with('brand')
-            ->orderByRaw('brand_id = ? desc', [$machine->brand_id])
-            ->latest()
-            ->take(4)
-            ->get();
-
-        $hasCalculator = collect(InstallmentCalculatorCatalog::payload()['machines'])
-            ->contains('id', $machine->id);
-
-        return view('site.machines.show', compact('machine', 'related', 'hasCalculator'));
+        $posts = \App\Models\Post::published()->take(max(1, (int) site('home.blog.limit', 4)))->get();
+        return view('site.machines.index', compact('machines', 'brands', 'activeCategory', 'category', 'search', 'brandId', 'totalAll', 'posts', 'selected'));
     }
 }

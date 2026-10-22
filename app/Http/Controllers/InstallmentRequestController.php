@@ -32,7 +32,7 @@ public function store(Request $request)
     $exists = InstallmentRequest::where('machine_id', $request->machine_id)
         ->where('applicant_phone', $request->applicant_phone)
         ->where('installment_type', $request->installment_type)
-        ->where('status', 'pending')
+        ->whereIn('status', ['new', 'new_request', 'pending', 'work_check', 'paused', 'transferred', 'approved'])
         ->exists();
 
     if ($exists) {
@@ -46,6 +46,7 @@ public function store(Request $request)
         'machine_id'        => ['required', 'exists:machines,id'],
         'installment_type'  => ['required', 'string', 'max:255'],
         'months'            => ['required', 'integer', 'min:1'],
+        'deposit' => ['nullable', 'numeric', 'min:0'],
 
         // العميل
         'applicant_name'        => ['required', 'string', 'max:255'],
@@ -77,6 +78,20 @@ public function store(Request $request)
         'tax_card_file'          => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:15360'],
         'place_video'            => ['nullable', 'file', 'mimetypes:video/mp4,video/quicktime', 'max:51200'],
     ]);
+
+    // Validate the same machine/system/term combination used by the live calculator,
+    // before processing or storing any uploaded documents.
+    $selectedMachine = Machine::where('is_active', true)->find($data['machine_id']);
+    $selectedSystem = $selectedMachine?->installmentSystems()->where('installment_systems.name', $data['installment_type'])->where('installment_systems.is_active', true)->first();
+    $selectedPlan = $selectedSystem?->installmentPlans()->where('months', $data['months'])->where('is_active', true)->first();
+    if (! $selectedMachine || ! $selectedSystem || ! $selectedPlan) {
+        throw \Illuminate\Validation\ValidationException::withMessages(['installment_type' => 'اختر موديل ونظام تقسيط ومدة متاحة حالياً.']);
+    }
+    try {
+        app(\App\Domain\Installments\InstallmentCalculator::class)->calculate($selectedMachine, $selectedSystem, $selectedPlan, (float) ($data['deposit'] ?? 0));
+    } catch (\App\Domain\Installments\InstallmentCalculationException $e) {
+        throw \Illuminate\Validation\ValidationException::withMessages(['deposit' => 'راجع المقدم: يجب أن يكون أقل من سعر الكاش ولا يقل عن الحد الأدنى للنظام (' . number_format((float) $selectedSystem->minimum_down_payment) . ' جنيه).']);
+    }
 
     // ✅ 1.1) اشتراط إضافي حسب الحالة (مهم)
     switch ($data['work_status']) {
@@ -249,6 +264,8 @@ public function store(Request $request)
         'machine_id'              => $data['machine_id'],
         'installment_type'        => $data['installment_type'],
         'months'                  => $data['months'],
+        'deposit' => $data['deposit'] ?? 0,
+        'machine_installment_price' => $selectedMachine->installment_price ?: $selectedMachine->cash_price,
 
         'applicant_name'          => $data['applicant_name'],
         'applicant_phone'         => $data['applicant_phone'],
@@ -295,6 +312,7 @@ public function store(Request $request)
     // ✅ 9) رسالة نجاح + عرض التقرير
     return back()
         ->with('success', 'تم إرسال طلبك بنجاح وجاري المراجعة.')
+        ->with('tracking_code', \Illuminate\Support\Facades\Crypt::encryptString((string) $requestModel->id))
         ->with('ocr_report', view('partials.ocr_report', [
             'ocr' => $ocr,
             'checks' => $checks,

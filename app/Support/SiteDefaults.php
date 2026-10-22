@@ -18,7 +18,19 @@ class SiteDefaults
 {
     public static function all(): array
     {
-        return [
+        return SiteContent::merge([
+            'tracking' => [
+                'title' => 'تتبع حالة طلبك',
+                'text' => 'تابع آخر تحديث لطلب التقسيط من خلال كود المتابعة الخاص بك.',
+                'form_title' => 'طلبك وصل لفين؟', 'code_label' => 'كود المتابعة الآمن',
+                'submit' => 'اعرض حالة الطلب', 'not_found' => 'لم نعثر على طلب بهذا الكود. راجع كود المتابعة أو تواصل معنا.',
+                'result_title' => 'حالة طلبك الآن', 'result_note' => 'الحالة محدثة من فريق موتوجيت. تواصل معنا لأي تفاصيل إضافية.',
+                'empty' => 'أدخل كود المتابعة الذي ظهر بعد إرسال الطلب.', 'contact_label' => 'تواصل مع الفريق',
+                'statuses' => ['new' => 'في انتظار المراجعة', 'new_request' => 'تم استلام الطلب', 'pending' => 'قيد المراجعة',
+                    'work_check' => 'جارٍ استكمال الاستعلام', 'approved' => 'تمت الموافقة', 'rejected' => 'لم تتم الموافقة',
+                    'paused' => 'الطلب متوقف مؤقتاً — تواصل معنا', 'transferred' => 'قيد مراجعة الإدارة',
+                    'delivered' => 'تم الاستلام', 'canceled' => 'الطلب ملغي'],
+            ],
             'general' => static::general(),
             'home' => static::home(),
             'about' => static::about(),
@@ -27,7 +39,7 @@ class SiteDefaults
             'blog' => static::blog(),
             'team' => static::team(),
             'contact' => static::contact(),
-        ];
+        ], json_decode(file_get_contents(resource_path('site/motogate-v2-content.json')), true));
     }
 
     protected static function img(string $path): string
@@ -39,8 +51,8 @@ class SiteDefaults
     {
         return [
             'site_name' => 'MotoGate',
-            'logo' => static::img('logo-light.png'),
-            'footer_logo' => static::img('logo-light.png'),
+            'logo' => 'site/v2-defaults/logo.png',
+            'footer_logo' => 'site/v2-defaults/logo.png',
             'favicon' => static::img('favicon.png'),
             'phone' => '01028887119',
             'whatsapp' => '01028887119',
@@ -57,11 +69,8 @@ class SiteDefaults
                 ['icon' => 'fa-brands fa-youtube', 'url' => 'https://www.youtube.com'],
             ],
             'menu' => [
-                ['label' => 'الرئيسية', 'url' => '/'],
-                ['label' => 'من نحن', 'url' => '/about'],
-                ['label' => 'المعرض', 'url' => '/machines'],
-                ['label' => 'المدونة', 'url' => '/blog'],
-                ['label' => 'فريق موتوجيت', 'url' => '/team'],
+                ['label' => 'الرئيسية', 'url' => '/'], ['label' => 'المعرض', 'url' => '/machines'],
+                ['label' => 'اعرف قسطك', 'url' => '/installment'], ['label' => 'نبذة عنا', 'url' => '/about'],
                 ['label' => 'تواصل معنا', 'url' => '/contact'],
             ],
             'loader' => [
@@ -83,6 +92,7 @@ class SiteDefaults
                     ['label' => 'المدونة', 'url' => '/blog'],
                     ['label' => 'فريق العمل', 'url' => '/team'],
                     ['label' => 'تواصل معنا', 'url' => '/contact'],
+                ['label' => 'تتبع طلبك', 'url' => '/track'],
                 ],
                 'categories_title' => 'فئات الدراجات',
                 'newsletter_enabled' => true,
@@ -96,7 +106,7 @@ class SiteDefaults
                 'title_suffix' => 'موتوجيت MotoGate',
                 'keywords' => 'موتوجيت, دراجات نارية, موتوسيكلات مصر, سكوتر, شراء موتوسيكل, صيانة موتوسيكلات, تقسيط موتوسيكلات, MotoGate',
                 'description' => 'معرض موتوجيت MotoGate - أكبر معرض للدراجات النارية والسكوتر في مصر، أفضل الماركات العالمية، خطط تقسيط مريحة وخدمات صيانة وقطع غيار أصلية.',
-                'og_image' => static::img('logo-light.png'),
+                'og_image' => 'site/v2-defaults/logo.png',
             ],
             'integrations' => [
                 'tawk_enabled' => true,
@@ -116,18 +126,20 @@ class SiteDefaults
                 'description' => null,
             ],
             'hero' => [
-                'bg_image' => static::img('slider1.jpg'),
-                'small_title' => 'الأفضل في مصر',
+                'bg_image' => 'site/v2-defaults/الباكجراوند.png',
+                'small_title' => 'عالمك، حركتك، اختيارك',
+                'description' => 'نساعدك تختار أنسب موتوسيكل وأفضل نظام للتقسيط وأقرب فرع معتمد تقدر تستلم منه',
+                'calculator_image' => 'site/v2-defaults/motorcycle-rkz200.webp',
                 'typed_words' => ['تقسيط مريح', 'بدون مقدم', 'ضمان معتمد'],
                 'brand_first' => 'Moto',
                 'brand_second' => 'Gate',
                 'calc_title' => 'احسب قسط دراجتك النارية بكل سهولة',
                 'tabs' => static::heroTabs(),
                 'slides' => [
-                    ['title' => 'TX 250', 'image' => static::img('TX250.png')],
-                    ['title' => 'KTX 250', 'image' => static::img('KTX.png')],
-                    ['title' => 'TX 250 Blue', 'image' => static::img('TX250-blue.png')],
-                    ['title' => 'TX 250 Red', 'image' => static::img('TX250-red.png')],
+                    ['title' => 'Keeway RKZ200', 'image' => 'site/v2-defaults/motorcycle-rkz200.webp'],
+                    ['title' => 'Keeway K-Light 202', 'image' => 'site/v2-defaults/bike2-isolated.webp'],
+                    ['title' => 'Benelli TNT 150i', 'image' => 'site/v2-defaults/bike3-isolated.webp'],
+                    ['title' => 'Keeway RKZ200', 'image' => 'site/v2-defaults/motorcycle-rkz200.webp'],
                 ],
             ],
             'explore' => [
@@ -140,11 +152,11 @@ class SiteDefaults
             ],
             'about' => [
                 'enabled' => true,
-                'image' => static::img('desert-mountain-bg.jpg'),
-                'video_url' => 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                'image' => 'site/v2-defaults/about-scene.png',
+                'video_url' => null,
                 'year_label' => 'خبرة منذ',
                 'year' => '2019',
-                'image2' => static::img('KTX.png'),
+                'image2' => 'site/v2-defaults/bike2-isolated.webp',
                 'small_title' => 'عن موتوجيت (MotoGate)',
                 'title' => 'رواد عالم الدراجات النارية والسكوتر في مصر',
                 'text' => 'منذ انطلاقنا في عام 2019، كرّسنا جهودنا لتقديم أفضل تجربة شراء وامتلاك للدراجات النارية والسكوتر في مصر. نوفر تشكيلة واسعة من أشهر الماركات العالمية، مع حلول تقسيط مرنة بدون تعقيدات، ومركز صيانة معتمد مجهز بأحدث أجهزة الفحص وقطع الغيار الأصلية.',
@@ -343,6 +355,15 @@ class SiteDefaults
                 'small_title' => '| فريق العمل',
                 'title' => 'نخبة من خبراء ومحترفي الدراجات النارية',
                 'limit' => 4,
+            ],
+            'faq' => [
+                'enabled' => true,
+                'title' => 'كل سؤال له طريق واضح',
+                'items' => [
+                    ['question' => 'إزاي أختار الموديل المناسب؟', 'answer' => 'تصفح المعرض وقارن المواصفات أو تواصل مع فريقنا لمساعدتك.'],
+                    ['question' => 'أتابع حالة طلبي إزاي؟', 'answer' => 'احتفظ برابط المتابعة الذي يظهر بعد إرسال طلبك، وافتحه لمعرفة آخر حالة للطلب.'],
+                    ['question' => 'إيه الأوراق المطلوبة للتقسيط؟', 'answer' => 'افتح نموذج طلب التقسيط واختر حالتك الوظيفية لعرض المستندات المطلوبة.'],
+                ],
             ],
             'testimonial' => [
                 'enabled' => true,

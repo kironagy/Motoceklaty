@@ -83,4 +83,36 @@ class Post extends Model
     {
         return $this->excerpt ?: Str::limit(trim(strip_tags((string) $this->body)), $limit);
     }
+
+    /**
+     * The body in the approved article layout: text before the first heading,
+     * then one section per heading (h2/h3/h4 from the editor), as motogate-2 renders it.
+     *
+     * @return array{intro: string, sections: list<array{title: string, html: string}>}
+     */
+    public function designSections(): array
+    {
+        $document = new \DOMDocument();
+        libxml_use_internal_errors(true);
+        $document->loadHTML('<?xml encoding="utf-8"?><div id="post-body">' . $this->body . '</div>', LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
+        libxml_clear_errors();
+
+        $root = $document->getElementById('post-body');
+        $intro = '';
+        $sections = [];
+        foreach ($root ? iterator_to_array($root->childNodes) : [] as $node) {
+            if ($node instanceof \DOMElement && in_array(strtolower($node->tagName), ['h2', 'h3', 'h4'], true)) {
+                $sections[] = ['title' => trim($node->textContent), 'html' => ''];
+                continue;
+            }
+            $html = $document->saveHTML($node);
+            if ($sections === []) {
+                $intro .= $html;
+            } else {
+                $sections[array_key_last($sections)]['html'] .= $html;
+            }
+        }
+
+        return ['intro' => trim($intro), 'sections' => $sections];
+    }
 }

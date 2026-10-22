@@ -1,9 +1,9 @@
-<div class="section-full p-t100 p-b80 site-bg-white">
+<div class="about-intro about-section">
     <div class="container">
         <div class="row align-items-center" dir="rtl">
 
             <div class="col-lg-5 col-md-12 m-b30">
-                <div class="site-about-brand-card">
+                <div class="site-about-brand-card"><img class="about-story-photo" src="{{ site_url(site('home.about.image')) }}" alt="{{ site('about.story.card_title') }}" loading="lazy">
                     <div class="site-about-brand-icon">
                         <i class="feather {{ site_feather(site('about.story.card_icon'), 'feather-compass') }}"></i>
                     </div>

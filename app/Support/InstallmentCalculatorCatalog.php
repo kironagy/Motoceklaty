@@ -15,23 +15,22 @@ use App\Models\Machine;
  */
 class InstallmentCalculatorCatalog
 {
-    protected static ?array $payload = null;
-
     public static function payload(): array
     {
-        if (static::$payload !== null) {
-            return static::$payload;
+        $request = request();
+        if ($request->attributes->has(self::class)) {
+            return $request->attributes->get(self::class);
         }
 
         $machines = Machine::query()
             ->where('is_active', true)
             ->with(['installmentSystems.installmentPlans' => fn ($q) => $q->where('is_active', true)->orderBy('months')])
             ->orderBy('name')
-            ->get(['id', 'name', 'brand_id', 'category', 'cash_price', 'installment_price']);
+            ->get(['id', 'name', 'brand_id', 'category', 'cash_price', 'installment_price', 'display_image']);
 
         $brandIds = $machines->pluck('brand_id')->unique()->filter();
 
-        return static::$payload = [
+        $payload = [
             'brands' => Brand::query()
                 ->whereIn('id', $brandIds)
                 ->orderBy('name')
@@ -44,6 +43,8 @@ class InstallmentCalculatorCatalog
                 'name' => $machine->name,
                 'brand_id' => $machine->brand_id,
                 'category' => $machine->category,
+                'image' => $machine->displayImageUrl(),
+                'cash_price' => (float) $machine->cash_price,
                 'systems' => $machine->installmentSystems
                     ->filter(fn ($system) => $system->is_active !== false && $system->installmentPlans->isNotEmpty())
                     ->sortByDesc('priority')
@@ -59,5 +60,9 @@ class InstallmentCalculatorCatalog
                     ->all(),
             ])->filter(fn ($machine) => $machine['systems'] !== [])->values()->all(),
         ];
+
+        $request->attributes->set(self::class, $payload);
+
+        return $payload;
     }
 }

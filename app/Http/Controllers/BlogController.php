@@ -20,7 +20,8 @@ class BlogController extends Controller
 
         $comments = $post->approvedComments()->get();
 
-        return view('site.blog.show', compact('post', 'comments'));
+        $relatedPosts = Post::published()->whereKeyNot($post->id)->take(3)->get();
+        return view('site.blog.show', compact('post', 'comments', 'relatedPosts'));
     }
 
     public function comment(Request $request, Post $post)

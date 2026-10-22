@@ -1,181 +1,115 @@
 @extends('layouts.site')
-
-@section('title', (string) (site('showroom.seo.title')))
-@section('meta_description', (string) (site('showroom.seo.description')))
-
-@php
-    $filter = site('showroom.filter');
-    $visibleChips = max(1, (int) ($filter['visible_chips'] ?? 6));
-    $hiddenChips = max(0, $brands->count() - $visibleChips);
-    $activeIsHidden = $brandId && $brands->search(fn ($b) => $b->id === $brandId) >= $visibleChips;
-    // Filter links keep the other filters; changing one restarts at page 1.
-    $link = fn (array $change) => route('machines.index', array_filter(array_merge(
-        ['q' => $search ?: null, 'category' => $category, 'brand' => $brandId],
-        $change,
-    ), fn ($v) => $v !== null && $v !== '')) . '#filterBar';
-@endphp
-
+@section('title', (string) ($selected ? trim(($selected->brand?->name ?? '') . ' ' . $selected->name) . ' | ' . site('general.site_name') : site('showroom.seo.title')))
+@section('body_class', 'gallery-page source-design')
+@section('design_css', 'base')
+@section('design_shell', 'gallery-shell')
 @section('content')
-    <div class="motogate-fleet-hero" dir="rtl">
-        <div class="container">
-            <div class="motogate-hero-content">
-                @if (site('showroom.hero.badge'))
-                    <div class="motogate-hero-badge wow fadeInDown" data-wow-delay="0.1">
-                        <i class="fa-solid fa-shield-halved text-orange"></i>
-                        <span>{{ site('showroom.hero.badge') }}</span>
-                    </div>
-                @endif
+@php
+$featured = $selected ?? $machines->first();
+@endphp
+@include('site.partials.site-header')
+<section aria-label="اختيار الماركة" class="brands-bar">
+<a class="button all-brands" href="{{ route('machines.index') }}">
+<img alt="" aria-hidden="true" class="icon bi bi-chevron-left" height="24" src="{{ asset('motogate-v2/assets/images/icons/chevron-left.svg') }}" width="24"/>{{ site('showroom.design.brands_bar.text_01') }}<img alt="" aria-hidden="true" class="icon bi bi-chevron-right" height="24" src="{{ asset('motogate-v2/assets/images/icons/chevron-right.svg') }}" width="24"/>
+</a>
+<div class="brand-list">@foreach ($brands as $brand)<a class="brand-filter" href="{{ route('machines.index', array_filter(['brand' => $brand->id, 'q' => $search, 'category' => $category])) }}" @if($brandId === $brand->id) aria-current="true"
+@endif
+>@if($brand->image)<img src="{{ site_url($brand->image) }}" alt="{{ trim($brand->name) }}" height="40" width="100">@else<span>{{ trim($brand->name) }}</span>
+@endif
+</a>
+@endforeach
+</div>
+<button aria-label="الماركات التالية" class="brand-next" type="button">
+<img alt="" aria-hidden="true" class="icon bi bi-chevron-right" height="24" src="{{ asset('motogate-v2/assets/images/icons/chevron-right.svg') }}" width="24"/>
+</button>
+</section>
+<main id="main">
+@if($featured)<section class="gallery-feature">
+<div class="gallery-scene">
+<img alt="" aria-hidden="true" class="showroom-floor" height="802" src="{{ asset('motogate-v2/assets/images/الباكجراوند.png') }}" width="1961"/>
+<img alt="" aria-hidden="true" class="showroom-ceiling" height="55" src="{{ asset('motogate-v2/assets/images/warehouse-ceiling.webp') }}" width="608"/>
+<div class="showroom-sign">
+<img alt="MotoGate" class="" height="116" src="{{ site_url(site('general.logo')) }}" width="376"/><span>PERFORMANCE<br/>GALLERY</span>
+</div>
+<div aria-hidden="true" class="motorcycle-platform"></div>
+<img alt="{{ $featured->name }}" class="showroom-motorcycle" height="693" src="{{ $featured->displayImageUrl() }}" width="799"/>
+<ul aria-label="مواصفات الدراجة" class="scene-specs">
+<li class="spec-capacity">
+<img alt="" aria-hidden="true" class="icon bi bi-engine" height="24" src="{{ asset('motogate-v2/assets/images/icons/engine.png') }}" width="24"/>
+<div>
+<strong dir="ltr">{{ $featured->specificationRows()[0]['value'] ?? '—' }}</strong><span dir="rtl">{{ $featured->specificationRows()[0]['label'] ?? '' }}</span>
+</div>
+</li>
+<li class="spec-stroke">
+<img alt="" aria-hidden="true" class="icon bi bi-stroke" height="24" src="{{ asset('motogate-v2/assets/images/icons/stroke.png') }}" width="24"/>
+<div>
+<strong dir="ltr">{{ $featured->specificationRows()[1]['value'] ?? '—' }}</strong><span dir="rtl">{{ $featured->specificationRows()[1]['label'] ?? '' }}</span>
+</div>
+</li>
+<li class="spec-cooling">
+<img alt="" aria-hidden="true" class="icon bi bi-radiator" height="24" src="{{ asset('motogate-v2/assets/images/icons/radiator.png') }}" width="24"/>
+<div>
+<strong dir="ltr">{{ $featured->specificationRows()[2]['value'] ?? '—' }}</strong><span dir="rtl">{{ $featured->specificationRows()[2]['label'] ?? '' }}</span>
+</div>
+</li>
+<li class="spec-gears">
+<img alt="" aria-hidden="true" class="icon bi bi-transmission" height="24" src="{{ asset('motogate-v2/assets/images/icons/transmission.png') }}" width="24"/>
+<div>
+<strong dir="ltr">{{ $featured->specificationRows()[3]['value'] ?? '—' }}</strong><span dir="rtl">{{ $featured->specificationRows()[3]['label'] ?? '' }}</span>
+</div>
+</li>
+<li class="spec-brakes">
+<img alt="" aria-hidden="true" class="icon bi bi-brake" height="24" src="{{ asset('motogate-v2/assets/images/icons/brake.png') }}" width="24"/>
+<div>
+<strong dir="ltr">{{ $featured->specificationRows()[4]['value'] ?? '—' }}</strong><span dir="rtl">{{ $featured->specificationRows()[4]['label'] ?? '' }}</span>
+</div>
+</li>
+</ul>
+</div>
+<div class="featured-copy">
+<span class="eyebrow" dir="rtl">المميز في المعرض</span>
+@php
+preg_match('/^(\D+?)\s*(\d.*)$/u', $featured->name, $nameParts);
+@endphp
+<h1><span>{{ $featured->brand?->name }}</span><strong>@if ($nameParts)<em>{{ $nameParts[1] }}</em>{{ $nameParts[2] }}@else{{ $featured->name }}@endif</strong></h1>
+<p class="featured-tagline" dir="rtl">{{ $featured->categoryLabel() }}</p>
+<div class="mobile-specs" data-icon-base="{{ asset('motogate-v2/assets/images/icons') }}/">@foreach (array_slice($featured->specificationRows(), 0, 4) as $spec)<span><img class="icon bi bi-{{ ['engine', 'stroke', 'transmission', 'brake'][$loop->index] }}" src="{{ asset('motogate-v2/assets/images/icons/' . ['engine', 'stroke', 'transmission', 'brake'][$loop->index] . '.png') }}" alt="" aria-hidden="true" width="24" height="24"> {{ $spec['value'] }}</span>@endforeach</div>
+<div class="price" dir="rtl">@if (site('showroom.card.show_price'))<span>{{ site('showroom.card.price_prefix') }}</span><strong>{{ number_format((float) ($featured->type === 'offer' && $featured->new_price ? $featured->new_price : $featured->cash_price)) }}</strong><span>{{ site('showroom.card.currency') }}</span>
+@endif
+</div>
+<div class="featured-actions"><a class="button button-orange" data-feature-calc data-open-calculator="{{ $featured->id }}" href="{{ route('installment.index', ['machine_id' => $featured->id]) }}">{{ site('showroom.detail.calc_button') }} <img class="icon bi bi-calculator" src="{{ asset('motogate-v2/assets/images/icons/calculator.svg') }}" alt="" aria-hidden="true" width="24" height="24"></a><a class="button button-outline" data-feature-contact href="{{ site_whatsapp(site('general.whatsapp'), $featured->name) }}" target="_blank" rel="noopener">{{ site('showroom.detail.whatsapp_button') }}</a></div>
+</div>
+</section>
+@endif
 
-                <h1 class="motogate-hero-title wow fadeInDown" data-wow-delay="0.2">
-                    {{ site('showroom.hero.title_before') }} <span class="text-orange">{{ site('showroom.hero.title_highlight') }}</span>
-                </h1>
+<section class="latest-models" id="models">
+<div class="section-heading">
+<h2>{{ site('showroom.design.latest_models.text_01') }} <em>{{ site('showroom.design.latest_models.text_02') }}</em></h2>
+<a class="button button-outline" href="{{ route('machines.index') }}">{{ site('showroom.design.latest_models.text_03') }}<img alt="" aria-hidden="true" class="icon bi bi-bullseye" height="24" src="{{ asset('motogate-v2/assets/images/icons/bullseye.svg') }}" width="24"/>
+</a>
+</div>
+<div class="models-grid">@foreach($machines as $machine)
+@php
+$machineData = ['id' => $machine->id, 'name' => $machine->name, 'brand' => $machine->brand?->name, 'image' => $machine->displayImageUrl(), 'category' => $machine->categoryLabel(), 'cc' => $machine->cc, 'price' => (float) ($machine->type === 'offer' && $machine->new_price ? $machine->new_price : $machine->cash_price), 'specs' => $machine->specificationRows(), 'calc' => route('installment.index', ['machine_id' => $machine->id]), 'contact' => site_whatsapp(site('general.whatsapp'), $machine->name)];
+@endphp
+<article class="model-card" data-live-machine='@json($machineData)' tabindex="0"><img src="{{ $machine->displayImageUrl() }}" alt="{{ $machine->name }}" height="175" loading="lazy"><div class="model-copy"><h3 dir="ltr">{{ $machine->brand?->name }}<strong>{{ $machine->name }}</strong></h3><p dir="rtl">{{ $machine->categoryLabel() }}</p><span class="model-line"></span><p class="availability" dir="rtl">@if(site('showroom.card.show_price')){{ number_format($machineData['price']) }} {{ site('showroom.card.currency') }}
+@endif
+</p><button class="button button-outline" type="button" data-display-machine>اعرض على المنصة ↗</button><div class="model-actions"><a class="button button-outline" href="{{ $machineData['contact'] }}" target="_blank" rel="noopener">واتساب</a><a class="button button-orange" data-open-calculator="{{ $machine->id }}" href="{{ $machineData['calc'] }}">احسب القسط</a></div></div></article>
 
-                @if (site('showroom.hero.subtitle'))
-                    <p class="motogate-hero-subtitle wow fadeInDown" data-wow-delay="0.3">{{ site('showroom.hero.subtitle') }}</p>
-                @endif
+@endforeach
+</div>
+@if($machines->isEmpty())<p class="empty-models" dir="rtl">{{ site('showroom.empty.text') }}</p>
+@endif
 
-                <ul class="motogate-hero-breadcrumb wow fadeInDown" data-wow-delay="0.4">
-                    <li><a href="{{ route('home') }}">الرئيسية</a></li>
-                    <li><i class="fa-solid fa-chevron-left"></i></li>
-                    <li class="active">{{ site('showroom.hero.breadcrumb') }}</li>
-                </ul>
-
-                <div class="twm-creative-filter-bar wow fadeInUp" data-wow-delay="0.5" id="filterBar"
-                    data-more-label="{{ ($filter['more_label'] ?? '') . " ({$hiddenChips}+)" }}"
-                    data-less-label="{{ $filter['less_label'] ?? '' }}">
-
-                    <form method="GET" action="{{ route('machines.index') }}#filterBar" class="mg-search" role="search">
-                        @if ($category) <input type="hidden" name="category" value="{{ $category }}"> @endif
-                        @if ($brandId) <input type="hidden" name="brand" value="{{ $brandId }}"> @endif
-                        <label for="showroom-q" class="visually-hidden">{{ $filter['search_placeholder'] ?? '' }}</label>
-                        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                        <input id="showroom-q" type="search" name="q" value="{{ $search }}" maxlength="80" autocomplete="off"
-                            placeholder="{{ $filter['search_placeholder'] ?? '' }}">
-                        @if ($search !== '')
-                            <a href="{{ $link(['q' => null]) }}" class="mg-search__clear" aria-label="{{ $filter['clear_search'] ?? '' }}"><i class="fa-solid fa-xmark"></i></a>
-                        @endif
-                        <button type="submit">{{ $filter['search_button'] ?? '' }}</button>
-                    </form>
-
-                    <div class="filter-bar-header">
-                        <div class="filter-bar-title">
-                            <i class="fa-solid fa-sliders"></i>
-                            <span>{{ $filter['title'] ?? '' }}</span>
-                        </div>
-                        <div class="filter-bar-status" id="filterStatusBadge">
-                            <i class="fa-solid fa-circle-check"></i>
-                            <span id="filterCountText">{{ site_text($filter['results'] ?? '', ['from' => $machines->firstItem() ?? 0, 'to' => $machines->lastItem() ?? 0, 'total' => $machines->total()]) }}</span>
-                        </div>
-                    </div>
-
-                    @if ($activeCategory || $search !== '')
-                        <div class="site-active-category">
-                            <span>
-                                @if ($activeCategory)
-                                    {{ $filter['category_label'] ?? '' }} <strong>{{ $activeCategory }}</strong>
-                                @endif
-                                @if ($search !== '')
-                                    {{ $filter['search_label'] ?? '' }} <strong>"{{ $search }}"</strong>
-                                @endif
-                            </span>
-                            <span class="d-flex gap-3 flex-wrap">
-                                @if ($search !== '')
-                                    <a href="{{ $link(['q' => null]) }}"><i class="fa-solid fa-xmark"></i> {{ $filter['clear_search'] ?? '' }}</a>
-                                @endif
-                                @if ($activeCategory)
-                                    <a href="{{ $link(['category' => null]) }}"><i class="fa-solid fa-xmark"></i> {{ $filter['clear_category'] ?? '' }}</a>
-                                @endif
-                            </span>
-                        </div>
-                    @endif
-
-                    <div @class(['filter-chips-container', 'is-expanded' => $activeIsHidden]) id="brandFilterContainer">
-                        <a href="{{ $link(['brand' => null]) }}" @class(['filter-chip-btn', 'active' => ! $brandId]) @if (! $brandId) aria-current="true" @endif>
-                            <span class="chip-main">
-                                <i class="fa-solid fa-layer-group"></i>
-                                <span>{{ $filter['all_label'] ?? '' }}</span>
-                            </span>
-                            <span class="chip-count">{{ $totalAll }}</span>
-                        </a>
-                        @foreach ($brands as $brand)
-                            <a href="{{ $link(['brand' => $brand->id]) }}"
-                                @class(['filter-chip-btn', 'active' => $brandId === $brand->id, 'filter-chip-secondary' => $loop->iteration > $visibleChips])
-                                @if ($brandId === $brand->id) aria-current="true" @endif>
-                                <span class="chip-main">
-                                    <i class="{{ $brand->web_icon ?: 'fa-solid fa-motorcycle' }}"></i>
-                                    <span>{{ trim($brand->name) }}</span>
-                                </span>
-                                <span class="chip-count">{{ $brand->visible_count }}</span>
-                            </a>
-                        @endforeach
-                    </div>
-
-                    @if ($hiddenChips > 0)
-                        <div class="filter-toggle-wrap">
-                            <button type="button" class="filter-toggle-brands-btn" id="toggleBrandsBtn" aria-expanded="{{ $activeIsHidden ? 'true' : 'false' }}">
-                                <span>{{ $activeIsHidden ? ($filter['less_label'] ?? '') : ($filter['more_label'] ?? '') . " ({$hiddenChips}+)" }}</span>
-                                <i class="fa-solid fa-chevron-{{ $activeIsHidden ? 'up' : 'down' }}"></i>
-                            </button>
-                        </div>
-                    @endif
-                </div>
-
-            </div>
-        </div>
-    </div>
-
-    <div class="section-full p-t80 p-b120 site-bg-white twm-cars-section-wrap" id="fleetGridContainer">
-        <div class="container">
-            <div class="section-content">
-                <div class="twm-cars-section m-b30">
-                    <div class="row g-4" id="vehiclesRow">
-                        @forelse ($machines as $machine)
-                            <div class="col-xl-3 col-lg-4 col-sm-6 d-flex">
-                                <x-site.machine-card :machine="$machine" />
-                            </div>
-                        @empty
-                            <div class="col-12 filter-empty-alert">
-                                <i class="fa-solid fa-motorcycle"></i>
-                                <h3 style="font-weight: 800; margin-bottom: 12px; color: #fff;">{{ site('showroom.empty.title') }}</h3>
-                                <p style="color: #94a3b8; font-size: 15px; margin-bottom: 22px;">{{ site('showroom.empty.text') }}</p>
-                                <a href="{{ route('machines.index') }}" class="site-button">{{ site('showroom.empty.button') }}</a>
-                            </div>
-                        @endforelse
-                    </div>
-                </div>
-
-                @if ($machines->hasPages())
-                    <nav class="mg-pagination" aria-label="صفحات المعرض" dir="rtl">
-                        @if ($machines->onFirstPage())
-                            <span class="mg-pagination__arrow is-disabled" aria-hidden="true"><i class="fa-solid fa-arrow-right"></i></span>
-                        @else
-                            <a class="mg-pagination__arrow" href="{{ $machines->previousPageUrl() }}" rel="prev" aria-label="الصفحة السابقة"><i class="fa-solid fa-arrow-right"></i></a>
-                        @endif
-
-                        @foreach ($machines->getUrlRange(1, $machines->lastPage()) as $page => $url)
-                            @if ($page === 1 || $page === $machines->lastPage() || abs($page - $machines->currentPage()) <= 1)
-                                @if ($page === $machines->currentPage())
-                                    <span class="mg-pagination__page is-active" aria-current="page">{{ $page }}</span>
-                                @else
-                                    <a class="mg-pagination__page" href="{{ $url }}" aria-label="صفحة {{ $page }}">{{ $page }}</a>
-                                @endif
-                            @elseif (abs($page - $machines->currentPage()) === 2)
-                                <span class="mg-pagination__dots" aria-hidden="true">…</span>
-                            @endif
-                        @endforeach
-
-                        @if ($machines->hasMorePages())
-                            <a class="mg-pagination__arrow" href="{{ $machines->nextPageUrl() }}" rel="next" aria-label="الصفحة التالية"><i class="fa-solid fa-arrow-left"></i></a>
-                        @else
-                            <span class="mg-pagination__arrow is-disabled" aria-hidden="true"><i class="fa-solid fa-arrow-left"></i></span>
-                        @endif
-                    </nav>
-                @endif
-            </div>
-        </div>
-    </div>
+<nav class="design-pagination" aria-label="صفحات المعرض">@if($machines->previousPageUrl())<a class="button button-outline" href="{{ $machines->previousPageUrl() }}">السابق</a>
+@endif
+ @if($machines->hasMorePages())<a class="button button-outline" href="{{ $machines->nextPageUrl() }}">التالي</a>
+@endif
+</nav></section>
+@includeWhen($posts->isNotEmpty(), 'site.home.sections.blog')
+</main>
 @endsection
-
-@push('scripts')
-    <script src="{{ site_asset('js/site-showroom.js') }}"></script>
+@push('modals')
+<div class="modal fade glass-modal" id="paymentCalculator" tabindex="-1" aria-labelledby="paymentCalculatorTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content" dir="rtl"><div class="modal-header"><h2 class="modal-title fs-4" id="paymentCalculatorTitle">احسب قسطك</h2><button type="button" class="drawer-close" data-bs-dismiss="modal" aria-label="إغلاق">×</button></div><div class="modal-body">@include('site.partials.design-calculator')</div></div></div></div>
+@include('site.partials.payment-result')
 @endpush

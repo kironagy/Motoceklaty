@@ -2,14 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\TeamMember;
 
 class TeamController extends Controller
 {
+    /** The approved design has no team page: the team lives on the about page. */
     public function index()
     {
-        $members = TeamMember::visible()->get();
-
-        return view('site.team.index', compact('members'));
+        return redirect()->to(route('about.index') . '#team', 301);
     }
 }

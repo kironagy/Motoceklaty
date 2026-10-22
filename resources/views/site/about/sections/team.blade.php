@@ -1,4 +1,4 @@
-<div class="section-full p-t80 p-b80 site-bg-light">
+<div class="about-section employee-section">
     <div class="container">
 
         <x-site.section-head align="center" small-class="site-accent-cyan"

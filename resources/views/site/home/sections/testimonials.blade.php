@@ -10,7 +10,7 @@
         </div>
 
         <div class="section-content">
-            <div class="owl-carousel twm-testimonial-carousel next-prev-top-right">
+            <div class="reviews-grid">
                 @foreach ($reviews as $review)
                     <div class="item">
                         <x-site.testimonial-card :review="$review" />

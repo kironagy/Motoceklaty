@@ -73,6 +73,8 @@ class HomeSettings extends SiteSettingsPage
                         ->reorderable()->defaultItems(0),
                     static::image('hero.bg_image', 'صورة خلفية الهيرو', 'site/home'),
                     static::text('hero.calc_title', 'عنوان حاسبة التقسيط'),
+                    static::textarea('hero.description', 'وصف الهيرو'),
+                    static::image('hero.calculator_image', 'صورة الدراجة بجوار الحاسبة', 'site/home'),
                     Forms\Components\Repeater::make('hero.tabs')
                         ->label('تابات الحاسبة (موتوسيكل / اسكوتر / كهربائي ...)')
                         ->helperText('كل تاب بيفلتر الماركات والموديلات اللي بتظهر في الحاسبة. لو سيبت الفئات والماركات فاضيين التاب هيعرض كل الموديلات.')

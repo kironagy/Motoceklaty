@@ -32,6 +32,15 @@ class AboutSettings extends SiteSettingsPage
     {
         return [
             Tabs::make('about')->persistTabInQueryString()->tabs([
+                Tab::make('الأسئلة الشائعة')->schema([
+                    static::toggle('faq.enabled'),
+                    static::text('faq.title', 'العنوان'),
+                    static::text('faq.title_highlight', 'العنوان — الجزء الملون'),
+                    Forms\Components\Repeater::make('faq.items')->label('الأسئلة')->schema([
+                        static::text('question', 'السؤال')->required(),
+                        static::textarea('answer', 'الإجابة')->required(),
+                    ])->reorderable()->collapsible()->defaultItems(0),
+                ]),
                 Tab::make('البانر و SEO')->icon('heroicon-o-photo')->schema([
                     static::bannerSection(),
                     static::seoSection(),

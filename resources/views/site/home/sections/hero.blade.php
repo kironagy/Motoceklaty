@@ -1,54 +1,33 @@
-@php
-    $words = collect(site('home.hero.typed_words', []))->filter(fn ($word) => is_string($word) && trim($word) !== '')->values();
-    $slides = collect(site('home.hero.slides', []))->filter(fn ($slide) => ! empty($slide['image']))->values();
-@endphp
-
-<div class="twm-home-1-banner-wrap mt-3">
-    <div class="twm-home-1-banner" @if (site('home.hero.bg_image')) style="background-image: url('{{ site_url(site('home.hero.bg_image')) }}');" @endif>
-        <div class="twm-banner-LR-wrap">
-            <div class="twm-banner-left">
-                <div class="twm-banner-left-info">
-                    <div class="twm-banner-left-content">
-
-                        @if (site('home.hero.small_title'))
-                            <div class="twm-sm-title left">{{ site('home.hero.small_title') }}</div>
-                        @endif
-                        <h2 class="twm-banner-title text-center text-lg-start">
-                            @if ($words->isNotEmpty())
-                                <em class="txt-type" data-wait="3000" data-words='@json($words)'></em>
-                            @endif
-                            {{ site('home.hero.brand_first') }}<span class="p-0">{{ site('home.hero.brand_second') }}</span>
-                        </h2>
-
-                        <x-site.installment-calculator
-                            :tabs="site('home.hero.tabs', [])"
-                            :title="site('home.hero.calc_title')"
-                            :browse-url="route('machines.index')" />
-
-                    </div>
-                </div>
-            </div>
-            <div class="twm-banner-right">
-                <div class="twm-banner-right-section" id="twmMotoSlider">
-                    @foreach ($slides as $slide)
-                        <div @class(['twm-moto-slide', 'active' => $loop->first])>
-                            <div class="twm-banner-r-content">
-                                <div class="twm-banner-r-bx site-hero-stage">
-                                    <h1 class="twm-bnr-title">{{ $slide['title'] ?? '' }}</h1>
-                                    <div class="twm-banner-media">
-                                        <img src="{{ site_url($slide['image']) }}" alt="{{ $slide['title'] ?? '' }}" data-hero-bike
-                                            @unless ($loop->first) loading="lazy" @endunless>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    @endforeach
-                </div>
-            </div>
-        </div>
-    </div>
+<div class="hero-wrap"><img class="hero-road" src="{{ site_url(site('home.hero.bg_image')) }}" alt="" aria-hidden="true">
+@include('site.partials.site-header')
+<section class="home-hero">
+<div class="hero-copy">
+<h1>{{ site('home.design.hero.text_01') }}</h1>
+<p class="hero-brand" dir="ltr">{{ site('home.design.hero.text_02') }}</p>
+<p class="hero-description" dir="rtl">{{ site('home.design.hero.text_03') }}<br/>{{ site('home.design.hero.text_04') }}</p>
+<a class="button button-orange" href="{{ route('machines.index') }}">{{ site('home.design.hero.text_05') }}<img alt="" aria-hidden="true" class="icon bi bi-chevron-right" height="24" src="{{ asset('motogate-v2/assets/images/icons/chevron-right.svg') }}" width="24"/></a>
 </div>
+<div aria-label="دراجات موتوجيت" aria-roledescription="عرض شرائح" class="home-visual hero-carousel" data-carousel="hero" role="region" tabindex="0">
+<img alt="" class="hero-dial" height="961" src="{{ asset('motogate-v2/assets/images/العداد.png') }}" width="1637"/>
+<div class="hero-slides">@foreach (collect(site('home.hero.slides', []))->filter(fn ($s) => !empty($s['image']))->values() as $slide)<div class="hero-slide {{ $loop->first ? 'is-active' : '' }}" data-slide aria-hidden="{{ $loop->first ? 'false' : 'true' }}"><img class="hero-motorcycle" src="{{ site_url($slide['image']) }}" alt="{{ $slide['title'] ?? '' }}" width="799" height="693"><p class="hero-model" dir="ltr">{{ explode(' ', $slide['title'] ?? '', 2)[0] }}<strong>{{ explode(' ', $slide['title'] ?? '', 2)[1] ?? '' }}</strong></p></div>
+@endforeach
+</div>
+<div class="carousel-controls hero-controls">
+<button aria-label="الدراجة السابقة" data-prev="" type="button">
+<img alt="" aria-hidden="true" class="icon" height="24" src="{{ asset('motogate-v2/assets/images/icons/chevron-left.svg') }}" width="24"/>
+</button>
+<div class="carousel-dots">
+@foreach (collect(site('home.hero.slides', []))->filter(fn ($s) => !empty($s['image']))->values() as $slide)<button type="button" data-dot="{{ $loop->index }}" aria-label="الشريحة {{ $loop->iteration }}" aria-pressed="{{ $loop->first ? 'true' : 'false' }}"></button>
+@endforeach
 
-@push('scripts')
-    <script src="{{ site_asset('js/site-hero.js') }}"></script>
-@endpush
+</div>
+<button aria-label="الدراجة التالية" data-next="" type="button">
+<img alt="" aria-hidden="true" class="icon" height="24" src="{{ asset('motogate-v2/assets/images/icons/chevron-left.svg') }}" width="24"/></button><button aria-label="إيقاف التبديل التلقائي" aria-pressed="false" data-pause="" type="button">
+<svg aria-hidden="true" height="15" viewBox="0 0 20 20" width="15">
+<path d="M6 4V16M14 4V16" stroke="currentColor" stroke-width="2"></path>
+</svg>
+</button>
+</div>
+<span aria-live="polite" class="visually-hidden" data-carousel-status=""></span>
+</div>
+</section></div>

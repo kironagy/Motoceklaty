@@ -4,25 +4,18 @@
 
 @php($staff = session('referred_staff_id') ? \App\Models\Staff::find(session('referred_staff_id')) : null)
 
+@section('body_class', 'contact-page interior-page apply-page source-design')
+@section('design_css', 'pages')
+{{-- No apply page in motogate-2: same parts as its contact page (page-heading, surface form panel). --}}
 @section('content')
-    <x-site.page-banner :image="site('installment.apply.banner_image')" :title="site('installment.apply.banner_title')"
-        :breadcrumbs="[site('installment.apply.breadcrumb') => null]" />
-
-    <div class="section-full p-t100 p-b120 site-bg-light">
-        <div class="container">
-            <div class="row justify-content-center">
-                <div class="col-xl-9 col-lg-11">
-
-                    <x-site.section-head align="center"
-                        :small="site('installment.apply.small_title')"
-                        :title="site('installment.apply.title')"
-                        :text="site('installment.apply.text')" />
-
-                    <div class="site-apply-card" dir="rtl">
+<main id="main" dir="rtl"><div class="page-heading"><span class="mini-label">{{ site('installment.apply.small_title') }}</span><h1>{{ site('installment.apply.banner_title') }}</h1><p>{{ site('installment.apply.text') }}</p></div>
+<section class="surface contact-form-panel site-apply-card"><h2>{{ site('installment.apply.title') }}</h2>
+                        @if (session('tracking_code'))
+                            <div class="alert alert-success"><h2 class="h5">احتفظ بكود ورابط متابعة طلبك</h2><label for="receipt-code">كود المتابعة</label><input id="receipt-code" class="form-control my-2" dir="ltr" readonly value="{{ session('tracking_code') }}"><a class="button button-orange" href="{{ route('tracking.index', ['code' => session('tracking_code')]) }}">متابعة حالة الطلب</a></div>
+                        @endif
 
                         @if ($staff)
                             <div class="alert alert-info text-center">
-                                <i class="fa-solid fa-user-tie me-1"></i>
                                 هذا الطلب سيتم تسجيله باسم الموظف: <strong>{{ $staff->name }}</strong>
                             </div>
                         @endif
@@ -55,11 +48,11 @@
                                 <input type="hidden" name="staff_id" value="{{ $staff->id }}">
                             @endif
 
-                            <h3 class="site-apply-title"><i class="fa-solid fa-motorcycle"></i> المكنة ونظام القسط</h3>
+                            <h3 class="site-apply-title mini-label">المكنة ونظام القسط</h3>
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">اختر المكنة</label>
-                                    <select name="machine_id" class="form-select form-control" required>
+                                    <select id="application-machine" name="machine_id" class="form-select form-control" required>
                                         <option value="">اختر المكنة...</option>
                                         @foreach ($machines as $machine)
                                             <option value="{{ $machine->id }}" @selected((string) old('machine_id', $selectedMachineId) === (string) $machine->id)>{{ $machine->name }}</option>
@@ -71,19 +64,20 @@
                                     <select id="systemSelect" name="installment_type" class="form-select form-control" required>
                                         <option value="">اختر النظام...</option>
                                         @foreach ($plans as $systemName => $planOptions)
-                                            <option value="{{ $systemName }}" data-plans='@json($planOptions)' @selected(old('installment_type') === $systemName)>{{ $systemName }}</option>
+                                            <option value="{{ $systemName }}" data-plans='@json($planOptions)' @selected(old('installment_type', request('installment_type')) === $systemName)>{{ $systemName }}</option>
                                         @endforeach
                                     </select>
                                 </div>
                                 <div class="col-md-12 mb-3">
                                     <label class="form-label">عدد الشهور</label>
-                                    <select id="monthsSelect" name="months" class="form-select form-control" data-old="{{ old('months') }}" disabled required>
+                                    <select id="monthsSelect" name="months" class="form-select form-control" data-old="{{ old('months', request('months')) }}" disabled required>
                                         <option value="">اختر عدد الشهور...</option>
                                     </select>
                                 </div>
                             </div>
 
-                            <h3 class="site-apply-title"><i class="fa-solid fa-user"></i> بيانات العميل</h3>
+                            <div class="mb-3"><label for="application-deposit">المقدم (جنيه)</label><input id="application-deposit" type="number" name="deposit" min="0" step="any" class="form-control" value="{{ old('deposit', request('deposit', 0)) }}"></div>
+                            <h3 class="site-apply-title mini-label">بيانات العميل</h3>
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">اسم العميل (بالعربية)</label>
@@ -102,7 +96,6 @@
                                     <div class="col-md-6 mb-3">
                                         <label class="form-label">{{ $label }}</label>
                                         <label class="site-upload-area" for="{{ $field }}">
-                                            <i class="fa-solid fa-cloud-arrow-up"></i>
                                             <span data-upload-text>انقر لرفع {{ $label }}</span>
                                             <small>JPG, PNG - الحد الأقصى 10MB</small>
                                         </label>
@@ -112,7 +105,7 @@
                                 @endforeach
                             </div>
 
-                            <h3 class="site-apply-title"><i class="fa-solid fa-briefcase"></i> الحالة الوظيفية</h3>
+                            <h3 class="site-apply-title mini-label">الحالة الوظيفية</h3>
                             <div class="mb-3">
                                 <label class="form-label">اختر حالتك الوظيفية</label>
                                 <select id="work_status" name="work_status" class="form-select form-control" required>
@@ -159,18 +152,16 @@
                                 <textarea name="free_work_address" class="form-control" rows="2" placeholder="عنوان المكان">{{ old('free_work_address') }}</textarea>
                             </div>
 
-                            <button type="submit" class="site-button w-100 py-3 fs-5 mt-3"><em>إرسال الطلب</em></button>
+                            <button type="submit" class="button button-orange">إرسال الطلب</button>
                         </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+</section></main>
 @endsection
 
 @push('scripts')
     <script>
         document.addEventListener('DOMContentLoaded', function () {
+            var machineCatalog = @json(\App\Support\InstallmentCalculatorCatalog::payload()['machines']);
+            var machineSelect = document.getElementById('application-machine');
             var systemSelect = document.getElementById('systemSelect');
             var monthsSelect = document.getElementById('monthsSelect');
 
@@ -185,8 +176,21 @@
                 });
                 monthsSelect.disabled = plans.length === 0;
             }
+            function refreshSystems() {
+                var previous = systemSelect.value;
+                var machine = machineCatalog.find(function (m) { return String(m.id) === machineSelect.value; });
+                systemSelect.replaceChildren(new Option('اختر النظام...', ''));
+                (machine ? machine.systems : []).forEach(function (system) {
+                    var option = new Option(system.name, system.name);
+                    option.dataset.plans = JSON.stringify(system.plans);
+                    option.selected = system.name === previous;
+                    systemSelect.appendChild(option);
+                });
+                refreshMonths();
+            }
+            machineSelect.addEventListener('change', refreshSystems);
             systemSelect.addEventListener('change', refreshMonths);
-            refreshMonths();
+            refreshSystems();
 
             var ws = document.getElementById('work_status');
             function toggleWork() {

@@ -77,9 +77,11 @@ class WebsiteTest extends TestCase
         $post = Post::published()->first();
 
         foreach (['/', '/about', '/machines', '/machines?category=sport', '/machines/' . $this->machine->id,
-            '/blog', '/blog/' . rawurlencode($post->slug), '/team', '/contact', '/installment', '/apply-installment'] as $url) {
+            '/blog', '/blog/' . rawurlencode($post->slug), '/contact', '/installment', '/apply-installment'] as $url) {
             $this->get($url)->assertOk();
         }
+        // The approved design has no team page; its team lives on the about page.
+        $this->get('/team')->assertRedirect(route('about.index') . '#team');
 
         $this->get('/machines/' . $this->machine->id)->assertSee('F250')->assertSee('55,000');
     }
@@ -121,7 +123,8 @@ class WebsiteTest extends TestCase
         // Unapproved comments stay off the article.
         $this->get(route('blog.show', $post))->assertDontSee('مقال مفيد');
         PostComment::query()->update(['is_approved' => true]);
-        $this->get(route('blog.show', $post))->assertSee('مقال مفيد');
+        // The approved article design has no comments section; approval remains available to the view/backend.
+        $this->get(route('blog.show', $post))->assertViewHas('comments', fn ($comments) => $comments->contains('body', 'مقال مفيد'));
     }
 
     public function test_every_settings_page_loads_saves_and_drives_the_site(): void
@@ -135,7 +138,7 @@ class WebsiteTest extends TestCase
 
         // Saving untouched forms must not change what the site shows -
         // images, repeaters and nested lists come back exactly as designed.
-        $this->get('/')->assertSee('احسب قسط دراجتك النارية بكل سهولة');
+        $this->get('/')->assertSee(site('home.hero.calc_title'));
         $defaults = \App\Support\SiteDefaults::all();
         foreach (['general', 'home', 'about', 'showroom', 'installment', 'blog', 'team', 'contact'] as $group) {
             $this->assertEquals($defaults[$group], SiteContent::group($group), "{$group} drifted after an untouched save");
@@ -198,7 +201,7 @@ class WebsiteTest extends TestCase
 
         $this->post(route('installments.store'), $this->application())
             ->assertRedirect()
-            ->assertSessionHas('success');
+            ->assertSessionHas('success')->assertSessionHas('tracking_code');
 
         $request = \App\Models\InstallmentRequest::latest('id')->first();
         $this->assertSame('أحمد محمد علي', $request->applicant_name);
@@ -245,15 +248,145 @@ class WebsiteTest extends TestCase
         Machine::create(['name' => 'مخفية', 'brand_id' => $brand->id, 'cash_price' => 1, 'installment_price' => 1, 'is_active' => false]);
 
         // 14 + F250 from setUp = 15 active machines.
-        $page1 = $this->get('/machines')->assertOk()->assertSee('عرض 1 - 12 من 15 موديل');
-        $this->assertSame(12, substr_count($page1->getContent(), 'class="mg-card"'));
-        $this->assertSame(3, substr_count($this->get('/machines?page=2')->getContent(), 'class="mg-card"'));
+        $page1 = $this->get('/machines')->assertOk()->assertViewHas('machines', fn ($machines) => $machines->total() === 15);
+        $this->assertSame(12, substr_count($page1->getContent(), 'data-live-machine='));
+        $this->assertSame(3, substr_count($this->get('/machines?page=2')->getContent(), 'data-live-machine='));
+        $filtered = $this->get('/machines?q=F250')->assertViewHas('machines', fn ($machines) => $machines->total() === 1);
+        $this->assertSame(1, substr_count($filtered->getContent(), 'data-live-machine='));
+        foreach (['/machines?q=' . urlencode('بينيلي'), '/machines?brand=' . $brand->id . '&q=TNT', '/machines?brand_id=' . $brand->id] as $url) {
+            $this->get($url)->assertViewHas('machines', fn ($machines) => $machines->total() === 14);
+        }
+        $this->get('/machines?q=' . urlencode('مخفية'))->assertViewHas('machines', fn ($machines) => $machines->isEmpty());
+    }
 
-        $this->get('/machines?q=F250')->assertSee('عرض 1 - 1 من 1 موديل')->assertDontSee('TNT 3');
-        $this->get('/machines?q=' . urlencode('بينيلي'))->assertSee('من 14 موديل');           // by brand name
-        $this->get('/machines?brand=' . $brand->id . '&q=TNT')->assertSee('من 14 موديل');
-        $this->get('/machines?brand_id=' . $brand->id)->assertSee('من 14 موديل');               // old site links
-        $this->get('/machines?q=' . urlencode('مخفية'))->assertSee('عرض 0 - 0 من 0 موديل');    // inactive never shows
+    public function test_article_page_renders_the_post_body(): void
+    {
+        $post = Post::create(['title' => 'دليل الاختيار', 'slug' => 'choose-guide', 'author_name' => 'موتوجيت', 'excerpt' => 'مقدمة', 'body' => '<h2>سعة المحرك</h2><p>اختار السعة المناسبة.</p>', 'is_published' => true]);
+
+        $this->get(route('blog.show', $post))->assertOk()
+            ->assertSee('<section id="part-0"><h2>سعة المحرك</h2><p>اختار السعة المناسبة.</p></section>', false)
+            ->assertSee('<a href="#part-0">سعة المحرك</a>', false)
+            ->assertDontSee('$post->body', false);
+    }
+
+    public function test_header_search_lists_only_active_models(): void
+    {
+        $brand = Brand::create(['name' => 'بينيلي', 'image' => 'x.png']);
+        $visible = Machine::create(['name' => 'TNT 25', 'brand_id' => $brand->id, 'cash_price' => 1, 'installment_price' => 1, 'is_active' => true]);
+        Machine::create(['name' => 'مخفية', 'brand_id' => $brand->id, 'cash_price' => 1, 'installment_price' => 1, 'is_active' => false]);
+
+        $html = $this->get('/')->assertOk()->assertSee('id="searchModal"', false)->getContent();
+        preg_match('/<script type="application\/json" id="searchMachines">(.*?)<\/script>/s', $html, $match);
+        $items = collect(json_decode($match[1] ?? '[]', true));
+
+        $this->assertTrue($items->contains(fn ($item) => $item['label'] === 'بينيلي TNT 25' && $item['url'] === route('machines.show', $visible)));
+        $this->assertFalse($items->contains(fn ($item) => str_contains($item['label'], 'مخفية')));
+    }
+
+    public function test_new_design_uses_real_content_and_has_no_demo_runtime(): void
+    {
+        $this->get('/')->assertOk()->assertSee('motogate-v2/assets/css/style.css', false)
+            ->assertSee('data-installment-calculator', false)
+            ->assertDontSee('motogate-v2/assets/js/main.js', false)
+            ->assertDontSee('machines.html', false);
+        $this->get('/machines')->assertOk()->assertSee('F250')
+            ->assertDontSee('MG-2026-001')->assertDontSee('89,000');
+        $this->get('/contact')->assertSee('name="message"', false)
+            ->assertSee('action="' . route('contact.store') . '"', false);
+        $this->get('/about')->assertDontSee('عميل تجريبي')->assertDontSee('بيانات تجريبية');
+    }
+
+    public function test_tracking_displays_current_status_only_for_an_authentic_code(): void
+    {
+        $application = \App\Models\InstallmentRequest::create([
+            'machine_id' => $this->machine->id, 'installment_type' => 'امان', 'months' => 12,
+            'applicant_name' => 'Private Customer', 'applicant_phone' => '01012345678',
+            'applicant_address' => 'Private address', 'status' => 'new_request',
+        ]);
+        $code = \Illuminate\Support\Facades\Crypt::encryptString((string) $application->id);
+        $this->get('/track')->assertOk()->assertSee(site('tracking.code_label'));
+        $this->post('/track', ['code' => 'MG-2026-001'])->assertOk()->assertSee(site('tracking.not_found'));
+        $this->post('/track', ['code' => (string) $application->id])->assertSee(site('tracking.not_found'));
+        $this->get(route('tracking.index', ['code' => $code]))->assertOk()
+            ->assertSee(site('tracking.statuses.new_request'))->assertDontSee('Private Customer')
+            ->assertDontSee('01012345678')->assertDontSee('Private address')
+            ->assertHeader('X-Robots-Tag', 'noindex, nofollow')
+            ->assertDontSee('embed.tawk.to');
+        $application->update(['status' => 'approved']);
+        $this->post('/track', ['code' => $code])->assertSee(site('tracking.statuses.approved'));
+        $application->delete();
+        $this->post('/track', ['code' => $code])->assertSee(site('tracking.not_found'));
+    }
+
+    public function test_new_dashboard_fields_drive_the_new_design(): void
+    {
+        $this->actingAs($this->admin(), 'filament');
+        Livewire::test(HomeSettings::class)->set('data.design.hero.text_03', 'وصف جديد للتصميم')
+            ->set('data.fleet.enabled', false)->call('save')->assertHasNoFormErrors();
+        $this->get('/')->assertSee('وصف جديد للتصميم')->assertDontSee('stock-track', false);
+        Livewire::test(AboutSettings::class)->set('data.faq.title', 'أسئلة محدثة')
+            ->call('save')->assertHasNoFormErrors();
+        $this->get('/about')->assertSee('أسئلة محدثة');
+        Livewire::test(\App\Filament\Clusters\WebsiteSettings\Pages\TrackingSettings::class)
+            ->set('data.title', 'متابعة طلبك من الداشبورد')->call('save')->assertHasNoFormErrors();
+        $this->get('/track')->assertSee('متابعة طلبك من الداشبورد');
+    }
+
+    public function test_design_adoption_keeps_custom_content_and_can_be_repeated(): void
+    {
+        SiteContent::save('home', ['hero' => ['small_title' => 'عنوان مخصص', 'bg_image' => 'site/defaults/slider1.jpg']]);
+        $this->artisan('site:adopt-motogate-v2')->assertSuccessful();
+        $this->assertSame('عنوان مخصص', site('home.hero.small_title'));
+        $this->assertSame('site/v2-defaults/الباكجراوند.png', site('home.hero.bg_image'));
+        $before = SiteContent::all();
+        $this->artisan('site:adopt-motogate-v2')->assertSuccessful();
+        $this->assertSame($before, SiteContent::all());
+    }
+
+    public function test_home_keeps_only_the_approved_source_sections_and_styles(): void
+    {
+        $html = $this->get('/')->assertOk()->getContent();
+        $dom = new \DOMDocument();
+        @$dom->loadHTML('<?xml encoding="UTF-8">' . $html);
+        $xpath = new \DOMXPath($dom);
+        $classes = [];
+        foreach ($xpath->query('//main[@class="home-content"]/section') as $section) {
+            $classes[] = $section->getAttribute('class');
+        }
+        $this->assertSame(['installment framed', 'story-section', 'available-section', 'journal', 'why-choose', 'categories'], $classes);
+        foreach (json_decode(file_get_contents(resource_path('site/motogate-v2-css-hashes.json')), true) as $file => $hash) {
+            $this->assertSame($hash, hash_file('sha256', public_path("motogate-v2/assets/css/{$file}.css")));
+        }
+    }
+
+    public function test_calculator_configuration_survives_html_attribute_encoding(): void
+    {
+        foreach (['/', '/installment', '/machines/' . $this->machine->id] as $url) {
+            $dom = new \DOMDocument();
+            @$dom->loadHTML('<?xml encoding="UTF-8">' . $this->get($url)->assertOk()->getContent());
+            $xpath = new \DOMXPath($dom);
+            $forms = $xpath->query('//form[@data-installment-calculator]');
+            $this->assertGreaterThan(0, $forms->length, $url);
+            foreach ($forms as $form) {
+                $config = json_decode($form->getAttribute('data-config'), true, 512, JSON_THROW_ON_ERROR);
+                $this->assertSame(route('installment.calculate'), $config['endpoint']);
+                $this->assertNotEmpty($config['labels']);
+            }
+        }
+    }
+
+    public function test_application_rejects_unavailable_terms_models_and_invalid_deposits_before_uploading(): void
+    {
+        Storage::fake('public');
+        $data = $this->application();
+        $this->post(route('installments.store'), array_replace($data, ['months' => 999]))
+            ->assertSessionHasErrors('installment_type');
+        $this->post(route('installments.store'), array_replace($data, ['deposit' => 55000]))
+            ->assertSessionHasErrors('deposit');
+        $this->machine->update(['is_active' => false]);
+        $this->post(route('installments.store'), $data)->assertSessionHasErrors('installment_type');
+        $this->assertDatabaseCount('installment_requests', 0);
+        $this->assertSame([], Storage::disk('public')->allFiles());
     }
 
     protected function admin(): Staff

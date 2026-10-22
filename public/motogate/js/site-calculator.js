@@ -22,7 +22,7 @@
     }
 
     function format(n) {
-        return Math.round(Number(n) || 0).toLocaleString('en-US');
+        return Math.round(Number(n) || 0).toLocaleString('ar-EG');
     }
 
     function template(text, values) {
@@ -38,8 +38,10 @@
         var field = function (name) { return form.querySelector('[data-field="' + name + '"]'); };
         var brandSel = field('brand'), machineSel = field('machine'), systemSel = field('system'), monthsSel = field('months');
         var downInput = field('down_payment');
-        var resultBox = form.querySelector('[data-calc-result]');
+        var resultBox = form.querySelector('[data-calc-result]') || document.getElementById('resultNote');
         var errorBox = form.querySelector('[data-calc-error]');
+        // No error box in the approved design: messages go where the result goes.
+        if (!errorBox) errorBox = resultBox;
         var widget = form.closest('.twm-banner-search-tabs');
         var filter = {
             categories: JSON.parse(form.getAttribute('data-categories') || '[]'),
@@ -64,8 +66,14 @@
         }
 
         function hideOutput() {
-            resultBox.hidden = true;
-            errorBox.hidden = true;
+            if (resultBox.tagName === 'OUTPUT') resultBox.textContent = '';
+            if (errorBox !== resultBox) errorBox.hidden = true;
+            ['monthlyAmount', 'resultMonths', 'resultDeposit', 'resultTotal'].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) el.textContent = '—';
+            });
+            var contact = document.getElementById('resultContact');
+            if (contact) contact.hidden = true;
         }
 
         function refreshBrands() {
@@ -88,6 +96,12 @@
 
         function refreshSystems() {
             var m = currentMachine();
+            var name = document.getElementById('selectedBikeName');
+            var bike = document.getElementById('financeBike');
+            var price = document.getElementById('financePrice');
+            if (name && m) name.textContent = m.name;
+            if (bike && m && m.image) { bike.src = m.image; bike.alt = m.name; }
+            if (price) price.textContent = m ? 'سعر الكاش: ' + format(m.cash_price) + ' جنيه' : 'اختر الماركة والموديل للبدء';
             fill(systemSel, labels.system_placeholder, (m ? m.systems : []).map(function (s) {
                 return { value: s.id, label: s.name };
             }));
@@ -103,7 +117,6 @@
         }
 
         function showError(message) {
-            resultBox.hidden = true;
             errorBox.textContent = message;
             errorBox.hidden = false;
         }
@@ -117,39 +130,32 @@
         function showResult(r) {
             var m = currentMachine();
             var system = currentSystem();
-            var applyUrl = config.applyUrl + (m ? '?machine_id=' + m.id : '');
+            var applyUrl = config.applyUrl + '?' + new URLSearchParams({machine_id:m.id, installment_type:system.name, months:r.months, deposit:r.down_payment}).toString();
             var L = resultLabels;
-            var cur = esc(L.currency || '');
-            var money = function (n) { return format(n) + ' <small>' + cur + '</small>'; };
-            var tile = function (icon, label, value, extra) {
-                return '<div class="mg-calc-tile' + (extra || '') + '"><i class="fa-solid ' + icon + '" aria-hidden="true"></i>' +
-                    '<span>' + esc(label) + '</span><strong>' + value + '</strong></div>';
-            };
-
-            resultBox.innerHTML =
-                '<div class="mg-calc-result__head">' +
-                    '<span class="mg-calc-result__icon"><i class="fa-solid fa-receipt" aria-hidden="true"></i></span>' +
-                    '<div><h4>' + esc(L.title) + '</h4>' +
-                    '<p>' + esc([m && m.name, system && system.name].filter(Boolean).join(' • ')) + '</p></div>' +
-                '</div>' +
-                '<div class="mg-calc-result__hero">' +
-                    '<span>' + esc(L.monthly) + '</span>' +
-                    '<strong>' + format(r.monthly_installment) + ' <small>' + cur + ' / ' + esc(L.per_month || '') + '</small></strong>' +
-                    '<em>' + esc(template(L.duration, { months: r.months })) + '</em>' +
-                '</div>' +
-                '<div class="mg-calc-result__grid">' +
-                    tile('fa-wallet', L.down_payment, money(r.down_payment)) +
-                    tile('fa-coins', L.financed, money(r.financed_amount)) +
-                    tile('fa-percent', L.interest, esc(r.interest_percent) + '%') +
-                    tile('fa-sack-dollar', L.total, money(r.total_with_interest)) +
-                    tile('fa-file-invoice', L.fees, money(r.administrative_fees), ' mg-calc-tile--wide') +
-                '</div>' +
-                (L.note ? '<p class="mg-calc-result__note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> ' + esc(L.note) + '</p>' : '') +
-                '<a class="site-button mg-calc-result__apply" href="' + applyUrl + '"><em>' + esc(L.apply) + ' <i class="fa-solid fa-arrow-left"></i></em></a>';
-
-            errorBox.hidden = true;
-            resultBox.hidden = false;
-            resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            var apply = '<a class="button button-orange" href="' + esc(applyUrl) + '">' + esc(L.apply) + '</a>';
+            var financeDashboard = document.querySelector('.finance-dashboard');
+            if (financeDashboard) {
+                // Calculator page: the approved design shows the result in its dashboard.
+                document.getElementById('monthlyAmount').textContent = format(r.monthly_installment);
+                document.getElementById('resultMonths').textContent = format(r.months);
+                document.getElementById('resultDeposit').textContent = format(r.down_payment);
+                document.getElementById('resultTotal').textContent = format(r.total_with_interest);
+                document.getElementById('resultNote').innerHTML = esc(L.note || '') + ' <a href="' + esc(applyUrl) + '">' + esc(L.apply) + '</a>';
+                return;
+            }
+            // Home: same sentence as the design, then its #paymentResult dialog.
+            resultBox.innerHTML = 'القسط الشهري التقديري: <strong>' + format(r.monthly_installment) + ' جنيه</strong> لمدة ' + format(r.months) + ' شهر.<br><small>إجمالي الأقساط ' + format(r.total_with_interest) + ' جنيه. ' + esc(L.note || '') + '</small>';
+            var dialog = document.getElementById('paymentResult');
+            if (!dialog) return;
+            document.getElementById('paymentSummary').innerHTML = resultBox.innerHTML + '<p>' + apply + '</p>';
+            var show = function () { bootstrap.Modal.getOrCreateInstance(dialog).show(); };
+            var calculator = form.closest('.modal.show');
+            if (calculator) {
+                calculator.addEventListener('hidden.bs.modal', show, { once: true });
+                bootstrap.Modal.getInstance(calculator).hide();
+            } else {
+                show();
+            }
         }
 
         if (brandSel) brandSel.addEventListener('change', refreshMachines);
@@ -208,8 +214,30 @@
                 .finally(function () { button.disabled = false; });
         });
 
+        downInput.addEventListener('input', hideOutput);
+        form.selectMachine = function (id) {
+            var selected = machines.find(function (m) { return String(m.id) === String(id); });
+            if (!selected || !brandSel) return false;
+            filter = {categories: [], brands: []};
+            refreshBrands();
+            brandSel.value = selected.brand_id;
+            refreshMachines();
+            machineSel.value = selected.id;
+            refreshSystems();
+            return true;
+        };
         if (brandSel) {
             refreshBrands();
+            var selectedId = new URLSearchParams(location.search).get('machine_id');
+            var selected = machines.find(function (m) { return String(m.id) === selectedId; });
+            if (selected) {
+                filter = {categories: [], brands: []};
+                refreshBrands();
+                brandSel.value = selected.brand_id;
+                refreshMachines();
+                machineSel.value = selected.id;
+                refreshSystems();
+            }
         } else {
             refreshSystems();
         }

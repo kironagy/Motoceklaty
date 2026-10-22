@@ -1,19 +1,3 @@
-<div class="section-full p-t150 p-b120 site-bg-white twm-blog-section-wrap wow fadeInDown" data-wow-offset="100" data-wow-delay="0.2">
-    <div class="container-fluid">
-
-        <x-site.section-head align="center"
-            :small="site('home.fleet.small_title')"
-            :title="site('home.fleet.title')" />
-
-        <div class="section-content">
-            <div class="owl-carousel twm-vehicle-fleet-carousel m-b30">
-                @foreach ($fleet as $machine)
-                    <div class="item">
-                        <x-site.machine-card :machine="$machine" />
-                    </div>
-                @endforeach
-            </div>
-        </div>
-
-    </div>
-</div>
+<section class="available-section" dir="rtl"><div class="section-heading"><h2>{{ site('home.design.fleet.text_01') }} <em>{{ site('home.design.fleet.text_02') }}</em></h2><div><button aria-label="السابق" class="slider-arrow" data-stock-prev="">❮</button><button aria-label="التالي" class="slider-arrow" data-stock-next="">❯</button></div></div><div class="stock-track">@foreach ($fleet as $machine)<a class="stock-card" href="{{ route('machines.show', $machine) }}"><span class="stock-number">{{ str_pad($loop->iteration, 2, '0', STR_PAD_LEFT) }}</span><img src="{{ $machine->displayImageUrl() }}" alt="{{ $machine->name }}" loading="lazy"><h3 dir="ltr">{{ $machine->name }}</h3><span>{{ site('showroom.card.details_label') }} ↖</span></a>
+@endforeach
+</div><a class="button button-outline" href="{{ route('machines.index') }}">{{ site('home.design.fleet.text_03') }}</a></section>

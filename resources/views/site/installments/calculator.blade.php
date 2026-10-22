@@ -1,25 +1,15 @@
 @extends('layouts.site')
-
-@section('title', (string) (site('installment.page.seo_title')))
-
-@section('content')
-    <x-site.page-banner :image="site('installment.page.banner_image')" :title="site('installment.page.banner_title')"
-        :breadcrumbs="[site('installment.page.breadcrumb') => null]" />
-
-    <div class="section-full p-t100 p-b120 site-bg-dark site-calc-page">
-        <div class="container">
-            <div class="row justify-content-center">
-                <div class="col-xl-8 col-lg-10">
-                    <x-site.section-head align="center" title-class="site-text-white"
-                        :small="site('installment.page.small_title')"
-                        :title="site('installment.page.title')" />
-                    @if (site('installment.page.text'))
-                        <p class="site-calc-page-text" dir="rtl">{{ site('installment.page.text') }}</p>
-                    @endif
-
-                    <x-site.installment-calculator :tabs="site('home.hero.tabs', [])" :browse-url="route('machines.index')" />
-                </div>
-            </div>
-        </div>
-    </div>
+@section('title', (string) site('installment.page.seo_title'))
+@section('body_class', 'finance-page source-design')
+@section('design_css', 'calculate')
+@section('content')@php
+$uid = 'calc-' . \Illuminate\Support\Str::random(8);
+$labels = site('installment.calculator.labels', []);
+$config = ['endpoint' => route('installment.calculate'), 'applyUrl' => route('installments.apply.form'), 'machineId' => null, 'labels' => $labels, 'result' => site('installment.calculator.result', [])];
+@endphp
+@once
+<script type="application/json" id="site-calc-catalog">@json(\App\Support\InstallmentCalculatorCatalog::payload())</script>
+@push('scripts')<script src="{{ site_asset('js/site-calculator.js') }}"></script>@endpush
+@endonce
+<main id="main"><section aria-labelledby="financeTitle" class="finance-scene"><div class="finance-visual"><div class="finance-since"><span>{{ site('installment.design.finance_visual.text_01') }}</span><strong>2019</strong><small>{{ site('installment.design.finance_visual.text_02') }}</small></div><img alt="Keeway RKZ200" id="financeBike" src="{{ site_url(site('installment.design.finance_visual.image_08')) }}"/><div class="finance-caption"><span>{{ site('installment.design.finance_visual.text_03') }}<br/>{{ site('installment.design.finance_visual.text_04') }} <em>{{ site('installment.design.finance_visual.text_05') }}</em><br/>{{ site('installment.design.finance_visual.text_06') }}</span><p dir="ltr" id="selectedBikeName">{{ site('installment.design.finance_visual.text_07') }}</p></div></div><div class="finance-panel" dir="rtl"><span class="finance-kicker" dir="ltr">{{ site('installment.design.finance_panel.text_01') }} <b>{{ site('installment.design.finance_panel.text_02') }}</b> ──</span><h1 id="financeTitle">{{ site('installment.design.finance_panel.text_03') }} <em>{{ site('installment.design.finance_panel.text_04') }}</em></h1><p class="finance-intro">{{ site('installment.design.finance_panel.text_05') }}</p><form data-config="{{ json_encode($config) }}" data-installment-calculator=""><div class="finance-fields"><label class="finance-field" for="{{ $uid }}-brand"><span><img alt="" src="{{ asset('motogate-v2/assets/images/icons/bicycle.svg') }}"/>{{ site('installment.design.finance_panel.text_06') }}</span><select data-field="brand" id="{{ $uid }}-brand" required=""><option value="">{{ $labels['brand_placeholder'] ?? '' }}</option></select></label><label class="finance-field" for="{{ $uid }}-machine"><span><img alt="" src="{{ asset('motogate-v2/assets/images/icons/gear.svg') }}"/>{{ site('installment.design.finance_panel.text_07') }}</span><select data-field="machine" disabled="" id="{{ $uid }}-machine" required=""><option value="">{{ $labels['machine_placeholder'] ?? '' }}</option></select></label><label class="finance-field" for="{{ $uid }}-system"><span><img alt="" src="{{ asset('motogate-v2/assets/images/icons/cash-coin.svg') }}"/>{{ site('installment.design.finance_panel.text_08') }}</span><select data-field="system" disabled="" id="{{ $uid }}-system" required=""><option value="">{{ $labels['system_placeholder'] ?? '' }}</option></select></label><label class="finance-field wide" for="{{ $uid }}-months"><span><img alt="" src="{{ asset('motogate-v2/assets/images/icons/calendar3.svg') }}"/>{{ site('installment.design.finance_panel.text_09') }}</span><select data-field="months" disabled="" id="{{ $uid }}-months" required=""><option value="">{{ $labels['months_placeholder'] ?? '' }}</option></select></label><label class="finance-field wide" for="{{ $uid }}-down_payment"><span><img alt="" src="{{ asset('motogate-v2/assets/images/icons/wallet2.svg') }}"/>{{ site('installment.design.finance_panel.text_10') }}</span><input data-field="down_payment" id="{{ $uid }}-down_payment" min="0" placeholder="أدخل المقدم بالجنيه" required="" step="1" type="number"/></label></div><p aria-live="polite" class="finance-price" id="financePrice">{{ site('installment.design.finance_panel.text_11') }}</p><button class="finance-submit" type="submit"><img alt="" src="{{ asset('motogate-v2/assets/images/icons/calculator.svg') }}"/>{{ site('installment.design.finance_panel.text_12') }} <span aria-hidden="true">‹</span></button></form><div class="finance-benefits"><div><img alt="" src="{{ asset('motogate-v2/assets/images/icons/shield-check.svg') }}"/><span>{{ site('installment.design.finance_panel.text_13') }}</span></div><div><img alt="" src="{{ asset('motogate-v2/assets/images/icons/gear.svg') }}"/><span>{{ site('installment.design.finance_panel.text_14') }}</span></div><div><img alt="" src="{{ asset('motogate-v2/assets/images/icons/headset.svg') }}"/><span>{{ site('installment.design.finance_panel.text_15') }}</span></div><div><img alt="" src="{{ asset('motogate-v2/assets/images/icons/shield-check.svg') }}"/><span>{{ site('installment.design.finance_panel.text_16') }}</span></div></div></div><section aria-labelledby="resultHeading" aria-live="polite" class="finance-dashboard" dir="rtl"><div class="payment-highlight"><span id="resultHeading">{{ site('installment.design.finance_dashboard.text_01') }}</span><strong id="monthlyAmount">—</strong><small>{{ site('installment.design.finance_dashboard.text_02') }}</small></div><div class="payment-facts"><div><span>{{ site('installment.design.finance_dashboard.text_03') }}</span><strong id="resultMonths">—</strong><small>{{ site('installment.design.finance_dashboard.text_04') }}</small></div><div><span>{{ site('installment.design.finance_dashboard.text_05') }}</span><strong id="resultDeposit">—</strong><small>{{ site('installment.design.finance_dashboard.text_06') }}</small></div><div><span>{{ site('installment.design.finance_dashboard.text_07') }}</span><strong id="resultTotal">—</strong><small>{{ site('installment.design.finance_dashboard.text_08') }}</small></div></div><p id="resultNote">{{ site('installment.design.finance_dashboard.text_09') }}</p><a class="button button-outline" hidden="" href="{{ site_whatsapp(site('general.whatsapp')) }}" id="resultContact" rel="noopener" target="_blank">{{ site('installment.design.finance_dashboard.text_10') }}</a></section></section></main>
 @endsection

@@ -67,6 +67,10 @@ class SiteContent
             return $path;
         }
 
+        if (str_starts_with($path, 'site/v2-defaults/')) {
+            return asset('motogate-v2/assets/images/' . static::encodePath(substr($path, strlen('site/v2-defaults/'))));
+        }
+
         if (str_starts_with($path, 'site/defaults/')) {
             return asset('motogate/images/' . static::encodePath(substr($path, strlen('site/defaults/'))));
         }
@@ -87,6 +91,15 @@ class SiteContent
      */
     public static function publishDefaults(): void
     {
+        $v2 = public_path('motogate-v2/assets/images');
+        if (File::isDirectory($v2)) {
+            foreach (File::allFiles($v2) as $file) {
+                $target = 'site/v2-defaults/' . $file->getRelativePathname();
+                if (! Storage::disk('public')->exists($target)) {
+                    Storage::disk('public')->put($target, File::get($file->getPathname()));
+                }
+            }
+        }
         $source = public_path('motogate/images');
 
         if (! File::isDirectory($source)) {

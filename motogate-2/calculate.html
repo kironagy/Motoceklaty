@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ar">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#080b0c" />
+    <meta
+      name="description"
+      content="موتوجيت — اكتشف الدراجات والموتوسيكلات واعرف أنسب نظام تقسيط ليك."
+    />
+    <title>اعرف قسطك | MotoGate موتوجيت</title>
+    <link rel="icon" href="assets/images/logo.png" />
+    <link rel="stylesheet" href="assets/vendor/bootstrap.min.css" />
+
+    <link rel="stylesheet" href="assets/css/fonts.css" />
+    <link rel="stylesheet" href="assets/css/style.css" />
+    <link rel="stylesheet" href="assets/css/responsiv.css" />
+    <link rel="stylesheet" href="assets/css/layers.css" />
+    <link rel="stylesheet" href="assets/css/components.css" />
+  <link rel="stylesheet" href="assets/css/updates.css" /><link rel="stylesheet" href="assets/css/calculate.css"><link rel="stylesheet" href="assets/css/navigation.css"></head>
+  <body class="finance-page"><aside
+      class="offcanvas offcanvas-end clean-drawer"
+      tabindex="-1"
+      id="mobileMenu"
+      aria-labelledby="menuTitle"
+    >
+      <div class="offcanvas-header">
+        <h2 id="menuTitle" class="visually-hidden">القائمة الرئيسية</h2>
+        <a href="index.html" class="drawer-logo"
+          ><img
+            src="assets/images/logo.png"
+            class=""
+            alt="MotoGate"
+            width="376"
+            height="116" /></a
+        ><button
+          type="button"
+          class="drawer-close"
+          data-bs-dismiss="offcanvas"
+          aria-label="إغلاق القائمة"
+        >
+          <svg viewBox="0 0 24 24" width="25" height="25" aria-hidden="true">
+            <path
+              d="M5 5L19 19M19 5L5 19"
+              stroke="currentColor"
+              stroke-width="1.5"
+            />
+          </svg>
+        </button>
+      </div>
+      <div class="drawer-body">
+        <nav class="drawer-links" aria-label="قائمة الموبايل">
+          <a href="index.html">الرئيسية</a
+          ><a href="machines.html">المعرض</a
+          ><a href="calculate.html" aria-current="page">اعرف قسطك</a
+          ><a href="about.html">نبذة عنا</a
+          ><a href="contact.html">تواصل معنا</a>
+        <a href="track.html">تتبع حالة طلبك</a></nav>
+        <div class="drawer-footer">
+          <a class="button button-outline" href="calculate.html"
+            >احسب قسطك الآن</a
+          >
+        </div>
+      </div>
+    </aside><header class="site-header">
+          <div class="header-inner">
+            <button
+              class="menu-toggle"
+              type="button"
+              data-bs-toggle="offcanvas"
+              data-bs-target="#mobileMenu"
+              aria-controls="mobileMenu"
+              aria-label="فتح القائمة"
+            >
+              <img
+                class="icon bi bi-list"
+                src="assets/images/icons/list.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24"
+              /></button
+            ><a
+              class="header-calc button button-orange"
+              href="calculate.html" aria-current="page"
+              >احسب قسطك
+              <img
+                class="icon bi bi-calculator"
+                src="assets/images/icons/calculator.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24"
+            /></a>
+            <nav class="desktop-nav" aria-label="القائمة الرئيسية">
+              <a href="index.html">الرئيسية</a
+              ><a href="machines.html">المعرض</a
+              ><a href="calculate.html">اعرف قسطك</a
+              ><a href="about.html">نبذة عنا</a
+              ><a href="contact.html">تواصل معنا</a>
+            <a href="track.html">تتبع حالة طلبك</a></nav>
+            <button
+              type="button"
+              class="search-toggle"
+              data-bs-toggle="modal"
+              data-bs-target="#searchModal"
+              aria-label="البحث عن دراجة"
+            >
+              <img
+                class="icon bi bi-search"
+                src="assets/images/icons/search.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24"
+              /></button
+            ><a class="logo" href="index.html" aria-label="موتوجيت — الرئيسية"
+              ><img
+                src="assets/images/logo.png"
+                width="376"
+                height="116"
+                alt="MotoGate"
+            /></a>
+          </div>
+        </header><main id="main"><section class="finance-scene" aria-labelledby="financeTitle"><div class="finance-visual"><div class="finance-since"><span>خبرة منذ</span><strong>2019</strong><small>نرافقك في كل خطوة</small></div><img id="financeBike" src="assets/images/motorcycle-rkz200.webp" alt="Keeway RKZ200"><div class="finance-caption"><span>RIDE<br>YOUR <em>NEXT</em><br>CHAPTER</span><p id="selectedBikeName" dir="ltr">Keeway RKZ200</p></div></div><div class="finance-panel" dir="rtl"><span class="finance-kicker" dir="ltr">⟶ MOTOGATE <b>FINANCE</b> ──</span><h1 id="financeTitle">احسب قسطك <em>في ثواني</em></h1><p class="finance-intro">اختر الماركة والنوع ونظام التقسيط لحساب القسط المناسب لك</p><form id="financeForm"><div class="finance-fields"><label class="finance-field " for="financeBrand"><span><img src="assets/images/icons/bicycle.svg" alt="">الماركة</span><select id="financeBrand" required><option value="">اختر الماركة</option><option value="Keeway">Keeway</option><option value="SYM">SYM</option><option value="Haojue">Haojue</option><option value="Benelli">Benelli</option></select></label><label class="finance-field " for="financeModel"><span><img src="assets/images/icons/gear.svg" alt="">النوع</span><select id="financeModel" required><option value="">اختر النوع</option></select></label><label class="finance-field " for="financePlan"><span><img src="assets/images/icons/cash-coin.svg" alt="">نظام التقسيط</span><select id="financePlan" required><option value="">اختر نظام التقسيط</option><option value="0">بدون فوائد</option><option value=".15">مثال حسابي: عائد 15%</option><option value=".2">مثال حسابي: عائد 20%</option></select></label><label class="finance-field wide" for="financeMonths"><span><img src="assets/images/icons/calendar3.svg" alt="">مدة التقسيط</span><select id="financeMonths" required><option value="">اختر المدة</option><option value="12">12 شهر</option><option value="24">24 شهر</option><option value="36">36 شهر</option></select></label><label class="finance-field wide" for="financeDeposit"><span><img src="assets/images/icons/wallet2.svg" alt="">المقدم</span><input id="financeDeposit" type="number" min="0" step="1" placeholder="أدخل المقدم بالجنيه" required></label></div><p id="financePrice" class="finance-price" aria-live="polite">اختر الماركة والموديل للبدء</p><button class="finance-submit" type="submit"><img src="assets/images/icons/calculator.svg" alt="">احسب قسطك <span aria-hidden="true">‹</span></button></form><div class="finance-benefits"><div><img src="assets/images/icons/shield-check.svg" alt=""><span>ضمان معتمد على كل موتوسيكل</span></div><div><img src="assets/images/icons/gear.svg" alt=""><span>إجراءات سريعة ومبسطة</span></div><div><img src="assets/images/icons/headset.svg" alt=""><span>دعم مستمر قبل وبعد الشراء</span></div><div><img src="assets/images/icons/shield-check.svg" alt=""><span>أنظمة تقسيط متنوعة</span></div></div></div><section class="finance-dashboard" dir="rtl" aria-labelledby="resultHeading" aria-live="polite"><div class="payment-highlight"><span id="resultHeading">القسط الشهري التقديري</span><strong id="monthlyAmount">—</strong><small>جنيه / شهر</small></div><div class="payment-facts"><div><span>مدة التقسيط</span><strong id="resultMonths">—</strong><small>شهر</small></div><div><span>المقدم</span><strong id="resultDeposit">—</strong><small>جنيه</small></div><div><span>إجمالي الأقساط</span><strong id="resultTotal">—</strong><small>جنيه</small></div></div><p id="resultNote">اختر الموديل وأكمل البيانات لعرض حساب القسط هنا.</p><a id="resultContact" class="button button-outline" href="https://wa.me/201001234567" target="_blank" rel="noopener" hidden>تأكيد السعر عبر واتساب</a></section></section></main><footer class="site-footer" id="contact">
+        <div class="contact-strip">
+          <div class="map-art">
+            <img
+              class="world-map"
+              src="assets/images/world-map.png"
+              alt=""
+              aria-hidden="true"
+            /><img
+              class="icon bi bi-location-pin map-pin"
+              src="assets/images/icons/location-pin.png"
+              alt=""
+              aria-hidden="true"
+              width="24"
+              height="24"
+            />
+          </div>
+          <div class="contact-copy" dir="rtl">
+            <h2>تواصل معنا الآن</h2>
+            <p>زورونا في أقرب فرع معتمد<br />أو تواصلوا معنا لحجز دراجتك</p>
+            <a class="button button-orange" href="tel:01001234567" dir="ltr"
+              ><img
+                class="icon bi bi-telephone-fill"
+                src="assets/images/icons/telephone-fill.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24"
+              />
+              0100 123 4567</a
+            >
+          </div>
+          <a
+            class="contact-chat"
+            href="https://wa.me/201001234567"
+            aria-label="تواصل عبر واتساب"
+            ><img
+              class="icon bi bi-chat-square-dots"
+              src="assets/images/icons/chat-square-dots.svg"
+              alt=""
+              aria-hidden="true"
+              width="24"
+              height="24"
+          /></a>
+          <div class="socials">
+            <a
+              class="social facebook"
+              href="https://www.facebook.com/"
+              aria-label="فيسبوك"
+              target="_blank"
+              rel="noopener noreferrer"
+              ><img
+                class="icon bi bi-facebook"
+                src="assets/images/icons/facebook.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24" /></a
+            ><a
+              class="social instagram"
+              href="https://www.instagram.com/"
+              aria-label="إنستجرام"
+              target="_blank"
+              rel="noopener noreferrer"
+              ><img
+                class="icon bi bi-instagram"
+                src="assets/images/icons/instagram.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24" /></a
+            ><a
+              class="social tiktok"
+              href="https://www.tiktok.com/"
+              aria-label="تيك توك"
+              target="_blank"
+              rel="noopener noreferrer"
+              ><img
+                class="icon bi bi-tiktok"
+                src="assets/images/icons/tiktok.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24" /></a
+            ><a
+              class="social whatsapp"
+              href="https://wa.me/201001234567"
+              aria-label="واتساب"
+              target="_blank"
+              rel="noopener noreferrer"
+              ><img
+                class="icon bi bi-whatsapp"
+                src="assets/images/icons/whatsapp.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24"
+            /></a>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <a class="logo" href="index.html"
+            ><img
+              src="assets/images/logo.png"
+              width="376"
+              height="116"
+              alt="MotoGate"
+          /></a>
+          <nav aria-label="روابط أسفل الصفحة">
+            <a href="index.html">الرئيسية</a><a href="machines.html">الدراجات</a
+            ><a href="calculate.html">احسب قسطك</a><a href="contact.html">فروعنا</a
+            ><a href="about.html">عن موتوجيت</a><a href="contact.html">تواصل معنا</a>
+          </nav>
+          <small dir="rtl">© 2024 MotoGate<br />جميع الحقوق محفوظة</small>
+        </div>
+      </footer><script src="assets/vendor/bootstrap.bundle.min.js"></script><script src="assets/js/finance.js"></script></body></html>

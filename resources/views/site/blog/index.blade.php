@@ -1,43 +1,10 @@
 @extends('layouts.site')
-
 @section('title', (string) (site('blog.seo.title')))
 @section('meta_description', (string) (site('blog.seo.description')))
-
-@php($style = site('blog.card_style', 'classic'))
-
-@section('content')
-    <x-site.page-banner :image="site('blog.banner.image')" :title="site('blog.banner.title')"
-        :breadcrumbs="[site('blog.banner.breadcrumb') => null]" />
-
-    <div @class(['section-full p-t150 p-b150 site-bg-white', 'twm-blog-grid-2-section-wrap' => $style === 'grid', 'twm-blog-grid-section-wrap' => $style !== 'grid'])>
-        <div class="container">
-            <div class="section-content">
-                <x-site.section-head align="center" :small="site('blog.small_title')" :title="site('blog.title')" />
-
-                <div class="masonry-wrap row" dir="rtl">
-                    @forelse ($posts as $post)
-                        <div class="masonry-item col-xl-4 col-lg-6 col-md-6 m-b30 wow fadeInDown" data-wow-delay="0.{{ ($loop->index % 3) + 1 }}">
-                            <x-site.post-card :post="$post" :style="$style" />
-                        </div>
-                    @empty
-                        <div class="col-12 text-center"><p class="p-text">{{ site('blog.empty_text') }}</p></div>
-                    @endforelse
-                </div>
-
-                @if ($posts->hasPages())
-                    <div class="pagination-outer d-flex justify-content-center">
-                        <div class="pagination-style1" dir="rtl">
-                            <ul class="clearfix">
-                                <li class="prev"><a href="{{ $posts->previousPageUrl() ?? '#' }}"><span><i class="fa-solid fa-arrow-right"></i></span></a></li>
-                                @foreach ($posts->getUrlRange(1, $posts->lastPage()) as $page => $url)
-                                    <li @class(['active' => $page === $posts->currentPage()])><a href="{{ $url }}">{{ $page }}</a></li>
-                                @endforeach
-                                <li class="next"><a href="{{ $posts->nextPageUrl() ?? '#' }}"><span><i class="fa-solid fa-arrow-left"></i></span></a></li>
-                            </ul>
-                        </div>
-                    </div>
-                @endif
-            </div>
-        </div>
-    </div>
+@section('body_class', 'article-page interior-page source-design')
+@section('design_css', 'pages')
+{{-- No list page in motogate-2: built only from its article-page parts (page-heading, related-card). --}}
+@section('content')<main id="main" dir="rtl"><div class="article-shell"><nav aria-label="مسار الصفحة" class="breadcrumbs"><a href="{{ route('home') }}">{{ site('blog.design.article.text_01') }}</a><span>/</span><span>{{ site('blog.design.article.text_02') }}</span></nav><div class="page-heading"><span class="mini-label">{{ site('blog.small_title') }}</span><h1>{{ site('blog.banner.title') }}</h1><p>{{ site('blog.title') }}</p></div>@if ($posts->isEmpty())<p>{{ site('blog.empty_text') }}</p>@else<div class="related-grid">@foreach ($posts as $post)<a class="surface related-card" href="{{ route('blog.show', $post) }}"><img src="{{ $post->coverUrl() }}" alt="{{ $post->title }}" loading="lazy"><h3>{{ $post->title }}</h3></a>@endforeach</div>@endif
+@if ($posts->hasPages())<nav class="design-pagination" aria-label="صفحات المقالات">@if ($posts->previousPageUrl())<a class="button button-outline" href="{{ $posts->previousPageUrl() }}">السابق</a>@endif @if ($posts->hasMorePages())<a class="button button-outline" href="{{ $posts->nextPageUrl() }}">التالي</a>@endif</nav>@endif
+</div></main>
 @endsection

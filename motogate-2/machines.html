@@ -1,0 +1,1468 @@
+<!doctype html>
+<html lang="ar">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#080b0c" />
+    <meta
+      name="description"
+      content="موتوجيت — اكتشف الدراجات والموتوسيكلات واعرف أنسب نظام تقسيط ليك."
+    />
+    <title>المعرض | MotoGate موتوجيت</title>
+    <link rel="icon" href="assets/images/logo.png" />
+    <link rel="stylesheet" href="assets/vendor/bootstrap.min.css" />
+
+    <link rel="stylesheet" href="assets/css/fonts.css" />
+    <link rel="stylesheet" href="assets/css/style.css" />
+    <link rel="stylesheet" href="assets/css/responsiv.css" />
+    <link rel="stylesheet" href="assets/css/layers.css" />
+    <link rel="stylesheet" href="assets/css/components.css" />
+  <link rel="stylesheet" href="assets/css/updates.css" /><link rel="stylesheet" href="assets/css/navigation.css"></head>
+  <body class="gallery-page">
+    <aside
+      class="offcanvas offcanvas-end clean-drawer"
+      tabindex="-1"
+      id="mobileMenu"
+      aria-labelledby="menuTitle"
+    >
+      <div class="offcanvas-header">
+        <h2 id="menuTitle" class="visually-hidden">القائمة الرئيسية</h2>
+        <a href="index.html" class="drawer-logo"
+          ><img
+            src="assets/images/logo.png"
+            class=""
+            alt="MotoGate"
+            width="376"
+            height="116" /></a
+        ><button
+          type="button"
+          class="drawer-close"
+          data-bs-dismiss="offcanvas"
+          aria-label="إغلاق القائمة"
+        >
+          <svg viewBox="0 0 24 24" width="25" height="25" aria-hidden="true">
+            <path
+              d="M5 5L19 19M19 5L5 19"
+              stroke="currentColor"
+              stroke-width="1.5"
+            />
+          </svg>
+        </button>
+      </div>
+      <div class="drawer-body">
+        <nav class="drawer-links" aria-label="قائمة الموبايل">
+          <a href="index.html">الرئيسية</a
+          ><a href="machines.html" aria-current="page">المعرض</a
+          ><a href="calculate.html">اعرف قسطك</a
+          ><a href="about.html">نبذة عنا</a
+          ><a href="contact.html">تواصل معنا</a>
+        <a href="track.html">تتبع حالة طلبك</a></nav>
+        <div class="drawer-footer">
+          <a class="button button-outline" href="calculate.html"
+            >احسب قسطك الآن</a
+          >
+        </div>
+      </div>
+    </aside>
+    <a class="skip-link" href="#main">انتقل إلى المحتوى</a>
+    <div class="gallery-shell">
+      <header class="site-header">
+          <div class="header-inner">
+            <button
+              class="menu-toggle"
+              type="button"
+              data-bs-toggle="offcanvas"
+              data-bs-target="#mobileMenu"
+              aria-controls="mobileMenu"
+              aria-label="فتح القائمة"
+            >
+              <img
+                class="icon bi bi-list"
+                src="assets/images/icons/list.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24"
+              /></button
+            ><a
+              class="header-calc button button-orange"
+              href="calculate.html"
+              >احسب قسطك
+              <img
+                class="icon bi bi-calculator"
+                src="assets/images/icons/calculator.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24"
+            /></a>
+            <nav class="desktop-nav" aria-label="القائمة الرئيسية">
+              <a href="index.html">الرئيسية</a
+              ><a href="machines.html" aria-current="page">المعرض</a
+              ><a href="calculate.html">اعرف قسطك</a
+              ><a href="about.html">نبذة عنا</a
+              ><a href="contact.html">تواصل معنا</a>
+            <a href="track.html">تتبع حالة طلبك</a></nav>
+            <button
+              type="button"
+              class="search-toggle"
+              data-bs-toggle="modal"
+              data-bs-target="#searchModal"
+              aria-label="البحث عن دراجة"
+            >
+              <img
+                class="icon bi bi-search"
+                src="assets/images/icons/search.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24"
+              /></button
+            ><a class="logo" href="index.html" aria-label="موتوجيت — الرئيسية"
+              ><img
+                src="assets/images/logo.png"
+                width="376"
+                height="116"
+                alt="MotoGate"
+            /></a>
+          </div>
+        </header>
+
+      <section class="brands-bar" aria-label="اختيار الماركة">
+        <button
+          type="button"
+          class="button all-brands"
+          data-brand="all"
+          aria-pressed="true"
+        >
+          <img
+            class="icon bi bi-chevron-left"
+            src="assets/images/icons/chevron-left.svg"
+            alt=""
+            aria-hidden="true"
+            width="24"
+            height="24"
+          />
+          جميع الماركات
+          <img
+            class="icon bi bi-chevron-right"
+            src="assets/images/icons/chevron-right.svg"
+            alt=""
+            aria-hidden="true"
+            width="24"
+            height="24"
+          />
+        </button>
+        <div class="brand-list">
+          <button
+            class="brand-filter brand-sym"
+            type="button"
+            data-brand="SYM"
+            aria-pressed="false"
+          >
+            <img
+              src="assets/images/brand-sym.webp"
+              alt="SYM"
+              width="100"
+              height="40"
+            /></button
+          ><button
+            class="brand-filter brand-haojue"
+            type="button"
+            data-brand="Haojue"
+            aria-pressed="false"
+          >
+            <img
+              src="assets/images/brand-haojue.webp"
+              alt="HAOJUE"
+              width="100"
+              height="40"
+            /></button
+          ><button
+            class="brand-filter brand-keeway"
+            type="button"
+            data-brand="KEEWAY"
+            aria-pressed="false"
+          >
+            <img
+              src="assets/images/brand-keeway.webp"
+              alt="KEEWAY"
+              width="100"
+              height="40"
+            /></button
+          ><button
+            class="brand-filter brand-dayun"
+            type="button"
+            data-brand="DAYUN"
+            aria-pressed="false"
+          >
+            <img
+              src="assets/images/brand-dayun.webp"
+              alt="DAYUN"
+              width="100"
+              height="40"
+            /></button
+          ><button
+            class="brand-filter brand-benelli"
+            type="button"
+            data-brand="Benelli"
+            aria-pressed="false"
+          >
+            <img
+              src="assets/images/brand-benelli.webp"
+              alt="BENELLI"
+              width="100"
+              height="40"
+            /></button
+          ><button
+            class="brand-filter brand-zontes"
+            type="button"
+            data-brand="ZONTES"
+            aria-pressed="false"
+          >
+            <img
+              src="assets/images/brand-zontes.webp"
+              alt="ZONTES"
+              width="100"
+              height="40"
+            /></button
+          ><button
+            class="brand-filter brand-tvs"
+            type="button"
+            data-brand="TVS"
+            aria-pressed="false"
+          >
+            <img
+              src="assets/images/brand-tvs.webp"
+              alt="TVS"
+              width="100"
+              height="40"
+            /></button
+          ><button
+            class="brand-filter brand-bajaj"
+            type="button"
+            data-brand="BAJAJ"
+            aria-pressed="false"
+          >
+            <img
+              src="assets/images/brand-bajaj.webp"
+              alt="BAJAJ"
+              width="100"
+              height="40"
+            />
+          </button>
+        </div>
+        <button class="brand-next" type="button" aria-label="الماركات التالية">
+          <img
+            class="icon bi bi-chevron-right"
+            src="assets/images/icons/chevron-right.svg"
+            alt=""
+            aria-hidden="true"
+            width="24"
+            height="24"
+          />
+        </button>
+      </section>
+      <main id="main">
+        <section class="gallery-feature">
+          <div class="gallery-scene">
+            <img
+              class="showroom-floor"
+              src="assets/images/الباكجراوند.png"
+              alt=""
+              aria-hidden="true"
+              width="1961"
+              height="802"
+            />
+            <img
+              class="showroom-ceiling"
+              src="assets/images/warehouse-ceiling.webp"
+              alt=""
+              aria-hidden="true"
+              width="608"
+              height="55"
+            />
+            <div class="showroom-sign">
+              <img
+                class=""
+                src="assets/images/logo.png"
+                alt="MotoGate"
+                width="376"
+                height="116"
+              /><span>PERFORMANCE<br />GALLERY</span>
+            </div>
+            <div class="motorcycle-platform" aria-hidden="true"></div>
+            <img
+              class="showroom-motorcycle"
+              src="assets/images/motorcycle-rkz200.webp"
+              alt="دراجة Keeway RKZ200 باللون الأسود والبرتقالي"
+              width="799"
+              height="693"
+            />
+            <ul class="scene-specs" aria-label="مواصفات الدراجة">
+              <li class="spec-capacity">
+                <img
+                  class="icon bi bi-engine"
+                  src="assets/images/icons/engine.png"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24"
+                />
+                <div>
+                  <strong dir="ltr">200 CC</strong
+                  ><span dir="rtl">سعة المحرك</span>
+                </div>
+              </li>
+              <li class="spec-stroke">
+                <img
+                  class="icon bi bi-stroke"
+                  src="assets/images/icons/stroke.png"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24"
+                />
+                <div>
+                  <strong dir="ltr">4 Stroke</strong
+                  ><span dir="rtl">نوع المحرك</span>
+                </div>
+              </li>
+              <li class="spec-cooling">
+                <img
+                  class="icon bi bi-radiator"
+                  src="assets/images/icons/radiator.png"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24"
+                />
+                <div>
+                  <strong dir="ltr">Liquid Cooled</strong
+                  ><span dir="rtl">نظام التبريد</span>
+                </div>
+              </li>
+              <li class="spec-gears">
+                <img
+                  class="icon bi bi-transmission"
+                  src="assets/images/icons/transmission.png"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24"
+                />
+                <div>
+                  <strong dir="ltr">6 Gears</strong
+                  ><span dir="rtl">ناقل الحركة</span>
+                </div>
+              </li>
+              <li class="spec-brakes">
+                <img
+                  class="icon bi bi-brake"
+                  src="assets/images/icons/brake.png"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24"
+                />
+                <div>
+                  <strong dir="ltr">Disc Brake</strong
+                  ><span dir="rtl">نظام الفرامل</span>
+                </div>
+              </li>
+            </ul>
+          </div>
+          <div class="featured-copy">
+            <span class="eyebrow" dir="rtl">المميز في المعرض</span>
+            <h1>
+              <span>Keeway</span><strong><em>RKZ</em>200</strong>
+            </h1>
+            <p class="featured-tagline" dir="rtl">الأداء الذي يلهمك</p>
+            <div class="mobile-specs">
+              <span
+                ><img
+                  class="icon bi bi-engine"
+                  src="assets/images/icons/engine.png"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24"
+                />
+                200 CC</span
+              ><span
+                ><img
+                  class="icon bi bi-stroke"
+                  src="assets/images/icons/stroke.png"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24"
+                />
+                4 Stroke</span
+              ><span
+                ><img
+                  class="icon bi bi-transmission"
+                  src="assets/images/icons/transmission.png"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24"
+                />
+                6 Gears</span
+              ><span
+                ><img
+                  class="icon bi bi-brake"
+                  src="assets/images/icons/brake.png"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24"
+                />
+                Disc Brake</span
+              >
+            </div>
+            <div class="price" dir="rtl">
+              <span>نقداً</span><strong dir="ltr">89,000</strong
+              ><span>جنيه</span>
+            </div>
+            <div class="featured-actions">
+              <a href="index.html#installment" class="button button-orange"
+                >احسب القسط
+                <img
+                  class="icon bi bi-calculator"
+                  src="assets/images/icons/calculator.svg"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24" /></a
+              ><button
+                type="button"
+                class="button button-outline"
+                data-model="keeway"
+              >
+                عرض التفاصيل
+                <img
+                  class="icon bi bi-chevron-right"
+                  src="assets/images/icons/chevron-right.svg"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24"
+                />
+              </button>
+            </div>
+          </div>
+        </section>
+        <section class="latest-models" id="models">
+          <div class="section-heading">
+            <h2>أحدث الموديلات <em>في المعرض</em></h2>
+            <button class="button button-outline" type="button" data-show-all>
+              عرض كل الموديلات
+              <img
+                class="icon bi bi-bullseye"
+                src="assets/images/icons/bullseye.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24"
+              />
+            </button>
+          </div>
+          <div class="models-grid">
+            <article
+              class="model-card"
+              data-make="Keeway"
+              data-category="sport"
+              data-extra-model
+              hidden
+            >
+              <img
+                class=""
+                src="assets/images/motorcycle-rkz200.webp"
+                alt="Keeway RKZ200"
+                width="799"
+                height="693"
+                loading="lazy"
+              />
+              <div class="model-copy">
+                <h3 dir="ltr">Keeway<strong>RKZ200</strong></h3>
+                <p dir="rtl">موتوسيكل رياضي</p>
+                <span class="model-line"></span>
+                <p class="availability" dir="rtl">89,000 جنيه</p>
+                <button
+                  class="button button-outline"
+                  type="button"
+                  data-model="keeway"
+                >
+                  عرض التفاصيل
+                  <img
+                    class="icon bi bi-chevron-right"
+                    src="assets/images/icons/chevron-right.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width="24"
+                    height="24"
+                  />
+                </button>
+              </div>
+            </article>
+            <article class="model-card" data-make="SYM" data-category="sport">
+              <img
+                src="assets/images/sym.webp"
+                width="204"
+                height="175"
+                alt="SYM NH T200"
+                loading="lazy"
+              />
+              <div class="model-copy">
+                <h3 dir="ltr">SYM<strong>NH T200</strong></h3>
+                <p dir="rtl">موتوسيكل رياضي</p>
+                <span class="model-line"></span>
+                <p class="availability" dir="rtl">السعر حسب التوفر</p>
+                <button
+                  class="button button-outline"
+                  type="button"
+                  data-model="sym"
+                >
+                  عرض التفاصيل
+                  <img
+                    class="icon bi bi-chevron-right"
+                    src="assets/images/icons/chevron-right.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width="24"
+                    height="24"
+                  />
+                </button>
+              </div>
+            </article>
+            <article
+              class="model-card"
+              data-make="Haojue"
+              data-category="sport"
+            >
+              <img
+                src="assets/images/haojue.webp"
+                width="204"
+                height="175"
+                alt="Haojue DR160"
+                loading="lazy"
+              />
+              <div class="model-copy">
+                <h3 dir="ltr">Haojue<strong>DR160</strong></h3>
+                <p dir="rtl">نيكد</p>
+                <span class="model-line"></span>
+                <p class="availability" dir="rtl">السعر حسب التوفر</p>
+                <button
+                  class="button button-outline"
+                  type="button"
+                  data-model="haojue"
+                >
+                  عرض التفاصيل
+                  <img
+                    class="icon bi bi-chevron-right"
+                    src="assets/images/icons/chevron-right.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width="24"
+                    height="24"
+                  />
+                </button>
+              </div>
+            </article>
+            <article
+              class="model-card"
+              data-make="Benelli"
+              data-category="sport"
+            >
+              <img
+                src="assets/images/benelli.webp"
+                width="204"
+                height="175"
+                alt="Benelli TNT"
+                loading="lazy"
+              />
+              <div class="model-copy">
+                <h3 dir="ltr">Benelli<strong>TNT</strong></h3>
+                <p dir="rtl">موتوسيكل رياضي</p>
+                <span class="model-line"></span>
+                <p class="availability" dir="rtl">السعر حسب التوفر</p>
+                <button
+                  class="button button-outline"
+                  type="button"
+                  data-model="benelli"
+                >
+                  عرض التفاصيل
+                  <img
+                    class="icon bi bi-chevron-right"
+                    src="assets/images/icons/chevron-right.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width="24"
+                    height="24"
+                  />
+                </button>
+              </div>
+            </article>
+          </div>
+          <p class="empty-models" hidden dir="rtl">
+            لا توجد موديلات متاحة من هذه الماركة حالياً.
+            <button type="button" data-reset-brands>عرض جميع الماركات</button>
+          </p>
+        </section>
+        <section class="journal" id="articles" aria-labelledby="journalTitle">
+          <div class="journal-heading">
+            <p>مجلة <span dir="ltr">MotoGate</span></p>
+            <h2 id="journalTitle">دليلك لاختيار <em>الأفضل</em></h2>
+            <p class="journal-subtitle">
+              مقالات عملية تساعدك في كل خطوة قبل الشراء
+            </p>
+            <button
+              class="button button-outline"
+              type="button"
+              data-all-articles
+            >
+              كل المقالات
+              <img
+                src="assets/images/icons/chevron-left.svg"
+                class="icon"
+                alt=""
+                width="24"
+                height="24"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+          <img
+            src="assets/images/blog/decoration.webp"
+            class="journal-decoration"
+            alt=""
+            aria-hidden="true"
+            loading="lazy"
+          />
+          <div
+            class="journal-carousel"
+            data-carousel="journal"
+            role="region"
+            aria-roledescription="عرض شرائح"
+            aria-label="مقالات مجلة موتوجيت"
+            tabindex="0"
+          >
+            <div class="journal-slides">
+              <div
+                class="journal-slide is-active"
+                data-slide
+                aria-hidden="false"
+              >
+                <a
+                  class="journal-card journal-featured"
+                  href="#article-1"
+                  data-article="0"
+                  ><img
+                    src="assets/images/blog/motorcycle.webp"
+                    class="journal-photo"
+                    alt="إزاي تختار موتوسيكل؟"
+                    loading="lazy"
+                  />
+                  <div class="journal-copy">
+                    <span class="journal-tag"
+                      ><img
+                        src="assets/images/why/book.svg"
+                        class="icon"
+                        alt=""
+                        width="24"
+                        height="24"
+                        aria-hidden="true"
+                      />دليل الشراء</span
+                    >
+                    <h3>إزاي تختار موتوسيكل؟</h3>
+                    <p>
+                      دليل شامل لاختيار الموتوسيكل المناسب لاحتياجاتك، مع أهم
+                      العوامل التي يجب مراعاتها قبل الشراء.
+                    </p>
+                    <span class="journal-read"
+                      ><span
+                        ><img
+                          src="assets/images/icons/chevron-left.svg"
+                          class="icon"
+                          alt=""
+                          width="24"
+                          height="24"
+                          aria-hidden="true" /></span
+                      >اقرأ المقال</span
+                    >
+                  </div></a
+                ><a
+                  class="journal-card journal-small"
+                  href="#article-2"
+                  data-article="1"
+                  ><img
+                    src="assets/images/blog/oil.webp"
+                    class="journal-photo"
+                    alt="أي نوع زيت؟"
+                    loading="lazy"
+                  />
+                  <div class="journal-copy">
+                    <span class="journal-tag"
+                      ><img
+                        src="assets/images/why/gear.svg"
+                        class="icon"
+                        alt=""
+                        width="24"
+                        height="24"
+                        aria-hidden="true"
+                      />صيانة واهتمام</span
+                    >
+                    <h3>أي نوع زيت؟</h3>
+                    <p>
+                      تعرف على أفضل زيت لموتوسيكلك، وما الفرق بين الأنواع وكيف
+                      تختار المناسب لمحركك.
+                    </p>
+                    <span class="journal-read"
+                      ><span
+                        ><img
+                          src="assets/images/icons/chevron-left.svg"
+                          class="icon"
+                          alt=""
+                          width="24"
+                          height="24"
+                          aria-hidden="true" /></span
+                      >اقرأ المقال</span
+                    >
+                  </div></a
+                ><a
+                  class="journal-card journal-small"
+                  href="#article-3"
+                  data-article="2"
+                  ><img
+                    src="assets/images/blog/finance.webp"
+                    class="journal-photo"
+                    alt="أنظمة التقسيط"
+                    loading="lazy"
+                  />
+                  <div class="journal-copy">
+                    <span class="journal-tag"
+                      ><img
+                        src="assets/images/why/card.svg"
+                        class="icon"
+                        alt=""
+                        width="24"
+                        height="24"
+                        aria-hidden="true"
+                      />نصائح الشراء</span
+                    >
+                    <h3>أنظمة التقسيط</h3>
+                    <p>
+                      كل ما تحتاج معرفته عن أنظمة التقسيط للموتوسيكلات وأفضل
+                      الخيارات المتاحة والمستندات المطلوبة.
+                    </p>
+                    <span class="journal-read"
+                      ><span
+                        ><img
+                          src="assets/images/icons/chevron-left.svg"
+                          class="icon"
+                          alt=""
+                          width="24"
+                          height="24"
+                          aria-hidden="true" /></span
+                      >اقرأ المقال</span
+                    >
+                  </div></a
+                >
+              </div>
+              <div class="journal-slide" data-slide aria-hidden="true">
+                <a
+                  class="journal-card journal-featured"
+                  href="#article-2"
+                  data-article="1"
+                  ><img
+                    src="assets/images/blog/oil.webp"
+                    class="journal-photo"
+                    alt="أي نوع زيت؟"
+                    loading="lazy"
+                  />
+                  <div class="journal-copy">
+                    <span class="journal-tag"
+                      ><img
+                        src="assets/images/why/gear.svg"
+                        class="icon"
+                        alt=""
+                        width="24"
+                        height="24"
+                        aria-hidden="true"
+                      />صيانة واهتمام</span
+                    >
+                    <h3>أي نوع زيت؟</h3>
+                    <p>
+                      تعرف على أفضل زيت لموتوسيكلك، وما الفرق بين الأنواع وكيف
+                      تختار المناسب لمحركك.
+                    </p>
+                    <span class="journal-read"
+                      ><span
+                        ><img
+                          src="assets/images/icons/chevron-left.svg"
+                          class="icon"
+                          alt=""
+                          width="24"
+                          height="24"
+                          aria-hidden="true" /></span
+                      >اقرأ المقال</span
+                    >
+                  </div></a
+                ><a
+                  class="journal-card journal-small"
+                  href="#article-1"
+                  data-article="0"
+                  ><img
+                    src="assets/images/blog/motorcycle.webp"
+                    class="journal-photo"
+                    alt="إزاي تختار موتوسيكل؟"
+                    loading="lazy"
+                  />
+                  <div class="journal-copy">
+                    <span class="journal-tag"
+                      ><img
+                        src="assets/images/why/book.svg"
+                        class="icon"
+                        alt=""
+                        width="24"
+                        height="24"
+                        aria-hidden="true"
+                      />دليل الشراء</span
+                    >
+                    <h3>إزاي تختار موتوسيكل؟</h3>
+                    <p>
+                      دليل شامل لاختيار الموتوسيكل المناسب لاحتياجاتك، مع أهم
+                      العوامل التي يجب مراعاتها قبل الشراء.
+                    </p>
+                    <span class="journal-read"
+                      ><span
+                        ><img
+                          src="assets/images/icons/chevron-left.svg"
+                          class="icon"
+                          alt=""
+                          width="24"
+                          height="24"
+                          aria-hidden="true" /></span
+                      >اقرأ المقال</span
+                    >
+                  </div></a
+                ><a
+                  class="journal-card journal-small"
+                  href="#article-3"
+                  data-article="2"
+                  ><img
+                    src="assets/images/blog/finance.webp"
+                    class="journal-photo"
+                    alt="أنظمة التقسيط"
+                    loading="lazy"
+                  />
+                  <div class="journal-copy">
+                    <span class="journal-tag"
+                      ><img
+                        src="assets/images/why/card.svg"
+                        class="icon"
+                        alt=""
+                        width="24"
+                        height="24"
+                        aria-hidden="true"
+                      />نصائح الشراء</span
+                    >
+                    <h3>أنظمة التقسيط</h3>
+                    <p>
+                      كل ما تحتاج معرفته عن أنظمة التقسيط للموتوسيكلات وأفضل
+                      الخيارات المتاحة والمستندات المطلوبة.
+                    </p>
+                    <span class="journal-read"
+                      ><span
+                        ><img
+                          src="assets/images/icons/chevron-left.svg"
+                          class="icon"
+                          alt=""
+                          width="24"
+                          height="24"
+                          aria-hidden="true" /></span
+                      >اقرأ المقال</span
+                    >
+                  </div></a
+                >
+              </div>
+              <div class="journal-slide" data-slide aria-hidden="true">
+                <a
+                  class="journal-card journal-featured"
+                  href="#article-3"
+                  data-article="2"
+                  ><img
+                    src="assets/images/blog/finance.webp"
+                    class="journal-photo"
+                    alt="أنظمة التقسيط"
+                    loading="lazy"
+                  />
+                  <div class="journal-copy">
+                    <span class="journal-tag"
+                      ><img
+                        src="assets/images/why/card.svg"
+                        class="icon"
+                        alt=""
+                        width="24"
+                        height="24"
+                        aria-hidden="true"
+                      />نصائح الشراء</span
+                    >
+                    <h3>أنظمة التقسيط</h3>
+                    <p>
+                      كل ما تحتاج معرفته عن أنظمة التقسيط للموتوسيكلات وأفضل
+                      الخيارات المتاحة والمستندات المطلوبة.
+                    </p>
+                    <span class="journal-read"
+                      ><span
+                        ><img
+                          src="assets/images/icons/chevron-left.svg"
+                          class="icon"
+                          alt=""
+                          width="24"
+                          height="24"
+                          aria-hidden="true" /></span
+                      >اقرأ المقال</span
+                    >
+                  </div></a
+                ><a
+                  class="journal-card journal-small"
+                  href="#article-1"
+                  data-article="0"
+                  ><img
+                    src="assets/images/blog/motorcycle.webp"
+                    class="journal-photo"
+                    alt="إزاي تختار موتوسيكل؟"
+                    loading="lazy"
+                  />
+                  <div class="journal-copy">
+                    <span class="journal-tag"
+                      ><img
+                        src="assets/images/why/book.svg"
+                        class="icon"
+                        alt=""
+                        width="24"
+                        height="24"
+                        aria-hidden="true"
+                      />دليل الشراء</span
+                    >
+                    <h3>إزاي تختار موتوسيكل؟</h3>
+                    <p>
+                      دليل شامل لاختيار الموتوسيكل المناسب لاحتياجاتك، مع أهم
+                      العوامل التي يجب مراعاتها قبل الشراء.
+                    </p>
+                    <span class="journal-read"
+                      ><span
+                        ><img
+                          src="assets/images/icons/chevron-left.svg"
+                          class="icon"
+                          alt=""
+                          width="24"
+                          height="24"
+                          aria-hidden="true" /></span
+                      >اقرأ المقال</span
+                    >
+                  </div></a
+                ><a
+                  class="journal-card journal-small"
+                  href="#article-2"
+                  data-article="1"
+                  ><img
+                    src="assets/images/blog/oil.webp"
+                    class="journal-photo"
+                    alt="أي نوع زيت؟"
+                    loading="lazy"
+                  />
+                  <div class="journal-copy">
+                    <span class="journal-tag"
+                      ><img
+                        src="assets/images/why/gear.svg"
+                        class="icon"
+                        alt=""
+                        width="24"
+                        height="24"
+                        aria-hidden="true"
+                      />صيانة واهتمام</span
+                    >
+                    <h3>أي نوع زيت؟</h3>
+                    <p>
+                      تعرف على أفضل زيت لموتوسيكلك، وما الفرق بين الأنواع وكيف
+                      تختار المناسب لمحركك.
+                    </p>
+                    <span class="journal-read"
+                      ><span
+                        ><img
+                          src="assets/images/icons/chevron-left.svg"
+                          class="icon"
+                          alt=""
+                          width="24"
+                          height="24"
+                          aria-hidden="true" /></span
+                      >اقرأ المقال</span
+                    >
+                  </div></a
+                >
+              </div>
+            </div>
+            <div class="carousel-controls journal-controls">
+              <button type="button" data-prev aria-label="المقالات السابقة">
+                <img
+                  src="assets/images/icons/chevron-left.svg"
+                  class="icon"
+                  alt=""
+                  width="24"
+                  height="24"
+                  aria-hidden="true"
+                />
+              </button>
+              <div class="carousel-dots">
+                <button
+                  type="button"
+                  data-dot="0"
+                  aria-label="عرض مجموعة المقالات 1"
+                  aria-pressed="true"
+                ></button
+                ><button
+                  type="button"
+                  data-dot="1"
+                  aria-label="عرض مجموعة المقالات 2"
+                  aria-pressed="false"
+                ></button
+                ><button
+                  type="button"
+                  data-dot="2"
+                  aria-label="عرض مجموعة المقالات 3"
+                  aria-pressed="false"
+                ></button>
+              </div>
+              <button type="button" data-next aria-label="المقالات التالية">
+                <img
+                  src="assets/images/icons/chevron-left.svg"
+                  class="icon"
+                  alt=""
+                  width="24"
+                  height="24"
+                  aria-hidden="true"
+                /></button
+              ><button
+                type="button"
+                data-pause
+                aria-label="إيقاف التبديل التلقائي"
+                aria-pressed="false"
+              >
+                <svg
+                  viewBox="0 0 20 20"
+                  width="15"
+                  height="15"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M6 4V16M14 4V16"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  />
+                </svg>
+              </button>
+            </div>
+            <span
+              class="visually-hidden"
+              data-carousel-status
+              aria-live="polite"
+            ></span>
+          </div>
+        </section>
+      </main>
+      <footer class="site-footer" id="contact">
+        <div class="contact-strip">
+          <div class="map-art">
+            <img
+              class="world-map"
+              src="assets/images/world-map.png"
+              alt=""
+              aria-hidden="true"
+            /><img
+              class="icon bi bi-location-pin map-pin"
+              src="assets/images/icons/location-pin.png"
+              alt=""
+              aria-hidden="true"
+              width="24"
+              height="24"
+            />
+          </div>
+          <div class="contact-copy" dir="rtl">
+            <h2>تواصل معنا الآن</h2>
+            <p>زورونا في أقرب فرع معتمد<br />أو تواصلوا معنا لحجز دراجتك</p>
+            <a class="button button-orange" href="tel:01001234567" dir="ltr"
+              ><img
+                class="icon bi bi-telephone-fill"
+                src="assets/images/icons/telephone-fill.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24"
+              />
+              0100 123 4567</a
+            >
+          </div>
+          <a
+            class="contact-chat"
+            href="https://wa.me/201001234567"
+            aria-label="تواصل عبر واتساب"
+            ><img
+              class="icon bi bi-chat-square-dots"
+              src="assets/images/icons/chat-square-dots.svg"
+              alt=""
+              aria-hidden="true"
+              width="24"
+              height="24"
+          /></a>
+          <div class="socials">
+            <a
+              class="social facebook"
+              href="https://www.facebook.com/"
+              aria-label="فيسبوك"
+              target="_blank"
+              rel="noopener noreferrer"
+              ><img
+                class="icon bi bi-facebook"
+                src="assets/images/icons/facebook.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24" /></a
+            ><a
+              class="social instagram"
+              href="https://www.instagram.com/"
+              aria-label="إنستجرام"
+              target="_blank"
+              rel="noopener noreferrer"
+              ><img
+                class="icon bi bi-instagram"
+                src="assets/images/icons/instagram.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24" /></a
+            ><a
+              class="social tiktok"
+              href="https://www.tiktok.com/"
+              aria-label="تيك توك"
+              target="_blank"
+              rel="noopener noreferrer"
+              ><img
+                class="icon bi bi-tiktok"
+                src="assets/images/icons/tiktok.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24" /></a
+            ><a
+              class="social whatsapp"
+              href="https://wa.me/201001234567"
+              aria-label="واتساب"
+              target="_blank"
+              rel="noopener noreferrer"
+              ><img
+                class="icon bi bi-whatsapp"
+                src="assets/images/icons/whatsapp.svg"
+                alt=""
+                aria-hidden="true"
+                width="24"
+                height="24"
+            /></a>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <a class="logo" href="index.html"
+            ><img
+              src="assets/images/logo.png"
+              width="376"
+              height="116"
+              alt="MotoGate"
+          /></a>
+          <nav aria-label="روابط أسفل الصفحة">
+            <a href="index.html">الرئيسية</a><a href="machines.html">الدراجات</a
+            ><a href="calculate.html">احسب قسطك</a><a href="contact.html">فروعنا</a
+            ><a href="about.html">عن موتوجيت</a><a href="contact.html">تواصل معنا</a>
+          </nav>
+          <small dir="rtl">© 2024 MotoGate<br />جميع الحقوق محفوظة</small>
+        </div>
+      </footer>
+    </div>
+    <div
+      class="modal fade"
+      id="detailsModal"
+      tabindex="-1"
+      aria-labelledby="detailsTitle"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 class="modal-title fs-4" id="detailsTitle"></h2>
+            <button
+              class="btn-close btn-close-white"
+              data-bs-dismiss="modal"
+              aria-label="إغلاق"
+            ></button>
+          </div>
+          <div class="modal-body" id="detailsBody" dir="rtl"></div>
+        </div>
+      </div>
+    </div>
+    <div
+      class="modal fade"
+      id="searchModal"
+      tabindex="-1"
+      aria-labelledby="searchTitle"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 class="modal-title fs-4" id="searchTitle">ابحث عن دراجتك</h2>
+            <button
+              class="btn-close btn-close-white"
+              data-bs-dismiss="modal"
+              aria-label="إغلاق"
+            ></button>
+          </div>
+          <div class="modal-body" dir="rtl">
+            <label for="bikeSearch" class="form-label"
+              >اسم الماركة أو الموديل</label
+            ><input
+              id="bikeSearch"
+              class="form-control"
+              type="search"
+              placeholder="مثال: Keeway أو TNT"
+              autocomplete="off"
+            />
+            <div
+              id="searchResults"
+              class="search-results"
+              aria-live="polite"
+            ></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Dialog content is authored in HTML; JavaScript only selects the relevant template. --><template
+      id="bike-content-keeway"
+      ><img src="assets/images/motorcycle-rkz200.webp" alt="Keeway RKZ200" />
+      <p>الأداء الذي يلهمك</p>
+      <div class="details-specs" dir="ltr">
+        <span>200 CC</span><span>4 Stroke</span><span>6 Gears</span
+        ><span>Disc Brake</span><span>Liquid Cooled</span>
+      </div>
+      <p>السعر النقدي: <strong dir="ltr">89,000</strong> جنيه</p>
+      <a class="button button-orange" href="calculate.html"
+        >احسب قسطك
+        <img
+          class="icon bi bi-calculator"
+          src="assets/images/icons/calculator.svg"
+          alt=""
+          width="24"
+          height="24"
+      /></a>
+      <a class="button button-outline" href="tel:01001234567"
+        >تواصل معنا</a
+      ></template
+    ><template id="bike-content-sym"
+      ><img src="assets/images/sym.webp" alt="SYM NH T200" />
+      <p>موتوسيكل رياضي</p>
+      <p>السعر حسب التوفر — تواصل مع المعرض لمعرفة السعر والمواصفات المتاحة.</p>
+      <a class="button button-orange" href="calculate.html"
+        >احسب قسطك
+        <img
+          class="icon bi bi-calculator"
+          src="assets/images/icons/calculator.svg"
+          alt=""
+          width="24"
+          height="24"
+      /></a>
+      <a class="button button-outline" href="tel:01001234567"
+        >تواصل معنا</a
+      ></template
+    ><template id="bike-content-haojue"
+      ><img src="assets/images/haojue.webp" alt="Haojue DR160" />
+      <p>نيكد</p>
+      <p>السعر حسب التوفر — تواصل مع المعرض لمعرفة السعر والمواصفات المتاحة.</p>
+      <a class="button button-orange" href="calculate.html"
+        >احسب قسطك
+        <img
+          class="icon bi bi-calculator"
+          src="assets/images/icons/calculator.svg"
+          alt=""
+          width="24"
+          height="24"
+      /></a>
+      <a class="button button-outline" href="tel:01001234567"
+        >تواصل معنا</a
+      ></template
+    ><template id="bike-content-benelli"
+      ><img src="assets/images/benelli.webp" alt="Benelli TNT" />
+      <p>موتوسيكل رياضي</p>
+      <p>السعر حسب التوفر — تواصل مع المعرض لمعرفة السعر والمواصفات المتاحة.</p>
+      <a class="button button-orange" href="calculate.html"
+        >احسب قسطك
+        <img
+          class="icon bi bi-calculator"
+          src="assets/images/icons/calculator.svg"
+          alt=""
+          width="24"
+          height="24"
+      /></a>
+      <a class="button button-outline" href="tel:01001234567"
+        >تواصل معنا</a
+      ></template
+    ><template id="article-content-0"
+      ><img src="assets/images/article-bike.webp" alt="" />
+      <p>
+        ابدأ بتحديد استخدامك اليومي: تنقلات، شغل، أو رحلات. قارن حجم الدراجة
+        ووزنها وراحة القعدة، واسأل عن الضمان والصيانة وتوفر قطع الغيار. جرّب
+        وضعية القيادة في المعرض قبل اختيار الموديل المناسب ليك.
+      </p></template
+    ><template id="article-content-1"
+      ><img src="assets/images/article-oil.webp" alt="" />
+      <p>
+        اختيار الزيت يبدأ من دليل المالك الخاص بموديل دراجتك. راجع درجة اللزوجة
+        والمواصفات المطلوبة ومواعيد التغيير، وخلي الصيانة تتم في مركز معتمد.
+        تواصل مع فريقنا لمعرفة المواصفات المذكورة في دليل موديلك.
+      </p></template
+    ><template id="article-content-2"
+      ><img src="assets/images/article-finance.webp" alt="" />
+      <p>
+        قارن المقدم ومدة السداد والقسط الشهري وإجمالي المبلغ وشروط التعاقد.
+        استخدم الحاسبة لتجربة الأرقام، ثم تواصل مع المعرض لمعرفة العرض المتاح
+        وتفاصيله قبل التعاقد.
+      </p></template
+    ><template id="article-list-content"
+      ><button class="article-list-button" type="button" data-article="0">
+        إزاي أقدر أختار أنسب موتوسيكل؟
+        <img
+          class="icon bi bi-chevron-left"
+          src="assets/images/icons/chevron-left.svg"
+          alt=""
+          width="24"
+          height="24"
+        /></button
+      ><button class="article-list-button" type="button" data-article="1">
+        أي نوع زيت أفضل لموتوسيكلك؟
+        <img
+          class="icon bi bi-chevron-left"
+          src="assets/images/icons/chevron-left.svg"
+          alt=""
+          width="24"
+          height="24"
+        /></button
+      ><button class="article-list-button" type="button" data-article="2">
+        إيه أنظمة التقسيط الأنسب لي؟
+        <img
+          class="icon bi bi-chevron-left"
+          src="assets/images/icons/chevron-left.svg"
+          alt=""
+          width="24"
+          height="24"
+        /></button></template
+    ><template id="team-content"
+      ><img src="assets/images/team.webp" alt="فريق MotoGate" />
+      <p>
+        فريقنا موجود دائماً لمساعدتك، من اختيار الموديل حتى الاستلام وما بعده.
+      </p>
+      <a class="button button-orange" href="tel:01001234567"
+        >تواصل مع فريقنا</a
+      ></template
+    >
+    <script src="assets/vendor/bootstrap.bundle.min.js"></script>
+    
+  <div class="modal fade glass-modal" id="paymentCalculator" tabindex="-1" aria-labelledby="paymentCalculatorTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content" dir="rtl"><div class="modal-header"><h2 class="modal-title fs-4" id="paymentCalculatorTitle">احسب قسطك</h2><button type="button" class="drawer-close" data-bs-dismiss="modal" aria-label="إغلاق">×</button></div><div class="modal-body"><form id="installmentForm">
+              <div class="calculator-fields">
+                <label
+                  ><span class="visually-hidden">الماركة</span
+                  ><img
+                    class="icon bi bi-bicycle"
+                    src="assets/images/icons/bicycle.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width="24"
+                    height="24"
+                  /><select id="brand" required>
+                    <option value="">الماركة</option>
+                    <option>Keeway</option>
+                    <option>SYM</option>
+                    <option>Haojue</option>
+                    <option>Benelli</option>
+                  </select></label
+                ><label
+                  ><span class="visually-hidden">النوع</span
+                  ><img
+                    class="icon bi bi-bicycle"
+                    src="assets/images/icons/bicycle.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width="24"
+                    height="24"
+                  /><select id="model" required>
+                    <option value="">النوع</option>
+                  </select></label
+                ><label
+                  ><span class="visually-hidden">نظام التقسيط</span
+                  ><img
+                    class="icon bi bi-cash-coin"
+                    src="assets/images/icons/cash-coin.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width="24"
+                    height="24"
+                  /><select id="finance" required>
+                    <option value="">نظام التقسيط</option>
+                    <option value="0">بدون فوائد</option>
+                    <option value="0.15">مثال حسابي: عائد 15%</option>
+                    <option value="0.2">مثال حسابي: عائد 20%</option>
+                  </select></label
+                ><label
+                  ><span class="visually-hidden">مدة التقسيط</span
+                  ><img
+                    class="icon bi bi-calendar3"
+                    src="assets/images/icons/calendar3.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width="24"
+                    height="24"
+                  /><select id="months" required>
+                    <option value="">مدة التقسيط</option>
+                    <option value="12">12 شهر</option>
+                    <option value="24">24 شهر</option>
+                    <option value="36">36 شهر</option>
+                  </select></label
+                ><label
+                  ><span class="visually-hidden">المقدم بالجنيه</span
+                  ><img
+                    class="icon bi bi-wallet2"
+                    src="assets/images/icons/wallet2.svg"
+                    alt=""
+                    aria-hidden="true"
+                    width="24"
+                    height="24" /><input
+                    id="deposit"
+                    type="number"
+                    min="0"
+                    step="100"
+                    placeholder="المقدم"
+                    required
+                /></label>
+              </div>
+              <button type="submit" class="button button-orange">
+                احسب قسطك
+                <img
+                  class="icon bi bi-calculator"
+                  src="assets/images/icons/calculator.svg"
+                  alt=""
+                  aria-hidden="true"
+                  width="24"
+                  height="24"
+                /></button
+              ><output id="installmentResult" aria-live="polite"></output>
+            </form></div></div></div></div><div class="modal fade glass-modal" id="paymentResult" tabindex="-1" aria-labelledby="paymentResultTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content" dir="rtl"><div class="modal-header"><h2 class="modal-title fs-4" id="paymentResultTitle">تفاصيل قسطك</h2><button type="button" class="drawer-close" data-bs-dismiss="modal" aria-label="إغلاق">×</button></div><div class="modal-body"><div id="paymentSummary" aria-live="polite"></div></div></div></div></div><script src="assets/js/main.js"></script><script src="assets/js/updates.js"></script></body>
+</html>

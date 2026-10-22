@@ -24,6 +24,8 @@ Route::delete('/push-subscriptions', [PushSubscriptionController::class, 'destro
 // web.php
 Route::get('/', [HomeController::class, 'index'])->name('home');
 
+Route::match(['get', 'post'], '/track', [\App\Http\Controllers\TrackingController::class, 'index'])->middleware('throttle:20,1')->name('tracking.index');
+
 // Dynamic Links: the customer's application form (no login - the 40-char token is the key)
 Route::prefix('f/{token}')->where(['token' => '[A-Za-z0-9]{32,64}'])->controller(\App\Http\Controllers\FormLinkController::class)->group(function () {
     Route::get('/', 'show')->name('form-links.show');

@@ -1,50 +1,60 @@
-<div class="section-full site-bg-white twm-w-chooseus-section-wrap wow fadeInDown" data-wow-offset="100" data-wow-delay="0.2">
-    <div class="container">
-        <div class="row twm-w-chooseus-section">
-            <div class="col-lg-5 col-md-12">
-                <x-site.section-head
-                    :small="site('home.why.small_title')"
-                    :title="site('home.why.title')"
-                    :text="site('home.why.text')" />
-
-                <div class="twm-list-icon-style1" dir="rtl">
-                    <ul>
-                        @foreach (site('home.why.items', []) as $item)
-                            <li>
-                                <div class="twm-list-icon-style-bx">
-                                    @if (! empty($item['icon']))
-                                        <div class="twm-icon-bx"><span><img src="{{ site_url($item['icon']) }}" alt="{{ $item['title'] ?? '' }}"></span></div>
-                                    @endif
-                                    <div class="twm-icon-bx-detail">
-                                        <h3 class="twm-title">{{ $item['title'] ?? '' }}</h3>
-                                        <p>{{ $item['text'] ?? '' }}</p>
-                                    </div>
-                                </div>
-                            </li>
-                        @endforeach
-                    </ul>
-                </div>
-            </div>
-            <div class="col-lg-7 col-md-12">
-                <div class="twm-w-chooseus-media">
-                    @if (site('home.why.image'))
-                        <div class="twm-media">
-                            <img src="{{ site_url(site('home.why.image')) }}" alt="{{ site('home.why.title') }}">
-                        </div>
-                    @endif
-                    @if (site('home.why.help_phone'))
-                        <div class="twm-need-help-bx" dir="rtl">
-                            <div class="twm-need-help-content">
-                                <span>{{ site('home.why.help_text') }}</span>
-                                <h3 class="twm-title"><a href="{{ site_tel(site('home.why.help_phone')) }}" style="color: inherit;">{{ site('home.why.help_phone') }}</a></h3>
-                            </div>
-                            @if (site('home.why.help_icon'))
-                                <div class="twm-need-help-icon"><img src="{{ site_url(site('home.why.help_icon')) }}" alt=""></div>
-                            @endif
-                        </div>
-                    @endif
-                </div>
-            </div>
-        </div>
-    </div>
+<section aria-labelledby="whyTitle" class="why-choose" id="why-us">
+<div class="why-heading" dir="rtl">
+<h2 id="whyTitle"><em>{{ site('home.design.why.text_01') }}</em> {{ site('home.design.why.text_02') }}</h2>
+<p>{{ site('home.design.why.text_03') }} <span dir="ltr">{{ site('home.design.why.text_04') }}</span> {{ site('home.design.why.text_05') }}<br/>{{ site('home.design.why.text_06') }}</p>
+<span aria-hidden="true"></span>
 </div>
+<div class="why-stage">
+<div class="why-feature why-guarantee">
+<img alt="" aria-hidden="true" class="why-feature-frame" src="{{ asset('motogate-v2/assets/images/why/feature-frame.svg') }}"/><img alt="" aria-hidden="true" class="why-icon" height="64" src="{{ asset('motogate-v2/assets/images/why/shield.svg') }}" width="64"/>
+<div class="why-feature-copy" dir="rtl">
+<h3>{{ site('home.design.why.text_07') }}</h3>
+<p>{{ site('home.design.why.text_08') }}</p>
+</div>
+</div>
+<div class="why-feature why-service">
+<img alt="" aria-hidden="true" class="why-feature-frame" src="{{ asset('motogate-v2/assets/images/why/feature-frame.svg') }}"/><img alt="" aria-hidden="true" class="why-icon" height="64" src="{{ asset('motogate-v2/assets/images/why/gear.svg') }}" width="64"/>
+<div class="why-feature-copy" dir="rtl">
+<h3>{{ site('home.design.why.text_09') }}</h3>
+<p>{{ site('home.design.why.text_10') }}</p>
+</div>
+</div>
+<div class="why-feature why-price">
+<img alt="" aria-hidden="true" class="why-feature-frame" src="{{ asset('motogate-v2/assets/images/why/feature-frame.svg') }}"/><img alt="" aria-hidden="true" class="why-icon" height="64" src="{{ asset('motogate-v2/assets/images/why/tag.svg') }}" width="64"/>
+<div class="why-feature-copy" dir="rtl">
+<h3>{{ site('home.design.why.text_11') }}</h3>
+<p>{{ site('home.design.why.text_12') }}</p>
+</div>
+</div>
+<div class="why-feature why-support">
+<img alt="" aria-hidden="true" class="why-feature-frame" src="{{ asset('motogate-v2/assets/images/why/feature-frame.svg') }}"/><img alt="" aria-hidden="true" class="why-icon" height="64" src="{{ asset('motogate-v2/assets/images/why/headset.svg') }}" width="64"/>
+<div class="why-feature-copy" dir="rtl">
+<h3>{{ site('home.design.why.text_13') }}</h3>
+<p>{{ site('home.design.why.text_14') }}</p>
+</div>
+</div>
+<div class="why-dial">
+<img alt="" aria-hidden="true" class="why-dial-art" height="500" src="{{ asset('motogate-v2/assets/images/why/dial.svg') }}" width="500"/>
+<dl class="why-stats">
+<div class="why-branches">
+<dt>{{ site('about.stats.items.0.label') }}</dt>
+<dd dir="ltr">{{ site('about.stats.items.0.number') }}{{ site('about.stats.items.0.suffix') }}</dd>
+</div>
+<div class="why-customers">
+<dt>{{ site('about.stats.items.1.label') }}</dt>
+<dd dir="ltr">{{ site('about.stats.items.1.number') }}{{ site('about.stats.items.1.suffix') }}</dd>
+</div>
+<div class="why-experience">
+<dt>{{ site('about.stats.items.2.label') }}</dt>
+<dd dir="ltr">{{ site('about.stats.items.2.number') }}{{ site('about.stats.items.2.suffix') }}</dd>
+</div>
+<div class="why-models">
+<dt>{{ site('about.stats.items.3.label') }}</dt>
+<dd dir="ltr">{{ site('about.stats.items.3.number') }}{{ site('about.stats.items.3.suffix') }}</dd>
+</div>
+</dl>
+</div>
+</div>
+<picture class="why-cockpit"><source media="(max-width: 767px)" srcset="{{ asset('motogate-v2/assets/images/why/cockpit-mobile.webp') }}"/>
+<img alt="مقود دراجة MotoGate" class="" height="154" loading="lazy" src="{{ site_url(site('home.design.why.image_15')) }}" width="1600"/></picture>
+</section>

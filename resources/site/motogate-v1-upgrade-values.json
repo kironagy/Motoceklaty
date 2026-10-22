@@ -1,0 +1,115 @@
+{
+    "general.menu": [
+        {
+            "label": "الرئيسية",
+            "url": "/"
+        },
+        {
+            "label": "من نحن",
+            "url": "/about"
+        },
+        {
+            "label": "المعرض",
+            "url": "/machines"
+        },
+        {
+            "label": "المدونة",
+            "url": "/blog"
+        },
+        {
+            "label": "فريق موتوجيت",
+            "url": "/team"
+        },
+        {
+            "label": "تواصل معنا",
+            "url": "/contact"
+        }
+    ],
+    "general.footer.links": [
+        {
+            "label": "الرئيسية",
+            "url": "/"
+        },
+        {
+            "label": "من نحن",
+            "url": "/about"
+        },
+        {
+            "label": "المعرض",
+            "url": "/machines"
+        },
+        {
+            "label": "احسب قسطك",
+            "url": "/installment"
+        },
+        {
+            "label": "قدّم على التقسيط",
+            "url": "/apply-installment"
+        },
+        {
+            "label": "المدونة",
+            "url": "/blog"
+        },
+        {
+            "label": "فريق العمل",
+            "url": "/team"
+        },
+        {
+            "label": "تواصل معنا",
+            "url": "/contact"
+        }
+    ],
+    "home.categories.items": [
+        {
+            "label": "سوبر بايك (ريس)",
+            "category": "sport",
+            "image": "site/defaults/motorcycles/bike-superbike.jpg"
+        },
+        {
+            "label": "كروزر كاستم",
+            "category": "cruiser",
+            "image": "site/defaults/motorcycles/bike-cruiser.jpg"
+        },
+        {
+            "label": "أدفنتشر تورينج",
+            "category": "touring",
+            "image": "site/defaults/motorcycles/bike-adventure.jpg"
+        },
+        {
+            "label": "سكوتر وماكسي",
+            "category": "scooter",
+            "image": "site/defaults/motorcycles/bike-scooter.jpg"
+        },
+        {
+            "label": "ستريت فايتر",
+            "category": "naked",
+            "image": "site/defaults/motorcycles/bike-streetfighter.jpg"
+        },
+        {
+            "label": "موتوسيكلات اقتصادية",
+            "category": "commuter",
+            "image": "site/defaults/motorcycles/haojiang-4.jpg"
+        }
+    ],
+    "home.hero.calc_title": "احسب قسط دراجتك النارية بكل سهولة",
+    "about.faq.title": "كل سؤال له طريق واضح",
+    "about.faq.items": [
+        {
+            "question": "إزاي أختار الموديل المناسب؟",
+            "answer": "تصفح المعرض وقارن المواصفات أو تواصل مع فريقنا لمساعدتك."
+        },
+        {
+            "question": "أتابع حالة طلبي إزاي؟",
+            "answer": "احتفظ برابط المتابعة الذي يظهر بعد إرسال طلبك، وافتحه لمعرفة آخر حالة للطلب."
+        },
+        {
+            "question": "إيه الأوراق المطلوبة للتقسيط؟",
+            "answer": "افتح نموذج طلب التقسيط واختر حالتك الوظيفية لعرض المستندات المطلوبة."
+        }
+    ],
+    "showroom.card.details_label": "التفاصيل",
+    "showroom.card.price_prefix": "كاش",
+    "showroom.card.currency": "ج.م",
+    "showroom.detail.calc_button": "احسب قسطك",
+    "showroom.detail.whatsapp_button": "استفسر على واتساب"
+}

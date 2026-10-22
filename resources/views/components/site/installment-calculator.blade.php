@@ -7,6 +7,7 @@
 @props(['tabs' => [], 'title' => null, 'machine' => null, 'browseUrl' => null])
 
 @php
+    $uid = 'calc-' . \Illuminate\Support\Str::random(8);
     $labels = site('installment.calculator.labels', []);
     $result = site('installment.calculator.result', []);
     $tabs = array_values(array_filter($tabs, fn ($tab) => filled($tab['label'] ?? null)));
@@ -68,16 +69,16 @@
                             @unless ($machine)
                                 <div class="col-12 col-lg-6">
                                     <div class="form-group">
-                                        <label>{{ $labels['brand'] ?? '' }}</label>
-                                        <select class="form-select p-3 form-control" data-field="brand">
+                                        <label for="{{ $uid }}-brand">{{ $labels['brand'] ?? '' }}</label>
+                                        <select class="form-select p-3 form-control" id="{{ $uid }}-brand" data-field="brand">
                                             <option value="">{{ $labels['brand_placeholder'] ?? '' }}</option>
                                         </select>
                                     </div>
                                 </div>
                                 <div class="col-12 col-lg-6">
                                     <div class="form-group">
-                                        <label>{{ $labels['machine'] ?? '' }}</label>
-                                        <select class="form-select p-3 form-control" data-field="machine" disabled>
+                                        <label for="{{ $uid }}-machine">{{ $labels['machine'] ?? '' }}</label>
+                                        <select class="form-select p-3 form-control" id="{{ $uid }}-machine" data-field="machine" disabled>
                                             <option value="">{{ $labels['machine_placeholder'] ?? '' }}</option>
                                         </select>
                                     </div>
@@ -85,30 +86,30 @@
                             @endunless
                             <div class="col-12 col-lg-6">
                                 <div class="form-group">
-                                    <label>{{ $labels['system'] ?? '' }}</label>
-                                    <select class="form-select p-3 form-control" data-field="system" @unless ($machine) disabled @endunless>
+                                    <label for="{{ $uid }}-system">{{ $labels['system'] ?? '' }}</label>
+                                    <select class="form-select p-3 form-control" id="{{ $uid }}-system" data-field="system" @unless ($machine) disabled @endunless>
                                         <option value="">{{ $labels['system_placeholder'] ?? '' }}</option>
                                     </select>
                                 </div>
                             </div>
                             <div class="col-12 col-lg-6">
                                 <div class="form-group">
-                                    <label>{{ $labels['months'] ?? '' }}</label>
-                                    <select class="form-select p-3 form-control" data-field="months" disabled>
+                                    <label for="{{ $uid }}-months">{{ $labels['months'] ?? '' }}</label>
+                                    <select class="form-select p-3 form-control" id="{{ $uid }}-months" data-field="months" disabled>
                                         <option value="">{{ $labels['months_placeholder'] ?? '' }}</option>
                                     </select>
                                 </div>
                             </div>
                             <div class="col-12">
                                 <div class="form-group">
-                                    <label>{{ $labels['down_payment'] ?? '' }}</label>
+                                    <label for="{{ $uid }}-down_payment">{{ $labels['down_payment'] ?? '' }}</label>
                                     <input class="form-control" type="number" min="0" step="any" inputmode="numeric"
-                                        data-field="down_payment" placeholder="{{ $labels['down_payment_placeholder'] ?? '' }}">
+                                        id="{{ $uid }}-down_payment" data-field="down_payment" placeholder="{{ $labels['down_payment_placeholder'] ?? '' }}">
                                 </div>
                             </div>
                         </div>
 
-                        <div class="site-calc-error" data-calc-error hidden></div>
+                        <div class="site-calc-error" data-calc-error role="alert" hidden></div>
 
                         <div class="twm-tabs-search-btn">
                             <button type="submit" class="site-button"><em>{{ $labels['submit'] ?? '' }}</em></button>
@@ -120,7 +121,7 @@
                             </div>
                         @endif
 
-                        <div class="site-calc-result" data-calc-result hidden></div>
+                        <div class="site-calc-result" data-calc-result role="status" tabindex="-1" hidden></div>
                     </form>
                 </div>
             </div>

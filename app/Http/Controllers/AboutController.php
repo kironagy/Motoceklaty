@@ -18,6 +18,8 @@ class AboutController extends Controller
             ->when(site('about.testimonial.review_id'), fn ($q, $id) => $q->whereKey($id))
             ->first() ?? ClientReview::visible()->first();
 
-        return view('site.about.index', compact('team', 'review'));
+        $reviews = ClientReview::visible()->get();
+
+        return view('site.about.index', compact('team', 'review', 'reviews'));
     }
 }
