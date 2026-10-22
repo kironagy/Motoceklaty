@@ -13,3 +13,37 @@
 /* Apply form: no source page; reuses the contact panel and adds only upload/alert states. */
 .apply-page .contact-form-panel{max-width:980px;margin:auto}.apply-page .site-apply-title{margin:26px 0 14px}.apply-page .form-label{display:block;font-size:13px;margin-bottom:9px}.apply-page .text-muted{color:#9da0a6!important;font-size:12px}.apply-page .site-upload-area{display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 14px;border:1px dashed #ff701270;border-radius:12px;background:#0b0f14;color:#ddd;cursor:pointer;text-align:center;font-size:13px}.apply-page .site-upload-area small{color:#9da0a6}.apply-page .site-upload-area.is-done{border-style:solid;border-color:#ff7012}.apply-page .site-upload-preview{display:block;max-height:140px;margin-top:10px;border-radius:10px}.apply-page .alert{border-radius:12px;background:#11171b;border:1px solid #ff701255;color:#eee}.apply-page .alert-danger{border-color:#e87155;color:#ffb6a4}.apply-page .contact-form-panel .button{width:100%;margin-top:14px}
 .apply-page select:disabled,.apply-page input:disabled{background:#0b0f14;color:#777;opacity:.7}
+
+/* Nine models per slide: three columns and three rows on desktop. */
+.models-slider{display:flex;gap:20px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:thin;direction:rtl}
+.models-slider>.models-slide{flex:0 0 100%;min-width:0;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:1fr;align-content:start;scroll-snap-align:start;direction:ltr}
+.models-slider .model-card{min-width:0}
+.models-slider .model-copy{display:flex;flex-direction:column;gap:10px}
+.models-slider .model-copy>p,.models-slider .model-line{margin:0}
+.models-slider .model-actions{display:flex;gap:10px;margin-top:2px}
+.models-slider .model-actions .button{width:auto;flex:1;min-width:0}
+.models-controls{display:flex;align-items:center;justify-content:center;gap:18px;padding:20px}
+.models-controls button:disabled{opacity:.4;cursor:default}
+@media(max-width:1100px){.models-slider>.models-slide{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.models-slider>.models-slide{grid-template-columns:minmax(0,1fr)}}
+.models-slider .model-copy{align-items:stretch;justify-content:flex-start}
+.models-slider .model-copy .button{position:static;min-height:36px;white-space:normal}
+.models-slider .model-actions{width:100%;flex-wrap:wrap}
+@media(max-width:640px){.models-slider .model-copy h3{display:block}.models-slider .model-actions{flex-direction:column}.models-slider .model-card>img{max-height:none}}
+
+/* Tracking: keep the marker separate from its readable stage label. */
+.tracking-result .order-timeline{display:flex;flex-direction:column;gap:0;margin:28px 0 0;padding:0;list-style:none;text-align:right}
+.tracking-result .order-timeline li{display:flex;align-items:flex-start;gap:16px;min-height:88px;padding:0 0 26px;position:relative;color:#8c949e}
+.tracking-result .order-timeline li:last-child{min-height:44px;padding-bottom:0}
+.tracking-result .order-timeline li:not(:last-child)::after{top:44px;right:21px;height:calc(100% - 44px);width:2px;background:#303840}
+.tracking-result .order-timeline li>.timeline-marker{display:grid;place-items:center;flex:0 0 44px;width:44px;height:44px;margin:0;border:1px solid #39434d;border-radius:50%;background:#13191f;color:#88939e;font:700 16px Arial;position:relative;z-index:1}
+.tracking-result .timeline-copy{flex:1;min-width:0;padding-top:8px;line-height:1.7}
+.tracking-result .timeline-copy strong{display:block;font-size:16px;font-weight:600;overflow-wrap:break-word}
+.tracking-result .timeline-copy small{display:block;margin-top:2px;font-size:12px;color:#8c949e}
+.tracking-result .order-timeline .done{color:#e1e5e9}
+.tracking-result .order-timeline .done>.timeline-marker{background:#ff70121a;border-color:#ff701280;color:#ff973f}
+.tracking-result .order-timeline .done::after{background:#ff701280}
+.tracking-result .order-timeline .current{color:#ff973f}
+.tracking-result .order-timeline .current>.timeline-marker{background:#ff7012;border-color:#ff9a4f;color:#101010;box-shadow:0 0 0 6px #ff70121c,0 0 24px #ff70124d}
+.tracking-result .order-timeline .current .timeline-copy strong{color:#ffad6b}
+.tracking-result .order-timeline .current .timeline-copy small{color:#ffad6b}

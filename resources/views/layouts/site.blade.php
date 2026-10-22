@@ -39,7 +39,7 @@
     <link rel="stylesheet" href="{{ asset('motogate-v2/assets/css/' . trim($sheet) . '.css') }}">
     @endforeach
     <link rel="stylesheet" href="{{ asset('motogate-v2/assets/css/navigation.css') }}">
-    <link rel="stylesheet" href="{{ asset('motogate-v2/assets/css/integration.css') }}">
+    <link rel="stylesheet" href="{{ asset('motogate-v2/assets/css/integration.css') . '?v=' . filemtime(public_path('motogate-v2/assets/css/integration.css')) }}">
     @else
     <link rel="stylesheet" href="{{ asset('motogate-v2/assets/vendor/bootstrap.min.css') }}">
     <link rel="stylesheet" href="{{ asset('motogate/css/feather.css') }}">
@@ -57,7 +57,7 @@
     <link rel="stylesheet" href="{{ asset('motogate-v2/assets/css/pages.css') }}">
     <link rel="stylesheet" href="{{ asset('motogate-v2/assets/css/calculate.css') }}">
     <link rel="stylesheet" href="{{ asset('motogate-v2/assets/css/navigation.css') }}">
-    <link rel="stylesheet" href="{{ asset('motogate-v2/assets/css/integration.css') }}">
+    <link rel="stylesheet" href="{{ asset('motogate-v2/assets/css/integration.css') . '?v=' . filemtime(public_path('motogate-v2/assets/css/integration.css')) }}">
     @endif
     @stack('styles')
 
@@ -122,7 +122,7 @@
 
     <script src="{{ asset('motogate-v2/assets/vendor/bootstrap.bundle.min.js') }}"></script>
     <script src="{{ asset('motogate/js/swiper-bundle.min.js') }}"></script>
-    <script src="{{ asset('motogate-v2/assets/js/integration.js') }}"></script>
+    <script src="{{ asset('motogate-v2/assets/js/integration.js') . '?v=' . filemtime(public_path('motogate-v2/assets/js/integration.js')) }}"></script>
     @stack('scripts')
 
     @if (site('general.integrations.protect_images'))
@@ -133,19 +133,6 @@
         </script>
     @endif
 
-    @if (!request()->routeIs('tracking.index') && site('general.integrations.tawk_enabled') && site('general.integrations.tawk_src'))
-        <script>
-            var Tawk_API = Tawk_API || {}, Tawk_LoadStart = new Date();
-            (function () {
-                var s1 = document.createElement('script'), s0 = document.getElementsByTagName('script')[0];
-                s1.async = true;
-                s1.src = @json(site('general.integrations.tawk_src'));
-                s1.charset = 'UTF-8';
-                s1.setAttribute('crossorigin', '*');
-                s0.parentNode.insertBefore(s1, s0);
-            })();
-        </script>
-    @endif
 
     @unless (request()->routeIs('tracking.index')){!! site('general.integrations.footer_code') !!}@endunless
 </body>

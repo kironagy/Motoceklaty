@@ -143,7 +143,7 @@ function displayLiveMachine(card) {
  scene.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});
 }
 document.querySelectorAll('[data-live-machine]').forEach(card=>{
- card.querySelector('[data-display-machine]')?.addEventListener('click',()=>displayLiveMachine(card));
+ card.addEventListener('click',event=>{if(event.target.closest('a,button:not([data-display-machine]),input,select'))return;displayLiveMachine(card)});
  card.addEventListener('keydown',e=>{if(e.target===card&&(e.key==='Enter'||e.key===' ')){e.preventDefault();displayLiveMachine(card)}});
 });
 document.querySelector('.brand-next')?.addEventListener('click',()=>document.querySelector('.brand-list')?.scrollBy({left:250,behavior:'smooth'}));
@@ -175,3 +175,20 @@ document.addEventListener('click',event=>{
  if(!trigger||!form?.selectMachine||!form.selectMachine(trigger.dataset.openCalculator))return;
  event.preventDefault();bootstrap.Modal.getOrCreateInstance(modal).show();
 });
+
+const modelsSlider = document.getElementById('modelsSlider');
+if (modelsSlider) {
+ const slides = [...modelsSlider.querySelectorAll('.models-slide')];
+ const previous = document.querySelector('[data-models-prev]'), next = document.querySelector('[data-models-next]'), status = document.querySelector('[data-models-status]');
+ let current = 0;
+ const update = () => {
+  current = slides.reduce((best, slide, index) => Math.abs(slide.getBoundingClientRect().right - modelsSlider.getBoundingClientRect().right) < Math.abs(slides[best].getBoundingClientRect().right - modelsSlider.getBoundingClientRect().right) ? index : best, 0);
+  previous.disabled = current === 0; next.disabled = current === slides.length - 1;
+  status.textContent = `${current + 1} / ${slides.length}`;
+ };
+ const move = delta => slides[Math.max(0, Math.min(slides.length - 1, current + delta))].scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'nearest',inline:'start'});
+ previous.addEventListener('click',()=>move(-1));next.addEventListener('click',()=>move(1));
+ modelsSlider.addEventListener('scroll',update,{passive:true});window.addEventListener('resize',update);
+ modelsSlider.addEventListener('keydown',event=>{if(event.target===modelsSlider&&['ArrowLeft','ArrowRight'].includes(event.key)){event.preventDefault();move(event.key==='ArrowLeft'?1:-1)}});
+ update();
+}

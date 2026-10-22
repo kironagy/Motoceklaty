@@ -195,8 +195,9 @@
             var button = form.querySelector('button[type="submit"]');
             button.disabled = true;
 
-            fetch(config.endpoint, {
+            function sendCalculation() { return fetch(new URL(config.endpoint, location.href).pathname, {
                 method: 'POST',
+                credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf },
                 body: JSON.stringify({
                     machine_id: m.id,
@@ -204,6 +205,12 @@
                     months: monthsSel.value,
                     down_payment: downInput.value || 0
                 })
+            }); }
+            sendCalculation().then(function (res) {
+                if (res.status !== 419) return res;
+                return fetch('/session/csrf', { credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' } })
+                    .then(function (refresh) { if (!refresh.ok) throw new Error('Session refresh failed'); return refresh.json(); })
+                    .then(function (session) { csrf = session.token; return sendCalculation(); });
             })
                 .then(function (res) { return res.json(); })
                 .then(function (data) {

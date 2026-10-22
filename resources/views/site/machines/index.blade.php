@@ -88,7 +88,7 @@ preg_match('/^(\D+?)\s*(\d.*)$/u', $featured->name, $nameParts);
 <a class="button button-outline" href="{{ route('machines.index') }}">{{ site('showroom.design.latest_models.text_03') }}<img alt="" aria-hidden="true" class="icon bi bi-bullseye" height="24" src="{{ asset('motogate-v2/assets/images/icons/bullseye.svg') }}" width="24"/>
 </a>
 </div>
-<div class="models-grid">@foreach($machines as $machine)
+<div class="models-slider" id="modelsSlider" tabindex="0" aria-label="موديلات المعرض"><div class="models-grid models-slide">@foreach($machines as $machine)
 @php
 $machineData = ['id' => $machine->id, 'name' => $machine->name, 'brand' => $machine->brand?->name, 'image' => $machine->displayImageUrl(), 'category' => $machine->categoryLabel(), 'cc' => $machine->cc, 'price' => (float) ($machine->type === 'offer' && $machine->new_price ? $machine->new_price : $machine->cash_price), 'specs' => $machine->specificationRows(), 'calc' => route('installment.index', ['machine_id' => $machine->id]), 'contact' => site_whatsapp(site('general.whatsapp'), $machine->name)];
 @endphp
@@ -96,16 +96,13 @@ $machineData = ['id' => $machine->id, 'name' => $machine->name, 'brand' => $mach
 @endif
 </p><button class="button button-outline" type="button" data-display-machine>اعرض على المنصة ↗</button><div class="model-actions"><a class="button button-outline" href="{{ $machineData['contact'] }}" target="_blank" rel="noopener">واتساب</a><a class="button button-orange" data-open-calculator="{{ $machine->id }}" href="{{ $machineData['calc'] }}">احسب القسط</a></div></div></article>
 
+@if($loop->iteration % 9 === 0 && !$loop->last)</div><div class="models-grid models-slide">@endif
 @endforeach
-</div>
+</div></div>
 @if($machines->isEmpty())<p class="empty-models" dir="rtl">{{ site('showroom.empty.text') }}</p>
 @endif
 
-<nav class="design-pagination" aria-label="صفحات المعرض">@if($machines->previousPageUrl())<a class="button button-outline" href="{{ $machines->previousPageUrl() }}">السابق</a>
-@endif
- @if($machines->hasMorePages())<a class="button button-outline" href="{{ $machines->nextPageUrl() }}">التالي</a>
-@endif
-</nav></section>
+<nav class="design-pagination models-controls" aria-label="التنقل بين الموديلات"><button class="button button-outline" type="button" data-models-prev>السابق</button><span data-models-status aria-live="polite"></span><button class="button button-outline" type="button" data-models-next>التالي</button></nav></section>
 @includeWhen($posts->isNotEmpty(), 'site.home.sections.blog')
 </main>
 @endsection

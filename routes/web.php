@@ -24,6 +24,9 @@ Route::delete('/push-subscriptions', [PushSubscriptionController::class, 'destro
 // web.php
 Route::get('/', [HomeController::class, 'index'])->name('home');
 
+Route::get('/session/csrf', fn () => response()->json(['token' => csrf_token()])
+    ->header('Cache-Control', 'no-store, private'))->middleware('throttle:60,1')->name('session.csrf');
+
 Route::match(['get', 'post'], '/track', [\App\Http\Controllers\TrackingController::class, 'index'])->middleware('throttle:20,1')->name('tracking.index');
 
 // Dynamic Links: the customer's application form (no login - the 40-char token is the key)

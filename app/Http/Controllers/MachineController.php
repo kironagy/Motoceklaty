@@ -56,9 +56,7 @@ class MachineController extends Controller
             ->with('brand')
             ->orderByDesc('is_featured')
             ->latest()
-            ->paginate(max(1, (int) site('showroom.filter.per_page', 12)))
-            ->withQueryString()
-            ->fragment('vehiclesRow');
+            ->get();
 
         $activeCategory = $category ? $categories[$category] : null;
         $totalAll = (int) $counts->sum();

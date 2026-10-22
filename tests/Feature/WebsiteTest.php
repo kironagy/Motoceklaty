@@ -92,6 +92,12 @@ class WebsiteTest extends TestCase
             'machine_id' => $this->machine->id,
             'installment_system_id' => $this->system->id,
             'months' => 12,
+        ])->assertOk()->assertJson(['ok' => true, 'result' => ['down_payment' => 0]]);
+
+        $this->postJson(route('installment.calculate'), [
+            'machine_id' => $this->machine->id,
+            'installment_system_id' => $this->system->id,
+            'months' => 12,
             'down_payment' => 5000,
         ])->assertOk()->assertJson(['ok' => true, 'result' => [
             'monthly_installment' => 5500,
@@ -239,7 +245,7 @@ class WebsiteTest extends TestCase
         ];
     }
 
-    public function test_showroom_paginates_by_twelve_and_searches(): void
+    public function test_showroom_groups_models_into_slides_and_searches(): void
     {
         $brand = Brand::create(['name' => 'بينيلي', 'image' => 'x.png']);
         foreach (range(1, 14) as $i) {
@@ -248,13 +254,13 @@ class WebsiteTest extends TestCase
         Machine::create(['name' => 'مخفية', 'brand_id' => $brand->id, 'cash_price' => 1, 'installment_price' => 1, 'is_active' => false]);
 
         // 14 + F250 from setUp = 15 active machines.
-        $page1 = $this->get('/machines')->assertOk()->assertViewHas('machines', fn ($machines) => $machines->total() === 15);
-        $this->assertSame(12, substr_count($page1->getContent(), 'data-live-machine='));
-        $this->assertSame(3, substr_count($this->get('/machines?page=2')->getContent(), 'data-live-machine='));
-        $filtered = $this->get('/machines?q=F250')->assertViewHas('machines', fn ($machines) => $machines->total() === 1);
+        $page1 = $this->get('/machines')->assertOk()->assertViewHas('machines', fn ($machines) => $machines->count() === 15);
+        $this->assertSame(15, substr_count($page1->getContent(), 'data-live-machine='));
+        $this->assertSame(2, substr_count($page1->getContent(), 'models-grid models-slide'));
+        $filtered = $this->get('/machines?q=F250')->assertViewHas('machines', fn ($machines) => $machines->count() === 1);
         $this->assertSame(1, substr_count($filtered->getContent(), 'data-live-machine='));
         foreach (['/machines?q=' . urlencode('بينيلي'), '/machines?brand=' . $brand->id . '&q=TNT', '/machines?brand_id=' . $brand->id] as $url) {
-            $this->get($url)->assertViewHas('machines', fn ($machines) => $machines->total() === 14);
+            $this->get($url)->assertViewHas('machines', fn ($machines) => $machines->count() === 14);
         }
         $this->get('/machines?q=' . urlencode('مخفية'))->assertViewHas('machines', fn ($machines) => $machines->isEmpty());
     }
@@ -296,7 +302,7 @@ class WebsiteTest extends TestCase
         $this->get('/about')->assertDontSee('عميل تجريبي')->assertDontSee('بيانات تجريبية');
     }
 
-    public function test_tracking_displays_current_status_only_for_an_authentic_code(): void
+    public function test_tracking_accepts_order_numbers_and_encrypted_codes_without_personal_details(): void
     {
         $application = \App\Models\InstallmentRequest::create([
             'machine_id' => $this->machine->id, 'installment_type' => 'امان', 'months' => 12,
@@ -306,7 +312,9 @@ class WebsiteTest extends TestCase
         $code = \Illuminate\Support\Facades\Crypt::encryptString((string) $application->id);
         $this->get('/track')->assertOk()->assertSee(site('tracking.code_label'));
         $this->post('/track', ['code' => 'MG-2026-001'])->assertOk()->assertSee(site('tracking.not_found'));
-        $this->post('/track', ['code' => (string) $application->id])->assertSee(site('tracking.not_found'));
+        $this->post('/track', ['code' => (string) $application->id])->assertSee(site('tracking.statuses.new_request'))->assertDontSee('Private Customer')->assertDontSee('01012345678');
+        $arabicNumber = strtr((string) $application->id, ['0'=>'٠','1'=>'١','2'=>'٢','3'=>'٣','4'=>'٤','5'=>'٥','6'=>'٦','7'=>'٧','8'=>'٨','9'=>'٩']);
+        $this->post('/track', ['code' => $arabicNumber])->assertSee(site('tracking.statuses.new_request'));
         $this->get(route('tracking.index', ['code' => $code]))->assertOk()
             ->assertSee(site('tracking.statuses.new_request'))->assertDontSee('Private Customer')
             ->assertDontSee('01012345678')->assertDontSee('Private address')
