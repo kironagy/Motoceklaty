@@ -72,3 +72,12 @@
 - At 1366x650, fees, total and the application button fit entirely inside the popup. At 1024x500, the body scrolls internally instead of clipping content.
 - Live home, showroom, tracking and calculator pages and the new stylesheets returned HTTP 200.
 - Changes do not include credentials, environment files, database dumps, uploads or backups.
+
+## Showroom responsive follow-up — 2026-10-23
+- Replace cramped four-across mobile specs with two-column tiles containing an icon, label and wrapping value; update the same markup when selecting a different model.
+- Redesign motorcycle cards with a contained image, readable brand/model/category/price and a separate display action followed by side-by-side WhatsApp and installment buttons.
+- Use three card columns on desktop, two on tablet and one on small phones while retaining nine models per slider group.
+- Constrain grid/flex children and remove absolute button positioning and nowrap constraints to prevent horizontal clipping.
+- Adapt the featured-model details, price and actions for mobile/tablet layouts.
+- Deploy the three affected files directly with a small pre-change backup. Preserve .env, .htaccess, root directory permissions, database and uploaded storage.
+- Validation: JavaScript syntax check, Blade compilation and live HTTP 200. Browser checks at 320, 390, 768 and 1440px found no document horizontal overflow. Verified selecting a card updates the featured model and labeled spec tiles.

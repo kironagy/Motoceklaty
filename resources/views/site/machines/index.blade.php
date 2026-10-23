@@ -2,6 +2,7 @@
 @section('title', (string) ($selected ? trim(($selected->brand?->name ?? '') . ' ' . $selected->name) . ' | ' . site('general.site_name') : site('showroom.seo.title')))
 @section('body_class', 'gallery-page source-design')
 @section('design_css', 'base')
+@push('styles')<link rel="stylesheet" href="{{ asset('motogate-v2/assets/css/showroom.css') . '?v=' . filemtime(public_path('motogate-v2/assets/css/showroom.css')) }}">@endpush
 @section('design_shell', 'gallery-shell')
 @section('content')
 @php
@@ -73,7 +74,7 @@ preg_match('/^(\D+?)\s*(\d.*)$/u', $featured->name, $nameParts);
 @endphp
 <h1><span>{{ $featured->brand?->name }}</span><strong>@if ($nameParts)<em>{{ $nameParts[1] }}</em>{{ $nameParts[2] }}@else{{ $featured->name }}@endif</strong></h1>
 <p class="featured-tagline" dir="rtl">{{ $featured->categoryLabel() }}</p>
-<div class="mobile-specs" data-icon-base="{{ asset('motogate-v2/assets/images/icons') }}/">@foreach (array_slice($featured->specificationRows(), 0, 4) as $spec)<span><img class="icon bi bi-{{ ['engine', 'stroke', 'transmission', 'brake'][$loop->index] }}" src="{{ asset('motogate-v2/assets/images/icons/' . ['engine', 'stroke', 'transmission', 'brake'][$loop->index] . '.png') }}" alt="" aria-hidden="true" width="24" height="24"> {{ $spec['value'] }}</span>@endforeach</div>
+<div class="mobile-specs" data-icon-base="{{ asset('motogate-v2/assets/images/icons') }}/">@foreach (array_slice($featured->specificationRows(), 0, 4) as $spec)<span class="showroom-spec"><img class="icon bi bi-{{ ['engine', 'stroke', 'transmission', 'brake'][$loop->index] }}" src="{{ asset('motogate-v2/assets/images/icons/' . ['engine', 'stroke', 'transmission', 'brake'][$loop->index] . '.png') }}" alt="" aria-hidden="true" width="24" height="24"><small>{{ $spec['label'] }}</small><b>{{ $spec['value'] }}</b></span>@endforeach</div>
 <div class="price" dir="rtl">@if (site('showroom.card.show_price'))<span>{{ site('showroom.card.price_prefix') }}</span><strong>{{ number_format((float) ($featured->type === 'offer' && $featured->new_price ? $featured->new_price : $featured->cash_price)) }}</strong><span>{{ site('showroom.card.currency') }}</span>
 @endif
 </div>
