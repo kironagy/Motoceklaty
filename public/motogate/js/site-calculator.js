@@ -68,7 +68,7 @@
         function hideOutput() {
             if (resultBox.tagName === 'OUTPUT') resultBox.textContent = '';
             if (errorBox !== resultBox) errorBox.hidden = true;
-            ['monthlyAmount', 'resultMonths', 'resultDeposit', 'resultTotal'].forEach(function (id) {
+            ['monthlyAmount', 'resultMonths', 'resultDeposit', 'resultTotal', 'resultFees'].forEach(function (id) {
                 var el = document.getElementById(id);
                 if (el) el.textContent = '—';
             });
@@ -132,7 +132,6 @@
             var system = currentSystem();
             var applyUrl = config.applyUrl + '?' + new URLSearchParams({machine_id:m.id, installment_type:system.name, months:r.months, deposit:r.down_payment}).toString();
             var L = resultLabels;
-            var apply = '<a class="button button-orange" href="' + esc(applyUrl) + '">' + esc(L.apply) + '</a>';
             var financeDashboard = document.querySelector('.finance-dashboard');
             if (financeDashboard) {
                 // Calculator page: the approved design shows the result in its dashboard.
@@ -140,14 +139,28 @@
                 document.getElementById('resultMonths').textContent = format(r.months);
                 document.getElementById('resultDeposit').textContent = format(r.down_payment);
                 document.getElementById('resultTotal').textContent = format(r.total_with_interest);
+                document.getElementById('resultFees').textContent = format(r.administrative_fees);
                 document.getElementById('resultNote').innerHTML = esc(L.note || '') + ' <a href="' + esc(applyUrl) + '">' + esc(L.apply) + '</a>';
                 return;
             }
             // Home: same sentence as the design, then its #paymentResult dialog.
-            resultBox.innerHTML = 'القسط الشهري التقديري: <strong>' + format(r.monthly_installment) + ' جنيه</strong> لمدة ' + format(r.months) + ' شهر.<br><small>إجمالي الأقساط ' + format(r.total_with_interest) + ' جنيه. ' + esc(L.note || '') + '</small>';
+            resultBox.innerHTML = 'القسط الشهري: <strong>' + format(r.monthly_installment) + ' جنيه</strong> لمدة ' + format(r.months) + ' شهر.<br><small>إجمالي الأقساط ' + format(r.total_with_interest) + ' جنيه.<br>المصاريف الإدارية: <b>' + format(r.administrative_fees) + ' جنيه</b> — تدفع مرة واحدة عند الاستلام.<br>' + esc(L.note || '') + '</small>';
             var dialog = document.getElementById('paymentResult');
             if (!dialog) return;
-            document.getElementById('paymentSummary').innerHTML = resultBox.innerHTML + '<p>' + apply + '</p>';
+            var summary = document.getElementById('paymentSummary');
+            var paymentValues = {
+                machine: m.name,
+                system: system.name,
+                monthly: format(r.monthly_installment),
+                months: format(r.months),
+                deposit: format(r.down_payment),
+                total: format(r.total_with_interest),
+                fees: format(r.administrative_fees)
+            };
+            summary.querySelectorAll('[data-payment]').forEach(function (element) {
+                element.textContent = paymentValues[element.dataset.payment];
+            });
+            summary.querySelector('[data-payment-apply]').href = applyUrl;
             var show = function () { bootstrap.Modal.getOrCreateInstance(dialog).show(); };
             var calculator = form.closest('.modal.show');
             if (calculator) {

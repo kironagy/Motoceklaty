@@ -310,7 +310,7 @@ class WebsiteTest extends TestCase
             'applicant_address' => 'Private address', 'status' => 'new_request',
         ]);
         $code = \Illuminate\Support\Facades\Crypt::encryptString((string) $application->id);
-        $this->get('/track')->assertOk()->assertSee(site('tracking.code_label'));
+        $this->get('/track')->assertOk()->assertSee('رقم الطلب أو كود المتابعة');
         $this->post('/track', ['code' => 'MG-2026-001'])->assertOk()->assertSee(site('tracking.not_found'));
         $this->post('/track', ['code' => (string) $application->id])->assertSee(site('tracking.statuses.new_request'))->assertDontSee('Private Customer')->assertDontSee('01012345678');
         $arabicNumber = strtr((string) $application->id, ['0'=>'٠','1'=>'١','2'=>'٢','3'=>'٣','4'=>'٤','5'=>'٥','6'=>'٦','7'=>'٧','8'=>'٨','9'=>'٩']);

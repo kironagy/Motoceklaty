@@ -35,3 +35,40 @@
 - Browser verification: empty down payment produced an installment result; numeric tracking displayed an existing request status; card selection updated the platform; slides contained nine models and desktop used three columns.
 - HTTP verification: invalid CSRF token returned 419; valid token reached validation (422 for empty input).
 - Tracking layout follow-up: response 200, four distinct stage markers and exactly one aria-current="step" marker.
+
+## Live website updates — 2026-10-23
+
+### Calculator and installment results
+- Rename the dedicated calculator result heading to "القسط الشهري".
+- Show the actual administrative fees returned by the existing server calculator on the dedicated result dashboard and in modal results; reset the fee display when selections change.
+- Explain that fees are paid once on delivery, separately from installment totals.
+- Replace the unstructured result modal with a MotoGate payment-plan card: selected motorcycle and finance system, prominent monthly amount, separate cards for months, deposit, installment total and administrative fees, plus a preselected application link.
+- Populate result fields with textContent and preserve the existing model/system/month/deposit parameters in the application URL.
+- Remove the duplicated administrative-fee note from the modal.
+- Give the popup a constrained width, compact spacing on short laptop screens, a fixed header and a scrollable body with min-height:0 so figures and actions cannot be clipped at normal zoom.
+
+### Tracking page design
+- Replace the previous tracking layout with an Arabic MotoGate journey page, matching the dark/orange visual identity.
+- Add a motorcycle illustration, request/code search card, empty-state journey, and an updated result panel.
+- Show the current stage, stage counter, completed/current/upcoming labels and contact link; use a horizontal timeline on desktop and vertical stages on narrower screens.
+- Continue supporting encrypted codes and numeric/Arabic request numbers without exposing customer personal details.
+
+### Dashboard statistics
+- Confirmed the four gauge statistics already use the existing About Settings > Numbers controls (number, suffix and label). No duplicate fields or database changes were necessary.
+
+### Deployment and backup work (server operations, not repository files)
+- With explicit authorization, removed the manual /root/backups directory, freeing about 21 GB; available disk space became about 23 GB.
+- Kept the separate Hestia /backup archives intact.
+- Created and verified a 36 MB compressed backup of the previous code/design inside the project root, excluding storage, vendor, Git history, runtime dependencies and large archives.
+- Deployed updated code while preserving the existing .env, uploads/storage link, vendor dependencies and the server's attendance-page customization.
+- Ran php artisan migrate --force; the server reported no pending migrations. No database reset, truncation or record deletion was performed.
+- Restored original root directory permissions after a deployment-time 403; .htaccess was restored from the backup and verified identical to the original. Live page and existing-image checks returned HTTP 200.
+- Took additional small backups of affected files before the tracking/calculator/popup edits.
+
+### Live validation
+- Successfully calculated a real installment with an empty deposit; verified all displayed result fields and the selected motorcycle/system.
+- Verified numeric request tracking and exactly one current-stage marker in the new journey layout.
+- Checked popup layout on desktop and a 390px mobile viewport.
+- At 1366x650, fees, total and the application button fit entirely inside the popup. At 1024x500, the body scrolls internally instead of clipping content.
+- Live home, showroom, tracking and calculator pages and the new stylesheets returned HTTP 200.
+- Changes do not include credentials, environment files, database dumps, uploads or backups.
