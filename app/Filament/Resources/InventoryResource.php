@@ -2,344 +2,109 @@
 
 namespace App\Filament\Resources;
 
+use App\Domain\Inventory\InventoryStock;
 use App\Filament\Resources\InventoryResource\Pages;
-use App\Models\Inventory;
-use App\Models\InventoryItem;
-use App\Models\Letter;
-use App\Models\Warehouse;
-use Filament\Forms\Components\Actions;
-use Filament\Forms\Components\Actions\Action;
-use Filament\Forms\Components\FileUpload;
-use Filament\Forms\Components\Hidden;
-use Filament\Forms\Components\Repeater;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\TextInput;
-use Filament\Forms\Form;
+use App\Models\{InventoryItem, Machine, Warehouse};
+use App\Support\Access;
+use Filament\Forms;
+use Filament\Forms\Components\{FileUpload, Select, TextInput};
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Eloquent\{Builder, Model};
 
 class InventoryResource extends Resource
 {
     use \App\Filament\Concerns\RoleGatedResource;
     use \App\Filament\Concerns\HasFullAccess;
-    protected static ?string $model = Inventory::class;
 
+    protected static ?string $model = Machine::class;
+    protected static ?string $slug = 'inventories';
     protected static ?string $navigationLabel = 'المخزون';
+    protected static ?string $modelLabel = 'مخزون موديل';
+    protected static ?string $pluralModelLabel = 'المخزون';
     protected static ?string $navigationGroup = 'إدارة المعرض';
     protected static ?int $navigationSort = 1;
-
-    public static function canViewAny(): bool
-    {
-        if (($allowed = static::roleAllows('view')) !== null) {
-            return $allowed;
-        }
-
-        return \App\Support\Access::allows(static::class, 'view');
-    }
-
     protected static ?string $navigationIcon = 'heroicon-o-archive-box';
 
-    public static function form(Form $form): Form
+    public static function canViewAny(): bool { return Access::allows(static::class, 'view'); }
+    public static function canEdit(Model $record): bool { return Access::allows(static::class, 'update'); }
+    public static function canCreate(): bool { return false; }
+    public static function canDelete(Model $record): bool { return false; }
+    public static function canDeleteAny(): bool { return false; }
+
+    public static function getEloquentQuery(): Builder
     {
-        return $form
-            ->schema([
-                Select::make('warehouse_id')
-                    ->label('المخزن')
-                    ->relationship('warehouse', 'name')
-                    ->required(),
-
-                Select::make('product_id')
-                    ->label('الصنف')
-                    ->relationship('product', 'name')
-                    ->required(),
-
-                Repeater::make('items')
-                    ->label('القطع')
-                    ->columnSpanFull()
-                    ->relationship()
-                    ->schema([
-                        Hidden::make('id'),
-
-                        FileUpload::make('chassis_image')
-                            ->label('صورة الشاسيه')
-                            ->image()
-                            ->directory('chassis')
-                            ->required(),
-
-                        FileUpload::make('engine_image')
-                            ->label('صورة الماتور')
-                            ->image()
-                            ->directory('engine')
-                            ->required(),
-
-                        TextInput::make('color')
-                            ->label('اللون')
-                            ->columnSpanFull()
-                            ->required(),
-
-                        TextInput::make('customer_name')
-                            ->label('اسم العميل')
-                            ->visibleOn('edit'),
-
-                        TextInput::make('national_id')
-                            ->label('الرقم القومي')
-                            ->visibleOn('edit'),
-
-                        TextInput::make('phone')
-                            ->label('رقم الهاتف')
-                            ->tel()
-                            ->visibleOn('edit'),
-
-                        TextInput::make('address')
-                            ->label('العنوان')
-                            ->columnSpanFull()
-                            ->visibleOn('edit'),
-                       FileUpload::make('customer_id_image')
-                             ->label('صورة البطاقة')
-                             ->image()
-                             ->directory('customer-id')
-                             ->imageEditor()
-                             ->visibleOn('edit'),
-                        TextInput::make('cash')
-                            ->label('كاش')
-                            ->numeric()
-                            ->visibleOn('edit'),
-
-                        TextInput::make('limit')
-                            ->label('ليمت')
-                            ->numeric()
-                            ->visibleOn('edit'),
-
-                        TextInput::make('admin_fees')
-                            ->label('مصاريف إدارية')
-                            ->numeric()
-                            ->visibleOn('edit'),
-
-                        TextInput::make('paid')
-                            ->label('المدفوع')
-                            ->numeric()
-                            ->visibleOn('edit'),
-
-                        TextInput::make('remaining')
-                            ->label('المتبقي')
-                            ->numeric()
-                            ->visibleOn('edit'),
-
-                        TextInput::make('chassis_number')
-                            ->label('رقم الشاسيه')
-                            ->visibleOn('edit'),
-
-                        TextInput::make('engine_number')
-                            ->label('رقم الماتور')
-                            ->visibleOn('edit'),
-
-                        Actions::make([
-                           
-    Action::make('transfer_item')
-        ->visible(fn () =>
-            static::fullAccess()
-        )
-        ->label('تحويل لمعرض آخر')
-        ->icon('heroicon-o-arrow-path-rounded-square')
-        ->color('warning')
-                                ->modalHeading('تحويل المكنة لمعرض آخر')
-                                ->modalDescription('اختار المعرض اللي عايز تحول له المكنة.')
-                                ->modalSubmitActionLabel('تم التحويل')
-                                ->form([
-                                    Select::make('target_warehouse_id')
-                                        ->label('تحويل إلى معرض')
-                                        ->options(function ($get) {
-                                            $itemId = $get('id');
-                                            $item = $itemId ? InventoryItem::with('inventory')->find($itemId) : null;
-
-                                            return Warehouse::query()
-                                                ->when($item?->inventory?->warehouse_id, function ($query, $currentWarehouseId) {
-                                                    $query->where('id', '!=', $currentWarehouseId);
-                                                })
-                                                ->pluck('name', 'id')
-                                                ->toArray();
-                                        })
-                                        ->searchable()
-                                        ->preload()
-                                        ->required(),
-                                ])
-                                ->requiresConfirmation()
-                                ->action(function (array $data, $get) {
-                                    $itemId = $get('id');
-
-                                    if (! $itemId) {
-                                        Notification::make()
-                                            ->title('لازم تحفظ القطعة الأول قبل التحويل')
-                                            ->danger()
-                                            ->send();
-
-                                        return;
-                                    }
-
-                                    $item = InventoryItem::with('inventory')->find($itemId);
-
-                                    if (! $item || ! $item->inventory) {
-                                        Notification::make()
-                                            ->title('القطعة غير موجودة')
-                                            ->danger()
-                                            ->send();
-
-                                        return;
-                                    }
-
-                                    if ((int) $item->inventory->warehouse_id === (int) $data['target_warehouse_id']) {
-                                        Notification::make()
-                                            ->title('مينفعش تحول لنفس المعرض')
-                                            ->danger()
-                                            ->send();
-
-                                        return;
-                                    }
-
-                                    DB::transaction(function () use ($item, $data) {
-                                        $targetInventory = Inventory::query()->firstOrCreate([
-                                            'warehouse_id' => $data['target_warehouse_id'],
-                                            'product_id' => $item->inventory->product_id,
-                                        ]);
-
-                                        $item->update([
-                                            'inventory_id' => $targetInventory->id,
-                                        ]);
-                                    });
-
-                                    Notification::make()
-                                        ->title('تم تحويل المكنة للمعرض الجديد')
-                                        ->success()
-                                        ->send();
-
-                                    redirect(request()->header('Referer'));
-                                })
-                                ,
-
-                            Action::make('add_to_letters')
-                                ->label('إضافة للجوابات')
-                                ->icon('heroicon-o-document-plus')
-                                ->color('success')
-                                ->requiresConfirmation()
-                                ->modalHeading('تأكيد خروج المكنة')
-                                ->modalDescription('سيتم نقل هذه المكنة إلى الجوابات وحذفها من المخزون.')
-                                ->action(function ($get) {
-                                    $itemId = $get('id');
-
-                                    if (! $itemId) {
-                                        Notification::make()
-                                            ->title('لازم تحفظ القطعة الأول')
-                                            ->danger()
-                                            ->send();
-
-                                        return;
-                                    }
-
-                                    $item = InventoryItem::find($itemId);
-
-                                    if (! $item) {
-                                        Notification::make()
-                                            ->title('القطعة غير موجودة')
-                                            ->danger()
-                                            ->send();
-
-                                        return;
-                                    }
-
-                                    DB::transaction(function () use ($item) {
-                                        Letter::create([
-                                            'inventory_id' => $item->inventory_id,
-                                            'inventory_item_id' => $item->id,
-
-                                            'chassis_image' => $item->chassis_image,
-                                            'engine_image' => $item->engine_image,
-                                            'color' => $item->color,
-
-                                            'customer_name' => $item->customer_name,
-                                            'customer_id_image' => $item->customer_id_image,
-                                            'national_id' => $item->national_id,
-                                            'phone' => $item->phone,
-                                            'address' => $item->address,
-
-                                            'cash' => $item->cash,
-                                            'limit' => $item->limit,
-                                            'admin_fees' => $item->admin_fees,
-                                            'paid' => $item->paid,
-                                            'remaining' => $item->remaining,
-
-                                            'chassis_number' => $item->chassis_number,
-                                            'engine_number' => $item->engine_number,
-                                        ]);
-
-                                        $item->delete();
-                                    });
-
-                                    Notification::make()
-                                        ->title('تم نقل المكنة إلى الجوابات')
-                                        ->success()
-                                        ->send();
-
-                                    redirect(request()->header('Referer'));
-                                }),
-                        ])
-                            ->columnSpanFull()
-                            ->visibleOn('edit'),
-                    ])
-                    ->columns(2)
-                    ->defaultItems(1)
-                    ->addActionLabel('اضافة قطعة'),
-            ]);
+        return app(InventoryStock::class)->modelQuery();
     }
 
     public static function table(Table $table): Table
     {
-        return $table
+        return $table->heading('الموديلات المتاحة في المخزون')
+            ->description('كل الموديلات من ريسورس المكن تلقائيًا، والعدد هو رصيد المعارض المسموح لك بالوصول إليها فقط.')
             ->columns([
-                TextColumn::make('warehouse.name')
-                    ->label('المخزن'),
+                TextColumn::make('name')->label('اسم الموديل')->searchable()->sortable()->weight('bold')->icon('heroicon-o-cube'),
+                TextColumn::make('available_items_count')->label('عدد القطع')->numeric()->sortable()->badge()
+                    ->color(fn ($state) => (int) $state > 0 ? 'success' : 'gray')->suffix(' قطعة'),
+            ])->defaultSort('name')->actions([
+                Tables\Actions\Action::make('editStock')->label('تعديل')->icon('heroicon-o-pencil-square')->color('gray')->button()
+                    ->url(fn (Machine $record) => static::getUrl('edit', ['record' => $record]))
+                    ->visible(fn (Machine $record) => static::canEdit($record)),
+                static::saleAction(),
+            ])->bulkActions([])->emptyStateHeading('أضف الموديلات من ريسورس المكن');
+    }
 
-                TextColumn::make('product.name')
-                    ->label('الصنف')
-                    ->searchable(query: function ($query, $search) {
-                        $query->whereHas('product', function ($q) use ($search) {
-                            $q->where('name', 'like', "%{$search}%");
-                        });
-                    }),
-
-                TextColumn::make('items_count')
-                    ->counts('items')
-                    ->label('عدد القطع'),
-            ])
-            ->filters([
-                Tables\Filters\SelectFilter::make('warehouse_id')
-                    ->label('فلترة بالمعرض')
-                    ->relationship('warehouse', 'name')
-                    ->searchable()
-                    ->preload(),
-            ])
-            ->actions([
-                Tables\Actions\ViewAction::make(),
-
-                Tables\Actions\EditAction::make()
-                    ->visible(fn () => \App\Support\Access::allows(static::class, 'update')),
-
-                Tables\Actions\DeleteAction::make()
-                    ->visible(fn () => \App\Support\Access::allows(static::class, 'delete')),
-            ]);
+    public static function saleAction(): Tables\Actions\Action
+    {
+        return Tables\Actions\Action::make('sell')->label('بيع')->icon('heroicon-o-shopping-bag')->color('success')->button()
+            ->visible(fn (Machine $record) => static::canEdit($record) && LetterResource::canCreate())
+            ->disabled(fn (Machine $record) => (int) $record->available_items_count === 0)
+            ->modalHeading(fn (Machine $record) => 'بيع • ' . $record->name)
+            ->modalDescription('اختر المعرض والقطعة، ثم أدخل بيانات العميل والحساب. إرسال الجواب يتم عند التأكيد فقط.')
+            ->modalWidth('4xl')->modalSubmitActionLabel('تأكيد البيع وإرسال للجوابات')
+            ->steps([
+                Forms\Components\Wizard\Step::make('اختيار القطعة')->icon('heroicon-o-cube')->schema([
+                    Select::make('warehouse_id')->label('المعرض')->required()->searchable()->preload()->live()
+                        ->options(fn (Machine $record) => app(InventoryStock::class)->warehouses()->whereHas('inventories', fn ($q) => $q
+                            ->whereHas('product', fn ($p) => $p->where('machine_id', $record->id))
+                            ->whereHas('items', fn ($i) => $i->whereNull('sold_at')))->pluck('name', 'id'))
+                        ->afterStateUpdated(fn (Forms\Set $set) => $set('inventory_item_id', null)),
+                    Select::make('inventory_item_id')->label('القطعة • الشاسيه / الماتور / اللون')->required()->searchable()->preload()->live()
+                        ->options(fn (Machine $record, Forms\Get $get) => app(InventoryStock::class)->available($record->id)
+                            ->whereHas('inventory', fn ($q) => $q->where('warehouse_id', $get('warehouse_id')))->get()
+                            ->mapWithKeys(fn ($item) => [$item->id => 'شاسيه: ' . ($item->chassis_number ?: 'غير مسجل') . ' • ماتور: ' . ($item->engine_number ?: 'غير مسجل') . ' • ' . $item->color . ' • #' . $item->id]))
+                        ->afterStateUpdated(function ($state, Machine $record, Forms\Set $set) {
+                            $item = app(InventoryStock::class)->available($record->id)->find($state);
+                            foreach (InventoryStock::SALE_FIELDS as $field) $set($field, $item?->{$field});
+                        }),
+                    TextInput::make('chassis_number')->label('رقم الشاسيه')->required()->maxLength(255),
+                    TextInput::make('engine_number')->label('رقم الماتور')->required()->maxLength(255),
+                ])->columns(2),
+                Forms\Components\Wizard\Step::make('بيانات العميل')->icon('heroicon-o-user')->schema([
+                    TextInput::make('customer_name')->label('اسم العميل')->required()->maxLength(255),
+                    TextInput::make('phone')->label('رقم الهاتف')->tel()->required()->maxLength(30),
+                    TextInput::make('national_id')->label('الرقم القومي')->nullable()->regex('/^[0-9]{14}$/')->maxLength(14),
+                    TextInput::make('address')->label('العنوان')->maxLength(2000),
+                    FileUpload::make('customer_id_image')->label('صورة البطاقة')->image()->disk('public')->visibility('public')->directory('customer-id')->columnSpanFull(),
+                ])->columns(2),
+                Forms\Components\Wizard\Step::make('الحساب والتأكيد')->icon('heroicon-o-banknotes')->schema([
+                    ...collect(['cash' => 'كاش', 'limit' => 'ليمت', 'admin_fees' => 'المصاريف الإدارية', 'paid' => 'المدفوع', 'remaining' => 'المتبقي'])
+                        ->map(fn ($label, $key) => TextInput::make($key)->label($label)->numeric()->minValue(0)->maxValue(99999999)->suffix('جنيه'))->values()->all(),
+                    Forms\Components\Placeholder::make('sale_note')->hiddenLabel()->content('بالتأكيد: تتحول القطعة إلى مباعة ويُنشأ جواب بنفس بياناتها وبيانات العميل، بدون حذف سجل القطعة.')->columnSpanFull(),
+                ])->columns(2),
+            ])->action(function (Machine $record, array $data) {
+                abort_unless(static::canEdit($record) && LetterResource::canCreate(), 403);
+                $letter = app(InventoryStock::class)->sell($record, $data);
+                Notification::make()->success()->title('تم البيع وإنشاء الجواب بنجاح')->send();
+                if (LetterResource::canEdit($letter)) return redirect(LetterResource::getUrl('edit', ['record' => $letter]));
+            });
     }
 
     public static function getPages(): array
     {
-        return [
-            'index' => Pages\ListInventories::route('/'),
-            'create' => Pages\CreateInventory::route('/create'),
-            'view' => Pages\ViewInventory::route('/{record}'),
-            'edit' => Pages\EditInventory::route('/{record}/edit'),
-        ];
+        return ['index' => Pages\ListInventories::route('/'), 'edit' => Pages\EditInventory::route('/{record}/edit')];
     }
 }
 

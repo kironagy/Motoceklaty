@@ -88,7 +88,7 @@ protected static function isSuperAdmin(): bool
                     ->when($get('warehouse_id'), fn ($q, $warehouseId) => $q->where('warehouse_id', $warehouseId))
                     ->get()
                     ->mapWithKeys(fn ($item) => [
-                        $item->id => ($item->product->name ?? 'بدون اسم مكنة') . ' - ' . ($item->warehouse->name ?? 'بدون مخزن'),
+                        $item->id => ($item->product?->machine?->name ?? $item->product?->name ?? 'بدون اسم مكنة') . ' - ' . ($item->warehouse->name ?? 'بدون مخزن'),
                     ])
                     ->toArray();
             })
@@ -111,7 +111,7 @@ protected static function isSuperAdmin(): bool
         Forms\Components\Placeholder::make('product_name')
             ->label('اسم المكنة الحالي')
             ->content(fn (?Letter $record) =>
-                $record?->inventory?->product?->name ?? 'لا يوجد اسم مكنة'
+                $record?->inventory?->product?->machine?->name ?? $record?->inventory?->product?->name ?? 'لا يوجد اسم مكنة'
             )
             ->visible(fn () => ! static::isSuperAdmin()),
     ])
@@ -245,6 +245,7 @@ protected static function isSuperAdmin(): bool
                         }),
 
                     Tables\Columns\TextColumn::make('inventory.product.name')
+                        ->formatStateUsing(fn ($state, Letter $record) => $record->inventory?->product?->machine?->name ?? $state)
                         ->label('اسم المكنة')
                         ->icon('heroicon-o-cube')
                         ->weight(FontWeight::Bold)
