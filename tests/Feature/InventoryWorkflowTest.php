@@ -120,6 +120,28 @@ class InventoryWorkflowTest extends TestCase
         return ['warehouse_id' => $this->warehouse->id, 'inventory_item_id' => $this->piece->id, 'customer_name' => 'Test Customer', 'phone' => '01000000000', 'chassis_number' => 'CH-1', 'engine_number' => 'EN-1', 'cash' => 50000, 'limit' => 0, 'admin_fees' => 100, 'paid' => 1000, 'remaining' => 49100];
     }
 
+    public function test_points_summary_combines_four_points_and_keeps_history(): void
+    {
+        $staff = auth('filament')->user();
+        $points = collect(range(1, 4))->map(fn () => \App\Models\AttendancePoint::create([
+            'staff_id' => $staff->id, 'color' => 'green', 'amount' => 0, 'earned_on' => today(), 'status' => 'active', 'source' => 'manual',
+        ]));
+        $page = Livewire::test(\App\Filament\Resources\AttendancePointResource\Pages\ListAttendancePoints::class);
+        $page->assertCountTableRecords(1)->assertTableColumnStateSet('green_total', 4, $page->instance()->getTableRecords()->first());
+        $page->set('activeTab', 'history')->assertCountTableRecords(4);
+        $this->assertDatabaseCount('attendance_points', 4);
+    }
+
+    public function test_remaining_report_download_and_access(): void
+    {
+        $this->stock->sell($this->machine, $this->saleData());
+        Livewire::test(\App\Filament\Resources\LetterResource\Pages\ListLetters::class)
+            ->callAction('remaining_report')->assertFileDownloaded('letters-remaining-' . now()->format('Y-m-d') . '.csv');
+        $employee = Staff::create(['name' => 'Report viewer', 'email' => 'report-viewer@example.test', 'password' => 'test-password', 'permissions' => ['LetterResource' => ['view']]]);
+        $this->actingAs($employee, 'filament');
+        Livewire::test(\App\Filament\Resources\LetterResource\Pages\ListLetters::class)->assertActionHidden('remaining_report');
+    }
+
     public function test_employee_only_sees_own_showroom_and_cannot_forge_other_showroom_sale_or_edit(): void
     {
         $other = Warehouse::create(['name' => 'Hidden Showroom']);

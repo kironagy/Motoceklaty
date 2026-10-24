@@ -75,11 +75,28 @@ class AttendancePointResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(function (Builder $query, $livewire) {
+                if ($livewire->activeTab === 'history') return;
+                $query->select('attendance_points.*');
+                $query->whereIn('attendance_points.id', AttendancePoint::query()->selectRaw('MIN(id)')->groupBy('staff_id'));
+                foreach (['green', 'red', 'black'] as $color) {
+                    $query->selectSub(AttendancePoint::query()->from('attendance_points as totals')
+                        ->selectRaw('COUNT(*)')->whereColumn('totals.staff_id', 'attendance_points.staff_id')
+                        ->where('totals.status', AttendancePoints::ACTIVE)->where('totals.color', $color), $color . '_total');
+                }
+                $query->selectSub(AttendancePoint::query()->from('attendance_points as totals')
+                    ->selectRaw('COALESCE(SUM(amount), 0)')->whereColumn('totals.staff_id', 'attendance_points.staff_id')
+                    ->where('totals.status', AttendancePoints::ACTIVE), 'deduction_total');
+            })
             ->defaultSort('earned_on', 'desc')
             ->columns([
-                TextColumn::make('earned_on')->label('اليوم')->date('Y-m-d')->sortable(),
+                TextColumn::make('green_total')->label('النقط الخضرا')->badge()->color('success')->visible(fn ($livewire) => $livewire->activeTab !== 'history'),
+                TextColumn::make('red_total')->label('النقط الحمرا')->badge()->color('danger')->visible(fn ($livewire) => $livewire->activeTab !== 'history'),
+                TextColumn::make('black_total')->label('النقط السودا')->badge()->color('gray')->visible(fn ($livewire) => $livewire->activeTab !== 'history'),
+                TextColumn::make('deduction_total')->label('إجمالي الخصم القائم')->money('EGP')->visible(fn ($livewire) => $livewire->activeTab !== 'history'),
+                TextColumn::make('earned_on')->visible(fn ($livewire) => $livewire->activeTab === 'history')->label('اليوم')->date('Y-m-d')->sortable(),
                 TextColumn::make('staff.name')->label('الموظف')->searchable()->visible(fn () => static::fullAccess()),
-                TextColumn::make('color')
+                TextColumn::make('color')->visible(fn ($livewire) => $livewire->activeTab === 'history')
                     ->label('النقطة')
                     ->badge()
                     ->formatStateUsing(fn ($state) => (AttendancePoints::ICONS[$state] ?? '').' '.(AttendancePoints::LABELS[$state] ?? $state))
@@ -88,11 +105,11 @@ class AttendancePointResource extends Resource
                         AttendancePoints::RED => 'danger',
                         default => 'gray',
                     }),
-                TextColumn::make('amount')
+                TextColumn::make('amount')->visible(fn ($livewire) => $livewire->activeTab === 'history')
                     ->label('الخصم')
                     ->formatStateUsing(fn ($state) => (float) $state > 0 ? number_format((float) $state).' ج' : null)
                     ->placeholder('—'),
-                TextColumn::make('status')
+                TextColumn::make('status')->visible(fn ($livewire) => $livewire->activeTab === 'history')
                     ->label('الحالة')
                     ->badge()
                     ->formatStateUsing(fn ($state) => match ($state) {
@@ -102,34 +119,34 @@ class AttendancePointResource extends Resource
                         default => $state,
                     })
                     ->color(fn ($state) => $state === AttendancePoints::ACTIVE ? 'warning' : 'gray'),
-                TextColumn::make('source')
+                TextColumn::make('source')->visible(fn ($livewire) => $livewire->activeTab === 'history')
                     ->label('من')
                     ->formatStateUsing(fn ($state, AttendancePoint $record) => match ($state) {
                         'manual' => 'إضافة يدوي'.($record->creator ? ' - '.$record->creator->name : ''),
                         'absence' => 'غياب بدون إجازة',
                         default => 'البصمة',
                     }),
-                TextColumn::make('reason')->label('السبب')->placeholder('—')->wrap(),
+                TextColumn::make('reason')->visible(fn ($livewire) => $livewire->activeTab === 'history')->label('السبب')->placeholder('—')->wrap(),
             ])
             ->filters([
                 SelectFilter::make('staff_id')
                     ->label('الموظف')
                     ->options(fn () => Staff::query()->where('is_showroom_employee', true)->orderBy('name')->pluck('name', 'id'))
                     ->visible(fn () => static::fullAccess()),
-                SelectFilter::make('color')->label('النقطة')->options([
+                SelectFilter::make('color')->visible(fn ($livewire) => $livewire->activeTab === 'history')->label('النقطة')->options([
                     AttendancePoints::GREEN => 'خضرا',
                     AttendancePoints::RED => 'حمرا',
                     AttendancePoints::BLACK => 'سودا',
                 ]),
-                SelectFilter::make('status')->label('الحالة')->options([
+                SelectFilter::make('status')->visible(fn ($livewire) => $livewire->activeTab === 'history')->label('الحالة')->options([
                     AttendancePoints::ACTIVE => 'قائمة',
                     AttendancePoints::USED => 'اتستخدمت',
                     AttendancePoints::CANCELED => 'اتلغت',
                 ]),
             ])
             ->actions([
-                static::cancelPointAction(),
-                Tables\Actions\DeleteAction::make()->label('حذف'),
+                static::cancelPointAction()->hidden(fn ($livewire) => $livewire->activeTab !== 'history'),
+                Tables\Actions\DeleteAction::make()->label('حذف')->hidden(fn ($livewire) => $livewire->activeTab !== 'history'),
             ]);
     }
 
