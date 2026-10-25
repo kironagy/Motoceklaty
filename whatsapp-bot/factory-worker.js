@@ -135,5 +135,5 @@ app.listen(Number(process.env.FACTORY_PORT || 3081), '127.0.0.1');
 for (const id of fs.readdirSync(root)) {
     if (!/^staff_[1-9]\d*$/.test(id)) continue;
     const creds = path.join(root, id, 'auth', 'creds.json');
-    if (fs.existsSync(creds) && JSON.parse(fs.readFileSync(creds, 'utf8')).registered) start(id).catch(() => { load(id).status = 'error'; });
+    if (fs.existsSync(creds) && JSON.parse(fs.readFileSync(creds, 'utf8')).me?.id) start(id).catch(() => { load(id).status = 'error'; });
 }
