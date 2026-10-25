@@ -1,0 +1,24 @@
+[Unit]
+Description=MotoGate Work Factory WhatsApp collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=elhawy
+Group=elhawy
+WorkingDirectory=/home/elhawy/web/motogate-eg.com/public_html/whatsapp-bot
+EnvironmentFile=/etc/motogate-work-factory.env
+ExecStart=/usr/bin/node /home/elhawy/web/motogate-eg.com/public_html/whatsapp-bot/factory-worker.js
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/elhawy/.work-factory
+MemoryMax=768M
+
+[Install]
+WantedBy=multi-user.target

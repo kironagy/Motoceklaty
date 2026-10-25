@@ -41,6 +41,7 @@ return [
     ],
 
     'whatsapp' => [
+        'factory_url' => env('WHATSAPP_FACTORY_URL', 'http://127.0.0.1:3081'),
         'bot_token' => env('BOT_TOKEN'),
         'worker_url' => rtrim((string) env('WHATSAPP_WORKER_URL', 'http://127.0.0.1:3080'), '/'),
     ],
