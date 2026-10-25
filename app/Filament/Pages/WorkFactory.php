@@ -68,7 +68,9 @@ class WorkFactory extends Page
     {
         try {
             $rows = $this->worker('get', '/contacts')['rows'] ?? [];
-            if (! $rows) { Notification::make()->warning()->title('لسه مفيش عملاء مستخرجين')->body('اربط واتساب وانتظر مزامنة الدردشات.')->send(); return null; }
+            $rows = collect($rows)->filter(fn ($row) => preg_match('/^[1-9][0-9]{6,14}$/', (string) ($row['phone'] ?? '')))
+                ->unique('phone')->map(fn ($row) => ['phone' => (string) $row['phone']])->values()->all();
+            if (! $rows) { Notification::make()->warning()->title('لسه مفيش أرقام هاتف مؤكدة')->body('الاسم والمعرّف المخفي مش أرقام. انتظر المزامنة؛ لو الحساب مربوط من قبل الإصلاح، افصله وأعد مسح QR لمزامنة تحويلات الأرقام.')->send(); return null; }
             $chunks = WorkFactoryExport::split($rows, $parts);
             $file = tempnam(storage_path('framework'), 'factory-');
             chmod($file, 0600);

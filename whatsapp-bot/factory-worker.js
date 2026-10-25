@@ -9,6 +9,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { createContacts } = require('./factory-contacts');
+const { downloadHistory, getHistoryMsg, proto } = require('@whiskeysockets/baileys');
+const inflate = require('node:util').promisify(require('node:zlib').inflate);
 const root = process.env.FACTORY_DATA_DIR;
 if (!root || !process.env.BOT_TOKEN) throw new Error('FACTORY_DATA_DIR and BOT_TOKEN are required');
 fs.mkdirSync(root, { recursive: true, mode: 0o700 });
@@ -32,6 +34,23 @@ function saveSoon(id, s) {
     clearTimeout(s.saveTimer);
     s.saveTimer = setTimeout(() => { try { persist(id, s); } catch { s.status = 'storage_error'; } }, 500);
 }
+async function resolvePhones(id, s) {
+    if (!s.sock?.signalRepository?.lidMapping) return;
+    await s.contacts.resolve(lid => s.sock.signalRepository.lidMapping.getPNForLID(lid));
+    persist(id, s);
+}
+function readHistoryMappings(id, s, notification) {
+    // rc.9 drops phoneNumberToLidMappings from messaging-history.set. Decode
+    // this metadata separately; never persist the raw history or message bodies.
+    s.historyQueue = (s.historyQueue || Promise.resolve()).then(async () => {
+        const raw = notification.initialHistBootstrapInlinePayload
+            ? proto.HistorySync.decode(await inflate(notification.initialHistBootstrapInlinePayload))
+            : await downloadHistory(notification, {});
+        s.contacts.historyMappings(raw);
+        await resolvePhones(id, s);
+        persist(id, s);
+    }).catch(() => { s.mappingError = true; });
+}
 async function start(id) {
     const s = load(id);
     if (s.sock || s.starting) return;
@@ -50,16 +69,24 @@ async function start(id) {
         sock.ev.on('messaging-history.set', data => {
             (data.contacts || []).forEach(c => s.contacts.contact(c));
             (data.messages || []).forEach(m => s.contacts.message(m));
-            for (const c of data.chats || []) if (c.pnJid && c.lidJid) s.contacts.link(c.lidJid, c.pnJid);
-            for (const m of data.lidPnMappings || []) s.contacts.link(m.lid, m.pn);
+            s.contacts.historyMappings(data);
+            resolvePhones(id, s).catch(() => { s.mappingError = true; });
             s.progress = data.progress ?? s.progress;
             saveSoon(id, s);
         });
-        sock.ev.on('messages.upsert', data => { data.messages.forEach(m => s.contacts.message(m)); saveSoon(id, s); });
+        sock.ev.on('messages.upsert', data => {
+            for (const m of data.messages) {
+                s.contacts.message(m);
+                const history = getHistoryMsg(m.message);
+                if (history) readHistoryMappings(id, s, history);
+            }
+            resolvePhones(id, s).catch(() => { s.mappingError = true; });
+            saveSoon(id, s);
+        });
         sock.ev.on('connection.update', async update => {
             if (s.sock !== sock) return;
             if (update.qr) { s.qr = await QRCode.toDataURL(update.qr); s.status = 'qr'; }
-            if (update.connection === 'open') { s.qr = null; s.status = 'connected'; s.retries = 0; }
+            if (update.connection === 'open') { s.qr = null; s.status = 'connected'; s.retries = 0; resolvePhones(id, s).catch(() => {}); }
             if (update.connection === 'close') {
                 s.sock = null; s.qr = null;
                 console.warn('Factory connection closed', { code: update.lastDisconnect?.error?.output?.statusCode,
@@ -82,13 +109,19 @@ app.use((req, res, next) => {
 app.param('id', (req, res, next, id) => /^staff_[1-9]\d*$/.test(id) ? next() : res.sendStatus(400));
 app.get('/sessions/:id', (req, res) => {
     const s = load(req.params.id);
-    res.json({ status: s.status, qr: s.qr, count: s.contacts.rows().length, updated: s.updated, progress: s.progress });
+    const rows = s.contacts.rows();
+    res.json({ status: s.status, qr: s.qr, count: rows.filter(r => r.phone).length, unresolved: rows.filter(r => !r.phone).length, updated: s.updated, progress: s.progress });
 });
 app.post('/sessions/:id/start', async (req, res) => {
     try { await start(req.params.id); res.json({ ok: true }); }
     catch { load(req.params.id).status = 'error'; res.status(503).json({ error: 'تعذر تشغيل الاتصال، حاول مرة أخرى.' }); }
 });
-app.get('/sessions/:id/contacts', (req, res) => res.json({ rows: load(req.params.id).contacts.rows() }));
+app.get('/sessions/:id/contacts', async (req, res) => {
+    const s = load(req.params.id);
+    try { await resolvePhones(req.params.id, s); await s.historyQueue; }
+    catch { return res.status(503).json({ error: 'تعذر مراجعة الأرقام، حاول مرة أخرى.' }); }
+    res.json({ rows: s.contacts.rows().filter(r => r.phone).map(r => ({ phone: r.phone })) });
+});
 app.post('/sessions/:id/logout', async (req, res) => {
     const s = load(req.params.id); s.stopped = true; clearTimeout(s.retryTimer); clearTimeout(s.saveTimer);
     try { await s.sock?.logout(); } catch { s.sock?.end(undefined); }
@@ -98,3 +131,9 @@ app.post('/sessions/:id/logout', async (req, res) => {
     persist(req.params.id, s); res.json({ ok: true });
 });
 app.listen(Number(process.env.FACTORY_PORT || 3081), '127.0.0.1');
+// Resume previously linked accounts after deployment without logging them out.
+for (const id of fs.readdirSync(root)) {
+    if (!/^staff_[1-9]\d*$/.test(id)) continue;
+    const creds = path.join(root, id, 'auth', 'creds.json');
+    if (fs.existsSync(creds) && JSON.parse(fs.readFileSync(creds, 'utf8')).registered) start(id).catch(() => { load(id).status = 'error'; });
+}

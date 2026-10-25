@@ -27,9 +27,9 @@ class WorkFactoryExport
         $zip->addFromString('_rels/.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
         $zip->addFromString('xl/workbook.xml', '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="العملاء" sheetId="1" r:id="rId1"/></sheets></workbook>');
         $zip->addFromString('xl/_rels/workbook.xml.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>');
-        $xml = '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0" rightToLeft="1"><pane ySplit="1" topLeftCell="A2" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="4" width="28" customWidth="1"/></cols><sheetData>';
-        $all = [['رقم الهاتف', 'اسم العميل', 'اليوزرنيم', 'المعرف المتاح']];
-        foreach ($rows as $row) $all[] = [$row['phone'] ?? '', $row['name'] ?? '', $row['username'] ?? '', $row['identifier'] ?? ''];
+        $xml = '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0" rightToLeft="1"><pane ySplit="1" topLeftCell="A2" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="28" customWidth="1"/></cols><sheetData>';
+        $all = [['رقم الهاتف']];
+        foreach ($rows as $row) $all[] = [$row['phone'] ?? ''];
         foreach ($all as $i => $values) {
             $xml .= '<row r="'.($i + 1).'">';
             foreach ($values as $j => $value) {
@@ -39,7 +39,7 @@ class WorkFactoryExport
             }
             $xml .= '</row>';
         }
-        $xml .= '</sheetData><autoFilter ref="A1:D'.count($all).'"/></worksheet>';
+        $xml .= '</sheetData><autoFilter ref="A1:A'.count($all).'"/></worksheet>';
         $zip->addFromString('xl/worksheets/sheet1.xml', $xml);
         if (! $zip->close()) throw new \RuntimeException('تعذر حفظ ملف Excel.');
     }

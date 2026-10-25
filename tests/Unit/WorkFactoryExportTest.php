@@ -34,7 +34,7 @@ class WorkFactoryExportTest extends TestCase
             $this->assertStringContainsString('00123456789', $xml);
             $this->assertStringContainsString('t="inlineStr"', $xml);
             $this->assertStringNotContainsString('<f>', $xml);
-            $this->assertStringContainsString('اسم &amp; عربي', $xml); $zip->close();
+            $this->assertStringNotContainsString('اسم العميل', $xml); $this->assertStringNotContainsString('HYPERLINK', $xml); $zip->close();
         } finally { @unlink($file); }
     }
 }

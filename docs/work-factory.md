@@ -15,3 +15,7 @@ Tests: `node --test whatsapp-bot/test/factory-contacts.test.js`; `php vendor/php
 History API reference: https://github.com/WhiskeySockets/docs/blob/main/advanced/history-sync.mdx
 
 Production verification: the service is active and bound to 127.0.0.1:3081; unauthenticated requests return 401. The dashboard was inspected after login and a real WhatsApp QR was generated. Desktop registration was rejected with code 428 before QR, so the collector uses the compatible Chrome profile while still requesting history. See https://github.com/WhiskeySockets/Baileys/issues/2677. PHP tests passed (6 tests, 22 assertions); Node sender tests passed (3 tests), also on production. Actual account history cannot be validated until the owner scans their QR.
+
+
+## Phone-only correction
+Exports now contain one phone column only. Only confirmed 7–15 digit international numbers starting with 1–9 are eligible; unknown numbers, zero and names are excluded and the UI reports unresolved chats separately. PHP defensively filters and deduplicates again before team splitting. The collector normalizes device JIDs, reads signalRepository LID mappings and recovers phoneNumberToLidMappings from raw history notifications because Baileys rc.9 omits them from its processed history events. Linked sessions resume after worker restarts. Previously synchronized accounts may require an explicit disconnect/relink by the owner to receive history mappings again. Mapping recovery cannot manufacture numbers that WhatsApp does not provide.

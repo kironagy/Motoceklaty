@@ -32,7 +32,7 @@ class WorkFactoryTest extends TestCase
     {
         $staff = new Staff(['is_hitler' => true]); $staff->id = 42;
         auth('filament')->setUser($staff);
-        Http::fake(['*' => Http::response(['rows' => array_fill(0, 3, ['phone' => '00123', 'name' => 'عميل'])])]);
+        Http::fake(['*' => Http::response(['rows' => array_map(fn ($i) => ['phone' => '20123456789'.$i, 'name' => 'عميل'], range(0, 2))])]);
         $response = (new WorkFactory)->download(2);
         $this->assertSame('application/zip', $response->headers->get('Content-Type'));
         ob_start(); $response->sendContent(); $bytes = ob_get_clean();
