@@ -42,6 +42,13 @@ function createContacts(saved = []) {
             if (phone(id) && alt?.endsWith('@lid')) link(alt, id);
         },
         link,
+        excludeSelf(ids) {
+            for (let id of ids.filter(Boolean)) {
+                id = canonical(id); id = aliases.get(id) || id;
+                const row = records.get(id);
+                if (row) row.isSelf = true;
+            }
+        },
         historyMappings(data) {
             for (const pair of data.phoneNumberToLidMappings || []) link(pair.lidJid, pair.pnJid);
             for (const pair of data.lidPnMappings || []) link(pair.lid || pair.lidJid, pair.pn || pair.pnJid);
@@ -56,7 +63,7 @@ function createContacts(saved = []) {
         },
         saved: () => [...records.values()],
         rows() {
-            return [...records.values()].filter(r => r.received && (r.id.endsWith('@lid') || phone(r.id))).map(r => ({
+            return [...records.values()].filter(r => r.received && !r.isSelf && (r.id.endsWith('@lid') || phone(r.id))).map(r => ({
                 phone: phone(r.id) || (/^[1-9]\d{6,14}$/.test(r.phone || '') ? r.phone : ''), name: r.name || '', username: r.username || '',
                 identifier: r.phone || r.username || r.name || 'اسم ورقم غير متاحين',
             })).sort((a, b) => a.identifier.localeCompare(b.identifier));

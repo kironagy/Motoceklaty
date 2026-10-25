@@ -42,3 +42,10 @@ test('resolve stored LID mappings and reject placeholder zero', async () => {
     assert.equal(c.rows().filter(r => r.phone).length, 1);
     assert.equal(c.rows().find(r => r.phone).phone, '201234567890');
 });
+test('own account protocol messages are not exported as customer numbers', () => {
+    const c = createContacts(); c.message(message('123@lid'));
+    c.link('123@lid', '201234567890@s.whatsapp.net');
+    c.excludeSelf(['201234567890:3@s.whatsapp.net']);
+    assert.equal(c.rows().length, 0);
+    assert.equal(createContacts(c.saved()).rows().length, 0);
+});

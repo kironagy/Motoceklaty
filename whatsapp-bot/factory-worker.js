@@ -37,6 +37,7 @@ function saveSoon(id, s) {
 async function resolvePhones(id, s) {
     if (!s.sock?.signalRepository?.lidMapping) return;
     await s.contacts.resolve(lid => s.sock.signalRepository.lidMapping.getPNForLID(lid));
+    s.contacts.excludeSelf([s.sock?.user?.id, s.sock?.user?.lid]);
     persist(id, s);
 }
 function readHistoryMappings(id, s, notification) {
