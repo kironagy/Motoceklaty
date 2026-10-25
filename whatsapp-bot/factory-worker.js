@@ -58,6 +58,8 @@ async function start(id) {
     s.starting = true; s.stopped = false; s.status = 'starting';
     try {
         const { state, saveCreds } = await useMultiFileAuthState(path.join(root, id, 'auth'));
+        s.contacts.excludeSelf([state.creds.me?.id, state.creds.me?.lid]);
+        persist(id, s);
         const { version } = await fetchLatestBaileysVersion();
         const sock = makeWASocket({ version, auth: state, logger: pino({ level: 'silent' }),
             browser: Browsers.macOS('Chrome'), syncFullHistory: true, markOnlineOnConnect: false,
