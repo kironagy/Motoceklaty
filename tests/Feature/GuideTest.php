@@ -181,6 +181,8 @@ class GuideTest extends TestCase
         $this->assertStringContainsString('55,000 جنيه', $record->changeSummary());
         $this->assertStringNotContainsString('turn_id', $record->changeSummary());
         $this->assertSame('اتوافق عليه', GuideRecorder::displayValue('approved', 'الحالة'));
+        $record->setAttribute('changes', [['field' => 'colors', 'before' => ['أحمر'], 'after' => ['أسود']]]);
+        $this->assertSame('عدّل الألوان المتاحة', $record->changeSummary());
     }
 
     public function test_model_changes_do_not_also_create_a_duplicate_request_summary(): void

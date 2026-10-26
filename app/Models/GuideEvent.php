@@ -68,6 +68,10 @@ class GuideEvent extends Model
                 $parts[] = 'غيّر '.$change['field'];
                 continue;
             }
+            if (is_array($change['before'] ?? null) || is_array($change['after'] ?? null)) {
+                $parts[] = 'عدّل '.$change['field'];
+                continue;
+            }
             $before = $this->shortValue($change['before'] ?? null, $change['field']);
             $after = $this->shortValue($change['after'] ?? null, $change['field']);
             $parts[] = $change['field'].' من «'.$before.'» إلى «'.$after.'»';

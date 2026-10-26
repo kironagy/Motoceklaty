@@ -51,6 +51,10 @@ class GuideRecorder
     ];
 
     public const FIELDS = [
+        'colors' => 'الألوان المتاحة', 'installment_systems' => 'أنظمة التقسيط',
+        'features' => 'المميزات', 'aliases' => 'أسماء بديلة', 'specifications' => 'مواصفات المكنة',
+        'availability' => 'توافر المكنة', 'cc' => 'سعة المحرك', 'model_year' => 'سنة الموديل',
+        'category' => 'الفئة', 'is_featured' => 'ظهور مميز', 'video_url' => 'فيديو المكنة',
         'name' => 'الاسم', 'cash_price' => 'السعر النقدي', 'installment_price' => 'سعر التقسيط',
         'machine_installment_price' => 'سعر المكنة بالتقسيط', 'old_price' => 'السعر السابق',
         'new_price' => 'السعر الجديد', 'status' => 'الحالة', 'staff_id' => 'الموظف المسؤول',
