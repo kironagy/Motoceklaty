@@ -128,6 +128,16 @@ class GuideRecorder
 
     public function model(string $event, Model $model): void
     {
+        try {
+            $this->recordModel($event, $model);
+        } catch (\Throwable $exception) {
+            // Audit failures must never interrupt saving a task or its attachments.
+            report($exception);
+        }
+    }
+
+    private function recordModel(string $event, Model $model): void
+    {
         if (! str_starts_with(get_class($model), 'App\\Models\\') || $model instanceof GuideEvent) {
             return;
         }
@@ -145,8 +155,9 @@ class GuideRecorder
 
         $changes = [];
         $original = self::sanitize($model->getRawOriginal());
-        if (array_key_exists('value', $attributes) && is_string($model->getAttribute('key'))
-            && preg_match('/password|token|secret|api.?key|credential|private.?key/i', $model->getAttribute('key'))) {
+        $rawAttributes = $model->getAttributes();
+        if (array_key_exists('value', $attributes) && is_string($rawAttributes['key'] ?? null)
+            && preg_match('/password|token|secret|api.?key|credential|private.?key/i', $rawAttributes['key'])) {
             $attributes['value'] = '[محجوب]';
         }
         foreach (self::sanitize($attributes) as $field => $value) {
@@ -159,7 +170,16 @@ class GuideRecorder
         }
 
         $label = self::LABELS[class_basename($model)] ?? class_basename($model);
-        $name = $model->getAttribute('name') ?? $model->getAttribute('applicant_name') ?? $model->getAttribute('title');
+        // getAttribute() on a missing column can invoke a same-named method as a
+        // relationship (DailyTaskFile::name() returns a string, not a Relation).
+        $name = null;
+        foreach (['name', 'applicant_name', 'title', 'original_name'] as $field) {
+            $candidate = $rawAttributes[$field] ?? null;
+            if (is_scalar($candidate) && trim((string) $candidate) !== '') {
+                $name = in_array($field, $model->getHidden(), true) ? '[محجوب]' : $candidate;
+                break;
+            }
+        }
         $subject = $label.' #'.$model->getKey().($name ? ' — '.mb_substr((string) $name, 0, 100) : '');
         $verb = match ($event) {
             'created' => 'أضاف', 'deleted' => 'حذف', 'restored' => 'استعاد', default => 'عدّل',

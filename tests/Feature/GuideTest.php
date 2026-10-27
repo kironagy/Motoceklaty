@@ -79,6 +79,27 @@ class GuideTest extends TestCase
         $this->assertSame('27', GuideEvent::where('event', 'login')->first()->actor_id);
     }
 
+    public function test_task_attachment_creation_and_update_are_saved_and_audited_without_calling_name_as_a_relation(): void
+    {
+        Schema::create('daily_task_files', function (Blueprint $table) {
+            $table->id(); $table->unsignedBigInteger('daily_task_id');
+            $table->string('kind'); $table->string('path'); $table->string('original_name')->nullable();
+            $table->unsignedBigInteger('uploaded_by')->nullable(); $table->timestamps();
+        });
+        Auth::guard('filament')->setUser((new Staff)->forceFill(['id' => 27, 'name' => 'المدير']));
+        $file = \App\Models\DailyTaskFile::create([
+            'daily_task_id' => 1, 'kind' => 'attachment', 'path' => 'tasks/photo.jpg', 'original_name' => 'صورة التاسك.jpg',
+        ]);
+        $file->update(['original_name' => 'الصورة الجديدة.jpg']);
+        $this->assertSame('الصورة الجديدة.jpg', $file->fresh()->original_name);
+        $events = GuideEvent::where('subject_type', \App\Models\DailyTaskFile::class)->orderBy('id')->get();
+        $this->assertSame(['created', 'updated'], $events->pluck('event')->all());
+        $this->assertStringContainsString('صورة التاسك.jpg', $events[0]->subject_label);
+        $this->assertStringContainsString('الصورة الجديدة.jpg', $events[1]->subject_label);
+        $file->update(['original_name' => null]);
+        $this->assertSame(3, GuideEvent::where('subject_type', \App\Models\DailyTaskFile::class)->count());
+    }
+
     public function test_bulk_writes_are_captured_without_logging_request_secrets(): void
     {
         $request = Request::create('/bulk-update', 'POST', ['password' => 'never-record-this']);
