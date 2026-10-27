@@ -19,3 +19,8 @@ Production verification: the service is active and bound to 127.0.0.1:3081; unau
 
 ## Phone-only correction
 Exports now contain one phone column only. Only confirmed 7–15 digit international numbers starting with 1–9 are eligible; unknown numbers, zero and names are excluded and the UI reports unresolved chats separately. PHP defensively filters and deduplicates again before team splitting. The collector normalizes device JIDs, reads signalRepository LID mappings and recovers phoneNumberToLidMappings from raw history notifications because Baileys rc.9 omits them from its processed history events. Linked sessions resume after worker restarts. Previously synchronized accounts may require an explicit disconnect/relink by the owner to receive history mappings again. Mapping recovery cannot manufacture numbers that WhatsApp does not provide.
+
+
+## Switching WhatsApp accounts
+Use «ربط حساب واتساب آخر» to close the current socket, archive its private session directory under FACTORY_DATA_DIR/archives, and start a fresh QR and empty contact list. Archives are excluded from automatic resume. Late events and credential writes from replaced sockets are ignored. The page shows the connected phone number and history progress so the operator can verify the account. Linking another account requires scanning on that phone; WhatsApp controls the amount of history supplied. Tested with factory-switch.test.js plus contact tests (7 passing).
+

@@ -45,6 +45,15 @@ class WorkFactory extends Page
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('switchAccount')->label('ربط حساب واتساب آخر')->icon('heroicon-o-arrow-path')
+                ->color('warning')->requiresConfirmation()
+                ->modalHeading('ربط حساب واتساب آخر')
+                ->modalDescription('سيتم إيقاف الاتصال الحالي وحفظ بياناته في أرشيف منفصل، ثم فتح QR جديد. قائمة الحساب الجديد تبدأ من صفر بدون خلط بالأرقام القديمة. قد تحتاج إزالة ربط مصنع الشغل القديم من الأجهزة المرتبطة في هاتفك.')
+                ->modalSubmitActionLabel('فتح QR لحساب آخر')
+                ->action(function () {
+                    try { $this->worker('post', '/switch'); $this->refreshConnection(); }
+                    catch (\Illuminate\Http\Client\HttpClientException $e) { Notification::make()->danger()->title('تعذر تبديل الحساب')->body('انتظر انتهاء محاولة الربط ثم أعد المحاولة. البيانات القديمة محفوظة.')->send(); }
+                }),
             Action::make('connect')->label('ربط واتساب / إظهار QR')->icon('heroicon-o-qr-code')
                 ->action(function () {
                     try { $this->worker('post', '/start'); $this->refreshConnection(); }

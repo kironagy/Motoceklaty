@@ -24,6 +24,7 @@ function load(id) {
     return sessions.get(id);
 }
 function persist(id, s) {
+    if (s.retired) return;
     fs.mkdirSync(path.join(root, id), { recursive: true, mode: 0o700 });
     const file = path.join(root, id, 'senders.json');
     fs.writeFileSync(file + '.tmp', JSON.stringify(s.contacts.saved()), { mode: 0o600 });
@@ -31,6 +32,7 @@ function persist(id, s) {
     s.updated = new Date().toISOString();
 }
 function saveSoon(id, s) {
+    if (s.retired) return;
     clearTimeout(s.saveTimer);
     s.saveTimer = setTimeout(() => { try { persist(id, s); } catch { s.status = 'storage_error'; } }, 500);
 }
@@ -58,18 +60,26 @@ async function start(id) {
     s.starting = true; s.stopped = false; s.status = 'starting';
     try {
         const { state, saveCreds } = await useMultiFileAuthState(path.join(root, id, 'auth'));
+        if (s.retired) return;
         s.contacts.excludeSelf([state.creds.me?.id, state.creds.me?.lid]);
         persist(id, s);
         const { version } = await fetchLatestBaileysVersion();
+        if (s.retired) return;
         const sock = makeWASocket({ version, auth: state, logger: pino({ level: 'silent' }),
             browser: Browsers.macOS('Chrome'), syncFullHistory: true, markOnlineOnConnect: false,
             shouldSyncHistoryMessage: () => true, downloadHistory: true });
         s.sock = sock;
-        sock.ev.on('creds.update', saveCreds);
-        sock.ev.on('contacts.upsert', contacts => { contacts.forEach(c => s.contacts.contact(c)); saveSoon(id, s); });
-        sock.ev.on('contacts.update', contacts => { contacts.forEach(c => s.contacts.contact(c)); saveSoon(id, s); });
-        sock.ev.on('lid-mapping.update', mapping => { s.contacts.link(mapping.lid, mapping.pn); saveSoon(id, s); });
-        sock.ev.on('messaging-history.set', data => {
+        // Ignore late events from a replaced account, including credential writes.
+        const listen = (event, handler) => sock.ev.on(event, (...args) => {
+            if (!s.retired && s.sock === sock) return handler(...args);
+        });
+        listen('creds.update', () => {
+            s.credentialQueue = (s.credentialQueue || Promise.resolve()).then(() => s.retired ? undefined : saveCreds()).catch(() => { s.status = 'storage_error'; });
+        });
+        listen('contacts.upsert', contacts => { contacts.forEach(c => s.contacts.contact(c)); saveSoon(id, s); });
+        listen('contacts.update', contacts => { contacts.forEach(c => s.contacts.contact(c)); saveSoon(id, s); });
+        listen('lid-mapping.update', mapping => { s.contacts.link(mapping.lid, mapping.pn); saveSoon(id, s); });
+        listen('messaging-history.set', data => {
             (data.contacts || []).forEach(c => s.contacts.contact(c));
             (data.messages || []).forEach(m => s.contacts.message(m));
             s.contacts.historyMappings(data);
@@ -77,7 +87,7 @@ async function start(id) {
             s.progress = data.progress ?? s.progress;
             saveSoon(id, s);
         });
-        sock.ev.on('messages.upsert', data => {
+        listen('messages.upsert', data => {
             for (const m of data.messages) {
                 s.contacts.message(m);
                 const history = getHistoryMsg(m.message);
@@ -86,7 +96,7 @@ async function start(id) {
             resolvePhones(id, s).catch(() => { s.mappingError = true; });
             saveSoon(id, s);
         });
-        sock.ev.on('connection.update', async update => {
+        listen('connection.update', async update => {
             if (s.sock !== sock) return;
             if (update.qr) { s.qr = await QRCode.toDataURL(update.qr); s.status = 'qr'; }
             if (update.connection === 'open') { s.qr = null; s.status = 'connected'; s.retries = 0; resolvePhones(id, s).catch(() => {}); }
@@ -113,7 +123,35 @@ app.param('id', (req, res, next, id) => /^staff_[1-9]\d*$/.test(id) ? next() : r
 app.get('/sessions/:id', (req, res) => {
     const s = load(req.params.id);
     const rows = s.contacts.rows();
-    res.json({ status: s.status, qr: s.qr, count: rows.filter(r => r.phone).length, unresolved: rows.filter(r => !r.phone).length, updated: s.updated, progress: s.progress });
+    const account = s.sock?.user?.id?.split('@')[0]?.split(':')[0];
+    res.json({ status: s.status, qr: s.qr, account: /^\d{7,15}$/.test(account || '') ? account : null, count: rows.filter(r => r.phone).length, unresolved: rows.filter(r => !r.phone).length, updated: s.updated, progress: s.progress });
+});
+app.post('/sessions/:id/switch', async (req, res) => {
+    const id = req.params.id, s = load(id);
+    if (s.retired || s.starting) return res.status(409).json({ error: 'انتظر انتهاء محاولة الربط الحالية.' });
+    try { persist(id, s); }
+    catch { return res.status(503).json({ error: 'تعذر حفظ البيانات الحالية؛ لم يتم تبديل الحساب.' }); }
+    s.retired = true; s.stopped = true;
+    clearTimeout(s.retryTimer); clearTimeout(s.saveTimer);
+    const sock = s.sock; s.sock = null; s.qr = null;
+    try {
+        // Close locally; the archived credentials are never resumed automatically.
+        sock?.end(undefined);
+        await s.credentialQueue;
+        const folder = path.join(root, id);
+        if (fs.existsSync(folder)) {
+            const archive = path.join(root, 'archives');
+            fs.mkdirSync(archive, { recursive: true, mode: 0o700 });
+            fs.renameSync(folder, path.join(archive, id + '-' + Date.now() + '-' + crypto.randomUUID()));
+        }
+        sessions.delete(id);
+        await start(id);
+        res.json({ ok: true });
+    } catch {
+        const current = load(id);
+        current.retired = false; current.status = 'error';
+        res.status(503).json({ error: 'تعذر تبديل الحساب. البيانات السابقة محفوظة.' });
+    }
 });
 app.post('/sessions/:id/start', async (req, res) => {
     try { await start(req.params.id); res.json({ ok: true }); }

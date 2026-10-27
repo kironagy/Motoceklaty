@@ -7,6 +7,9 @@
                 <p class="text-danger-600">{{ $connectionError }}</p>
             @else
                 <div class="flex flex-wrap items-center gap-4">
+                    @if (!empty($connection['account']))
+                        <x-filament::badge color="info">حساب واتساب المتصل: <bdi>+{{ $connection['account'] }}</bdi></x-filament::badge>
+                    @endif
                     <x-filament::badge :color="($connection['status'] ?? '') === 'connected' ? 'success' : 'warning'">
                         {{ ['connected' => 'متصل • جاري استقبال المزامنة', 'qr' => 'جاهز للمسح', 'starting' => 'جاري تجهيز الكود', 'reconnecting' => 'جاري إعادة محاولة الاتصال بواتساب', 'logged_out' => 'انتهت الجلسة • افصل الحساب ثم أعد الربط', 'error' => 'تعذر الاتصال', 'storage_error' => 'تعذر حفظ المزامنة'][''.($connection['status'] ?? '')] ?? 'غير متصل' }}
                     </x-filament::badge>
@@ -14,6 +17,8 @@
                     @if (($connection["unresolved"] ?? 0) > 0)<x-filament::badge color="warning">{{ number_format($connection["unresolved"]) }} دردشة رقمها غير متاح حاليًا • لن تُصدّر</x-filament::badge>@endif
                     <x-filament::button wire:click="refreshConnection" color="gray" outlined>تحديث الحالة</x-filament::button>
                 </div>
+                <p class="mt-4 text-sm text-gray-600 dark:text-gray-300">لو الأرقام تخص حسابًا قديمًا، اختار «ربط حساب واتساب آخر» من أعلى الصفحة، وامسح الكود الجديد من الهاتف المطلوب. زر «إظهار QR» يستكمل نفس الحساب الحالي.</p>
+                @if (isset($connection['progress']))<p class="mt-2 text-sm">تقدم المزامنة: {{ (int) $connection['progress'] }}٪ • انتظر ثبات العدد قبل التصدير.</p>@endif
                 @if (!empty($connection['qr']) && str_starts_with($connection['qr'], 'data:image/png;base64,'))
                     <div class="mt-6 flex justify-center"><img src="{{ $connection['qr'] }}" alt="كود ربط حساب واتساب" width="280" height="280" class="rounded-xl bg-white p-4" /></div>
                 @endif
