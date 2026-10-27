@@ -34,12 +34,17 @@ function createContacts(saved = []) {
             if (c.phoneNumber && c.id.endsWith('@lid')) link(c.id, c.phoneNumber.includes('@') ? c.phoneNumber : `${c.phoneNumber}@s.whatsapp.net`);
         },
         message(m) {
-            if (m.key?.fromMe || !m.message || !direct(m.key?.remoteJid)) return;
+            if (!direct(m.key?.remoteJid)) return;
             const id = m.key.remoteJid;
-            merge(id, { received: true, name: m.pushName || '' });
+            // Outgoing receipts may reveal a LID's phone, but do not prove an incoming chat.
+            if (!m.key.fromMe && m.message) merge(id, { received: true, name: m.pushName || '' });
             const alt = m.key.remoteJidAlt;
             if (id.endsWith('@lid') && phone(alt)) link(id, alt);
             if (phone(id) && alt?.endsWith('@lid')) link(alt, id);
+            if (m.key.fromMe && id.endsWith('@lid')) {
+                const recipient = (m.userReceipt || []).find(r => phone(r.userJid));
+                if (recipient) link(id, recipient.userJid);
+            }
         },
         link,
         excludeSelf(ids) {
@@ -52,7 +57,20 @@ function createContacts(saved = []) {
         historyMappings(data) {
             for (const pair of data.phoneNumberToLidMappings || []) link(pair.lidJid, pair.pnJid);
             for (const pair of data.lidPnMappings || []) link(pair.lid || pair.lidJid, pair.pn || pair.pnJid);
-            for (const chat of data.conversations || data.chats || []) link(chat.lidJid || chat.id, chat.pnJid);
+            for (const chat of data.conversations || data.chats || []) {
+                if (!direct(chat.id)) continue;
+                this.contact({ ...chat, name: chat.displayName || chat.name, lid: chat.lidJid || chat.accountLid, phoneNumber: chat.pnJid });
+                // Some history chunks include chats without message bodies.
+                if (Number(chat.lastMessageRecvTimestamp) > 0) merge(chat.id, { received: true });
+                for (const item of chat.messages || []) this.message(item.message?.key ? item.message : item);
+                if (chat.pnJid) link(chat.lidJid || chat.id, chat.pnJid);
+                else if (phone(chat.id) && (chat.lidJid || chat.accountLid)) link(chat.lidJid || chat.accountLid, chat.id);
+            }
+        },
+        needsHistory(id) {
+            id = aliases.get(canonical(id)) || canonical(id);
+            const row = records.get(id);
+            return !row?.isSelf && (!row?.received || !phone(id));
         },
         async resolve(lookup) {
             for (const row of [...records.values()]) {

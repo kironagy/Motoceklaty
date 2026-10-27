@@ -24,3 +24,14 @@ Exports now contain one phone column only. Only confirmed 7–15 digit internati
 ## Switching WhatsApp accounts
 Use «ربط حساب واتساب آخر» to close the current socket, archive its private session directory under FACTORY_DATA_DIR/archives, and start a fresh QR and empty contact list. Archives are excluded from automatic resume. Late events and credential writes from replaced sockets are ignored. The page shows the connected phone number and history progress so the operator can verify the account. Linking another account requires scanning on that phone; WhatsApp controls the amount of history supplied. Tested with factory-switch.test.js plus contact tests (7 passing).
 
+
+## Expanded sync (2026-10-27)
+The collector uses an isolated, pinned Baileys 7.0.0-rc14 runtime. Install with `npm ci --prefix whatsapp-bot/factory-runtime --ignore-scripts`; existing bot dependencies remain unchanged. Node 22 is required. rc14 supplies LID mappings in processed history, so history is not downloaded/decompressed a second time by this collector.
+
+History ingestion includes incoming-chat timestamp evidence even when bodies are absent, nested chat messages and outgoing 1:1 recipient receipt mappings. Contact-only and outgoing-only rows still do not qualify for export without evidence of an incoming chat. No hidden LID is fabricated as a phone number.
+
+Only oldest message keys/timestamps are stored in private history.json, never message bodies. Missing incoming-history/phone evidence triggers paged on-demand fetches (200 messages per request, one request per 5 seconds, at most 300 per run and 10 pages per chat). Identical cursors are not requested repeatedly. This can retrieve earlier messages for known chats; it cannot discover chats WhatsApp never supplies. The dashboard reports requests, failures and known cursors separately from per-batch history progress.
+
+«مزامنة موسعة لنفس الحساب» archives the previous private session, starts a new desktop/full-history pairing while retaining the extracted contacts, and pins the expected account number. Data events are blocked until that number is verified; a different phone is rejected without importing its contacts. Desktop pairing rejection 428 automatically falls back to the compatible Chrome profile. The original accounts/data are not automatically unlinked for this upgrade: the owner must explicitly start expanded resync and scan the QR on the same phone. Keep the primary phone online while it supplies history. Archived credentials are never automatically resumed.
+
+Validation: 9 Node tests passed locally and on production, including cursor persistence, nested history, phone recovery, account switching, preserved results and rejection of a different account. Existing session reconnect and counts are checked through the loopback authenticated status API. Full historical coverage remains limited by the data WhatsApp sends.

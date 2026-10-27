@@ -15,7 +15,7 @@ test('switch archives old account, starts empty QR, ignores late events and isol
         useMultiFileAuthState: async dir => {fs.mkdirSync(dir,{recursive:true}); return {state:{creds:{}},saveCreds:async()=>{}}},
         fetchLatestBaileysVersion: async()=>({version:[1,2,3]}), Browsers:{macOS:()=>[]}, DisconnectReason:{loggedOut:401}, getHistoryMsg:()=>null,
     };
-    const context = {require: name => ({dotenv:{config(){}}, '@whiskeysockets/baileys':baileys, express:()=>app, pino:()=>({}), qrcode:{toDataURL:async()=> 'data:image/png;base64,test'}, './factory-contacts':{createContacts}}[name] || require(name)), process:{umask(){},env:{FACTORY_DATA_DIR:root,BOT_TOKEN:'test'}}, console, Buffer, setTimeout, clearTimeout};
+    const context = {require: name => ({dotenv:{config(){}}, './factory-runtime/node_modules/@whiskeysockets/baileys':baileys, './factory-history':require('../factory-history'), express:()=>app, pino:()=>({}), qrcode:{toDataURL:async()=> 'data:image/png;base64,test'}, './factory-contacts':{createContacts}}[name] || require(name)), process:{umask(){},env:{FACTORY_DATA_DIR:root,BOT_TOKEN:'test'}}, console, Buffer, setTimeout, clearTimeout};
     const source = fs.readFileSync(path.join(__dirname,'../factory-worker.js'),'utf8');
     vm.runInNewContext(source, context);
     const call = async(method,suffix,id='staff_27') => {let body,status=200; const res={json(v){body=v;return this},status(v){status=v;return this}}; await routes.get(method+' /sessions/:id'+suffix)({params:{id}},res);return {body,status};};
@@ -36,8 +36,19 @@ test('switch archives old account, starts empty QR, ignores late events and isol
         await sockets[1].handlers['connection.update']({qr:'new-qr'});
         assert.equal((await call('GET','')).body.status,'qr');
         assert.equal((await call('GET','', 'staff_25')).body.count,0);
+        await sockets[1].handlers['messages.upsert']({messages:[{key:{remoteJid:'201555555555@s.whatsapp.net',fromMe:false},message:{conversation:'not saved'}}]});
+        assert.equal((await call('GET','')).body.count,1);
+        assert.equal((await call('POST','/resync')).status,200);
+        assert.equal((await call('GET','')).body.count,1);
+        sockets[2].handlers['contacts.upsert']([{id:'209999999999@s.whatsapp.net'}]);
+        sockets[2].user.id='201999999999@s.whatsapp.net';
+        await sockets[2].handlers['connection.update']({connection:'open'});
+        assert.equal((await call('GET','')).body.status,'wrong_account');
+        await sockets[2].handlers['messages.upsert']({messages:[{key:{remoteJid:'201666666666@s.whatsapp.net',fromMe:false},message:{conversation:'not saved'}}]});
+        assert.equal((await call('GET','')).body.count,1);
     } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
 
 
 

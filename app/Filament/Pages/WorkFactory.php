@@ -45,6 +45,19 @@ class WorkFactory extends Page
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('recover')->label('جلب السجل الأقدم ومراجعة الأرقام')->icon('heroicon-o-arrow-down-circle')
+                ->action(function () {
+                    try { $this->worker('post', '/recover'); $this->refreshConnection(); Notification::make()->success()->title('بدأت مراجعة الأرقام وطلبات السجل المتاح')->send(); }
+                    catch (\Illuminate\Http\Client\HttpClientException $e) { Notification::make()->warning()->title('اتصل بواتساب أولًا ثم أعد المحاولة')->send(); }
+                }),
+            Action::make('resync')->label('مزامنة موسعة لنفس الحساب')->icon('heroicon-o-qr-code')->color('success')
+                ->requiresConfirmation()->modalHeading('إعادة ربط نفس الرقم بمزامنة موسعة')
+                ->modalDescription('سيظهر QR جديد. امسحه بنفس رقم واتساب الحالي، وخلي الهاتف متصل بالإنترنت وواتساب مفتوح أثناء المزامنة. الأرقام الحالية محفوظة وتُدمج مع النتائج الجديدة بدون تكرار؛ يُرفض أي رقم مختلف. قد تحتاج إزالة الجهاز القديم من الأجهزة المرتبطة في هاتفك.')
+                ->modalSubmitActionLabel('تجهيز QR موسع لنفس الرقم')
+                ->action(function () {
+                    try { $this->worker('post', '/resync'); $this->refreshConnection(); }
+                    catch (\Illuminate\Http\Client\HttpClientException $e) { Notification::make()->danger()->title('تعذر بدء المزامنة الموسعة')->body('تأكد من اتصال الحساب الحالي، ثم أعد المحاولة.')->send(); }
+                }),
             Action::make('switchAccount')->label('ربط حساب واتساب آخر')->icon('heroicon-o-arrow-path')
                 ->color('warning')->requiresConfirmation()
                 ->modalHeading('ربط حساب واتساب آخر')
