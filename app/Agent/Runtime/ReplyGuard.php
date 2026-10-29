@@ -311,7 +311,7 @@ class ReplyGuard
         // holds stock per branch and nobody checked. Nothing the bot can do
         // later is "I'll check and come back".
         // offering to check ("أشيّك لك؟") is as empty as saying it was checked
-        if ($this->claimsStockOrCheck($this->withoutConditionalClausesOnly($replyText), collect($outcomes)->contains(fn ($o) => $o['name'] === 'check_cash_inventory' && $o['ok'] && ($o['data']['source'] ?? '') === 'physical_inventory' && ($o['data']['available'] ?? false)))) {
+        if ($this->claimsStockOrCheck($this->withoutConditionalClausesOnly($replyText), $this->hasLiveStockForReply($replyText, $outcomes))) {
             return 'STOCK_OR_CHECK_CLAIMED';
         }
 
@@ -462,7 +462,7 @@ class ReplyGuard
 
         // Owner 2026-10-08: "عندك L250؟" - Hogan and Vigory both sell one. The search flags it; a reply that
         // names one brand's model or price without the other, before he said which, picked for him.
-        if (($ambiguous = $this->ambiguityIgnored($replyText, $outcomes) ?? $this->ambiguityInHisWords($replyText, $conversation)) !== null) {
+        if (($ambiguous = $this->ambiguityIgnored($replyText, $outcomes, $this->customerTextSinceLastReply($conversation)) ?? $this->ambiguityInHisWords($replyText, $conversation)) !== null) {
             $this->detail = 'The name is sold by '.$ambiguous.'. Ask him which one (or give both prices) - do not pick one.';
 
             return 'AMBIGUOUS_MODEL_NOT_ASKED';
@@ -1548,6 +1548,45 @@ class ReplyGuard
     }
 
 
+    /** Only physical stock for every model explicitly named in this reply counts. */
+    private function hasLiveStockForReply(string $replyText, array $outcomes): bool
+    {
+        $catalog = app(CatalogMentions::class);
+        $replyText = preg_replace('/[^.\\n!?؟]*مش\\s+(?:متوفر[ةه]?|متاح[ةه]?|موجود[ةه]?)[^.\\n!?؟]*/u', '', $replyText) ?? $replyText;
+        $ids = $catalog->fullNames($replyText);
+        if ($ids === []) return false;
+        $verified = [];
+        foreach ($outcomes as $outcome) {
+            if (! ($outcome['ok'] ?? false)) continue;
+            $data = $outcome['data'] ?? [];
+            $stocks = ($outcome['name'] ?? '') === 'check_cash_inventory' ? [$data] : [];
+            if (($outcome['name'] ?? '') === 'search_motorcycles') {
+                foreach ($data['items'] ?? [] as $item) {
+                    // Same-name models from other brands are not asserted by this reply.
+                    if (! str_contains($catalog->normalize($replyText), $catalog->normalize((string) ($item['brand'] ?? '')))) continue;
+                    $stocks[] = $item['cash_stock'] ?? [];
+                }
+            }
+            foreach ($stocks as $stock) {
+                if (($stock['source'] ?? '') === 'physical_inventory' && ($stock['available'] ?? false)) {
+                    $verified[] = (int) ($stock['machine_id'] ?? 0);
+                }
+            }
+        }
+        // fullNames may identify the same name under two brands. Keep only brands
+        // actually asserted in the reply, using catalog results from this turn.
+        foreach ($outcomes as $outcome) {
+            if (($outcome['name'] ?? '') !== 'search_motorcycles' || ! ($outcome['ok'] ?? false)) continue;
+            foreach ($outcome['data']['items'] ?? [] as $item) {
+                $brand = $catalog->normalize((string) ($item['brand'] ?? ''));
+                if ($brand !== '' && ! str_contains($catalog->normalize($replyText), $brand)) {
+                    $ids = array_values(array_diff($ids, [(int) $item['id']]));
+                }
+            }
+        }
+        return $ids !== [] && array_diff($ids, $verified) === [];
+    }
+
     private function claimsStockOrCheck(string $assertions, bool $hasLiveStock = false): bool
     {
         return (bool) preg_match(
@@ -1805,7 +1844,7 @@ class ReplyGuard
         return null;
     }
 
-    private function ambiguityIgnored(string $replyText, array $outcomes): ?string
+    private function ambiguityIgnored(string $replyText, array $outcomes, string $customerText = ''): ?string
     {
         $catalog = app(CatalogMentions::class);
         $reply = $catalog->normalize($replyText);
@@ -1823,6 +1862,16 @@ class ReplyGuard
 
                     return $brand !== '' && str_contains($reply, $brand);
                 });
+
+                // A broad search can return another brand even when the customer
+                // already chose one. Only that same brand resolves this group.
+                $customer = $catalog->normalize($customerText);
+                $selected = array_values(array_filter($brands, fn ($brand) =>
+                    preg_match('/(?<![\\p{L}\\p{N}])'.preg_quote($catalog->normalize($brand), '/').'(?![\\p{L}\\p{N}])/u', $customer)));
+                if (count($selected) === 1 && count($named) === 1
+                    && in_array($selected[0], $named, true)) {
+                    continue;
+                }
 
                 // he is asked ("أنهي", "تقصد") or shown every brand
                 if (count($named) < count($brands) && ! preg_match('/أنهي|انهي|تقصد|قصدك|ولا\s/u', $replyText)) {
