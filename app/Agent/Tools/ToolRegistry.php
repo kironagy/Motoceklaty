@@ -77,7 +77,7 @@ class ToolRegistry
             ->where('args_hash', $argsHash)
             ->first();
 
-        if ($existing) {
+        if ($existing && $name !== 'check_cash_inventory') {
             return $existing->result_redacted;
         }
 

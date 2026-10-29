@@ -311,7 +311,7 @@ class ReplyGuard
         // holds stock per branch and nobody checked. Nothing the bot can do
         // later is "I'll check and come back".
         // offering to check ("أشيّك لك؟") is as empty as saying it was checked
-        if ($this->claimsStockOrCheck($this->withoutConditionalClausesOnly($replyText))) {
+        if ($this->claimsStockOrCheck($this->withoutConditionalClausesOnly($replyText), collect($outcomes)->contains(fn ($o) => $o['name'] === 'check_cash_inventory' && $o['ok'] && ($o['data']['source'] ?? '') === 'physical_inventory' && ($o['data']['available'] ?? false)))) {
             return 'STOCK_OR_CHECK_CLAIMED';
         }
 
@@ -566,7 +566,7 @@ class ReplyGuard
             return false;
         }
 
-        $lookups = array_filter($outcomes, fn ($o) => $o['name'] === 'get_branch_information' && $o['ok']);
+        $lookups = array_filter($outcomes, fn ($o) => in_array($o['name'], ['get_branch_information', 'check_cash_inventory'], true) && $o['ok']);
 
         if ($lookups === []) {
             return true;
@@ -1548,7 +1548,7 @@ class ReplyGuard
     }
 
 
-    private function claimsStockOrCheck(string $assertions): bool
+    private function claimsStockOrCheck(string $assertions, bool $hasLiveStock = false): bool
     {
         return (bool) preg_match(
             '/(?:^|\s)و?(?:ه|ح|هن|ن)(?:شوف|تأكد|تاكد|سأل|سال|راجع|كلم|تابع|تحقق|اتحقق)(?:لك|لِك|ك|ي|لكم)?\s+(?:\S+\s+){0,5}?(?:و(?:ه|أ|ا|ن)?(?:رد|رجع|بلغ|قول|رتب))'
@@ -1556,8 +1556,8 @@ class ReplyGuard
             .'|(?:ن|ه|هن|أ|ا)(?:رتب|حجز|جهز)(?:لك|لِك|ك)?\s+(?:\S+\s+){0,2}?(?:معاين[ةه]|ميعاد|موعد)'
             .'|ثواني\s+و(?:ه|ح)?(?:رد|رجع|بلغ|قول)'
             .'|(?:اتأكدت|اتاكدت|اتأكدتلك|اتاكدتلك|سألت|سالت)\s+(?:\S+\s+){0,3}?(?:متاح|موجود|في\s+(?:ال)?فرع)'
-            .'|(?:متاح|متوفر|موجود)(?:[ةه]|ين)?\s+(?:\S+\s+){0,2}?(?:في|فى|ف)\s+(?:ال)?(?:فرع|فروع|فرعين|كل\s+(?:ال)?فروع)'
-            .'|(?:في|فى|ف)\s+(?:ال)?(?:فرع|فروع|فرعين)\s+(?:\S+\s+){0,1}?(?:متاح|متوفر|موجود)'
+            .($hasLiveStock ? '' : '|(?:متاح|متوفر|موجود)(?:[ةه]|ين)?\s+(?:\S+\s+){0,2}?(?:في|فى|ف)\s+(?:ال)?(?:فرع|فروع|فرعين|كل\s+(?:ال)?فروع)')
+            .($hasLiveStock ? '' : '|(?:في|فى|ف)\s+(?:ال)?(?:فرع|فروع|فرعين)\s+(?:\S+\s+){0,1}?(?:متاح|متوفر|موجود)')
             .'|(?:^|\s)و?(?:أ|ا|ه|ن|هن)?شي[ّ]?ك(?:لك|لِك|ك|هالك|هولك)?(?!\p{L})/u',
             $assertions
         );

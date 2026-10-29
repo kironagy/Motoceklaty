@@ -339,6 +339,11 @@ class AgentRunner
                         'data' => ($result['ok'] ?? false) ? (array) ($result['data'] ?? []) : (array) ($result['error'] ?? []),
                     ];
 
+                    if ($toolCall['name'] === 'check_cash_inventory' && ($result['ok'] ?? false) && ($result['data']['handed_off'] ?? false)) {
+                        $this->finishTrace($trace, 'done', $guardEvents, $lastResponse);
+                        return ['messages' => [$result['data']['customer_message']]];
+                    }
+
                     // start_application + process_document in one step: the
                     // document needs the application the step just opened.
                     if (($result['ok'] ?? false) && $toolCall['name'] === 'start_application' && isset($result['data']['application_id'])) {
@@ -737,7 +742,7 @@ class AgentRunner
     private function completedSteps(int $turnId): array
     {
         return \App\Models\AiTraceStep::where('turn_id', $turnId)->where('kind', 'tool_call')
-            ->where('tool_name', '!=', 'send_reply')->orderBy('id')->get()
+            ->whereNotIn('tool_name', ['send_reply', 'check_cash_inventory'])->orderBy('id')->get()
             ->map(function (\App\Models\AiTraceStep $step) {
                 $result = (array) $step->result_redacted;
 

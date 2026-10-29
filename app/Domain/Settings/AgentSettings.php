@@ -27,6 +27,10 @@ class AgentSettings
     public static function definitions(): array
     {
         return [
+            'cash.inventory_enabled' => ['run', 'ربط الكاش بالمخزون الفعلي', 'bool', 'قراءة القطع غير المباعة من كل المعارض.'],
+            'cash.tool_description' => ['instructions', 'تعليمات أداة مخزون الكاش', 'text', null],
+            'cash.unavailable_message' => ['instructions', 'رسالة نفاد مخزون الكاش والتحويل', 'text', '{motorcycle} اسم الموديل.'],
+            'cash.handoff_topic' => ['handoff', 'عنوان تحويل الكاش غير المتاح', 'string', null],
             'safety.enabled' => ['run', 'مراجعة مصدر الرد قبل الإرسال', 'bool', 'غير المثبت يتوقف بدون تحويل تلقائي.'],
             'safety.review_instructions' => ['instructions', 'تعليمات التحقق من مصدر الرد', 'text', 'سياسة مراجعة الرد وطلب التحويل.'],
             'safety.no_zero_upfront_hint' => ['instructions', 'توجيه عدم وجود خطة بلا دفع عند الاستلام', 'text', 'توجيه أداة الحساب من الميموري.'],
