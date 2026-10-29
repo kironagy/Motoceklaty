@@ -18,7 +18,7 @@ class MentionedMotorcycle
     private const EXTRA_BRAND_WORDS = [
         'هوجان' => ['هجن', 'هوجين', 'هوجن', 'hogan', 'hojan'],
         'باجاج' => ['بجاج', 'bajaj'],
-        'دايو' => ['دايوو', 'daewoo', 'daywoo'],
+        'دايو' => ['دايوو', 'الديو', 'ديو', 'daewoo', 'daywoo'],
         'كيواي' => ['keeway', 'كيوي'],
         'بينيلي' => ['بنلي', 'بنيلي', 'بينلي', 'benelli'],
         'وينج' => ['وينغ', 'wing'],
@@ -60,6 +60,17 @@ class MentionedMotorcycle
                     .trim($machine->name).'", which he did not name. Find what he means with search_motorcycles (his own words, '
                     .'or a price he wrote as min_cash_price/max_cash_price) and use the ids it returns; if unclear, ask him which model.';
             }
+        }
+
+        // A matching price or a broad search never overrides an explicit brand.
+        $vocabulary = self::vocabulary();
+        foreach ($texts as $raw) {
+            $text = ArabicTextNormalizer::normalize($raw);
+            if (preg_match(self::ASKS_ALTERNATIVE, $text)) continue;
+            $brands = [];
+            foreach (preg_split('/[^\p{L}\p{N}]+/u', $text, -1, PREG_SPLIT_NO_EMPTY) as $token) $brands = array_merge($brands, $vocabulary[$token] ?? []);
+            $nameHasBrand = collect(self::letterTokens((string) $machine->name))->contains(fn ($token) => array_intersect($vocabulary[$token] ?? [], $brands) !== []);
+            if ($brands !== [] && ! in_array((int) $machine->brand_id, $brands, true) && ! $nameHasBrand) return 'EXPLICIT_BRAND_MISMATCH: use the brand and model the customer named; a matching price is not a model identity.';
         }
 
         if (self::foundBySearchThisTurn($turnId, (int) $machine->id)) {

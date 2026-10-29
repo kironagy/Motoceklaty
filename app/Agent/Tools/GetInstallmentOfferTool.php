@@ -116,7 +116,7 @@ class GetInstallmentOfferTool implements ReadTool
 
         if ($customerTypeId === null && ($capLabels = $this->cappedWorkTypes($machine)) !== null) {
             return ToolResult::error('ASK_WORK_FIRST', 'Before any installment number, tell him the cash price ('
-                .number_format((float) $machine->cash_price).' جنيه) and ask only "حضرتك بتشتغل إيه؟" - for this motorcycle the '
+                .number_format($this->cashPrice($machine)).' جنيه) and ask only "حضرتك بتشتغل إيه؟" - for this motorcycle the '
                 .'installment depends on his work ('.$capLabels.' pay part of the price at pickup). When he answers, call again with customer_type.');
         }
 
@@ -198,7 +198,7 @@ class GetInstallmentOfferTool implements ReadTool
             return ToolResult::ok([
                 // conversation 639: id 4 was priced as "هوجن 4" - the result names what it priced
                 'motorcycle' => $this->label($machine),
-                'cash_price' => (float) $machine->cash_price,
+                'cash_price' => $this->cashPrice($machine),
                 'durations' => array_map(fn (array $o) => $this->duration($o['months']), $offers),
             ] + $cap);
         }
@@ -214,7 +214,7 @@ class GetInstallmentOfferTool implements ReadTool
 
         return ToolResult::ok([
             'motorcycle' => $this->label($machine),
-            'cash_price' => (float) $machine->cash_price,
+            'cash_price' => $this->cashPrice($machine),
             'offers' => array_map(fn (array $o) => [
                 'months' => $o['months'],
                 'cash_due_upfront' => $o['cash_due_upfront'],
@@ -289,7 +289,7 @@ class GetInstallmentOfferTool implements ReadTool
         // no installment price: the owner never tells it to the customer.
         // The owner: "متضفش المصاريف الاداريه علي اجمالي قسط المكنه" - the
         // fee is its own sentence, the total is the motorcycle's only.
-        return 'سعرها كاش '.number_format((float) $machine->cash_price).' جنيه. على '.$this->duration($offer['months']).': '
+        return 'سعرها كاش '.number_format($this->cashPrice($machine)).' جنيه. على '.$this->duration($offer['months']).': '
             .($down > 0 ? 'مقدم '.number_format($down).' جنيه + ' : '')
             .$offer['months'].' قسط × '.number_format($offer['monthly_payment']).' جنيه = '
             .number_format(round($down + $offer['monthly_payment'] * $offer['months'])).' جنيه في الآخر.'
@@ -351,4 +351,9 @@ class GetInstallmentOfferTool implements ReadTool
     {
         return trim(($machine->brand?->name ? trim($machine->brand->name).' ' : '').trim((string) $machine->name));
     }
+    private function cashPrice(Machine $machine): float
+    {
+        return (float) ($machine->type === 'offer' && $machine->new_price > 0 ? $machine->new_price : $machine->cash_price);
+    }
+
 }

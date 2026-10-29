@@ -133,6 +133,15 @@ class CheckEligibilityTool implements ReadTool
             $result['age_checked'] = false;
         }
 
+        if (isset($facts['age']) && ($result['status'] ?? null) === 'not_eligible'
+            && array_intersect(array_column($result['reasons'] ?? [], 'code'), ['AGE_OUT_OF_RANGE', 'AGE_BELOW_MINIMUM_STATED'])) {
+            $result['work_questions_required'] = false;
+            $result['next_step'] = 'age_ineligible_use_eligible_alternative';
+            $result['instruction'] = (string) config('agent.eligibility.age_stop_instructions');
+            $result['other_applicant_line'] = \App\Domain\Applications\OtherApplicant::line($aboutOther);
+            return ToolResult::ok($result);
+        }
+
         if (filled($facts['work_statement'] ?? null)
             && ($problem = app(\App\Domain\Applications\WorkClassification::class)->problem($ctx->conversationId, 'employee', $facts['work_statement']))) {
             if ($problem['code'] === 'APPLICANT_HAS_NO_WORK') {

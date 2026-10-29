@@ -162,6 +162,7 @@ class AgentRunner
         $toolCallCount = 0;
         $repairs = 0;
         $evidenceRepairs = 0;
+        $bannedPhraseRepairs = 0;
         $openedNow = false;
         $guardEvents = [];
         /** @var array<int, array{name: string, ok: bool, data: array}> $outcomes */
@@ -229,6 +230,21 @@ class AgentRunner
                             'silence' => fn ($a) => $this->silenceWrittenAsText($a, $ctx),
                             'link_written' => fn ($a) => $this->withoutWrittenLink($a, $outcomes, $conversation->id),
                         ]);
+
+                        $phrase = app(ReplyPhrasePolicy::class)->apply($toolCall['args']);
+                        if ($phrase['changed']) {
+                            $guardEvents[] = ['code'=>'BANNED_REPLY_PHRASE_REMOVED','args'=>[]];
+                            $toolCall['args'] = $phrase['args'];
+                            if (($toolCall['args']['messages'] ?? []) === []) {
+                                if ($bannedPhraseRepairs >= 1 || $limitReached) return $this->fallback($conversation, $trace, $guardEvents, 'REPEATED_BANNED_REPLY_PHRASE');
+                                $bannedPhraseRepairs++;
+                                $hint = (string) config('agent.safety.banned_reply_repair');
+                                $contents[] = $toolCall['id'] === 'implicit'
+                                    ? ['role'=>'user','parts'=>[['type'=>'text','text'=>$hint]]]
+                                    : $this->toolResultContent($toolCall['id'], 'send_reply', ['ok'=>false,'error'=>['code'=>'BANNED_REPLY_PHRASE','detail'=>$hint]]);
+                                continue;
+                            }
+                        }
 
                         // PHP checks only what the AI may not decide: claims of
                         // actions, numbers and facts no tool gave, promises.
