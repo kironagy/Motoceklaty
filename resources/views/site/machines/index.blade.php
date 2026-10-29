@@ -78,7 +78,7 @@ preg_match('/^(\D+?)\s*(\d.*)$/u', $featured->name, $nameParts);
 <div class="price" dir="rtl">@if (site('showroom.card.show_price'))<span>{{ site('showroom.card.price_prefix') }}</span><strong>{{ number_format((float) ($featured->type === 'offer' && $featured->new_price ? $featured->new_price : $featured->cash_price)) }}</strong><span>{{ site('showroom.card.currency') }}</span>
 @endif
 </div>
-<div class="featured-actions"><a class="button button-orange" data-feature-calc data-open-calculator="{{ $featured->id }}" href="{{ route('installment.index', ['machine_id' => $featured->id]) }}">{{ site('showroom.detail.calc_button') }} <img class="icon bi bi-calculator" src="{{ asset('motogate-v2/assets/images/icons/calculator.svg') }}" alt="" aria-hidden="true" width="24" height="24"></a><a class="button button-outline" data-feature-contact href="{{ site_whatsapp(site('general.whatsapp'), $featured->name) }}" target="_blank" rel="noopener">{{ site('showroom.detail.whatsapp_button') }}</a></div>
+<div class="featured-actions"><a class="button button-orange" data-feature-calc data-open-calculator="{{ $featured->id }}" href="{{ route('installment.index', ['machine_id' => $featured->id]) }}">{{ site('showroom.detail.calc_button') }} <img class="icon bi bi-calculator" src="{{ asset('motogate-v2/assets/images/icons/calculator.svg') }}" alt="" aria-hidden="true" width="24" height="24"></a><a class="button button-outline" data-feature-contact href="{{ site_whatsapp(site('general.whatsapp'), 'لو سمحت بستفسر عن ' . trim(($featured->brand?->name ?? '') . ' ' . $featured->name)) }}" target="_blank" rel="noopener">اعرف التفاصيل</a></div>
 </div>
 </section>
 @endif
@@ -91,11 +91,11 @@ preg_match('/^(\D+?)\s*(\d.*)$/u', $featured->name, $nameParts);
 </div>
 <div class="models-slider" id="modelsSlider" tabindex="0" aria-label="موديلات المعرض"><div class="models-grid models-slide">@foreach($machines as $machine)
 @php
-$machineData = ['id' => $machine->id, 'name' => $machine->name, 'brand' => $machine->brand?->name, 'image' => $machine->displayImageUrl(), 'category' => $machine->categoryLabel(), 'cc' => $machine->cc, 'price' => (float) ($machine->type === 'offer' && $machine->new_price ? $machine->new_price : $machine->cash_price), 'specs' => $machine->specificationRows(), 'calc' => route('installment.index', ['machine_id' => $machine->id]), 'contact' => site_whatsapp(site('general.whatsapp'), $machine->name)];
+$machineData = ['id' => $machine->id, 'name' => $machine->name, 'brand' => $machine->brand?->name, 'image' => $machine->displayImageUrl(), 'category' => $machine->categoryLabel(), 'cc' => $machine->cc, 'price' => (float) ($machine->type === 'offer' && $machine->new_price ? $machine->new_price : $machine->cash_price), 'specs' => $machine->specificationRows(), 'calc' => route('installment.index', ['machine_id' => $machine->id]), 'contact' => site_whatsapp(site('general.whatsapp'), 'لو سمحت بستفسر عن ' . trim(($machine->brand?->name ?? '') . ' ' . $machine->name))];
 @endphp
-<article class="model-card" data-live-machine='@json($machineData)' tabindex="0"><img src="{{ $machine->displayImageUrl() }}" alt="{{ $machine->name }}" height="175" loading="lazy"><div class="model-copy"><h3 dir="ltr">{{ $machine->brand?->name }}<strong>{{ $machine->name }}</strong></h3><p dir="rtl">{{ $machine->categoryLabel() }}</p><span class="model-line"></span><p class="availability" dir="rtl">@if(site('showroom.card.show_price')){{ number_format($machineData['price']) }} {{ site('showroom.card.currency') }}
+<article class="model-card" data-live-machine='@json($machineData)' tabindex="0"><img src="{{ $machine->displayImageUrl() }}" alt="{{ $machine->name }}" height="350" loading="lazy"><div class="model-copy"><h3 dir="ltr">{{ $machine->brand?->name }}<strong>{{ $machine->name }}</strong></h3><p dir="rtl">{{ $machine->categoryLabel() }}</p><span class="model-line"></span><p class="availability" dir="rtl">@if(site('showroom.card.show_price')){{ number_format($machineData['price']) }} {{ site('showroom.card.currency') }}
 @endif
-</p><button class="button button-outline" type="button" data-display-machine>اعرض على المنصة ↗</button><div class="model-actions"><a class="button button-outline" href="{{ $machineData['contact'] }}" target="_blank" rel="noopener">واتساب</a><a class="button button-orange" data-open-calculator="{{ $machine->id }}" href="{{ $machineData['calc'] }}">احسب القسط</a></div></div></article>
+</p><button class="button button-outline" type="button" data-display-machine>اعرض على المنصة ↗</button><div class="model-actions"><a class="button button-outline" href="{{ $machineData['contact'] }}" target="_blank" rel="noopener">اعرف التفاصيل</a><a class="button button-orange" data-open-calculator="{{ $machine->id }}" href="{{ $machineData['calc'] }}">احسب القسط</a></div></div></article>
 
 @if($loop->iteration % 9 === 0 && !$loop->last)</div><div class="models-grid models-slide">@endif
 @endforeach
@@ -111,3 +111,4 @@ $machineData = ['id' => $machine->id, 'name' => $machine->name, 'brand' => $mach
 <div class="modal fade glass-modal" id="paymentCalculator" tabindex="-1" aria-labelledby="paymentCalculatorTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-lg"><div class="modal-content" dir="rtl"><div class="modal-header"><h2 class="modal-title fs-4" id="paymentCalculatorTitle">احسب قسطك</h2><button type="button" class="drawer-close" data-bs-dismiss="modal" aria-label="إغلاق">×</button></div><div class="modal-body">@include('site.partials.design-calculator')</div></div></div></div>
 @include('site.partials.payment-result')
 @endpush
+

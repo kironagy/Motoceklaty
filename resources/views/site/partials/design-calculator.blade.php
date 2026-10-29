@@ -1,7 +1,7 @@
 @php
 $uid = 'calc-' . \Illuminate\Support\Str::random(8);
 $labels = site('installment.calculator.labels', []);
-$config = ['endpoint' => route('installment.calculate'), 'applyUrl' => route('installments.apply.form'), 'machineId' => null, 'labels' => $labels, 'result' => site('installment.calculator.result', [])];
+$config = ['endpoint' => route('installment.calculate'), 'machineId' => null, 'labels' => $labels, 'result' => site('installment.calculator.result', [])];
 @endphp
 @once
 <script type="application/json" id="site-calc-catalog">@json(\App\Support\InstallmentCalculatorCatalog::payload())</script>

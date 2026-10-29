@@ -21,6 +21,8 @@ class InstallmentRequestController extends Controller
 
 public function store(Request $request)
 {
+    abort(410, 'التقديم من الموقع غير متاح حاليًا. للاستفسار تواصل معانا على واتساب.');
+
     // ✅ (اختياري لكن مفيد) Normalize لقيمة work_status
     if ($request->has('work_status')) {
         $w = trim(mb_strtolower($request->input('work_status')));

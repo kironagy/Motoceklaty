@@ -130,7 +130,6 @@
         function showResult(r) {
             var m = currentMachine();
             var system = currentSystem();
-            var applyUrl = config.applyUrl + '?' + new URLSearchParams({machine_id:m.id, installment_type:system.name, months:r.months, deposit:r.down_payment}).toString();
             var L = resultLabels;
             var financeDashboard = document.querySelector('.finance-dashboard');
             if (financeDashboard) {
@@ -140,7 +139,7 @@
                 document.getElementById('resultDeposit').textContent = format(r.down_payment);
                 document.getElementById('resultTotal').textContent = format(r.total_with_interest);
                 document.getElementById('resultFees').textContent = format(r.administrative_fees);
-                document.getElementById('resultNote').innerHTML = esc(L.note || '') + ' <a href="' + esc(applyUrl) + '">' + esc(L.apply) + '</a>';
+                document.getElementById('resultNote').textContent = L.note || '';
                 return;
             }
             // Home: same sentence as the design, then its #paymentResult dialog.
@@ -160,7 +159,6 @@
             summary.querySelectorAll('[data-payment]').forEach(function (element) {
                 element.textContent = paymentValues[element.dataset.payment];
             });
-            summary.querySelector('[data-payment-apply]').href = applyUrl;
             var show = function () { bootstrap.Modal.getOrCreateInstance(dialog).show(); };
             var calculator = form.closest('.modal.show');
             if (calculator) {

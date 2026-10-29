@@ -19,7 +19,7 @@
     $category = $machine->categoryLabel();
     $features = $machine->featureTitles();
     $specRows = $machine->specificationRows();
-    $whatsapp = site_whatsapp(site('general.whatsapp'), site_text($detail['whatsapp_message'] ?? '', ['name' => $machine->name]));
+    $whatsapp = site_whatsapp(site('general.whatsapp'), 'لو سمحت بستفسر عن ' . trim(($machine->brand?->name ?? '') . ' ' . $machine->name));
 @endphp
 
 @section('content')
@@ -141,10 +141,9 @@
                             @if ($hasCalculator)
                                 <a href="#calculator" class="site-button"><em>{{ $detail['calc_button'] ?? '' }}</em></a>
                             @endif
-                            <a href="{{ route('installments.apply.form', ['machine_id' => $machine->id]) }}" class="site-button site-button-outline"><em>{{ $detail['apply_button'] ?? '' }}</em></a>
                             @if ($whatsapp && ! empty($detail['whatsapp_button']))
                                 <a href="{{ $whatsapp }}" target="_blank" rel="noopener" class="mg-whatsapp">
-                                    <i class="fa-brands fa-whatsapp" aria-hidden="true"></i> {{ $detail['whatsapp_button'] }}
+                                    <i class="fa-brands fa-whatsapp" aria-hidden="true"></i> اعرف التفاصيل
                                 </a>
                             @endif
                         </div>

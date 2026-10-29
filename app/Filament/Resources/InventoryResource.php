@@ -37,7 +37,7 @@ class InventoryResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return app(InventoryStock::class)->modelQuery();
+        return app(InventoryStock::class)->modelQuery()->with('brand');
     }
 
     public static function table(Table $table): Table
@@ -46,6 +46,7 @@ class InventoryResource extends Resource
             ->description('كل الموديلات من ريسورس المكن تلقائيًا، والعدد هو رصيد المعارض المسموح لك بالوصول إليها فقط.')
             ->columns([
                 TextColumn::make('name')->label('اسم الموديل')->searchable()->sortable()->weight('bold')->icon('heroicon-o-cube'),
+                TextColumn::make('brand.name')->label('الماركة')->searchable()->sortable()->placeholder('غير مسجلة'),
                 TextColumn::make('available_items_count')->label('عدد القطع')->numeric()->sortable()->badge()
                     ->color(fn ($state) => (int) $state > 0 ? 'success' : 'gray')->suffix(' قطعة'),
             ])->defaultSort('name')->actions([

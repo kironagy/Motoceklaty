@@ -14,7 +14,6 @@
     $firstTab = $tabs[0] ?? null;
     $config = [
         'endpoint' => route('installment.calculate'),
-        'applyUrl' => route('installments.apply.form'),
         'machineId' => $machine?->id,
         'labels' => $labels,
         'result' => $result,

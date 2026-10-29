@@ -20,7 +20,6 @@
                     <div class="receipt-fees"><span>المصاريف الإدارية</span><p><strong data-payment="fees">—</strong><small>جنيه</small></p></div>
                 </div>
                 <div class="receipt-note"><span aria-hidden="true">i</span><p>المصاريف الإدارية بتتدفع <strong>مرة واحدة عند الاستلام</strong>، بصورة منفصلة عن إجمالي الأقساط.</p></div>
-                <a class="button button-orange receipt-apply" data-payment-apply href="{{ route('installments.apply.form') }}"><span>قدّم على التقسيط الآن</span><span aria-hidden="true">←</span></a>
                 <p class="receipt-footnote">راجع تفاصيل النظام مع فريقنا قبل إتمام الطلب.</p>
             </div>
         </div>
