@@ -8,7 +8,7 @@ use App\Agent\Providers\{AiProvider,AiResponse,FakeAiProvider};
 use Illuminate\Support\Facades\{DB,Schema};
 if(DB::connection()->getDriverName()!=='sqlite' || config('database.connections.sqlite.database')!==':memory:') throw new RuntimeException('Unsafe test database');
 $n=0;$ok=function($value,$name)use(&$n){if(!$value)throw new RuntimeException($name);echo 'PASS '.$name.PHP_EOL;$n++;};
-config(['agent.safety.enabled'=>true,'agent.safety.review_instructions'=>'test-review-policy','agent.safety.unknown_reply'=>'غير متأكد','agent.safety.claim_rules'=>json_encode([['id'=>'gift','pattern'=>'/خوذة.*هدية/u','evidence_key'=>'approved_gifts']])]);
+config(['agent.safety.reply_guard_mode'=>'enforce','agent.safety.enabled'=>true,'agent.safety.review_instructions'=>'test-review-policy','agent.safety.unknown_reply'=>'غير متأكد','agent.safety.claim_rules'=>json_encode([['id'=>'gift','pattern'=>'/خوذة.*هدية/u','evidence_key'=>'approved_gifts']])]);
 $review=new EvidenceReview;
 $ok($review->check(['messages'=>['خوذة وشنطة هدية']],'',[])==='CLAIM_WITHOUT_EVIDENCE: gift','gift without evidence blocked before model');
 $fake=new FakeAiProvider;$app->instance(AiProvider::class,$fake);

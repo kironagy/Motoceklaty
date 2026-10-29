@@ -27,10 +27,22 @@ class AgentSettings
     public static function definitions(): array
     {
         return [
+            'eligibility.no_work_hint' => ['instructions', 'تفسير اشتراط العمل الحالي', 'text', null],
+            'eligibility.other_applicant' => ['instructions', 'تقديم شخص بديل مستوف للشروط', 'text', null],
+            'eligibility.other_applicant_refused' => ['instructions', 'الشخص البديل غير مستوف للشروط', 'text', null],
+            'installments.cap_explanation' => ['instructions', 'تفسير المقدم بسبب حد التمويل', 'text', null],
+            'social.replies' => ['instructions', 'ردود التحيات والشكر المعتمدة JSON', 'text', null],
+            'cash.sales_handoff' => ['run', 'مسار شراء الكاش عبر الموظف', 'bool', null],
+            'cash.purchase_handoff_message' => ['instructions', 'رسالة تحويل مشتري الكاش', 'text', null],
+            'cash.purchase_handoff_topic' => ['instructions', 'عنوان تحويل مشتري الكاش', 'string', null],
+            'cash.purchase_review_instructions' => ['instructions', 'التحقق من تأكيد شراء الكاش', 'text', null],
+            'safety.repair_instructions' => ['instructions', 'توجيه تصحيح الرد المرفوض', 'text', null],
+            'safety.max_evidence_repairs' => ['run', 'محاولات تصحيح مراجعة المصدر', 'int', null],
             'cash.inventory_enabled' => ['run', 'ربط الكاش بالمخزون الفعلي', 'bool', 'قراءة القطع غير المباعة من كل المعارض.'],
             'cash.tool_description' => ['instructions', 'تعليمات أداة مخزون الكاش', 'text', null],
             'cash.unavailable_message' => ['instructions', 'رسالة نفاد مخزون الكاش والتحويل', 'text', '{motorcycle} اسم الموديل.'],
             'cash.handoff_topic' => ['handoff', 'عنوان تحويل الكاش غير المتاح', 'string', null],
+            'safety.reply_guard_mode' => ['run', 'حماية نص الرد', 'select', 'الملاحظة تسجل الاعتراض دون حجب الرد؛ الأفعال تظل متحققة.', ['advisory'=>'ملاحظة فقط', 'enforce'=>'حجب وتصحيح']],
             'safety.enabled' => ['run', 'مراجعة مصدر الرد قبل الإرسال', 'bool', 'غير المثبت يتوقف بدون تحويل تلقائي.'],
             'safety.review_instructions' => ['instructions', 'تعليمات التحقق من مصدر الرد', 'text', 'سياسة مراجعة الرد وطلب التحويل.'],
             'safety.no_zero_upfront_hint' => ['instructions', 'توجيه عدم وجود خطة بلا دفع عند الاستلام', 'text', 'توجيه أداة الحساب من الميموري.'],

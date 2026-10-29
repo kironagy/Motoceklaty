@@ -56,13 +56,23 @@ class SendApplicationLinkTool implements WriteTool
     /** A request of his still waiting for a decision: no new link while it does. */
     public function openRequest(WhatsappConversation $conversation): ?InstallmentRequest
     {
-        $phone = app(FormSubmissionService::class)->localPhone(explode(':', (string) ($conversation->real_phone ?: $conversation->phone))[0]);
+        return app(\App\Domain\Applications\RequestIdentity::class)->query($conversation->customer, $conversation)
+            ->whereIn('status', FormSubmissionService::UNDECIDED_STATUSES)->latest('id')->first();
+    }
 
-        return InstallmentRequest::query()
-            ->whereIn('status', FormSubmissionService::UNDECIDED_STATUSES)
-            ->where(fn ($q) => $q->where('whatsapp_conversation_id', $conversation->id)->orWhereIn('applicant_phone', [$phone, '2'.$phone]))
-            ->latest('id')
-            ->first();
+    public function maySendLink(WhatsappConversation $conversation): bool
+    {
+        if ($this->openRequest($conversation)) return false;
+        $text = app(\App\Agent\Runtime\ReplyGuard::class)->customerTextSinceLastReply($conversation);
+        $new = (bool) preg_match('/(?:عايز|عاوز|محتاج|ممكن|ابعت)[^.؟?\\n]{0,45}(?:اقدم|أقدم|تقديم|طلب)[^.؟?\\n]{0,25}(?:جديد|تاني|تانية|تانيه)|(?:عايز|عاوز|محتاج)[^.؟?\\n]{0,25}(?:اقدم|أقدم)\\s+من\\s+جديد/u', $text);
+        $request = app(\App\Domain\Applications\RequestIdentity::class)->query($conversation->customer, $conversation)->latest('id')->first();
+        if ($request) return $new;
+        // An unverified old request is not a reason to start another application.
+        $history = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'incoming')->where('sender_type', 'customer')->latest('id')->limit(20)->get(['text','transcript'])
+            ->map(fn ($m) => trim((string) $m->text.' '.(string) $m->transcript))->implode(' ');
+        $followup = (bool) preg_match('/(?:طلب|طلبي|طلبى)\\s+(?:ب?رقم|وصل|اتقدم|قدمته)|(?:قدمت|قدّمت)\\s+(?:طلب|قبل|من)/u', $history);
+        return $new || ! $followup;
     }
 
     /**
@@ -104,6 +114,16 @@ class SendApplicationLinkTool implements WriteTool
 
         if (! $conversation) {
             return ToolResult::error('NO_CONVERSATION');
+        }
+
+        // Existing request facts take priority over application eligibility/link generation.
+        if (! $this->maySendLink($conversation)) {
+            return ToolResult::ok([
+                'has_existing_request' => true,
+                'has_open_request' => $this->openRequest($conversation) !== null,
+                'requests' => app(\App\Domain\Applications\CustomerRequestStatus::class)->for($conversation->customer, $conversation),
+                'link_sent_after_your_reply' => false,
+            ]);
         }
 
         if (config('agent.safety.enabled')) {

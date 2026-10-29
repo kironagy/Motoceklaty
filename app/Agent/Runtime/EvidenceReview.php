@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\Log;
 /** Technical enforcement; policy and customer wording are dashboard data. */
 class EvidenceReview
 {
+    private string $lastReason = '';
+    public function lastReason(): string { return $this->lastReason; }
     public function enabled(): bool { return (bool) config('agent.safety.enabled', false); }
     public function uncertainty(): array
     {
@@ -14,6 +16,7 @@ class EvidenceReview
     }
     public function check(array $args, string $system, array $outcomes, string $question = ''): ?string
     {
+        if (config('agent.safety.reply_guard_mode') === 'advisory') return null;
         if (! $this->enabled() || ($args['messages'] ?? []) === []) return null;
         $reply = implode("\n", $args['messages']);
         $rules = json_decode((string) config('agent.safety.claim_rules', '[]'), true);
@@ -37,7 +40,8 @@ class EvidenceReview
     }
     public function judge(string $task, array $data): bool
     {
-        $policy = trim((string) config('agent.safety.review_instructions'));
+        $this->lastReason = '';
+        $policy = trim((string) config($task === 'cash_purchase_confirmed' ? 'agent.cash.purchase_review_instructions' : 'agent.safety.review_instructions'));
         if ($policy === '') return false;
         try {
             $response = app(AiProvider::class)->chat(new AiRequest(
@@ -48,8 +52,10 @@ class EvidenceReview
                 purpose: 'reply', label: 'evidence_review',
             ));
             $result = json_decode(implode('', $response->textParts), true, 16, JSON_THROW_ON_ERROR);
+            $this->lastReason = is_string($result['reason'] ?? null) ? mb_substr($result['reason'], 0, 600) : 'INVALID_REVIEW_RESPONSE';
             return ($result['approved'] ?? null) === true && is_string($result['reason'] ?? null);
         } catch (\Throwable $e) {
+            $this->lastReason = 'REVIEW_UNAVAILABLE';
             Log::warning('Reply evidence review unavailable', ['exception' => get_class($e)]);
             return false;
         }

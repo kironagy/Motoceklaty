@@ -568,14 +568,23 @@ class ReplyGuard
 
         $lookups = array_filter($outcomes, fn ($o) => in_array($o['name'], ['get_branch_information', 'check_cash_inventory'], true) && $o['ok']);
 
-        if ($lookups === []) {
-            return true;
-        }
-
         // Only the branch rows count - the tool's own note ("We have NO
         // branch in المنصورة") named the very place a branch was then
         // invented in, and let it through.
         $branches = array_merge(...array_map(fn ($o) => $o['data']['branches'] ?? [], array_values($lookups)));
+        // Search carries a fresh physical-stock snapshot too. Only confirmed
+        // pickup locations can prove branch facts; catalog availability cannot.
+        foreach ($outcomes as $outcome) {
+            if (($outcome['name'] ?? '') !== 'search_motorcycles' || ! ($outcome['ok'] ?? false)) continue;
+            foreach ($outcome['data']['items'] ?? [] as $item) {
+                $stock = $item['cash_stock'] ?? [];
+                if (($stock['source'] ?? '') !== 'physical_inventory') continue;
+                foreach ($stock['branches'] ?? [] as $branch) {
+                    if (($branch['pickup_location_confirmed'] ?? false) && ($branch['quantity'] ?? 0) > 0) $branches[] = $branch;
+                }
+            }
+        }
+        if ($branches === []) return true;
         $source = \App\Support\ArabicTextNormalizer::normalize(json_encode($branches, JSON_UNESCAPED_UNICODE) ?: '');
 
         // A map link is only ever one of the branches' own links.
@@ -1555,6 +1564,7 @@ class ReplyGuard
         $replyText = preg_replace('/[^.\\n!?؟]*مش\\s+(?:متوفر[ةه]?|متاح[ةه]?|موجود[ةه]?)[^.\\n!?؟]*/u', '', $replyText) ?? $replyText;
         $ids = $catalog->fullNames($replyText);
         if ($ids === []) return false;
+        $multipleModels = count($ids) > 1;
         $verified = [];
         foreach ($outcomes as $outcome) {
             if (! ($outcome['ok'] ?? false)) continue;
@@ -1563,7 +1573,7 @@ class ReplyGuard
             if (($outcome['name'] ?? '') === 'search_motorcycles') {
                 foreach ($data['items'] ?? [] as $item) {
                     // Same-name models from other brands are not asserted by this reply.
-                    if (! str_contains($catalog->normalize($replyText), $catalog->normalize((string) ($item['brand'] ?? '')))) continue;
+                    if (count($ids) > 1 && ! str_contains($catalog->normalize($replyText), $catalog->normalize((string) ($item['brand'] ?? '')))) continue;
                     $stocks[] = $item['cash_stock'] ?? [];
                 }
             }
@@ -1579,7 +1589,7 @@ class ReplyGuard
             if (($outcome['name'] ?? '') !== 'search_motorcycles' || ! ($outcome['ok'] ?? false)) continue;
             foreach ($outcome['data']['items'] ?? [] as $item) {
                 $brand = $catalog->normalize((string) ($item['brand'] ?? ''));
-                if ($brand !== '' && ! str_contains($catalog->normalize($replyText), $brand)) {
+                if ($multipleModels && $brand !== '' && ! str_contains($catalog->normalize($replyText), $brand)) {
                     $ids = array_values(array_diff($ids, [(int) $item['id']]));
                 }
             }
@@ -1616,8 +1626,9 @@ class ReplyGuard
             }
         }
 
-        return $conversation->customer_id !== null
-            && Application::where('customer_id', $conversation->customer_id)->whereNotNull('submitted_at')->exists();
+        return app(\App\Domain\Applications\RequestIdentity::class)->query($conversation->customer, $conversation)->exists()
+            || ($conversation->customer_id !== null
+            && Application::where('customer_id', $conversation->customer_id)->whereNotNull('submitted_at')->exists());
     }
 
     /**

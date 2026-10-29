@@ -113,6 +113,12 @@ class SearchMotorcyclesTool implements ReadTool
             $result['closest_to'] = ['label' => $wanted['label'] ?? null, 'cc' => (int) $wanted['cc']];
         }
 
+        $conversation = \App\Models\WhatsappConversation::find($ctx->conversationId);
+        if ($conversation) {
+            $customerText = app(\App\Agent\Runtime\ReplyGuard::class)->customerTextSinceLastReply($conversation);
+            $result = $this->scopeToRequestedBrand($result, $customerText);
+        }
+
         // "VLR 200" is sold by two brands at different prices; picking one
         // silently quoted the wrong price. Flag same-name hits from
         // different brands so the agent asks which one.
@@ -127,6 +133,23 @@ class SearchMotorcyclesTool implements ReadTool
         }
 
         return ToolResult::ok($result);
+    }
+
+    /** Scope broad model-name matches to a brand explicitly named this turn. */
+    private function scopeToRequestedBrand(array $result, string $customerText): array
+    {
+        $ids = [];
+        $normalized = \App\Support\ArabicTextNormalizer::normalize($customerText);
+        foreach (preg_split('/[^\\p{L}\\p{N}]+/u', $normalized, -1, PREG_SPLIT_NO_EMPTY) as $word) {
+            $ids = array_merge($ids, \App\Domain\Conversations\MentionedMotorcycle::brandIdsFor($word));
+        }
+        $brands = \App\Models\Brand::whereIn('id', array_unique($ids))
+            ->whereNotIn('name', ['Scooters', 'Electric scooters', 'تروسيكلات'])->pluck('name')->all();
+        if (count($brands) !== 1) return $result;
+        $result['items'] = array_values(array_filter($result['items'] ?? [], fn ($item) => ($item['brand'] ?? null) === $brands[0]));
+        $result['total'] = count($result['items']);
+        unset($result['ambiguous_names'], $result['versions'], $result['similar_available']);
+        return $result;
     }
 
     /**

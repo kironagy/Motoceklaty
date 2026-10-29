@@ -2,6 +2,7 @@
 if (($argv[1] ?? '') !== '--rollback-check') { fwrite(STDERR, "Pass --rollback-check for a synthetic transaction with no delivery.\n"); exit(2); }
 require dirname(__DIR__,2).'/vendor/autoload.php';$app=require dirname(__DIR__,2).'/bootstrap/app.php';$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 use Illuminate\Support\Facades\DB;use App\Agent\Providers\{AiProvider,AiResponse,FakeAiProvider};
+config(['agent.safety.reply_guard_mode'=>'enforce']);
 DB::beginTransaction();try{
 $bot=App\Models\WhatsappBot::where('is_active',true)->firstOrFail();$jid='sim-policy-'.bin2hex(random_bytes(5));
 $customer=App\Models\Customer::create(['whatsapp_bot_id'=>$bot->id,'jid'=>$jid,'phone'=>$jid]);

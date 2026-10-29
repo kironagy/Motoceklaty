@@ -21,9 +21,7 @@ class OtherApplicant
      */
     public static function line(bool $refusedIsOther = false): string
     {
-        return $refusedIsOther
-            ? 'للأسف اللي هيقدّم لازم يكون شغال أو على المعاش وسنه من 21 لـ 62. فيه حد تاني كده يقدر يقدّم؟'
-            : 'ينفع حد تاني يقدّم بدالك، بس الطلب كله يبقى باسمه هو وبمستنداته هو، ولازم سنه من 21 لـ 62 ويكون شغال أو على المعاش. هو بيشتغل إيه؟';
+        return trim((string) config($refusedIsOther ? 'agent.eligibility.other_applicant_refused' : 'agent.eligibility.other_applicant'));
     }
 
     /** @param string[] $codes */

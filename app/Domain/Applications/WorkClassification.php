@@ -66,7 +66,7 @@ class WorkClassification
         }
 
         if (in_array($r['working_now'], ['no', 'not_yet'], true) && $r['customer_type'] !== 'pension') {
-            return ['code' => 'APPLICANT_HAS_NO_WORK', 'hint' => 'his words: "'.$words.'". Say exactly: "'.OtherApplicant::line(($r['applicant'] ?? null) === 'someone_else').'"'];
+            return ['code' => 'APPLICANT_HAS_NO_WORK', 'hint' => 'his words: "'.$words.'". Say exactly: "'.trim((string) config('agent.eligibility.no_work_hint')).'"'];
         }
 
         // Simulation 2026-10-04: a retired postal manager was refused as

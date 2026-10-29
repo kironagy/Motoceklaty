@@ -196,7 +196,7 @@ class ConversationFacts
             // expired: no number is shown, so none can be repeated - look it up again
             'needs_new_lookup' => array_map(fn ($q) => ['motorcycle' => $q['motorcycle'], 'months' => $q['months'], 'why' => $q['why']], $quotes['expired']),
             'application' => $application && $snapshot ? $this->applicationFacts($application, $snapshot) : null,
-            'requests' => $customer ? $this->requests($customer, $conversation) : [],
+            'requests' => $this->requests($customer, $conversation),
             'application_link' => $this->applicationLink($conversation),
             'asked_and_waiting_for' => array_map(fn ($a) => ['kind' => $a['kind'] ?? null, 'key' => $a['key'] ?? null], $awaiting),
             'handoff' => ($handoff = $this->handoff($conversation)) === ['status' => 'none'] ? null : $handoff,

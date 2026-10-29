@@ -356,10 +356,10 @@ class CatalogService
             'is_offer' => $m->type === 'offer',
             'offer_price' => $m->type === 'offer' ? $m->new_price : null,
             'cash_stock' => config('agent.cash.inventory_enabled') ? app(CashInventoryService::class)->forMachine((int) $m->id) : null,
-            'availability' => $m->availability,
+            'availability' => config('agent.cash.sales_handoff') ? null : $m->availability,
             // Without colors the agent told a customer "no 150 comes in
             // yellow" while the Wing 150 does.
-            'colors' => $this->colorNames($m->id),
+            'colors' => config('agent.cash.sales_handoff') ? [] : $this->colorNames($m->id),
         ];
     }
 
@@ -385,9 +385,9 @@ class CatalogService
                 'old_price' => $m->type === 'offer' ? $m->old_price : null,
                 'new_price' => $m->type === 'offer' ? $m->new_price : null,
                 'features' => collect($m->features ?? [])->pluck('title')->filter()->values()->all(),
-                'colors' => $colors,
+                'colors' => config('agent.cash.sales_handoff') ? [] : $colors,
                 'cash_stock' => config('agent.cash.inventory_enabled') ? app(CashInventoryService::class)->forMachine((int) $m->id) : null,
-            'availability' => $m->availability,
+            'availability' => config('agent.cash.sales_handoff') ? null : $m->availability,
                 'installment_system_ids' => $m->installmentSystemIds(),
                 'cc' => self::engineCc($m),
                 'model_year' => $m->model_year,

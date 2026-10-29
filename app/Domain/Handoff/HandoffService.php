@@ -33,6 +33,26 @@ class HandoffService
         return $handoff;
     }
 
+    /** Owner-approved cash purchase confirmation, independent of stock state. */
+    public function cashPurchaseConfirmed(WhatsappConversation $conversation, int $machineId): Handoff
+    {
+        return DB::transaction(function () use ($conversation, $machineId) {
+            $locked = WhatsappConversation::whereKey($conversation->id)->lockForUpdate()->firstOrFail();
+            $state = $locked->state ?? [];
+            $state['cash_handoff_machine_id'] = $machineId;
+            $locked->state = $state;
+            $locked->last_topic = config('agent.cash.purchase_handoff_topic');
+            $locked->save();
+            $existing = Handoff::where('conversation_id', $locked->id)->whereNull('closed_at')->latest('id')->first();
+            if ($existing) {
+                $locked->update(['status' => 'awaiting_agent']);
+                return $existing;
+            }
+            return $this->handOff($locked, 'cash_purchase_confirmed',
+                (string) config('agent.cash.purchase_handoff_topic').' [model '.$machineId.']', 'cash_sales');
+        });
+    }
+
     /** Owner-approved exception: a confirmed cash buyer, no unsold piece anywhere. */
     public function cashStockUnavailable(WhatsappConversation $conversation, int $machineId): ?Handoff
     {
@@ -170,7 +190,7 @@ class HandoffService
         $returned = 0;
 
         Handoff::whereNull('closed_at')
-            ->where('reason', '!=', 'cash_stock_unavailable')
+            ->whereNotIn('reason', ['cash_stock_unavailable', 'cash_purchase_confirmed'])
             ->where('opened_at', '<=', now()->subMinutes((int) $minutes))
             ->with('conversation')
             ->get()

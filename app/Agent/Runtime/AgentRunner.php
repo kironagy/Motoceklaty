@@ -94,6 +94,8 @@ class AgentRunner
         }
 
         $conversation = WhatsappConversation::with('customer')->findOrFail($turn->whatsapp_conversation_id);
+        if ($conversation->status === 'awaiting_agent' && ! \App\Domain\Handoff\HandoffService::botKeepsAnswering($conversation)) return ['messages'=>[], 'no_reply'=>true];
+
         $customer = $conversation->customer;
         $activeApplication = $customer
             ? Application::where('customer_id', $customer->id)->whereIn('status', Application::agentActiveStatuses())->latest('id')->first()
@@ -124,6 +126,15 @@ class AgentRunner
         $onlyText = ! \App\Models\WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')
             ->whereNotIn('type', ['text', 'audio', 'voice', 'ptt'])->exists();
 
+        if ($resumed === [] && $onlyText && blank($turn->media_items ?? null)) {
+            $social = app(SocialReply::class)->for($this->guard->customerTextSinceLastReply($conversation));
+            if ($social !== null) {
+                $this->resetFailureCounter($conversation);
+                $this->finishTrace($trace, 'done', [['code'=>'APPROVED_SOCIAL_REPLY','args'=>[]]], null);
+                return $social;
+            }
+        }
+
         if (! app(EvidenceReview::class)->enabled() && $resumed === [] && $onlyText && blank($turn->media_items ?? null)) {
             $greeting = app(GreetingReply::class)->for($conversation, $this->guard->customerTextSinceLastReply($conversation));
 
@@ -150,6 +161,7 @@ class AgentRunner
         $modelCalls = 0;
         $toolCallCount = 0;
         $repairs = 0;
+        $evidenceRepairs = 0;
         $openedNow = false;
         $guardEvents = [];
         /** @var array<int, array{name: string, ok: bool, data: array}> $outcomes */
@@ -221,6 +233,10 @@ class AgentRunner
                         // PHP checks only what the AI may not decide: claims of
                         // actions, numbers and facts no tool gave, promises.
                         $violation = $this->guard->check($toolCall['args'], $conversation, $request->system, $contents, $outcomes);
+                        if ($violation !== null && config('agent.safety.reply_guard_mode') === 'advisory') {
+                            $guardEvents[] = ['code'=>'OBSERVED:'.$violation, 'args'=>$toolCall['args']];
+                            $violation = null;
+                        }
 
                         if ($violation !== null) {
                             $guardEvents[] = ['code' => $violation, 'args' => $toolCall['args']];
@@ -261,7 +277,7 @@ class AgentRunner
                                 }
                             }
 
-                            if ($repairs >= 1 || $limitReached) {
+                            if ($evidenceRepairs >= (int) config('agent.safety.max_evidence_repairs', 2) || $limitReached) {
                                 // Replay of conversation 206 (Gemini): a second repeat ended
                                 // in "مش متأكد إني فهمتك" three times - worse than the repeat.
                                 // What he already got is dropped and the rest is sent.
@@ -313,12 +329,12 @@ class AgentRunner
                         $rejection = $review->check($toolCall['args'], $request->system, $outcomes, $this->guard->customerTextSinceLastReply($conversation));
                         if ($rejection !== null) {
                             $guardEvents[] = ['code' => $rejection, 'args' => []];
-                            if ($repairs >= 1 || $limitReached) {
+                            if ($evidenceRepairs >= (int) config('agent.safety.max_evidence_repairs', 2) || $limitReached) {
                                 $this->finishTrace($trace, 'fallback', $guardEvents, $lastResponse, $rejection);
                                 return $review->uncertainty();
                             }
-                            $repairs++;
-                            $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => ['code' => $rejection, 'detail' => config('agent.safety.review_instructions')]]);
+                            $evidenceRepairs++;
+                            $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => ['code' => $rejection, 'detail' => $review->lastReason().' '.config('agent.safety.repair_instructions')]]);
                             continue;
                         }
                     }
@@ -339,7 +355,7 @@ class AgentRunner
                         'data' => ($result['ok'] ?? false) ? (array) ($result['data'] ?? []) : (array) ($result['error'] ?? []),
                     ];
 
-                    if ($toolCall['name'] === 'check_cash_inventory' && ($result['ok'] ?? false) && ($result['data']['handed_off'] ?? false)) {
+                    if (in_array($toolCall['name'], ['check_cash_inventory', 'handoff_to_human'], true) && ($result['ok'] ?? false) && ($result['data']['handed_off'] ?? false) && isset($result['data']['customer_message'])) {
                         $this->finishTrace($trace, 'done', $guardEvents, $lastResponse);
                         return ['messages' => [$result['data']['customer_message']]];
                     }
@@ -541,7 +557,7 @@ class AgentRunner
         $conversation = WhatsappConversation::find($conversationId);
         $tool = app(\App\Agent\Tools\SendApplicationLinkTool::class);
 
-        if (! $conversation || $tool->openRequest($conversation)) {
+        if (! $conversation || ! $tool->maySendLink($conversation)) {
             return null;
         }
 
@@ -563,8 +579,12 @@ class AgentRunner
             return null;
         }
 
+        $conversation = WhatsappConversation::find($conversationId);
+
         $link = \App\Models\FormLink::where('whatsapp_conversation_id', $conversationId)
             ->whereIn('status', \App\Models\FormLink::OPEN_STATUSES)->latest('id')->first();
+
+        if (! $conversation || ($link?->purpose !== 'fix' && ! app(\App\Agent\Tools\SendApplicationLinkTool::class)->maySendLink($conversation))) return null;
 
         return $link?->isOpen() ? $link : null;
     }
@@ -806,6 +826,7 @@ class AgentRunner
      */
     private function unverifiedReply(WhatsappConversation $conversation, AiTrace $trace, array $guardEvents, string $reason): array
     {
+        if (config('agent.safety.reply_guard_mode') === 'advisory') return $this->fallback($conversation, $trace, $guardEvents, $reason);
         if (config('agent.handoff.customer_only')) {
             $this->finishTrace($trace, 'fallback', $guardEvents, null, $reason);
             return app(EvidenceReview::class)->uncertainty();
@@ -946,6 +967,10 @@ class AgentRunner
     /** @return array{messages: string[]} */
     private function fallback(WhatsappConversation $conversation, AiTrace $trace, array $guardEvents, string $reason): array
     {
+        if (config('agent.safety.reply_guard_mode') === 'advisory') {
+            $this->finishTrace($trace, 'fallback', $guardEvents, null, $reason);
+            return ['messages'=>[(string) config('agent.fallback.message')]];
+        }
         if (config('agent.handoff.customer_only') && app(EvidenceReview::class)->enabled()) {
             $this->finishTrace($trace, 'fallback', $guardEvents, null, $reason);
             return app(EvidenceReview::class)->uncertainty();

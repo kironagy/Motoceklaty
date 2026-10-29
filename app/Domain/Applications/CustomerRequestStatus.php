@@ -38,22 +38,8 @@ class CustomerRequestStatus
     /** @return array<int, array<string, mixed>> newest first, at most 3 */
     public function for(?Customer $customer, WhatsappConversation $conversation): array
     {
-        $ids = collect([$conversation->id]);
-        $requestIds = $customer
-            ? Application::where('customer_id', $customer->id)->whereNotNull('installment_request_id')->pluck('installment_request_id')
-            : collect();
-
-        $phones = collect([$customer?->phone, $conversation->real_phone, $conversation->phone])
-            ->map(fn ($p) => preg_replace('/\D+/', '', (string) $p))
-            ->map(fn ($p) => preg_match('/^201[0125]\d{8}$/', $p) ? '0'.substr($p, 2) : $p)
-            ->filter(fn ($p) => preg_match('/^01[0125]\d{8}$/', $p))
-            ->unique()->values();
-
-        $requests = InstallmentRequest::query()
+        $requests = app(RequestIdentity::class)->query($customer, $conversation)
             ->with(['machine', 'application.installmentPlan.installmentSystem', 'application.machine'])
-            ->where(fn ($q) => $q->whereIn('whatsapp_conversation_id', $ids)
-                ->orWhereIn('id', $requestIds)
-                ->when($phones->isNotEmpty(), fn ($q) => $q->orWhereIn('applicant_phone', $phones)))
             ->latest('id')
             ->limit(3)
             ->get();

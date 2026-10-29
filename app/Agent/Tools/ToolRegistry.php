@@ -23,6 +23,8 @@ class ToolRegistry
             ? config('agent.form_links.chat_intake_tools', [])
             : [SendApplicationLinkTool::class];
 
+        if (config('agent.cash.sales_handoff')) $skip[] = CheckCashInventoryTool::class;
+
         foreach (config('agent.tools', []) as $class) {
             if (in_array($class, $skip, true)) {
                 continue;
