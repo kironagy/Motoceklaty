@@ -61,8 +61,12 @@ class HandoffService
      * config('agent.handoff.max_failed_turns') (DEC-13) and the customer
      * is handed off without the AI having "decided" anything from text.
      */
-    public function handOffForFailures(WhatsappConversation $conversation, string $code): Handoff
+    public function handOffForFailures(WhatsappConversation $conversation, string $code): ?Handoff
     {
+        if (config('agent.handoff.customer_only')) {
+            return null;
+        }
+
         return $this->handOff(
             $conversation,
             reason: 'low_confidence',

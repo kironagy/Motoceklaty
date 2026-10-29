@@ -49,6 +49,10 @@ class GeminiKeyManager
             return 'free_only';
         }
 
+        if (filled($override = config('agent.keys.pool'))) {
+            return (string) $override;
+        }
+
         $purpose = self::purpose() ?? 'other';
 
         return (string) (config('gemini.key_pools.'.$purpose) ?? self::DEFAULT_POOLS[$purpose] ?? 'free_first');
@@ -89,6 +93,7 @@ class GeminiKeyManager
             $provider
         ) {
             $now = now();
+            $cooldownNow = $now->copy()->utc();
             // The pools split Gemini's free and paid keys. GPT has no free
             // keys, so the simulator may spend a GPT key too (owner 2026-10-04).
             $pool = $provider === 'gemini' ? self::pool() : 'any';
@@ -115,9 +120,9 @@ class GeminiKeyManager
                         ->orWhere('second_window_started_at', '<=', $now->copy()->subSecond())
                         ->orWhereRaw('(tokens_this_second + ?) <= tps_limit', [$estimatedTokens]);
                 })
-                ->where(function ($query) use ($now) {
+                ->where(function ($query) use ($cooldownNow) {
                     $query->whereNull('cooldown_until')
-                        ->orWhere('cooldown_until', '<=', $now);
+                        ->orWhere('cooldown_until', '<=', $cooldownNow);
                 })
                 ->whereHas('apiKey', function ($query) use ($now, $provider) {
                     $query->where('provider', $provider)
@@ -133,6 +138,7 @@ class GeminiKeyManager
                 ->when(! is_null($embedding), function ($query) use ($embedding) {
                     $query->where('is_embedding', $embedding);
                 })
+                ->when($pool === 'balanced', fn ($query) => $query->orderByRaw("COALESCE(last_used_at, '1970-01-01')")->orderBy('requests_today'))
                 ->orderBy('priority')
                 ->orderBy('requests_today')
                 ->orderBy('requests_this_minute')
@@ -193,7 +199,7 @@ class GeminiKeyManager
             ->where('provider', $provider)
             ->where('is_active', true)
             ->whereColumn('requests_today', '<', 'rpd_limit')
-            ->where(fn ($query) => $query->whereNull('cooldown_until')->orWhere('cooldown_until', '<=', $soon))
+            ->where(fn ($query) => $query->whereNull('cooldown_until')->orWhere('cooldown_until', '<=', $soon->copy()->utc()))
             ->when($preferredModelCode, fn ($query) => $query->where('model_code', $preferredModelCode))
             ->when(! is_null($embedding), fn ($query) => $query->where('is_embedding', $embedding))
             ->whereHas('apiKey', fn ($query) => $query->where('is_paid', true)->where('is_active', true)

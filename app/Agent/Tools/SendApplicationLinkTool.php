@@ -106,6 +106,27 @@ class SendApplicationLinkTool implements WriteTool
             return ToolResult::error('NO_CONVERSATION');
         }
 
+        if (config('agent.safety.enabled')) {
+            $classification = app(\App\Domain\Applications\WorkClassification::class);
+            $work = $classification->reading($ctx->conversationId);
+            if (! $work || empty($work['work_stated'])) {
+                return ToolResult::error('WORK_NOT_RECORDED');
+            }
+            if ($problem = $classification->problem($ctx->conversationId, $work['customer_type'] ?? 'unknown')) {
+                return ToolResult::error($problem['code'], $problem['hint']);
+            }
+            $check = \App\Models\AiTraceStep::where('turn_id', $ctx->turnId)
+                ->where('tool_name', 'check_eligibility')->latest('id')->first();
+            $result = $check?->result_redacted ?? [];
+            if (! ($result['ok'] ?? false)) {
+                return ToolResult::error('ELIGIBILITY_CHECK_REQUIRED');
+            }
+            $data = $result['data'] ?? [];
+            if (in_array($data['status'] ?? '', ['not_eligible', 'needs_id'], true) || ! empty($data['occupation_not_accepted']) || ! empty($data['ask_sector'])) {
+                return ToolResult::error('ELIGIBILITY_NOT_CONFIRMED');
+            }
+        }
+
         if ($open = $this->openRequest($conversation)) {
             return ToolResult::ok([
                 'has_open_request' => true,
