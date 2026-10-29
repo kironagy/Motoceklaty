@@ -66,6 +66,16 @@ class WorkProfiles
         return ['ok' => true, 'profile' => $profile];
     }
 
+    public function pauseQuestions(int $conversationId): void
+    {
+        $conversation = WhatsappConversation::findOrFail($conversationId);
+        $state = $conversation->state ?? [];
+        if (isset($state[self::STATE_KEY])) {
+            $state[self::STATE_KEY]['question'] = 'none';
+            $conversation->update(['state'=>$state]);
+        }
+    }
+
     /** The customer said he cannot bring his work papers at all: the card-only route was taken on those words. */
     public function markCannotBringPapers(int $conversationId): void
     {

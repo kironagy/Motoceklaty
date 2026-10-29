@@ -376,6 +376,12 @@ class AgentRunner
                         return ['messages' => [$result['data']['customer_message']]];
                     }
 
+                    if (in_array($toolCall['name'], ['record_work_profile','send_application_link','get_installment_offer'], true) && ($result['ok'] ?? false)
+                        && ($result['data']['age_blocked'] ?? false) && filled($result['data']['customer_message'] ?? null)) {
+                        $this->finishTrace($trace, 'done', $guardEvents, $lastResponse);
+                        return ['messages'=>[$result['data']['customer_message']]];
+                    }
+
                     // start_application + process_document in one step: the
                     // document needs the application the step just opened.
                     if (($result['ok'] ?? false) && $toolCall['name'] === 'start_application' && isset($result['data']['application_id'])) {

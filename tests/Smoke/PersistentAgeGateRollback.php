@@ -1,0 +1,40 @@
+<?php
+if(($argv[1]??'')!=='--rollback-check')exit("Use --rollback-check\n");
+require dirname(__DIR__,2).'/vendor/autoload.php';$app=require dirname(__DIR__,2).'/bootstrap/app.php';$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+use Illuminate\Support\Facades\DB;use App\Agent\Providers\{AiProvider,AiResponse,FakeAiProvider};use App\Domain\Applications\AgeEligibilityGate;use App\Agent\Tools\{ToolContext,RecordWorkProfileTool,CheckEligibilityTool};
+$n=0;$ok=function($v,$label)use(&$n){if(!$v)throw new RuntimeException($label);echo "PASS $label\n";$n++;};
+DB::beginTransaction();try{
+$bot=App\Models\WhatsappBot::where('is_active',true)->firstOrFail();$jid='sim-persistent-age-'.bin2hex(random_bytes(5));$u=App\Models\Customer::create(['whatsapp_bot_id'=>$bot->id,'jid'=>$jid,'phone'=>$jid]);$c=App\Models\WhatsappConversation::create(['whatsapp_bot_id'=>$bot->id,'customer_id'=>$u->id,'phone'=>$jid,'status'=>'open']);
+$message=function($text,$turn=null,$direction='incoming')use($c,$bot){return App\Models\WhatsappMessage::create(['whatsapp_conversation_id'=>$c->id,'whatsapp_bot_id'=>$bot->id,'turn_id'=>$turn,'direction'=>$direction,'sender_type'=>$direction==='incoming'?'customer':'bot','type'=>'text','text'=>$text]);};
+$message('انا عندي 20 سنة');app(App\Domain\Memory\CustomerMemory::class)->applyModelUpdate($u->id,$c->id,['facts'=>[['key'=>'age','value'=>'20','quote'=>'انا عندي 20 سنة']]]);
+$gate=app(AgeEligibilityGate::class);$ok(($gate->for($c)['age']??null)===20,'existing conversation age memory creates gate without reasking age');
+$ctx=new ToolContext($u->id,$c->id,null,1,1,new App\Agent\Runtime\TurnResultBuilder());
+$r=app(CheckEligibilityTool::class)->execute(['age'=>20],$ctx)->toArray();$ok(($c->fresh()->state['age_eligibility']['customer']['status']??'')==='not_eligible','age check persists applicant-specific refusal');
+$trace=App\Models\AiTrace::create(['conversation_id'=>$c->id,'turn_id'=>1,'status'=>'done']);
+App\Models\AiTraceStep::create(['trace_id'=>$trace->id,'turn_id'=>1,'seq'=>1,'kind'=>'tool_call','tool_name'=>'check_eligibility','permission'=>'READ','args_hash'=>'age-test','args_redacted'=>['age'=>20],'result_redacted'=>$r]);
+$savedState=$c->fresh()->state;$savedMemory=$u->fresh()->memory;
+$c->update(['state'=>[]]);$u->update(['memory'=>[]]);
+$ok(($gate->for($c->fresh())['age']??null)===20,'legacy audited age refusal works without age memory or new gate state');
+$c->update(['state'=>$savedState]);$u->update(['memory'=>$savedMemory]);
+$message('انا شغال مهندس');$args=['evidence'=>'انا شغال مهندس','occupation'=>'مهندس','job_title'=>'مهندس','applicant'=>'customer','work_stated'=>true,'working_now'=>'yes','applicant_gender'=>'male','customer_type'=>'unknown','question'=>'ask_sector'];
+$r=app(RecordWorkProfileTool::class)->execute($args,$ctx)->toArray();$ok(($r['data']['age_blocked']??false)===true,'engineer statement does not reopen eligibility');$ok(($r['data']['question']??'')==='none','sector question suppressed by age gate');
+$ok(app(App\Domain\Applications\WorkProfiles::class)->get($c->id)['question']==='none','saved work profile no longer carries sector prompt');
+$offer=app(App\Agent\Tools\GetInstallmentOfferTool::class)->execute(['motorcycle_id'=>3,'months'=>24],$ctx)->toArray();
+$ok(($offer['data']['age_blocked']??false)&&!isset($offer['data']['offers']),'known age refusal blocks reopening installment calculation');
+$link=app(App\Agent\Tools\SendApplicationLinkTool::class)->execute([],$ctx)->toArray();
+$ok(($link['data']['age_blocked']??false)&&!($link['data']['link_sent_after_your_reply']??false),'known age refusal blocks new application link');
+$message('خاص');$args['evidence']='خاص';$args['sector']='private';$args['question']='ask_insured';$r=app(RecordWorkProfileTool::class)->execute($args,$ctx)->toArray();$ok(($r['data']['question']??'')==='none','private-sector answer does not trigger insurance question');$ok(($gate->for($c->fresh())['age']??null)===20,'work updates preserve known age');
+$ok(app(App\Domain\Applications\WorkProfiles::class)->get($c->id)['question']==='none','saved work profile no longer carries insurance prompt');
+$message('ابعتلك اخويا');$bad=$args;$bad['applicant']='someone_else';$bad['applicant_relation']='brother';$bad['applicant_quote']='أبويا هيقدم';$bad['people_named']=['brother'];$bad['evidence']='خاص';$r=app(RecordWorkProfileTool::class)->execute($bad,$ctx)->toArray();$ok(($r['data']['age_blocked']??false)===true,'invented alternative-applicant quote cannot clear refusal');
+$message('أخويا عنده 30 سنة وهو اللي هيقدم');$other=$args;$other['applicant']='someone_else';$other['applicant_relation']='brother';$other['applicant_quote']='أخويا عنده 30 سنة وهو اللي هيقدم';$other['people_named']=['brother'];$other['evidence']=$other['applicant_quote'];$r=app(RecordWorkProfileTool::class)->execute($other,$ctx)->toArray();
+$ok(empty($r['data']['age_blocked']),'explicit other applicant does not inherit customer age');
+app(CheckEligibilityTool::class)->execute(['age'=>30,'about'=>'other_applicant'],$ctx);
+$ok($gate->for($c->fresh())===null,'eligible checked alternative has no age gate');
+$ok(($c->fresh()->state['age_eligibility']['customer']['age']??null)===20,'customer refusal stays scoped to customer');
+$message('انا اللي هقدم وانا شغال مهندس');$id=DB::table('whatsapp_message_jobs')->insertGetId(['whatsapp_bot_id'=>$bot->id,'whatsapp_conversation_id'=>$c->id,'status'=>'processing','created_at'=>now(),'updated_at'=>now()]);$message('انا شغال مهندس',$id);
+$args['evidence']='انا شغال مهندس';$args['applicant']='customer';$fake=new FakeAiProvider;$fake->queue(new AiResponse([], [['id'=>'record-engineer','name'=>'record_work_profile','args'=>$args]],'STOP',[],'test',null,1));$app->instance(AiProvider::class,$fake);
+$result=app(App\Agent\Runtime\AgentRunner::class)->run(DB::table('whatsapp_message_jobs')->find($id));
+$ok($result['messages']===[config('agent.eligibility.age_block_message')],'real runner returns approved age message before model asks sector');
+$ok(!str_contains(implode(' ',$result['messages']),'حكومي ولا خاص')&&!str_contains(implode(' ',$result['messages']),'متأمن'),'no sector or insurance question in output');
+}finally{DB::rollBack();echo "Rolled back; no WhatsApp delivery\n";}
+echo "$n passed\n";

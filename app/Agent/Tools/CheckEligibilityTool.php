@@ -114,6 +114,10 @@ class CheckEligibilityTool implements ReadTool
         // taken as HIM changing his age after the refusal at 20.
         $aboutOther = ($args['about'] ?? 'customer') === 'other_applicant';
 
+        if (isset($facts['age']) && ($result['status'] ?? '') === 'not_eligible') {
+            app(\App\Domain\Applications\AgeEligibilityGate::class)->record($ctx->conversationId, (int) $facts['age'], $result, $aboutOther);
+        }
+
         if (isset($facts['age']) && ($result['status'] ?? null) === 'eligible') {
             if (! $aboutOther && $this->ageRefusedEarlier($ctx->conversationId)) {
                 // what to do with it is in the instructions (rebuild: facts only here)
@@ -123,6 +127,7 @@ class CheckEligibilityTool implements ReadTool
                 ]);
             }
 
+            app(\App\Domain\Applications\AgeEligibilityGate::class)->record($ctx->conversationId, (int) $facts['age'], $result, $aboutOther);
             $result['decided_by'] = 'stated_age';
         }
 

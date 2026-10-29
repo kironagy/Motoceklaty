@@ -44,6 +44,7 @@ class AgentSettings
             'cash.handoff_topic' => ['handoff', 'عنوان تحويل الكاش غير المتاح', 'string', null],
             'safety.banned_reply_pattern' => ['instructions', 'عبارات الرد الممنوعة — regex', 'text', null],
             'safety.banned_reply_repair' => ['instructions', 'توجيه إعادة صياغة العبارة الممنوعة', 'text', null],
+            'eligibility.age_block_message' => ['instructions', 'الرد عند استمرار رفض السن مع تغيير الشغل', 'text', '{age} السن، {minimum} الحد الأدنى.'],
             'eligibility.age_stop_instructions' => ['instructions', 'إيقاف أسئلة العمل عند رفض السن', 'text', null],
             'safety.reply_guard_mode' => ['run', 'حماية نص الرد', 'select', 'الملاحظة تسجل الاعتراض دون حجب الرد؛ الأفعال تظل متحققة.', ['advisory'=>'ملاحظة فقط', 'enforce'=>'حجب وتصحيح']],
             'safety.enabled' => ['run', 'مراجعة مصدر الرد قبل الإرسال', 'bool', 'غير المثبت يتوقف بدون تحويل تلقائي.'],

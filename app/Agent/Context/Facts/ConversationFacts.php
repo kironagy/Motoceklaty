@@ -186,6 +186,7 @@ class ConversationFacts
         $minimumAge = CustomerMemory::minimumAge();
 
         $facts = $this->prune([
+            'age_eligibility_gate' => app(\App\Domain\Applications\AgeEligibilityGate::class)->for($conversation),
             'applicant' => Applicant::forPrompt($applicant),
             'person' => $person,
             'work' => $workFacts,

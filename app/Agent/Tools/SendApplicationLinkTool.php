@@ -126,6 +126,10 @@ class SendApplicationLinkTool implements WriteTool
             ]);
         }
 
+        if ($age = app(\App\Domain\Applications\AgeEligibilityGate::class)->for($conversation)) {
+            return ToolResult::ok(['age_blocked'=>true,'work_questions_required'=>false,'link_sent_after_your_reply'=>false,'customer_message'=>$age['customer_message']]);
+        }
+
         if (config('agent.safety.enabled')) {
             $classification = app(\App\Domain\Applications\WorkClassification::class);
             $work = $classification->reading($ctx->conversationId);

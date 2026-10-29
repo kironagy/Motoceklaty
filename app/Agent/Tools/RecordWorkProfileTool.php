@@ -83,6 +83,13 @@ class RecordWorkProfileTool implements WriteTool
         $applicant = \App\Domain\Applications\Applicant::fromProfile($result['profile']);
         $closed = \App\Domain\Applications\Applicant::closeIfOtherPerson($ctx->customerId, $applicant)
             ?? \App\Domain\Applications\Applicant::closeIfNoWork($ctx->customerId, $result['profile']);
+        $conversation = \App\Models\WhatsappConversation::findOrFail($ctx->conversationId);
+        if ($age = app(\App\Domain\Applications\AgeEligibilityGate::class)->for($conversation)) {
+            $this->profiles->pauseQuestions($ctx->conversationId);
+            return ToolResult::ok(['recorded'=>true,'age_blocked'=>true,'question'=>'none','work_questions_required'=>false,
+                'age_eligibility'=>$age,'customer_message'=>$age['customer_message']]);
+        }
+
         // Replay of conversation 206: the brother "مش شغال لسه هيشتغل" was recorded,
         // no application was open, and the reply offered "نبدأ التقديم باسم أخويا؟".
         // The person applying must work or be on a pension - said here, every time.

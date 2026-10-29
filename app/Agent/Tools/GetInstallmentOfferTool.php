@@ -61,6 +61,11 @@ class GetInstallmentOfferTool implements ReadTool
             return ToolResult::error('UNKNOWN_MOTORCYCLE');
         }
 
+        $conversation = \App\Models\WhatsappConversation::find($ctx->conversationId);
+        if ($conversation && ($age = app(\App\Domain\Applications\AgeEligibilityGate::class)->for($conversation))) {
+            return ToolResult::ok(['status'=>'not_eligible','age_blocked'=>true,'work_questions_required'=>false,'customer_message'=>$age['customer_message']]);
+        }
+
         if ($machine->availability !== 'in_stock') {
             return ToolResult::error('MOTORCYCLE_NOT_AVAILABLE');
         }
