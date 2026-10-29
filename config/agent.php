@@ -96,6 +96,7 @@ return [
     'reply_timeout_seconds' => env('AGENT_REPLY_TIMEOUT_SECONDS', 12),
 
     'tools' => [
+        \App\Agent\Tools\CheckCashInventoryTool::class,
         \App\Agent\Tools\GetEarlierMessagesTool::class,
         \App\Agent\Tools\SendReplyTool::class,
         \App\Agent\Tools\HandoffToHumanTool::class,

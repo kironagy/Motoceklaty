@@ -33,6 +33,29 @@ class HandoffService
         return $handoff;
     }
 
+    /** Owner-approved exception: a confirmed cash buyer, no unsold piece anywhere. */
+    public function cashStockUnavailable(WhatsappConversation $conversation, int $machineId): ?Handoff
+    {
+        return DB::transaction(function () use ($conversation, $machineId) {
+            $locked = WhatsappConversation::whereKey($conversation->id)->lockForUpdate()->firstOrFail();
+            if (app(\App\Domain\Catalog\CashInventoryService::class)->forMachine($machineId)['available']) {
+                return null;
+            }
+            $state = $locked->state ?? [];
+            $state['cash_handoff_machine_id'] = $machineId;
+            $locked->state = $state;
+            $locked->last_topic = config('agent.cash.handoff_topic');
+            $locked->save();
+            $existing = Handoff::where('conversation_id', $locked->id)->whereNull('closed_at')->latest('id')->first();
+            if ($existing) {
+                $locked->update(['status' => 'awaiting_agent']);
+                return $existing;
+            }
+            return $this->handOff($locked, 'cash_stock_unavailable',
+                (string) config('agent.cash.handoff_topic').' [model '.$machineId.']', 'cash_inventory');
+        });
+    }
+
     /**
      * Owner 2026-10-03: "ممكن اكلمك تليفون" handed the customer to staff and
      * his next two messages ("انا بشتغل ترزي ملابس"، "مكنه دايو 4 قسط على سنه
@@ -61,8 +84,12 @@ class HandoffService
      * config('agent.handoff.max_failed_turns') (DEC-13) and the customer
      * is handed off without the AI having "decided" anything from text.
      */
-    public function handOffForFailures(WhatsappConversation $conversation, string $code): Handoff
+    public function handOffForFailures(WhatsappConversation $conversation, string $code): ?Handoff
     {
+        if (config('agent.handoff.customer_only')) {
+            return null;
+        }
+
         return $this->handOff(
             $conversation,
             reason: 'low_confidence',
@@ -143,6 +170,7 @@ class HandoffService
         $returned = 0;
 
         Handoff::whereNull('closed_at')
+            ->where('reason', '!=', 'cash_stock_unavailable')
             ->where('opened_at', '<=', now()->subMinutes((int) $minutes))
             ->with('conversation')
             ->get()

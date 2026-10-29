@@ -27,6 +27,18 @@ class AgentSettings
     public static function definitions(): array
     {
         return [
+            'cash.inventory_enabled' => ['run', 'ربط الكاش بالمخزون الفعلي', 'bool', 'قراءة القطع غير المباعة من كل المعارض.'],
+            'cash.tool_description' => ['instructions', 'تعليمات أداة مخزون الكاش', 'text', null],
+            'cash.unavailable_message' => ['instructions', 'رسالة نفاد مخزون الكاش والتحويل', 'text', '{motorcycle} اسم الموديل.'],
+            'cash.handoff_topic' => ['handoff', 'عنوان تحويل الكاش غير المتاح', 'string', null],
+            'safety.enabled' => ['run', 'مراجعة مصدر الرد قبل الإرسال', 'bool', 'غير المثبت يتوقف بدون تحويل تلقائي.'],
+            'safety.review_instructions' => ['instructions', 'تعليمات التحقق من مصدر الرد', 'text', 'سياسة مراجعة الرد وطلب التحويل.'],
+            'safety.no_zero_upfront_hint' => ['instructions', 'توجيه عدم وجود خطة بلا دفع عند الاستلام', 'text', 'توجيه أداة الحساب من الميموري.'],
+            'safety.unknown_reply' => ['instructions', 'رد عدم توفر معلومة مؤكدة', 'text', 'بدون وعد أو تحويل لزميل.'],
+            'safety.claim_rules' => ['instructions', 'قواعد الادعاءات JSON', 'text', 'pattern وevidence_key لكل ادعاء.'],
+            'handoff.tool_description' => ['instructions', 'تعليمات أداة التحويل', 'text', 'متى يسمح بطلب موظف.'],
+            'handoff.customer_only' => ['handoff', 'التحويل بطلب العميل فقط', 'bool', 'يمنع التحويل التلقائي بسبب الأخطاء أو نقص المعلومات.'],
+            'keys.pool' => ['run', 'توزيع مفاتيح Gemini', 'select', 'يشمل الردود ومراجعتها؛ المحاكي مجاني فقط.', ['balanced' => 'توزيع على الكل', 'paid' => 'المدفوع أولًا', 'free_first' => 'المجاني أولًا']],
             'enabled' => ['run', 'البوت شغال', 'bool', 'لو اتقفل البوت مش هيرد على أي رسالة واتساب جديدة.'],
             'model' => ['run', 'الموديل الأساسي', 'string', 'الموديل اللي بيرد على العملاء: gpt-5-nano أو gpt-5-mini (محتاج مفتاح GPT) أو gemini-3.1-flash-lite.'],
             'fallback_models' => ['run', 'موديلات احتياطية', 'csv', 'بتتجرب بالترتيب لو الموديل الأساسي واقع. ممكن تخلط GPT و Gemini.'],

@@ -119,6 +119,9 @@ return [
             // added/retired in production.
             'default_models' => [
 
+                ['display_name' => 'Gemini 3.5 Flash Lite', 'model_code' => 'gemini-3.5-flash-lite', 'category' => 'Gemini', 'rpm_limit' => 15, 'rpd_limit' => 1000, 'tps_limit' => 1000000, 'priority' => 1, 'is_embedding' => false],
+                ['display_name' => 'Gemini 3.5 Flash', 'model_code' => 'gemini-3.5-flash', 'category' => 'Gemini', 'rpm_limit' => 10, 'rpd_limit' => 250, 'tps_limit' => 1000000, 'priority' => 2, 'is_embedding' => false],
+
                 [
                     'display_name' => 'Gemma 4 31B',
                     'model_code' => 'gemma-4-31b-it',

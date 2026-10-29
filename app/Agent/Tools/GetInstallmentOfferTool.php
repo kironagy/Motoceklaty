@@ -172,8 +172,7 @@ class GetInstallmentOfferTool implements ReadTool
         }
 
         if ($offers === [] && $noUpfront) {
-            return ToolResult::error('NO_ZERO_UPFRONT_PLAN', 'No plan without any payment at pickup for this motorcycle. '
-                .'Tell him the admin fees are the only thing paid at pickup (no down payment) and quote the normal offer.');
+            return ToolResult::error('NO_ZERO_UPFRONT_PLAN', (string) config('agent.safety.no_zero_upfront_hint', ''));
         }
 
         if ($offers === [] && $months !== null) {

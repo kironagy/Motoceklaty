@@ -1,0 +1,43 @@
+<?php
+// Standalone regression suite: isolated SQLite memory DB, never production data.
+foreach (['APP_ENV'=>'testing','APP_CONFIG_CACHE'=>'/tmp/motogate-bot-test-no-cache.php','DB_CONNECTION'=>'sqlite','DB_DATABASE'=>':memory:','CACHE_STORE'=>'array','SESSION_DRIVER'=>'array','LOG_CHANNEL'=>'stderr'] as $k=>$v) { putenv("$k=$v"); $_ENV[$k]=$v; $_SERVER[$k]=$v; }
+require dirname(__DIR__,2).'/vendor/autoload.php';
+$app=require dirname(__DIR__,2).'/bootstrap/app.php';$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+use App\Agent\Runtime\EvidenceReview;
+use App\Agent\Providers\{AiProvider,AiResponse,FakeAiProvider};
+use Illuminate\Support\Facades\{DB,Schema};
+if(DB::connection()->getDriverName()!=='sqlite' || config('database.connections.sqlite.database')!==':memory:') throw new RuntimeException('Unsafe test database');
+$n=0;$ok=function($value,$name)use(&$n){if(!$value)throw new RuntimeException($name);echo 'PASS '.$name.PHP_EOL;$n++;};
+config(['agent.safety.enabled'=>true,'agent.safety.review_instructions'=>'test-review-policy','agent.safety.unknown_reply'=>'غير متأكد','agent.safety.claim_rules'=>json_encode([['id'=>'gift','pattern'=>'/خوذة.*هدية/u','evidence_key'=>'approved_gifts']])]);
+$review=new EvidenceReview;
+$ok($review->check(['messages'=>['خوذة وشنطة هدية']],'',[])==='CLAIM_WITHOUT_EVIDENCE: gift','gift without evidence blocked before model');
+$fake=new FakeAiProvider;$app->instance(AiProvider::class,$fake);
+$fake->queue(new AiResponse(['{"approved":false,"reason":"contradicts minimum"}'],[],'STOP',[],'test',null,1));
+$ok($review->check(['messages'=>['المقدم مش إجباري']],'minimum_down_payment=15000',[])==='EVIDENCE_REVIEW_REJECTED','contradictory down payment rejected');
+$fake->queue(new AiResponse(['{"approved":true,"reason":"sourced"}'],[],'STOP',[],'test',null,1));
+$ok($review->check(['messages'=>['المقدم 15000 بسبب حد التمويل']],'minimum_down_payment=15000',[])===null,'sourced explanation accepted');
+$ok($fake->lastRequest()->label==='evidence_review' && $fake->lastRequest()->purpose==='reply','review uses reply key pool and auditable label');
+$ok($review->check(['messages'=>['معلومة']],'',[])==='EVIDENCE_REVIEW_REJECTED','review outage fails closed');
+$fake->queue(new AiResponse(['not json'],[],'STOP',[],'test',null,1));
+$ok(!$review->judge('reply',[]),'malformed review fails closed');
+$ok(!$review->customerRequestedHandoff('كلم موظف','عايز سعر المكنة'),'fabricated handoff quote rejected');
+$fake->queue(new AiResponse(['{"approved":false,"reason":"complaint only"}'],[],'STOP',[],'test',null,1));
+$ok(!$review->customerRequestedHandoff('مش فاهم','مش فاهم'),'complaint alone does not hand off');
+$fake->queue(new AiResponse(['{"approved":true,"reason":"explicit request"}'],[],'STOP',[],'test',null,1));
+$ok($review->customerRequestedHandoff('عايز اكلم موظف','عايز اكلم موظف'),'explicit request can hand off');
+$ok($review->uncertainty()===['messages'=>['غير متأكد']],'uncertainty wording comes from dashboard');
+Schema::create('gemini_api_keys',function($t){$t->id();$t->string('name');$t->string('provider');$t->text('api_key');$t->boolean('is_active')->default(true);$t->boolean('is_paid')->default(false);$t->dateTime('cooldown_until')->nullable();$t->dateTime('last_used_at')->nullable();$t->text('last_error')->nullable();$t->timestamps();});
+Schema::create('gemini_api_key_models',function($t){$t->id();$t->unsignedBigInteger('gemini_api_key_id');$t->string('provider');$t->string('model_code');$t->string('display_name')->nullable();$t->string('category')->nullable();$t->boolean('is_active')->default(true);$t->boolean('is_embedding')->default(false);foreach(['priority'=>0,'requests_today'=>0,'rpd_limit'=>500,'requests_this_minute'=>0,'rpm_limit'=>15,'tokens_this_second'=>0,'tps_limit'=>1000000]as$c=>$v)$t->integer($c)->default($v);foreach(['minute_window_started_at','second_window_started_at','cooldown_until','last_used_at']as$c)$t->dateTime($c)->nullable();$t->text('last_error')->nullable();$t->timestamps();});
+config(['agent.keys.pool'=>'balanced']);
+$create=function($name,$paid){$k=App\Models\GeminiApiKey::create(['name'=>$name,'provider'=>'gemini','api_key'=>'fake-'.$name,'is_active'=>true,'is_paid'=>$paid]);return $k->models()->create(['provider'=>'gemini','model_code'=>'test-model','is_active'=>true,'is_embedding'=>false]);};
+$a=$create('paid',true);$b=$create('free',false);$manager=app(App\Services\GeminiKeyManager::class);
+$first=$manager->reserveAvailableModel('test-model',10,false);$second=$manager->reserveAvailableModel('test-model',10,false);
+$ok($first->gemini_api_key_id!==$second->gemini_api_key_id,'balanced reservations rotate across paid and free');
+$a->update(['cooldown_until'=>now()->addMinute()]);
+$next=$manager->reserveAvailableModel('test-model',10,false);
+$ok((int)$next->id===(int)$b->id,'paid cooldown does not block available free key');
+$b->update(['requests_today'=>500]);$ok($manager->reserveAvailableModel('test-model',10,false)===null,'quota and cooldown still enforced');
+$pool=App\Services\GeminiKeyManager::for('simulator',fn()=>App\Services\GeminiKeyManager::pool());$ok($pool==='free_only','simulator remains free only');
+config(['agent.handoff.customer_only'=>true]);
+$ok(app(App\Domain\Handoff\HandoffService::class)->handOffForFailures(new App\Models\WhatsappConversation, 'TEST_FAILURE')===null,'automatic failure handoff disabled before any database write');
+echo "TOTAL $n passed\n";

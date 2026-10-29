@@ -49,7 +49,7 @@ class ContextBuilder
         // Rebuild: ONE instruction source (L0). Pinned/scoped knowledge and
         // lessons are folded into it; what follows is data only - catalog
         // names, customer-type keys, then the facts.
-        $l0 = $this->buildL0();
+        $l0 = $this->buildL0($result->facts['work']['customer_type'] ?? null, $application?->status);
         $l3 = $this->catalogIsRelevant($conversation, $application) ? $this->buildL3() : ['text' => null, 'count' => 0];
         $l3b = $this->buildL3b();
         $l4 = $this->renderFacts($result->facts);
@@ -170,11 +170,22 @@ class ContextBuilder
     }
 
     /** @return array{version: string, text: string} */
-    private function buildL0(): array
+    private function buildL0(?string $customerType = null, ?string $stage = null): array
     {
         $current = $this->instructions->current();
 
-        return ['version' => $current['version'], 'text' => $current['text']];
+        $text = app(\App\Domain\Teaching\LessonSync::class)->withLessons($current['text']);
+        $knowledge = \App\Models\BusinessMemory::where('is_active', true)->orderBy('priority')->get()
+            ->filter(function ($row) use ($customerType, $stage) {
+                $types = (array) ($row->scope_customer_types ?? []);
+                $stages = (array) ($row->scope_application_statuses ?? []);
+                return ($types === [] && $stages === []) || in_array($customerType, $types, true) || in_array($stage, $stages, true);
+            })
+            ->map(fn ($row) => $row->title.': '.$row->content)->implode("\n");
+        if ($knowledge !== '') {
+            $text .= "\n\n## المعرفة التجارية المعتمدة من الداشبورد\n".$knowledge;
+        }
+        return ['version' => $current['version'], 'text' => $text];
     }
 
 

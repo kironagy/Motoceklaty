@@ -355,6 +355,7 @@ class CatalogService
             // price the installment is calculated on
             'is_offer' => $m->type === 'offer',
             'offer_price' => $m->type === 'offer' ? $m->new_price : null,
+            'cash_stock' => config('agent.cash.inventory_enabled') ? app(CashInventoryService::class)->forMachine((int) $m->id) : null,
             'availability' => $m->availability,
             // Without colors the agent told a customer "no 150 comes in
             // yellow" while the Wing 150 does.
@@ -385,7 +386,8 @@ class CatalogService
                 'new_price' => $m->type === 'offer' ? $m->new_price : null,
                 'features' => collect($m->features ?? [])->pluck('title')->filter()->values()->all(),
                 'colors' => $colors,
-                'availability' => $m->availability,
+                'cash_stock' => config('agent.cash.inventory_enabled') ? app(CashInventoryService::class)->forMachine((int) $m->id) : null,
+            'availability' => $m->availability,
                 'installment_system_ids' => $m->installmentSystemIds(),
                 'cc' => self::engineCc($m),
                 'model_year' => $m->model_year,

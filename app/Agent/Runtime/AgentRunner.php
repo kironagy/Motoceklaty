@@ -124,7 +124,7 @@ class AgentRunner
         $onlyText = ! \App\Models\WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')
             ->whereNotIn('type', ['text', 'audio', 'voice', 'ptt'])->exists();
 
-        if ($resumed === [] && $onlyText && blank($turn->media_items ?? null)) {
+        if (! app(EvidenceReview::class)->enabled() && $resumed === [] && $onlyText && blank($turn->media_items ?? null)) {
             $greeting = app(GreetingReply::class)->for($conversation, $this->guard->customerTextSinceLastReply($conversation));
 
             if ($greeting !== null) {
@@ -308,6 +308,21 @@ class AgentRunner
                         $toolCall['args'] = $this->rewritten($toolCall['args'], $guardEvents, ['next_step_added' => fn ($a) => $this->withNextStep($a, $ctx->activeApplicationId)]);
                     }
 
+                    if ($toolCall['name'] === 'send_reply') {
+                        $review = app(EvidenceReview::class);
+                        $rejection = $review->check($toolCall['args'], $request->system, $outcomes, $this->guard->customerTextSinceLastReply($conversation));
+                        if ($rejection !== null) {
+                            $guardEvents[] = ['code' => $rejection, 'args' => []];
+                            if ($repairs >= 1 || $limitReached) {
+                                $this->finishTrace($trace, 'fallback', $guardEvents, $lastResponse, $rejection);
+                                return $review->uncertainty();
+                            }
+                            $repairs++;
+                            $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => ['code' => $rejection, 'detail' => config('agent.safety.review_instructions')]]);
+                            continue;
+                        }
+                    }
+
                     $result = $this->tools->execute($toolCall['name'], $toolCall['args'], $ctx);
 
                     // What a tool proves (a price looked up = he asked about
@@ -323,6 +338,11 @@ class AgentRunner
                         'ok' => (bool) ($result['ok'] ?? false),
                         'data' => ($result['ok'] ?? false) ? (array) ($result['data'] ?? []) : (array) ($result['error'] ?? []),
                     ];
+
+                    if ($toolCall['name'] === 'check_cash_inventory' && ($result['ok'] ?? false) && ($result['data']['handed_off'] ?? false)) {
+                        $this->finishTrace($trace, 'done', $guardEvents, $lastResponse);
+                        return ['messages' => [$result['data']['customer_message']]];
+                    }
 
                     // start_application + process_document in one step: the
                     // document needs the application the step just opened.
@@ -722,7 +742,7 @@ class AgentRunner
     private function completedSteps(int $turnId): array
     {
         return \App\Models\AiTraceStep::where('turn_id', $turnId)->where('kind', 'tool_call')
-            ->where('tool_name', '!=', 'send_reply')->orderBy('id')->get()
+            ->whereNotIn('tool_name', ['send_reply', 'check_cash_inventory'])->orderBy('id')->get()
             ->map(function (\App\Models\AiTraceStep $step) {
                 $result = (array) $step->result_redacted;
 
@@ -786,6 +806,11 @@ class AgentRunner
      */
     private function unverifiedReply(WhatsappConversation $conversation, AiTrace $trace, array $guardEvents, string $reason): array
     {
+        if (config('agent.handoff.customer_only')) {
+            $this->finishTrace($trace, 'fallback', $guardEvents, null, $reason);
+            return app(EvidenceReview::class)->uncertainty();
+        }
+
         $waiting = config('agent.handoff.waiting_message');
 
         if (blank($waiting)) {
@@ -921,6 +946,11 @@ class AgentRunner
     /** @return array{messages: string[]} */
     private function fallback(WhatsappConversation $conversation, AiTrace $trace, array $guardEvents, string $reason): array
     {
+        if (config('agent.handoff.customer_only') && app(EvidenceReview::class)->enabled()) {
+            $this->finishTrace($trace, 'fallback', $guardEvents, null, $reason);
+            return app(EvidenceReview::class)->uncertainty();
+        }
+
         $message = config('agent.fallback.message');
 
         if ($message === null) {
@@ -932,7 +962,7 @@ class AgentRunner
 
         $maxFailedTurns = config('agent.handoff.max_failed_turns');
 
-        if ($maxFailedTurns !== null && $failures >= (int) $maxFailedTurns) {
+        if (! config('agent.handoff.customer_only') && $maxFailedTurns !== null && $failures >= (int) $maxFailedTurns) {
             $this->handoff->handOffForFailures($conversation, $reason);
         }
 
