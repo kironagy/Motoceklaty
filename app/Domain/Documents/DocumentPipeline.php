@@ -213,6 +213,8 @@ class DocumentPipeline
         // the work he stated, and "بدون عمل" goes on the file for staff.
         if (filled($extractedFields['occupation'] ?? null)) {
             $result['occupation_on_id'] = (string) $extractedFields['occupation'];
+            // Printed ID metadata must not overwrite the current work profile.
+            $result['occupation_is_current_work_evidence'] = false;
             // Owner 2026-10-04: a job title on the ID makes the salary slip
             // compulsory; "بدون عمل" / "طالب" is no problem at all.
             // what it means for his papers: the instructions (§٧)
