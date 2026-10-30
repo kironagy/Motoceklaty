@@ -236,7 +236,7 @@ class ProcessDocumentTool implements WriteTool
         $results = array_map(function (array $r) {
             $say = app(\App\Domain\Applications\OccupationPolicy::class)->rejection($r['occupation_on_id'] ?? null);
 
-            return $say ? $r + ['occupation_not_accepted' => 'refusal: "'.$say.'"'] : $r;
+            return $say ? $r + ['occupation_review_required' => (string) config('agent.eligibility.occupation_review_hint')] : $r;
         }, $results);
 
         // Read before the model's call: a photo that is no document at all

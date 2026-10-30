@@ -27,6 +27,7 @@ class AgentSettings
     public static function definitions(): array
     {
         return [
+            'eligibility.occupation_review_hint' => ['instructions', 'تعليمات مراجعة الوظيفة دون قرار تمويل آلي', 'text', null],
             'eligibility.no_work_hint' => ['instructions', 'تفسير اشتراط العمل الحالي', 'text', null],
             'eligibility.other_applicant' => ['instructions', 'تقديم شخص بديل مستوف للشروط', 'text', null],
             'eligibility.other_applicant_refused' => ['instructions', 'الشخص البديل غير مستوف للشروط', 'text', null],

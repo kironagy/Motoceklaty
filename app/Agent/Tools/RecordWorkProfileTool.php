@@ -3,7 +3,6 @@
 namespace App\Agent\Tools;
 
 use App\Domain\Applications\WorkProfiles;
-use App\Models\EligibilityRule;
 
 /**
  * Rebuild: the agent reads the applicant's work itself and records it here
@@ -30,9 +29,6 @@ class RecordWorkProfileTool implements WriteTool
 
     public function inputSchema(): array
     {
-        $refused = EligibilityRule::where('is_active', true)->where('rule_type', \App\Domain\Applications\OccupationPolicy::RULE_TYPE)->get()
-            ->map(fn ($rule) => (string) (((array) $rule->params)['words'] ?? ''))->filter()->implode('، ');
-
         return [
             'type' => 'object',
             'required' => ['evidence', 'work_stated', 'customer_type', 'working_now', 'applicant_gender'],
@@ -56,7 +52,7 @@ class RecordWorkProfileTool implements WriteTool
                 'insured' => ['type' => 'string', 'enum' => ['yes', 'no', 'unknown']],
                 'sector' => ['type' => 'string', 'enum' => ['government', 'private', 'unknown']],
                 'could_be_government' => ['type' => 'boolean', 'description' => 'The job is commonly both government and private and he did not say which.'],
-                'refused_work' => ['type' => 'boolean', 'description' => 'Government work, army/police, lawyers'.($refused !== '' ? ' - the owner\'s list: '.$refused : '').'.'],
+                'refused_work' => ['type' => 'boolean', 'description' => 'Flag only the occupations specified in the active dashboard instructions for staff review, using the customer exact words. Government sector alone is not this flag. This flag is not a final lending decision.'],
                 'daily_labour_no_trade' => ['type' => 'boolean', 'description' => 'Daily pay, no craft (tuk-tuk, scrap...).'],
                 'cannot_bring_work_papers' => ['type' => 'boolean', 'description' => 'He said he cannot get his work papers at all (not "later").'],
                 'stated_monthly_income' => ['type' => 'number', 'description' => 'Monthly income or pension he stated in EGP; 0 when none.'],

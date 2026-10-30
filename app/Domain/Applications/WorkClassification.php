@@ -70,10 +70,10 @@ class WorkClassification
         }
 
         // Simulation 2026-10-04: a retired postal manager was refused as
-        // "government work". The refused jobs are what he does now - a
-        // pension from a government job is what the pension type is for.
-        if (($r['refused_work'] || $r['sector'] === 'government') && $r['customer_type'] !== 'pension') {
-            return ['code' => 'OCCUPATION_NOT_ACCEPTED', 'hint' => 'refusal: "'.$this->refusalSentence().'"'];
+        // "government work". Sector alone cannot decide eligibility; a flagged
+        // current occupation pauses automation for a staff decision.
+        if ($r['refused_work'] && $r['customer_type'] !== 'pension') {
+            return ['code' => 'OCCUPATION_REQUIRES_STAFF_REVIEW', 'hint' => (string) config('agent.eligibility.occupation_review_hint')];
         }
 
         // Owner 2026-10-04: a day's pay with no trade (tuk-tuk, café by the

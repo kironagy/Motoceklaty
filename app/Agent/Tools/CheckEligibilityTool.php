@@ -154,6 +154,10 @@ class CheckEligibilityTool implements ReadTool
                 // the one who applies must work or be on a pension.
                 $result['status'] = 'not_eligible';
                 $result['reasons'] = array_merge($result['reasons'] ?? [], [['code' => 'APPLICANT_HAS_NO_WORK']]);
+            } elseif ($problem['code'] === 'OCCUPATION_REQUIRES_STAFF_REVIEW') {
+                $result['status'] = 'needs_staff_review';
+                $result['staff_review_required'] = true;
+                $result['instruction'] = $problem['hint'];
             } elseif ($problem['code'] === 'OCCUPATION_NOT_ACCEPTED') {
                 $result['occupation_not_accepted'] = $problem['hint'];
             } elseif ($problem['code'] === 'ASK_SECTOR') {
