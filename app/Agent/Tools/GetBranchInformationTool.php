@@ -18,9 +18,7 @@ class GetBranchInformationTool implements ReadTool
 
     public function description(): string
     {
-        return 'Branch locations, hours and phones. Use when the customer asks where you are, '
-            .'the nearest branch, or opening hours - every time: hours and addresses change, never repeat them from earlier '
-            .'in the chat. Pass city = his place as he said it (e.g. "المنصورة") and its governorate.';
+        return (string) config('agent.branches.tool_description');
     }
 
     public function inputSchema(): array
@@ -41,7 +39,7 @@ class GetBranchInformationTool implements ReadTool
 
     public function execute(array $args, ToolContext $ctx): ToolResult
     {
-        $result = $this->branches->find($args['governorate'] ?? null, $args['city'] ?? null);
+        $result = $this->branches->find(null, null);
 
         return ToolResult::ok($result);
     }
