@@ -280,7 +280,7 @@ class DynamicLinksTest extends TestCase
         $this->postJson('/f/'.$link->token.'/submit')->assertOk();
     }
 
-    public function test_the_same_person_cannot_apply_again_until_his_request_is_decided(): void
+    public function test_the_same_identity_cannot_create_a_second_request_even_after_a_decision(): void
     {
         $link = $this->link();
         $this->fillValid($link);
@@ -294,10 +294,10 @@ class DynamicLinksTest extends TestCase
 
         $this->postJson('/f/'.$second->token.'/submit')->assertStatus(422)->assertJsonPath('code', 'DUPLICATE');
 
-        // owner 2026-10-18: once it is decided, the same person applies again
+        // Current owner policy: reuse the existing identity record across staff, including decided requests.
         $first->forceFill(['status' => 'rejected'])->saveQuietly();
-        $this->postJson('/f/'.$second->token.'/submit')->assertOk();
-        $this->assertSame(2, InstallmentRequest::where('applicant_phone', '01012345678')->count());
+        $this->postJson('/f/'.$second->token.'/submit')->assertStatus(422)->assertJsonPath('code','DUPLICATE');
+        $this->assertSame(1, InstallmentRequest::where('applicant_phone', '01012345678')->count());
     }
 
     public function test_sending_twice_makes_one_request(): void
@@ -431,6 +431,11 @@ class DynamicLinksTest extends TestCase
         $this->assertSame(1, InstallmentRequest::count());
         $this->assertSame('pending', $request->status);
         $this->assertSame('7', $request->applicant_apartment);
+        $log=\Spatie\Activitylog\Models\Activity::where('subject_id',$request->id)->where('description','العميل عدّل بيانات الطلب من الفورم')->firstOrFail();
+        $this->assertSame('7',$log->properties['attributes']['applicant_apartment']);
+        $this->assertSame('App\\Models\\Customer',$log->causer_type);
+        $guide=\App\Models\GuideEvent::where('event','customer_form_updated')->where('subject_id',$request->id)->firstOrFail();
+        $this->assertSame('العميل',$guide->actor_name);
         $this->assertSame('submitted', Application::find($request->application_id)->status);
     }
 
@@ -793,5 +798,61 @@ class DynamicLinksTest extends TestCase
 
         $this->assertStringContainsString('مش متوصل', $problem);
         Http::assertNothingSent();
+    }
+
+    public function test_owner_form_requires_the_correct_documents_for_each_employment_case(): void
+    {
+        $schema=new \App\Domain\Forms\FormSchema(json_decode(file_get_contents(resource_path('forms/motogate-form1-v2.json')),true));
+        $this->assertSame([],$schema->publishProblems());
+        foreach(['government','employee']as$work){$v=$schema->visible(['work'=>$work]);$this->assertArrayHasKey('salary_slip',$v);$this->assertTrue($schema->field('salary_slip')['required']);$this->assertArrayHasKey('place_name',$v);}
+        $v=$schema->visible(['work'=>'private_uninsured']);$this->assertArrayNotHasKey('salary_slip',$v);$this->assertSame(2,$schema->customerTypeId(['work'=>'private_uninsured']));
+        $v=$schema->visible(['work'=>'smart_transport']);$this->assertArrayHasKey('license',$v);$this->assertArrayHasKey('car_license',$v);$this->assertArrayNotHasKey('work_address',$v);$this->assertArrayNotHasKey('earnings',$v);$this->assertArrayNotHasKey('salary_slip',$v);
+    }
+
+    public function test_landmark_is_accepted_and_the_missing_address_part_is_named_correctly(): void
+    {
+        $schema=new \App\Domain\Forms\FormSchema(json_decode(file_get_contents(resource_path('forms/motogate-form1-v2.json')),true));
+        $home=['governorate'=>'القاهرة','area'=>'عين شمس','street'=>'الزهراء','landmark'=>'جنب مدرسة الخنساء'];
+        $errors=$schema->submitErrors(['work'=>'private_uninsured','home'=>$home],[])['fields'];$this->assertArrayNotHasKey('home',$errors);
+        unset($home['street']);$errors=$schema->submitErrors(['work'=>'private_uninsured','home'=>$home],[])['fields'];$this->assertStringContainsString('الشارع',$errors['home']);$this->assertStringNotContainsString('علامة مميزة',$errors['home']);
+    }
+
+    public function test_server_requires_exact_confirmation_of_the_current_financing_cap_amount(): void
+    {
+        $link=$this->link();$this->fillValid($link);$this->answer($link,'work','free');
+        \App\Models\EligibilityRule::create(['customer_type_id'=>$this->freelancer->id,'rule_type'=>'financing_cap','params'=>['max_amount'=>40000],'is_active'=>true]);
+        $v=$link->version;$schema=$v->schema;$schema['settings']['confirm_financing_cap']=true;$v->update(['schema'=>$schema]);
+        $plan=$this->getJson('/f/'.$link->token.'/plans?machine='.$this->machine->id)->json('plans.0');$this->answer($link,'plan',$plan['id']);
+        $this->postJson('/f/'.$link->token.'/submit')->assertStatus(422)->assertJsonPath('code','CAP_CONFIRMATION_REQUIRED');
+        $consent=['machine_id'=>$this->machine->id,'plan_id'=>$plan['id'],'amount'=>(int)$plan['down_payment']];
+        $wrong=$consent;$wrong['amount']=1;$this->postJson('/f/'.$link->token.'/submit',['cap_confirmation'=>$wrong])->assertStatus(422)->assertJsonPath('code','CAP_CONFIRMATION_REQUIRED');
+        $this->postJson('/f/'.$link->token.'/submit',['cap_confirmation'=>$consent])->assertOk()->assertJsonPath('ok',true);
+        $this->assertSame($consent['amount'],$link->fresh()->answerValues()['__financing_cap_consent']['amount']);
+    }
+
+    public function test_identity_guard_applies_to_model_creation_by_a_different_staff_and_not_name_only(): void
+    {
+        $link=$this->link();$this->fillValid($link);$this->postJson('/f/'.$link->token.'/submit')->assertOk();$first=InstallmentRequest::firstOrFail();
+        $first->forceFill(['applicant_phone'=>'+20 10-1234-5678'])->saveQuietly();
+        $copy=$first->replicate(['application_id','form_link_id']);$copy->applicant_phone='201012345678';
+        try{$copy->save();$this->fail('Duplicate identity escaped model guard');}catch(\Illuminate\Validation\ValidationException $e){$this->assertArrayHasKey('applicant_national_id',$e->errors());}
+        $copy=$first->replicate(['application_id','form_link_id']);$copy->applicant_national_id='29101011234565';$copy->applicant_phone='01012345678';
+        try{$copy->save();$this->fail('Formatted phone escaped duplicate guard');}catch(\Illuminate\Validation\ValidationException $e){$this->assertArrayHasKey('applicant_national_id',$e->errors());}
+        $copy=$first->replicate(['application_id','form_link_id']);$copy->applicant_phone='01077777777';$copy->applicant_national_id='29101011234565';$copy->save();
+        $this->assertSame($first->applicant_name,$copy->applicant_name);$this->assertSame(2,InstallmentRequest::count());
+    }
+
+    public function test_explicit_employee_request_transfers_even_when_model_quote_is_concatenated_wrongly(): void
+    {
+        $settings=json_decode(file_get_contents(resource_path('agent/policies/intake-quality-settings.json')),true);
+        foreach($settings['settings']as$k=>$v)config(['agent.'.$k=>$v]);config(['agent.handoff.customer_only'=>true,'agent.safety.language_enabled'=>true,'agent.runtime.max_model_calls'=>5,'agent.runtime.max_tool_calls'=>10,'agent.runtime.wall_clock_seconds'=>30,'agent.fallback.message'=>'safe test fallback']);
+        $id=\Illuminate\Support\Facades\DB::table('whatsapp_message_jobs')->insertGetId(['whatsapp_bot_id'=>$this->bot->id,'whatsapp_conversation_id'=>$this->conversation->id,'status'=>'processing','created_at'=>now(),'updated_at'=>now()]);
+        foreach(['أنا عايز موظف يكلمني','عشن احجز']as$text)WhatsappMessage::create(['whatsapp_bot_id'=>$this->bot->id,'whatsapp_conversation_id'=>$this->conversation->id,'turn_id'=>$id,'direction'=>'incoming','sender_type'=>'customer','type'=>'text','text'=>$text]);
+        $fake=new \App\Agent\Providers\FakeAiProvider;
+        $fake->queue(new \App\Agent\Providers\AiResponse([], [['id'=>'handoff','name'=>'handoff_to_human','args'=>['reason'=>'call_request','note'=>'customer wants staff','request_quote'=>'اي داأنا عايز موظف يكلمنيعشن احجز']]],'STOP',[],'test',null,1));
+        app()->instance(\App\Agent\Providers\AiProvider::class,$fake);
+        $runner=app(\App\Agent\Runtime\AgentRunner::class);$r=$runner->run(\Illuminate\Support\Facades\DB::table('whatsapp_message_jobs')->find($id));
+        $this->assertSame('awaiting_agent',$this->conversation->fresh()->status);$this->assertSame([config('agent.handoff.customer_message')],$r['messages']);
+        $again=$runner->run(\Illuminate\Support\Facades\DB::table('whatsapp_message_jobs')->find($id));$this->assertTrue($again['no_reply']);
     }
 }

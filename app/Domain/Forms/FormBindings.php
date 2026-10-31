@@ -64,6 +64,7 @@ class FormBindings
             'work.commercial_reg' => ['group' => 'الشغل', 'label' => 'السجل التجاري', 'kind' => 'document', 'column' => 'commercial_reg_file', 'dir' => 'installments/business', 'party' => 'applicant', 'types' => ['document']],
             'work.tax_card' => ['group' => 'الشغل', 'label' => 'البطاقة الضريبية', 'kind' => 'document', 'column' => 'tax_card_file', 'dir' => 'installments/business', 'document_type' => 'tax_card', 'party' => 'applicant', 'types' => ['document']],
             'work.place_media' => ['group' => 'الشغل', 'label' => 'صور / فيديو مكان الشغل', 'kind' => 'document', 'column' => 'place_video', 'dir' => 'installments/business', 'array' => true, 'document_type' => 'business_place_photo', 'party' => 'applicant', 'types' => ['document', 'images']],
+            'work.vehicle_license' => ['group'=>'الشغل','label'=>'رخصة العربية','kind'=>'document','column'=>'free_income_proof_images','dir'=>'installments/free_income_proofs','array'=>true,'document_type'=>'vehicle_license','party'=>'applicant','types'=>['document']],
             'work.free_income_proof' => ['group' => 'الشغل', 'label' => 'إثبات الدخل الحر', 'kind' => 'document', 'column' => 'free_income_proof_images', 'dir' => 'installments/free_income_proofs', 'array' => true, 'party' => 'applicant', 'types' => ['document', 'images']],
 
             // الطلب

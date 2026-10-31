@@ -34,6 +34,14 @@ function applicationForm() {
         plansMeta: { job_known: false, capped: false },
         skipped: 0,
         machineSearch: {},
+        selectedBrand: null,
+        plansRequestId: 0,
+        capOffer: null,
+        capConsent: null,
+        voiceEnabled: false,
+        saveChains: {},
+        saveFailed: {},
+        lastSavedValues: {},
         uploading: {},
         pending: [],
         dragOver: {},
@@ -55,8 +63,9 @@ function applicationForm() {
                     else this.answers[it.key] = saved[it.key] ?? '';
                 }
             }
+            for (const [key,value] of Object.entries(this.answers)) this.lastSavedValues[key]=JSON.stringify(value);
             const machineKey = this.keyOf('request.machine');
-            if (machineKey && this.answers[machineKey]) this.loadPlans(this.answers[machineKey]);
+            if (machineKey && this.answers[machineKey]) {this.selectedBrand=String(this.selectedMachine()?.brand_id ?? '');this.loadPlans(this.answers[machineKey]);}
             this.ping();
             setInterval(() => this.ping(), 60000);
             // what the bot already filled is skipped: he lands on the first step with something
@@ -132,18 +141,60 @@ function applicationForm() {
         },
         async save(key) {
             clearTimeout(this.timers[key]);
-            const res = await this.post('/answer', { key, value: this.answers[key] });
-            if (!res) return;
-            this.errors[key] = res.error || null;
-            if (res.progress) this.progress = res.progress;
-            this.savedNote = 'اتحفظ ✓';
-            this.blocking = [];
-            // his work decides which finance systems take him: the offers are fetched again
-            const machineKey = this.keyOf('request.machine');
-            if (key === this.keyOf('work.status') && machineKey && this.answers[machineKey]) this.loadPlans(this.answers[machineKey]);
-            // a corrected national id clears (or sets) the warning on the card photos
-            if (this.sections.some(s => s.items.some(it => it.key === key && it.type === 'national_id')) && this.files.length) this.refreshFiles();
+            delete this.timers[key];
+            const value = JSON.parse(JSON.stringify(this.answers[key] ?? ''));
+            const task = async () => {
+                const res = await this.post('/answer', { key, value });
+                this.saveFailed[key] = !res;
+                if (!res) { this.savedNote = 'تعذر الحفظ، تأكد من الاتصال وحاول تاني.'; return false; }
+                if (JSON.stringify(this.answers[key]) === JSON.stringify(value)) this.errors[key] = res.error || null;
+                if (res.progress) this.progress = res.progress;
+                this.savedNote = 'اتحفظ ✓';
+                this.blocking = [];
+                const machineKey = this.keyOf('request.machine');
+                if (key === this.keyOf('work.status') && this.lastSavedValues[key] !== JSON.stringify(value) && machineKey && this.answers[machineKey]) { this.capConsent = null; await this.loadPlans(this.answers[machineKey]); }
+                this.lastSavedValues[key]=JSON.stringify(value);
+                if (this.sections.some(s => s.items.some(it => it.key === key && it.type === 'national_id')) && this.files.length) this.refreshFiles();
+                return true;
+            };
+            this.saveChains[key] = (this.saveChains[key] || Promise.resolve()).catch(() => {}).then(task);
+            return await this.saveChains[key];
         },
+        async flush(section = null) {
+            const items = section ? section.items : this.shownSections().flatMap(s => s.items);
+            await Promise.all(items.filter(it => this.isVisible(it.key) && !['note','stop','document','images'].includes(it.type)).map(it => this.save(it.key)));
+            return !items.some(it => this.saveFailed[it.key]);
+        },
+        brands() {
+            return [...new Map(this.machines.map(m => [String(m.brand_id ?? ''), {id:String(m.brand_id ?? ''), name:m.brand || 'أخرى'}])).values()];
+        },
+        toggleVoice() {
+            this.voiceEnabled = !this.voiceEnabled;
+            if (!this.voiceEnabled) window.speechSynthesis?.cancel();
+            else this.speak('تم تشغيل المساعد الصوتي.');
+        },
+        speak(text) {
+            if (!this.voiceEnabled || !window.speechSynthesis || !window.SpeechSynthesisUtterance) return;
+            window.speechSynthesis.cancel();
+            const speech = new SpeechSynthesisUtterance(text); speech.lang = 'ar-EG'; speech.rate = 0.9;
+            const voice = window.speechSynthesis.getVoices().find(v => v.lang.startsWith('ar')); if (voice) speech.voice = voice;
+            window.speechSynthesis.speak(speech);
+        },
+        addressPrompt(part) {
+            const prompts = {governorate:'اختار المحافظة اللي إنت منها', area:'اكتب اسم المنطقة أو المدينة', street:'اكتب اسم الشارع الرئيسي', branch_street:'اكتب اسم الشارع المتفرع أو الشارع اللي ساكن فيه', building:'اكتب رقم العقار لو موجود', floor:'اكتب رقم الدور', apartment:'اكتب رقم الشقة', landmark:'اكتب علامة مميزة قريبة من العنوان، زي مسجد أو مدرسة أو محل معروف'};
+            this.speak(prompts[part] || part);
+        },
+        needsCap(plan) { return !!plan?.capped && Number(plan.down_payment) > 0 && !(this.capConsent && this.capConsent.machine_id === Number(this.selectedMachine()?.id) && this.capConsent.plan_id === Number(plan.id) && this.capConsent.amount === Math.round(Number(plan.down_payment))); },
+        pickPlan(key, plan) {
+            if (this.needsCap(plan)) { this.capOffer = {key, plan}; return; }
+            this.answers[key] = plan.id; this.save(key);
+        },
+        acceptCap() {
+            const offer = this.capOffer; if (!offer) return;
+            this.capConsent = {machine_id:Number(this.selectedMachine()?.id), plan_id:Number(offer.plan.id), amount:Math.round(Number(offer.plan.down_payment))};
+            this.answers[offer.key] = offer.plan.id; this.save(offer.key); this.capOffer = null;
+        },
+        declineCap() { this.capOffer = null; this.capConsent = null; const key=this.keyOf('request.plan'); if(key){this.answers[key]='';this.save(key);} },
         // a value the server filled (from his ID card) lands only in a field he left empty
         mergeFilled(server) {
             let filled = false;
@@ -180,14 +231,18 @@ function applicationForm() {
             return key ? this.plans.find(p => String(p.id) === String(this.answers[key])) : null;
         },
         machineOptions(key) {
+            if (this.selectedBrand === null) return [];
             const q = (this.machineSearch[key] || '').trim().toLowerCase();
-            const list = q ? this.machines.filter(m => m.name.toLowerCase().includes(q)) : this.machines;
-            return list.slice(0, 60);
+            const list = this.machines.filter(m => !this.selectedBrand || String(m.brand_id ?? '') === this.selectedBrand);
+            return q ? list.filter(m => m.name.toLowerCase().includes(q)) : list;
         },
         async pickMachine(key, id) {
+            this.capConsent = null;
             this.answers[key] = id;
-            this.save(key);
+            await this.save(key);
             await this.loadPlans(id);
+            const capped = this.plans.find(p => p.capped && Number(p.down_payment) > 0);
+            if (capped) this.capOffer = {key:this.keyOf('request.plan'), plan:capped};
             const planKey = this.keyOf('request.plan');
             if (planKey && this.answers[planKey] && !this.plans.some(p => String(p.id) === String(this.answers[planKey]))) {
                 this.answers[planKey] = '';
@@ -195,12 +250,15 @@ function applicationForm() {
             }
         },
         async loadPlans(machineId) {
+            if (String(this.selectedMachine()?.id) !== String(machineId)) return;
+            const requestId=++this.plansRequestId;
             try {
                 const r = await fetch(F.base + '/plans?machine=' + encodeURIComponent(machineId), { headers: { Accept: 'application/json' } });
                 const data = await r.json();
+                if(requestId!==this.plansRequestId || String(this.selectedMachine()?.id)!==String(machineId))return;
                 this.plans = data.plans || [];
                 this.plansMeta = { job_known: !!data.job_known, capped: !!data.capped };
-            } catch (e) { this.plans = []; }
+            } catch (e) { if(requestId===this.plansRequestId)this.plans = []; }
         },
         money(n) { return n ? Math.round(n).toLocaleString('en-US') : ''; },
 
@@ -337,6 +395,7 @@ function applicationForm() {
             for (const it of section.items) {
                 if (!v[it.key]) continue;
                 if (it.type === 'stop') { problems[it.key] = it.message || it.label || 'مش هينفع نكمّل'; continue; }
+                if (it.type === 'address' && it.required) { const missing=(it.address_required || ['governorate','area','street']).filter(k => (it.address_parts || Object.keys(ADDRESS_LABELS)).includes(k) && !String((this.answers[it.key] || {})[k] || '').trim()); if(missing.length){problems[it.key]='كمّل: '+missing.map(k=>ADDRESS_LABELS[k]||k).join('، ');continue;} }
                 if (this.errors[it.key] && this.errors[it.key] !== 'مطلوب' && !['document', 'images'].includes(it.type)) { problems[it.key] = this.errors[it.key]; continue; }
                 if (it.required && this.isEmpty(it)) { problems[it.key] = ['document', 'images'].includes(it.type) ? 'ارفع ' + it.label : 'مطلوب'; continue; }
                 if (it.type === 'images' && this.filesOf(it.key).length && this.filesOf(it.key).length < this.minFiles(it)) {
@@ -361,7 +420,8 @@ function applicationForm() {
         },
         async next(section, i) {
             // what he just typed is saved (and judged by the server) before the step is checked
-            await Promise.all(section.items.filter(it => this.timers[it.key]).map(it => this.save(it.key)));
+            if (!await this.flush(section)) return;
+            const plan=this.selectedPlan(); if (plan && this.needsCap(plan)) {this.capOffer={key:this.keyOf('request.plan'),plan};return;}
             const problems = this.sectionProblems(section);
             const keys = Object.keys(problems);
             if (keys.length) {
@@ -386,11 +446,13 @@ function applicationForm() {
             this.submitTried = true;
             this.sending = true;
             // anything still waiting to autosave goes first
-            await Promise.all(Object.keys(this.timers).map(k => this.save(k)));
+            if (!await this.flush()) { this.sending=false; return; }
+            const plan=this.selectedPlan(); if (plan && this.needsCap(plan)) {this.sending=false;this.capOffer={key:this.keyOf('request.plan'),plan};return;}
             try {
-                const r = await fetch(F.base + '/submit', { method: 'POST', headers: { 'X-CSRF-TOKEN': csrf, Accept: 'application/json' } });
+                const r = await fetch(F.base + '/submit', { method: 'POST', headers: { 'X-CSRF-TOKEN': csrf, 'Content-Type':'application/json', Accept: 'application/json' }, body:JSON.stringify({cap_confirmation:this.capConsent || {}}) });
                 const data = await r.json().catch(() => ({}));
                 if (data.ok) { this.done = true; window.scrollTo({ top: 0 }); return; }
+                if (data.code === 'CAP_CONFIRMATION_REQUIRED' && this.selectedPlan()) {this.capConsent=null;this.capOffer={key:this.keyOf('request.plan'),plan:this.selectedPlan()};}
                 this.errors = Object.assign({}, data.errors || {});
                 this.blocking = data.blocking || (data.message ? [data.message] : []);
                 const firstKey = Object.keys(this.errors)[0];

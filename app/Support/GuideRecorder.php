@@ -51,6 +51,24 @@ class GuideRecorder
     ];
 
     public const FIELDS = [
+        'work_landmark' => 'العمل: العلامة المميزة',
+        'work_apartment' => 'العمل: الشقة',
+        'work_floor' => 'العمل: الدور',
+        'work_building_number' => 'العمل: رقم العقار',
+        'work_branch_street' => 'العمل: الشارع الجانبي',
+        'work_street' => 'العمل: الشارع',
+        'work_area' => 'العمل: المنطقة',
+        'work_governorate' => 'العمل: المحافظة',
+        'applicant_landmark' => 'السكن: العلامة المميزة',
+        'applicant_apartment' => 'السكن: الشقة',
+        'applicant_floor' => 'السكن: الدور',
+        'applicant_building_number' => 'السكن: رقم العقار',
+        'applicant_branch_street' => 'السكن: الشارع الجانبي',
+        'applicant_street' => 'السكن: الشارع',
+        'applicant_area' => 'السكن: المنطقة',
+        'applicant_governorate' => 'السكن: المحافظة',
+        'free_work_name' => 'اسم جهة العمل / النشاط',
+
         'colors' => 'الألوان المتاحة', 'installment_systems' => 'أنظمة التقسيط',
         'features' => 'المميزات', 'aliases' => 'أسماء بديلة', 'specifications' => 'مواصفات المكنة',
         'availability' => 'توافر المكنة', 'cc' => 'سعة المحرك', 'model_year' => 'سنة الموديل',
@@ -220,7 +238,7 @@ class GuideRecorder
                 return;
             }
             $actor ??= $this->actor();
-            $actorName = $actor?->getAttribute('name') ?? 'النظام / عملية تلقائية';
+            $actorName = $actor instanceof \App\Models\Customer ? 'العميل' : ($actor?->getAttribute('name') ?? 'النظام / عملية تلقائية');
             GuideEvent::create([
                 'event' => $event, 'actor_type' => $actor ? get_class($actor) : null,
                 'actor_id' => $actor?->getKey(), 'actor_name' => $actorName,

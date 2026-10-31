@@ -235,6 +235,9 @@ class ConversationFacts
 
         $open = $link->isOpen();
         $progress = $open ? app(\App\Domain\Forms\FormLinkService::class)->progress($link) : null;
+        $schema=$link->version->formSchema();
+        $validation=$open ? $schema->submitErrors($link->answerValues(),app(\App\Domain\Forms\FormLinkService::class)->fileCounts($link)) : ['fields'=>[],'blocking'=>[]];
+        $validationMessages=[];foreach($validation['fields']as$key=>$message)$validationMessages[]=($schema->field($key)['label']??$key).': '.$message;
 
         return array_filter([
             'status' => $link->status === 'sent' ? 'sent_not_opened_yet' : ($open ? $link->status : ($link->status === 'submitted' ? 'submitted' : 'expired_send_again')),
@@ -242,6 +245,8 @@ class ConversationFacts
             'sent_minutes_ago' => (int) $link->created_at->diffInMinutes(now()),
             'filled_percent' => $progress['percent'] ?? null,
             'still_missing' => $progress ? array_slice($progress['missing'], 0, 6) : null,
+            'validation_errors' => array_slice($validationMessages,0,12),
+            'blocking_reasons' => $validation['blocking'],
             'warned_uploads' => $open ? $link->files()->where('check_status', 'warning')->pluck('message')->filter()->take(3)->values()->all() : null,
         ], fn ($v) => $v !== null && $v !== []);
     }

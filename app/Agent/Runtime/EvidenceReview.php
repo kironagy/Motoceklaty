@@ -36,6 +36,12 @@ class EvidenceReview
     }
     public function customerRequestedHandoff(string $quote, string $message): bool
     {
+        // Authorize clear requests from the real current message, never the model's paraphrase.
+        $text=\App\Support\ArabicTextNormalizer::normalize($message);
+        $pattern=(string)config('agent.handoff.explicit_request_pattern');
+        $negative=(string)config('agent.handoff.negative_request_pattern');
+        if($pattern!=='' && @preg_match($pattern,'')!==false && preg_match($pattern,$text)
+            && !($negative!=='' && @preg_match($negative,'')!==false && preg_match($negative,$text))) return true;
         return $quote !== '' && str_contains($message, $quote) && $this->judge('handoff', ['customer_message' => $message, 'request_quote' => $quote]);
     }
     public function judge(string $task, array $data): bool

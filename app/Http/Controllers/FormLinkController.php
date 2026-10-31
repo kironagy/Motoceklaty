@@ -226,12 +226,17 @@ class FormLinkController extends Controller
         ]);
     }
 
-    public function submit(string $token): JsonResponse
+    public function submit(Request $request, string $token): JsonResponse
     {
         $link = $this->find($token);
         abort_if(! $link, 404);
 
-        $result = app(FormSubmissionService::class)->submit($link);
+        try {
+            $result = app(FormSubmissionService::class)->submit($link, (array)$request->input('cap_confirmation', []));
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            if (!isset($e->errors()['applicant_national_id'])) throw $e;
+            return response()->json(['ok'=>false,'code'=>'DUPLICATE','message'=>'أنت مقدم عندنا قبل كده بالفعل. راجع الطلب الموجود بدل إنشاء طلب جديد.'],422);
+        }
 
         return response()->json($result, ($result['ok'] ?? false) ? 200 : 422);
     }
@@ -277,13 +282,15 @@ class FormLinkController extends Controller
 
     private function machines(): array
     {
-        return Machine::where('is_active', true)->where('availability', 'in_stock')
+        return Machine::where('is_active', true)
             ->with('brand')->orderBy('name')->get()
             ->map(fn (Machine $m) => [
                 'id' => $m->id,
                 'name' => trim(($m->brand?->name ? $m->brand->name.' ' : '').$m->name),
                 'price' => $m->installment_price,
                 'image' => $m->displayImageUrl(),
+                'brand_id' => $m->brand_id,
+                'brand' => $m->brand?->name ?? 'أخرى',
             ])->values()->all();
     }
 }

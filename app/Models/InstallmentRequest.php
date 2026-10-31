@@ -183,6 +183,19 @@ public function scopeFake($query)
 {
     return $query->where('request_type', 'fake');
 }
+/** Serialize request creation so two staff cannot submit the same identity concurrently. */
+protected function performInsert(\Illuminate\Database\Eloquent\Builder $query)
+{
+    return app(\App\Domain\Requests\RequestDuplicateGuard::class)->withCreationLock(function () use ($query) {
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($query) {
+            if (app(\App\Domain\Requests\RequestDuplicateGuard::class)->find($this->getAttributes(), null, true)) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['applicant_national_id'=>'العميل مقدم عندنا قبل كده بالفعل. راجع الطلب الموجود بدل إنشاء طلب جديد.']);
+            }
+            return parent::performInsert($query);
+        });
+    });
+}
+
 protected static function booted()
 {
     static::creating(function ($model) {

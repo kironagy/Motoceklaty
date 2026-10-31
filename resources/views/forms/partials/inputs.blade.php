@@ -57,13 +57,13 @@
             <div class="address-part" :class="{wide: ['street', 'landmark'].includes(part.key)}">
                 <small x-text="part.label"></small>
                 <template x-if="part.key === 'governorate'">
-                    <select class="input" x-model="answers[item.key][part.key]" @change="save(item.key)">
+                    <select class="input" @focus="addressPrompt(part.key)" x-model="answers[item.key][part.key]" @change="save(item.key)">
                         <option value="">اختار...</option>
                         <template x-for="g in governorates" :key="g"><option :value="g" x-text="g" :selected="answers[item.key][part.key] === g"></option></template>
                     </select>
                 </template>
                 <template x-if="part.key !== 'governorate'">
-                    <input class="input" type="text" x-model="answers[item.key][part.key]" @input="queue(item.key)" @blur="save(item.key)">
+                    <input class="input" type="text" @focus="addressPrompt(part.key)" x-model="answers[item.key][part.key]" @input="queue(item.key)" @blur="save(item.key)">
                 </template>
             </div>
         </template>
@@ -72,8 +72,13 @@
 
 <template x-if="item.type === 'machine'">
     <div>
+        <div class="brand-slider" aria-label="اختار الماركة">
+            <button type="button" class="brand-pill" :class="{on: selectedBrand === ''}" @click="selectedBrand=''">كل الماركات</button>
+            <template x-for="brand in brands()" :key="brand.id"><button type="button" class="brand-pill" :class="{on:selectedBrand===brand.id}" @click="selectedBrand=brand.id; machineSearch[item.key]=''" x-text="brand.name"></button></template>
+        </div>
         <input class="input" type="search" placeholder="ابحث باسم المكنة..." x-model="machineSearch[item.key]">
-        <div class="machines">
+        <p class="muted" x-show="selectedBrand === null">اختار الماركة من الشريط لعرض الموديلات.</p>
+        <div class="machines" x-show="selectedBrand !== null">
             <template x-for="m in machineOptions(item.key)" :key="m.id">
                 <button type="button" class="machine" :class="{on: String(answers[item.key]) === String(m.id)}" @click="pickMachine(item.key, m.id)">
                     <img :src="m.image" x-show="m.image" alt="" loading="lazy">
@@ -93,7 +98,7 @@
         </div>
         <div class="plans">
             <template x-for="p in plans" :key="p.id">
-                <button type="button" class="plan" :class="{on: String(answers[item.key]) === String(p.id)}" @click="answers[item.key] = p.id; save(item.key)">
+                <button type="button" class="plan" :class="{on: String(answers[item.key]) === String(p.id)}" @click="pickPlan(item.key, p)">
                     <strong x-text="`${p.months} شهر`"></strong>
                     <span x-show="p.monthly" x-text="`القسط ${money(p.monthly)} ج في الشهر`"></span>
                     <small x-show="p.down_payment" :class="{cash: p.capped}" x-text="p.capped ? `مقدم كاش ${money(p.down_payment)} ج` : `مقدم ${money(p.down_payment)} ج`"></small>

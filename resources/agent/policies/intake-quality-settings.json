@@ -1,0 +1,8 @@
+{
+  "blocked_text_pattern_fragment": "(?i:send_reply|handoff_to_human|get_branch_information|branch_address|map_url|location_url|\\bVAR\\b|\\bmessages\\s*:)|عين\\s+عقل|\\$\\{[^}]+\\}|\\{\\{[^}]+\\}\\}|\\{(?:branch|address|location|map_url|VAR)[^}]*\\}",
+  "settings": {
+    "handoff.customer_message": "تم تحويل محادثتك لموظف من فريقنا عشان يكمل معاك. هيتابع معاك هنا على الواتساب.",
+    "handoff.explicit_request_pattern": "/(?:عايز|عاوز|محتاج|ممكن)\\s+(?:اكلم\\s+|اتكلم\\s+مع\\s+|حد\\s+من\\s+)?(?:موظف|زميل|حد)(?:\\s+(?:حقيقي|من\\s+(?:عندكم|الفريق|خدمه)|يكلمني|يرد|يتابع)|\\s*[.؟?!،]?$)|(?:حولني|وصلني)\\s+(?:ل|الي|مع)\\s*(?:موظف|زميل|حد)|(?:موظف|حد\\s+حقيقي)\\s+يكلمني/u",
+    "handoff.negative_request_pattern": "/مش\\s+(?:عايز|محتاج)\\s+(?:اكلم\\s+)?(?:موظف|حد\\s+حقيقي|زميل)|ماتحولنيش|مت?حولنيش/u"
+  }
+}

@@ -67,9 +67,10 @@ class HandoffToHumanTool implements WriteTool
             }
         }
 
-        $this->handoffService->handOff($conversation, $args['reason'], $args['note'], source: 'ai');
+        $reason = config('agent.handoff.customer_only') ? 'customer_request' : $args['reason'];
+        $this->handoffService->handOff($conversation, $reason, $args['note'], source: 'ai');
 
-        return ToolResult::ok(['handed_off' => true]);
+        return ToolResult::ok(['handed_off' => true] + (filled(config('agent.handoff.customer_message')) ? ['customer_message'=>(string)config('agent.handoff.customer_message')] : []));
     }
     private function cashShipping(array $args, ToolContext $ctx, WhatsappConversation $conversation): ToolResult
     {

@@ -78,6 +78,8 @@ class SearchMotorcyclesTool implements ReadTool
             return ToolResult::error('INVALID_ARGUMENTS', 'cc_min must be <= cc_max');
         }
 
+        // Public product questions use the active catalog, never physical stock.
+        $args['available_only'] = false;
         $result = $this->catalog->search($args);
         $interest = \App\Domain\Conversations\CustomerInterest::class;
 

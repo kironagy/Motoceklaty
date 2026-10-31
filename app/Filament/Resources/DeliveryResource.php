@@ -1378,9 +1378,9 @@ Forms\Components\TextInput::make('work_apartment')
     ])
     ->columns(3),
                     Forms\Components\TextInput::make('free_work_name')
-                        ->label('اسم العمل')
-                        ->required()
-                        ->visible(fn($get) => $get('work_status') === 'no_income_proof'),
+                        ->label('اسم جهة العمل / النشاط')
+                        ->required(fn($get) => $get('work_status') === 'no_income_proof')
+                        ->visible(fn($get) => filled($get('work_status')) && $get('work_status') !== 'pension'),
 
                     Forms\Components\Textarea::make('free_work_address')
                         ->label('عنوان مكان العمل')

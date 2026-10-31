@@ -1728,9 +1728,16 @@ class ReplyGuard
      * read as a promise, the handoff was forced before the customer said
      * yes, and a customer who was only joking went to staff.
      */
+    public function handoffClaimWithoutAction(array $args, WhatsappConversation $conversation, array $outcomes): bool
+    {
+        if ($conversation->status === 'awaiting_agent') return false;
+        foreach ($outcomes as $outcome) if (($outcome['ok']??false) && ($outcome['data']['handed_off']??false)) return false;
+        return $this->promisesHandoff(implode("\n",(array)($args['messages']??[])));
+    }
+
     private function promisesHandoff(string $replyText): bool
     {
-        $promise = '/[هأا]حو[ّ]?ل|حو[ّ]?لت|زميل[يى]?\s+(?:\S+\s+){0,4}?(?:هيتابع|هيكلمك|هيتواصل|هيرد|هيكون معاك|هيرجعلك)|هيتواصل معاك|(?:ه|و)?يكون معاك (?:حد|زميل)|حد من (?:ال)?زملا(?:ء|ئي)|(?:ا|أ|ه)تأكد\s*(?:لك|لكم)?\s+من\s+(?:ال)?زميل|[أاه]رجع\s+[أا]?قولك|ارجعلك|أرجعلك|هرجعلك|[أاه]رد عليك (?:فور|بعد|حالا|في أقرب)/u';
+        $promise = '/(?:زملاء|زمايل|زملائي|زمايلي|الموظف|الزملاء)\s+(?:\S+\s+){0,3}?(?:هيتصل|هيكلم|هيتابع)|[هأا]حو[ّ]?ل|حو[ّ]?لت|زميل[يى]?\s+(?:\S+\s+){0,4}?(?:هيتابع|هيكلمك|هيتواصل|هيرد|هيكون معاك|هيرجعلك)|هيتواصل معاك|(?:ه|و)?يكون معاك (?:حد|زميل)|حد من (?:ال)?زملا(?:ء|ئي)|(?:ا|أ|ه)تأكد\s*(?:لك|لكم)?\s+من\s+(?:ال)?زميل|[أاه]رجع\s+[أا]?قولك|ارجعلك|أرجعلك|هرجعلك|[أاه]رد عليك (?:فور|بعد|حالا|في أقرب)/u';
         foreach (preg_split('/(?<=[.!؟?\n])/u', $replyText) as $sentence) {
             if (! preg_match($promise, $sentence, $match, PREG_OFFSET_CAPTURE) || preg_match($this->offerPattern(), $sentence)) {
                 continue;

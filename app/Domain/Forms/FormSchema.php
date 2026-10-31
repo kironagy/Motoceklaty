@@ -380,7 +380,9 @@ class FormSchema
 
             $value = in_array($field['type'], self::FILE_TYPES, true) ? ($fileCounts[$key] ?? 0) : ($answers[$key] ?? null);
 
-            if ($this->isEmpty($field, $value)) {
+            if ($field['type'] === 'address' && ($parts = $this->missingAddressParts($field, (array)$value)) !== []) {
+                $missing[] = $field['label'].' — كمّل: '.implode('، ', $parts);
+            } elseif ($this->isEmpty($field, $value)) {
                 $missing[] = $field['label'];
             } else {
                 $done++;

@@ -1,0 +1,576 @@
+{
+  "sections": [
+    {
+      "key": "work",
+      "items": [
+        {
+          "data": {
+            "key": "work",
+            "label": "الحالة الوظيفية لصاحب الطلب",
+            "binding": "work.status",
+            "options": [
+              {
+                "label": "موظف حكومي",
+                "value": "government",
+                "customer_type_id": 1
+              },
+              {
+                "label": "موظف قطاع خاص متأمن عليه",
+                "value": "employee",
+                "customer_type_id": 1
+              },
+              {
+                "label": "موظف قطاع خاص مش متأمن عليه — دخل حر",
+                "value": "private_uninsured",
+                "customer_type_id": 2,
+                "work_types": [
+                  "other"
+                ]
+              },
+              {
+                "label": "عربيات نقل ذكي / شغل بعربية",
+                "value": "smart_transport",
+                "customer_type_id": 2,
+                "work_types": [
+                  "delivery_app",
+                  "delivery_company"
+                ]
+              },
+              {
+                "label": "دليفري على موتوسيكل / دراجة (طلبات ونحوه)",
+                "value": "delivery",
+                "work_types": [
+                  "delivery_app",
+                  "delivery_app_bicycle",
+                  "delivery_company"
+                ],
+                "customer_type_id": 2
+              },
+              {
+                "label": "شغل حر / صنايعي / باليومية",
+                "value": "free",
+                "work_types": [
+                  "craftsman",
+                  "other",
+                  "none"
+                ],
+                "customer_type_id": 2
+              },
+              {
+                "label": "صاحب محل / ورشة / نشاط",
+                "value": "business",
+                "customer_type_id": 4
+              },
+              {
+                "label": "على المعاش",
+                "value": "pension",
+                "customer_type_id": 3
+              }
+            ],
+            "required": true
+          },
+          "type": "radio"
+        },
+        {
+          "data": {
+            "key": "job_title",
+            "label": "الوظيفة / الشغلانة بالظبط",
+            "required": true,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "employee,free,business,government,private_uninsured,smart_transport",
+                "operator": "in"
+              }
+            ]
+          },
+          "type": "text"
+        },
+        {
+          "data": {
+            "key": "place_name",
+            "label": "اسم جهة العمل / الشركة / النشاط",
+            "binding": "work.place_name",
+            "required": true,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "employee,business,government,private_uninsured,smart_transport",
+                "operator": "in"
+              }
+            ],
+            "help": "اسم جهة العمل أو النشاط. لو شغال بعربيتك لحسابك، اكتب وصف شغلك الفعلي مثل شغل بعربيتي."
+          },
+          "type": "text"
+        },
+        {
+          "data": {
+            "key": "salary",
+            "label": "صافي المرتب الشهري",
+            "rules": {
+              "min": 1000
+            },
+            "binding": "work.salary_amount",
+            "required": true,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "employee,government",
+                "operator": "in"
+              }
+            ]
+          },
+          "type": "money"
+        },
+        {
+          "data": {
+            "key": "pension",
+            "label": "قيمة المعاش الشهري",
+            "binding": "work.pension_amount",
+            "required": true,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "pension",
+                "operator": "in"
+              }
+            ]
+          },
+          "type": "money"
+        },
+        {
+          "data": {
+            "key": "work_address",
+            "label": "عنوان الشغل",
+            "binding": "work.address",
+            "required": true,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "free,business,private_uninsured",
+                "operator": "in"
+              }
+            ],
+            "address_parts": [
+              "governorate",
+              "area",
+              "street",
+              "building",
+              "landmark"
+            ],
+            "address_required": [
+              "governorate",
+              "area",
+              "street"
+            ]
+          },
+          "type": "address"
+        }
+      ],
+      "match": "all",
+      "title": "شغلك",
+      "conditions": [],
+      "description": "اختار شغلك الأول، وعلى أساسه هنقولك القسط والورق المطلوب."
+    },
+    {
+      "key": "machine",
+      "items": [
+        {
+          "data": {
+            "key": "machine",
+            "label": "اختار المكنة",
+            "binding": "request.machine",
+            "required": true
+          },
+          "type": "machine"
+        },
+        {
+          "data": {
+            "key": "plan",
+            "label": "تقسط على كام شهر؟",
+            "binding": "request.plan",
+            "required": true
+          },
+          "type": "plan"
+        }
+      ],
+      "match": "all",
+      "title": "المكنة ونظام القسط",
+      "conditions": [],
+      "description": null
+    },
+    {
+      "key": "person",
+      "items": [
+        {
+          "data": {
+            "key": "person_note",
+            "message": "البيانات دي لصاحب الطلب نفسه، ولو بتقدّم لحد تاني اكتب بياناته هو.",
+            "required": false
+          },
+          "type": "note"
+        },
+        {
+          "data": {
+            "key": "egyptian",
+            "label": "صاحب الطلب مصري الجنسية؟",
+            "required": true
+          },
+          "type": "yes_no"
+        },
+        {
+          "data": {
+            "key": "stop_foreign",
+            "message": "للأسف التقسيط للمصريين بس، والكاش متاح في أي فرع من فروعنا.",
+            "required": false,
+            "conditions": [
+              {
+                "field": "egyptian",
+                "value": "no",
+                "operator": "equals"
+              }
+            ]
+          },
+          "type": "stop"
+        },
+        {
+          "data": {
+            "key": "name",
+            "label": "الاسم رباعي زي البطاقة",
+            "rules": {
+              "max_length": 80,
+              "min_length": 8
+            },
+            "binding": "applicant.name",
+            "required": true
+          },
+          "type": "text"
+        },
+        {
+          "data": {
+            "key": "national_id",
+            "label": "الرقم القومي (14 رقم)",
+            "rules": {
+              "max_age": 62,
+              "min_age": 21
+            },
+            "binding": "applicant.national_id",
+            "required": true
+          },
+          "type": "national_id"
+        },
+        {
+          "data": {
+            "key": "stop_female_free",
+            "match": "all",
+            "message": "للأسف جهات التمويل مش بتقبل الدخل الحر للستات. ينفع لو شغلك متأمن عليه، أو نشاط باسمك بورقه، أو معاش - والكاش متاح.",
+            "required": false,
+            "conditions": [
+              {
+                "prop": "gender",
+                "field": "national_id",
+                "value": "female",
+                "operator": "equals"
+              },
+              {
+                "field": "work",
+                "value": "delivery,free",
+                "operator": "in"
+              }
+            ]
+          },
+          "type": "stop"
+        },
+        {
+          "data": {
+            "key": "phone",
+            "label": "رقم موبايل صاحب الطلب",
+            "binding": "applicant.phone",
+            "required": true
+          },
+          "type": "phone"
+        },
+        {
+          "data": {
+            "key": "phone_2",
+            "label": "رقم موبايل تاني (اختياري)",
+            "binding": "applicant.phone_2",
+            "required": false
+          },
+          "type": "phone"
+        },
+        {
+          "data": {
+            "key": "home",
+            "label": "عنوان السكن (زي ما هو في البطاقة أو السكن الحالي)",
+            "binding": "applicant.address",
+            "required": true,
+            "address_parts": [
+              "governorate",
+              "area",
+              "street",
+              "branch_street",
+              "building",
+              "floor",
+              "apartment",
+              "landmark"
+            ],
+            "address_required": [
+              "governorate",
+              "area",
+              "street",
+              "landmark"
+            ]
+          },
+          "type": "address"
+        }
+      ],
+      "match": "all",
+      "title": "بيانات صاحب الطلب",
+      "conditions": [],
+      "description": null
+    },
+    {
+      "key": "guarantor",
+      "items": [
+        {
+          "data": {
+            "key": "g_name",
+            "label": "اسم الضامن رباعي",
+            "binding": "guarantor.name",
+            "required": true
+          },
+          "type": "text"
+        },
+        {
+          "data": {
+            "key": "g_nid",
+            "label": "الرقم القومي للضامن",
+            "rules": {
+              "max_age": 62,
+              "min_age": 21
+            },
+            "binding": "guarantor.national_id",
+            "required": true
+          },
+          "type": "national_id"
+        },
+        {
+          "data": {
+            "key": "g_phone",
+            "label": "موبايل الضامن",
+            "binding": "guarantor.phone",
+            "required": true
+          },
+          "type": "phone"
+        },
+        {
+          "data": {
+            "key": "g_id_front",
+            "label": "صورة بطاقة الضامن (وش)",
+            "accept": "images",
+            "binding": "guarantor.id_front",
+            "required": true
+          },
+          "type": "document"
+        },
+        {
+          "data": {
+            "key": "g_id_back",
+            "label": "صورة بطاقة الضامن (ضهر)",
+            "accept": "images",
+            "binding": "guarantor.id_back",
+            "required": true
+          },
+          "type": "document"
+        }
+      ],
+      "match": "all",
+      "title": "بيانات الضامن",
+      "conditions": [
+        {
+          "field": "work",
+          "value": "pension",
+          "operator": "in"
+        }
+      ],
+      "description": "طلبات المعاش محتاجة ضامن."
+    },
+    {
+      "key": "papers",
+      "items": [
+        {
+          "data": {
+            "key": "id_front",
+            "label": "صورة البطاقة (وش)",
+            "accept": "images",
+            "binding": "applicant.id_front",
+            "required": true
+          },
+          "type": "document"
+        },
+        {
+          "data": {
+            "key": "id_back",
+            "label": "صورة البطاقة (ضهر)",
+            "accept": "images",
+            "binding": "applicant.id_back",
+            "required": true
+          },
+          "type": "document"
+        },
+        {
+          "data": {
+            "key": "salary_slip",
+            "label": "مفردات مرتب رسمية من جهة العمل (إلزامي)",
+            "binding": "work.salary_slip",
+            "required": true,
+            "max_files": 2,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "employee,government",
+                "operator": "in"
+              }
+            ],
+            "help": "مطلوبة للموظف الحكومي والقطاع الخاص المتأمن عليه. شهادة المحاسب القانوني غير مقبولة.",
+            "instructions": "مفردات مرتب رسمية من جهة العمل. شهادة المحاسب القانوني غير مقبولة، وبرنت التأمينات وحده ليس مفردات مرتب لهذا الحقل. أي اختلاف يوضّح للموظف للمراجعة."
+          },
+          "type": "document"
+        },
+        {
+          "data": {
+            "key": "pension_statement",
+            "label": "كشف المعاش",
+            "binding": "work.pension_statement",
+            "required": true,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "pension",
+                "operator": "in"
+              }
+            ]
+          },
+          "type": "document"
+        },
+        {
+          "data": {
+            "key": "license",
+            "label": "رخصة القيادة",
+            "accept": "images",
+            "binding": "work.free_income_proof",
+            "required": true,
+            "max_files": 2,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "delivery,smart_transport",
+                "operator": "in"
+              }
+            ],
+            "document_type": "driving_license"
+          },
+          "type": "document"
+        },
+        {
+          "data": {
+            "key": "earnings",
+            "label": "سكرين أرباح التطبيق (آخر 3 شهور)",
+            "accept": "images",
+            "required": true,
+            "max_files": 6,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "delivery",
+                "operator": "in"
+              }
+            ],
+            "document_type": "delivery_app_earnings"
+          },
+          "type": "document"
+        },
+        {
+          "data": {
+            "key": "profile",
+            "label": "سكرين بروفايل التطبيق (لو متاح)",
+            "accept": "images",
+            "required": false,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "delivery",
+                "operator": "in"
+              }
+            ],
+            "document_type": "delivery_app_profile"
+          },
+          "type": "document"
+        },
+        {
+          "data": {
+            "key": "place",
+            "label": "صور مكان النشاط (اليافطة من بره واضحة + من جوا)",
+            "accept": "video",
+            "binding": "work.place_media",
+            "required": true,
+            "max_files": 4,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "business",
+                "operator": "in"
+              }
+            ]
+          },
+          "type": "document"
+        },
+        {
+          "data": {
+            "key": "tax_card",
+            "label": "البطاقة الضريبية أو السجل التجاري",
+            "binding": "work.tax_card",
+            "required": true,
+            "max_files": 2,
+            "conditions": [
+              {
+                "field": "work",
+                "value": "business",
+                "operator": "in"
+              }
+            ]
+          },
+          "type": "document"
+        },
+        {
+          "type": "document",
+          "data": {
+            "key": "car_license",
+            "label": "رخصة العربية",
+            "required": true,
+            "accept": "images",
+            "max_files": 2,
+            "conditions": [
+              {
+                "field": "work",
+                "operator": "equals",
+                "value": "smart_transport"
+              }
+            ],
+            "binding": "work.vehicle_license",
+            "document_type": "vehicle_license"
+          }
+        }
+      ],
+      "match": "all",
+      "title": "الورق",
+      "conditions": [],
+      "description": "صوّر كل ورقة كاملة في نور كويس ومن غير انعكاس."
+    }
+  ],
+  "settings": {
+    "intro": "املا بياناتك وارفع الورق المطلوب، وكل اللي بتكتبه بيتحفظ لوحده. لو وقفت في حاجة كلّمنا على الواتساب.",
+    "confirm_financing_cap": true
+  }
+}

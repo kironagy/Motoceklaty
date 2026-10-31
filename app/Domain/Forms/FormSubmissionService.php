@@ -42,9 +42,9 @@ class FormSubmissionService
     /**
      * @return array{ok: bool, code?: string, errors?: array<string, string>, blocking?: string[], message?: string, request_id?: int}
      */
-    public function submit(FormLink $link): array
+    public function submit(FormLink $link, array $capConfirmation = []): array
     {
-        $result = DB::transaction(function () use ($link) {
+        $result = DB::transaction(function () use ($link, $capConfirmation) {
             $link = FormLink::whereKey($link->id)->lockForUpdate()->firstOrFail();
 
             // a double tap, or the page sent twice: the first one counts
@@ -72,11 +72,25 @@ class FormSubmissionService
                 return ['ok' => false, 'code' => 'INVALID', 'errors' => $errors['fields'], 'blocking' => $errors['blocking']];
             }
 
+            if (($schema->settings()['confirm_financing_cap'] ?? false)) {
+                $selection=$this->selection($schema,$answers);
+                if ($selection['machine'] && $selection['plan']) {
+                    $offer=app(\App\Domain\Installments\BestOfferService::class)->offers($selection['machine'],$schema->customerTypeId($answers),$this->governorate($schema,$answers),(int)$selection['plan']->months)[0]??null;
+                    if ($offer && $offer['cap'] !== null && $offer['down_payment'] > 0) {
+                        $expected=['machine_id'=>(int)$selection['machine']->id,'plan_id'=>(int)$offer['plan_id'],'amount'=>(int)round($offer['down_payment'])];
+                        if ((int)($capConfirmation['machine_id']??0)!==$expected['machine_id'] || (int)($capConfirmation['plan_id']??0)!==$expected['plan_id'] || (int)($capConfirmation['amount']??-1)!==$expected['amount']) {
+                            return ['ok'=>false,'code'=>'CAP_CONFIRMATION_REQUIRED','message'=>'لازم توافق على قيمة المقدم النقدي قبل إرسال الطلب.'];
+                        }
+                        \App\Models\FormLinkAnswer::updateOrCreate(['form_link_id'=>$link->id,'field_key'=>'__financing_cap_consent'],['value'=>$expected+['accepted_at'=>now()->toIso8601String()]]);
+                    }
+                }
+            }
+
             $visible = $schema->visible($answers);
             $columns = $this->columns($schema, $answers, $visible);
 
             if ($duplicate = $this->undecidedRequest($link, $columns)) {
-                return ['ok' => false, 'code' => 'DUPLICATE', 'message' => "عندك طلب لسه تحت المراجعة (رقم #{$duplicate->id}). هنكلمك عليه أول ما يطلع الرد."];
+                return ['ok' => false, 'code' => 'DUPLICATE', 'message' => "أنت مقدم عندنا قبل كده بالفعل. هنراجع معاك الطلب الموجود بدل إنشاء طلب جديد."];
             }
 
             return $link->purpose === 'fix'
@@ -181,6 +195,7 @@ class FormSubmissionService
         // back to the status staff had it in - as StaffDecisionService::resubmit does, but with the
         // form's own columns (its projection would put the WhatsApp number over the form's)
         $staffRequest = (array) $application->staff_request;
+        $before = $request->getAttributes();
 
         $request->forceFill(array_merge(
             array_diff_key($columns, ['notes' => true]),
@@ -193,6 +208,20 @@ class FormSubmissionService
                 'notes' => trim((string) $request->notes."\n".'العميل عدّل البيانات من رابط الفورم - '.now()->format('Y-m-d H:i')),
             ],
         ))->saveQuietly();
+
+        $after = $request->getAttributes();
+        $changes = [];$old=[];$new=[];
+        foreach (array_keys($columns) as $field) {
+            if (($before[$field] ?? null) != ($after[$field] ?? null)) {
+                $old[$field]=$before[$field]??null;$new[$field]=$after[$field]??null;
+                $changes[]=['field'=>\App\Support\GuideRecorder::FIELDS[$field]??$field,'before'=>$old[$field],'after'=>$new[$field]];
+            }
+        }
+        if ($changes !== []) {
+            activity('installment_requests')->performedOn($request)->causedBy($application->customer)
+                ->withProperties(['old'=>$old,'attributes'=>$new,'source'=>'customer_form'])->log('العميل عدّل بيانات الطلب من الفورم');
+            app(\App\Support\GuideRecorder::class)->write('customer_form_updated','طلب #'.$request->id,'العميل عدّل بيانات الطلب من الفورم',$changes,$request,$application->customer,['source'=>'customer_form','form_link_id'=>$link->id]);
+        }
 
         $machine = app(\App\Domain\Applications\ApplicationStateMachine::class);
 
@@ -247,8 +276,8 @@ class FormSubmissionService
                     $parts = array_map(fn ($v) => filled($v) ? trim((string) $v) : null, (array) $value);
 
                     foreach (FormBindings::addressColumns($binding['prefix']) as $part => $column) {
-                        if (filled($parts[$part] ?? null)) {
-                            $columns[$column] = $parts[$part];
+                        if (in_array($part, (array)($field['address_parts'] ?? array_keys(FormBindings::ADDRESS_PARTS)), true)) {
+                            $columns[$column] = $parts[$part] ?? null;
                         }
                     }
 
@@ -452,22 +481,8 @@ class FormSubmissionService
     /** Owner 2026-10-18: no second application while one for the same person waits for a decision. */
     private function undecidedRequest(FormLink $link, array $columns): ?InstallmentRequest
     {
-        $phone = $columns['applicant_phone'] ?? $this->localPhone((string) $link->whatsapp_phone);
-        $phones = array_values(array_unique(array_filter([$phone, $phone ? '2'.$phone : null, $phone ? '+2'.$phone : null])));
-        $nationalId = $columns['applicant_national_id'] ?? null;
+        return app(\App\Domain\Requests\RequestDuplicateGuard::class)->find($columns, $link->installment_request_id);
 
-        return InstallmentRequest::query()
-            ->whereIn('status', self::UNDECIDED_STATUSES)
-            ->when($link->installment_request_id, fn ($q) => $q->whereKeyNot($link->installment_request_id))
-            ->where(function ($q) use ($phones, $nationalId) {
-                $q->whereIn('applicant_phone', $phones);
-
-                if ($nationalId) {
-                    $q->orWhere('applicant_national_id', $nationalId);
-                }
-            })
-            ->latest('id')
-            ->first();
     }
 
     /** 01xxxxxxxxx from any of 2010..., +2010..., 010... */

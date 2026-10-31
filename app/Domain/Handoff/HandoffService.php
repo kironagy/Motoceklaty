@@ -101,7 +101,7 @@ class HandoffService
      */
     public static function botKeepsAnswering(WhatsappConversation $conversation): bool
     {
-        if ($conversation->status !== 'awaiting_agent') {
+        if (config('agent.handoff.customer_only') || $conversation->status !== 'awaiting_agent') {
             return false;
         }
 

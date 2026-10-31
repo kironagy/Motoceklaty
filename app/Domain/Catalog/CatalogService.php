@@ -28,7 +28,7 @@ class CatalogService
     {
         $query = Machine::query()->where('is_active', true);
 
-        if ($filters['available_only'] ?? true) {
+        if ($filters['available_only'] ?? false) {
             $query->where('availability', '!=', 'out_of_stock');
         }
 
@@ -173,7 +173,7 @@ class CatalogService
      */
     public function similar(?int $cc, ?string $kind = null, ?float $price = null, int $limit = 5, array $excludeIds = []): array
     {
-        return Machine::query()->where('is_active', true)->where('availability', 'in_stock')->with('brand')->get()
+        return Machine::query()->where('is_active', true)->with('brand')->get()
             ->reject(fn (Machine $m) => in_array($m->id, $excludeIds, true))
             ->filter(fn (Machine $m) => $kind === null || self::kind($m) === $kind)
             ->filter(fn (Machine $m) => $cc === null || (($own = self::engineCc($m)) !== null && abs($own - $cc) <= 25))

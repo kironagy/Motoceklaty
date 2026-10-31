@@ -22,6 +22,17 @@
             <small x-text="progress.total ? `${progress.done} من ${progress.total} مطلوب` : ''"></small>
         </div>
     </header>
+    <button type="button" class="voice-toggle" @click="toggleVoice()" :aria-pressed="voiceEnabled" x-show="'speechSynthesis' in window" x-text="voiceEnabled ? 'إيقاف المساعد الصوتي 🔇' : 'تشغيل المساعد الصوتي 🔊'"></button>
+    <div class="cap-overlay" x-show="capOffer" role="dialog" aria-modal="true" aria-label="تأكيد المقدم النقدي" @keydown.escape.window="if(capOffer) declineCap()">
+        <section class="card cap-dialog">
+            <h2>تأكيد المقدم النقدي</h2>
+            <p>سعر المكنة أعلى من حد التمويل المتاح لحالتك. الفرق بيتدفع كاش مقدم، والباقي بالتقسيط.</p>
+            <p><strong x-text="capOffer ? 'المقدم المطلوب: '+money(capOffer.plan.down_payment)+' جنيه' : ''"></strong></p>
+            <p x-text="capOffer ? 'المدة '+capOffer.plan.months+' شهر، والقسط '+money(capOffer.plan.monthly)+' جنيه شهريًا' : ''"></p>
+            <p class="muted" x-text="capOffer ? 'إجمالي المطلوب وقت الاستلام: '+money(capOffer.plan.upfront)+' جنيه شامل المصاريف الموضحة بالنظام' : ''"></p>
+            <div class="actions"><button type="button" class="btn" @click="acceptCap()">موافق وأكمّل</button><button type="button" class="btn ghost" @click="declineCap()">أختار مكنة أو نظام تاني</button></div>
+        </section>
+    </div>
 
     <template x-if="done">
         <section class="card success">
@@ -77,7 +88,7 @@
                     <p class="muted" x-show="section.description" x-text="section.description"></p>
 
                     <template x-for="item in section.items" :key="item.key">
-                        <div class="field" x-show="isVisible(item.key)" :id="'f-' + item.key">
+                        <div class="field" @focusin="if(item.type !== 'address') speak(item.label)" x-show="isVisible(item.key)" :id="'f-' + item.key">
                             {{-- display items --}}
                             <template x-if="item.type === 'note'">
                                 <div class="note" x-text="item.message || item.label"></div>

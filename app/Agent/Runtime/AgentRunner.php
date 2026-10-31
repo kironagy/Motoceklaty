@@ -164,6 +164,7 @@ class AgentRunner
         $evidenceRepairs = 0;
         $bannedPhraseRepairs = 0;
         $languageRepairs = 0;
+        $handoffRepairs = 0;
         $openedNow = false;
         $guardEvents = [];
         /** @var array<int, array{name: string, ok: bool, data: array}> $outcomes */
@@ -231,6 +232,18 @@ class AgentRunner
                             'silence' => fn ($a) => $this->silenceWrittenAsText($a, $ctx),
                             'link_written' => fn ($a) => $this->withoutWrittenLink($a, $outcomes, $conversation->id),
                         ]);
+
+                        if ($this->guard->handoffClaimWithoutAction($toolCall['args'], $conversation, $outcomes)) {
+                            $guardEvents[]=['code'=>'HANDOFF_CLAIMED_NOT_DONE','args'=>[]];
+                            if ($handoffRepairs >= 1 || $limitReached) {
+                                $this->finishTrace($trace,'fallback',$guardEvents,$lastResponse,'HANDOFF_CLAIMED_NOT_DONE');
+                                return app(EvidenceReview::class)->uncertainty();
+                            }
+                            $handoffRepairs++;
+                            $hint=(string)config('agent.handoff.tool_description');
+                            $contents[]=$toolCall['id']==='implicit' ? ['role'=>'user','parts'=>[['type'=>'text','text'=>$hint]]] : $this->toolResultContent($toolCall['id'],'send_reply',['ok'=>false,'error'=>['code'=>'HANDOFF_CLAIMED_NOT_DONE','detail'=>$hint]]);
+                            continue;
+                        }
 
                         $language = app(ReplyLanguageReview::class);
                         if (! $language->allows($toolCall['args'])) {

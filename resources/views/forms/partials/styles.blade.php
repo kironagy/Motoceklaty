@@ -35,8 +35,8 @@
     .address { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .address-part.wide { grid-column: 1 / -1; }
     .address-part small { color: var(--muted); }
-    .machines { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 8px; max-height: 360px; overflow-y: auto; }
-    .machine { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; font: inherit; font-size: 13px; cursor: pointer; }
+    .machines { display:flex; gap:8px; margin-top:8px; overflow-x:auto; overflow-y:hidden; padding-bottom:8px; scroll-snap-type:x mandatory; }
+    .machine { flex:0 0 140px; scroll-snap-align:start; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; font: inherit; font-size: 13px; cursor: pointer; }
     .machine img { width: 100%; height: 70px; object-fit: contain; }
     .plans { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
     .plan { display: flex; flex-direction: column; gap: 2px; padding: 10px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; font: inherit; cursor: pointer; text-align: right; }
@@ -116,4 +116,11 @@
     .lightbox img { max-width: 100%; max-height: 88vh; border-radius: 12px; }
     .lightbox button { position: absolute; top: 14px; left: 14px; width: 40px; height: 40px; border-radius: 50%; border: 0; background: #fff; font-size: 24px; cursor: pointer; }
     @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2s; } .step-dot, .up-zone { transition: none; } }
+    .brand-slider {display:flex;gap:8px;overflow-x:auto;padding:8px 0 12px;scroll-snap-type:x mandatory;}
+    .brand-pill {flex:0 0 auto;scroll-snap-align:start;border:1px solid #ddd;background:#fff;border-radius:22px;padding:8px 16px;font:inherit;cursor:pointer;}
+    .brand-pill.on {background:#ff6b00;color:#fff;border-color:#ff6b00;}
+    .voice-toggle {display:block;margin:10px auto 18px;background:#fff;border:1px solid #ddd;border-radius:20px;padding:9px 18px;font:inherit;cursor:pointer;}
+    .cap-overlay {position:fixed;inset:0;z-index:1000;background:#0009;display:flex;align-items:center;justify-content:center;padding:18px;}
+    .cap-dialog {max-width:480px;max-height:90vh;overflow:auto;box-shadow:0 12px 40px #0004;}
+    @media(max-width:600px){.machines{max-height:none}.machine img{height:65px}.cap-dialog .actions{flex-wrap:wrap}}
 </style>
