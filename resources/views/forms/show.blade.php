@@ -10,10 +10,11 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
     @include('forms.partials.styles')
+    <script>window.__FORM_VOICE__ = {base: @json(asset('audio/form-eg-v1')), clips: @json(array_keys(json_decode(file_get_contents(resource_path('forms/voice-eg.json')), true)['clips']))};</script>
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.14.1/cdn.min.js"></script>
 </head>
 <body>
-<div class="page" x-data="applicationForm()" @pointerdown.once="startVoice()" @keydown.once="startVoice()" x-cloak>
+<div class="page" x-data="applicationForm()" @pointerdown="startVoice()" @keydown="startVoice()" x-cloak>
     <header class="top">
         <img class="logo" src="{{ site_url(site('general.logo')) }}" alt="{{ site('general.site_name') }}">
         <div class="top-text">
@@ -22,7 +23,7 @@
             <small x-text="progress.total ? `${progress.done} من ${progress.total} مطلوب` : ''"></small>
         </div>
     </header>
-    <p class="muted" role="status" x-text="voiceStatus"></p>
+    <p class="muted" role="status" x-text="voiceStatus"></p><small class="muted">إرشادات صوتية مسجّلة بصوت مولّد بالذكاء الاصطناعي.</small>
     <div class="cap-overlay" x-show="capOffer" role="dialog" aria-modal="true" aria-label="تأكيد المقدم النقدي" @keydown.escape.window="if(capOffer) declineCap()">
         <section class="card cap-dialog">
             <h2>تأكيد المقدم النقدي</h2>
@@ -88,7 +89,7 @@
                     <p class="muted" x-show="section.description" x-text="section.description"></p>
 
                     <template x-for="item in section.items" :key="item.key">
-                        <div class="field" @focusin="if(item.type !== 'address') speak(item.label)" x-show="isVisible(item.key)" :id="'f-' + item.key">
+                        <div class="field" @focusin="speakField(item)" @click="speakField(item)" x-show="isVisible(item.key)" :id="'f-' + item.key">
                             {{-- display items --}}
                             <template x-if="item.type === 'note'">
                                 <div class="note" x-text="item.message || item.label"></div>

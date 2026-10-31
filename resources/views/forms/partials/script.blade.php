@@ -21,6 +21,7 @@ function applicationForm() {
         return { age, gender: (+d[12]) % 2 === 1 ? 'male' : 'female', governorate: gov };
     }
 
+    let voiceAudio = null, voiceGeneration = 0, lastVoiceSignature = '', lastVoiceAt = 0;
     return {
         sections: F.sections,
         answers: {},
@@ -173,29 +174,60 @@ function applicationForm() {
         startVoice() {
             if (this.voiceStarted) return;
             this.voiceStarted = true;
-            this.speak('أهلاً بيك. كمّل البيانات، وهقولك المطلوب في كل خانة.');
+            this.playVoice(['welcome']);
+        },
+        async playVoice(ids) {
+            const signature = ids.join('|');
+            if (signature === lastVoiceSignature && Date.now() - lastVoiceAt < 400) return;
+            lastVoiceSignature = signature; lastVoiceAt = Date.now();
+            const generation = ++voiceGeneration;
+            if (voiceAudio) { voiceAudio.pause(); voiceAudio.onended = null; voiceAudio.onerror = null; }
+            const available = new Set(window.__FORM_VOICE__?.clips || []);
+            const queue = [...new Set(ids)].filter(id => available.has(id));
+            for (const id of queue) {
+                if (generation !== voiceGeneration) return;
+                if (!voiceAudio) voiceAudio = new Audio();
+                voiceAudio.src = window.__FORM_VOICE__.base + '/' + id + '.wav';
+                voiceAudio.preload = 'auto';
+                const audio = voiceAudio;
+                try {
+                    await new Promise((resolve, reject) => {
+                        audio.onended = resolve;
+                        audio.onerror = () => reject(new Error('audio unavailable'));
+                        const playing = audio.play();
+                        if (playing?.catch) playing.catch(reject);
+                    });
+                    if (generation === voiceGeneration) this.voiceStatus = 'المساعد الصوتي بالمصري شغّال.';
+                } catch (error) {
+                    if (generation !== voiceGeneration) return;
+                    this.voiceStatus = error.name === 'NotAllowedError' ? 'المس أي خانة عشان الصوت يشتغل.' : 'الصوت مش متاح دلوقتي. كمّل من التعليمات المكتوبة.';
+                    if (error.name === 'NotAllowedError') { this.voiceStarted = false; lastVoiceSignature = ''; }
+                    return;
+                }
+            }
+        },
+        speakField(item) {
+            if (!['note','stop','address'].includes(item.type)) this.playVoice(['field_' + item.key]);
         },
         speakProblems(problems) {
             const items = this.shownSections().flatMap(s => s.items);
-            const messages = Object.entries(problems).map(([key, error]) => {
-                const label = items.find(it => it.key === key)?.label || '';
-                return error === 'مطلوب' ? label : label + ': ' + error;
-            });
-            if (messages.length) this.speak('فاضل تكمل: ' + messages.join('، '));
+            const ids = ['missing'];
+            for (const [key, error] of Object.entries(problems)) {
+                const item = items.find(it => it.key === key);
+                if (!item) continue;
+                if (item.type === 'address') {
+                    const parts = (item.address_required || ['governorate','area','street']).filter(part => (item.address_parts || Object.keys(ADDRESS_LABELS)).includes(part) && !String((this.answers[key] || {})[part] || '').trim());
+                    if (parts.length) ids.push(...parts.map(part => 'address_' + part));
+                    else ids.push('check', 'field_' + key);
+                } else ids.push(error === 'استنى لما الرفع يخلص' ? 'wait_upload' : 'field_' + key);
+            }
+            if (ids.length > 1) this.playVoice(ids);
         },
         speak(text) {
-            if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) { this.voiceStatus = 'المتصفح ده مش بيدعم الصوت. افتح الرابط في متصفح بيدعم الإرشاد الصوتي.'; return; }
-            this.voiceStatus = 'الإرشاد الصوتي مفعّل تلقائيًا.';
-            window.speechSynthesis.cancel();
-            const speech = new SpeechSynthesisUtterance(text); speech.lang = 'ar-EG'; speech.rate = 0.9;
-            speech.onerror = () => { this.voiceStatus = 'تعذر تشغيل الصوت على جهازك. التعليمات والنواقص ظاهرة مكتوبة.'; };
-            const voice = window.speechSynthesis.getVoices().find(v => v.lang.startsWith('ar')); if (voice) speech.voice = voice;
-            window.speechSynthesis.speak(speech);
+            // Never read customer data or unreviewed server messages out loud.
+            this.playVoice([text.includes('حفظ') ? 'save_error' : text.includes('الملف') || text.includes('رفع') ? 'upload_error' : 'check']);
         },
-        addressPrompt(part) {
-            const prompts = {governorate:'اختار المحافظة اللي إنت منها', area:'اكتب اسم المنطقة أو المدينة', street:'اكتب اسم الشارع الرئيسي', branch_street:'اكتب اسم الشارع المتفرع أو الشارع اللي ساكن فيه', building:'اكتب رقم العقار لو موجود', floor:'اكتب رقم الدور', apartment:'اكتب رقم الشقة', landmark:'اكتب علامة مميزة قريبة من العنوان، زي مسجد أو مدرسة أو محل معروف'};
-            this.speak(prompts[part] || part);
-        },
+        addressPrompt(part) { this.playVoice(['address_' + part]); },
         needsCap(plan) { return !!plan?.capped && Number(plan.down_payment) > 0 && !(this.capConsent && this.capConsent.machine_id === Number(this.selectedMachine()?.id) && this.capConsent.plan_id === Number(plan.id) && this.capConsent.amount === Math.round(Number(plan.down_payment))); },
         pickPlan(key, plan) {
             if (this.needsCap(plan)) { this.capOffer = {key, plan}; return; }
