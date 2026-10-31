@@ -18,7 +18,8 @@ ok(calls.length===1,'address saves are serialized');calls[0].resolve({error:'old
 form.post=async()=>({error:null});await form.flush();ok(form.sectionDone(form.sections[0]),'complete address and landmark allow next step');
 delete form.answers.home.street;ok(form.sectionProblems(form.sections[0]).home.includes('الشارع'),'missing address part named correctly');form.answers.home.street='الزهراء';
 form.plans=[{id:10,capped:true,down_payment:20000,months:12,monthly:5000,upfront:22000}];form.pickPlan('plan',form.plans[0]);ok(form.capOffer&&form.answers.plan==='','capped plan waits for popup confirmation');form.acceptCap();ok(form.capConsent.amount===20000&&form.answers.plan===10,'popup acceptance records exact current amount');ok(!form.needsCap(form.plans[0]),'same confirmed offer can continue');ok(form.needsCap({...form.plans[0],down_payment:21000}),'changed amount needs new confirmation');
-form.voiceEnabled=true;form.addressPrompt('branch_street');ok(spoken[0].includes('المتفرع')&&!spoken[0].includes('أمام المسجد'),'voice reads field guidance, not private answers');
+ok(form.voiceEnabled===true,'voice is enabled by default without an optional toggle');form.addressPrompt('branch_street');ok(spoken[0].includes('المتفرع')&&!spoken[0].includes('أمام المسجد'),'voice reads field guidance, not private answers');
+form.speakProblems({home:'كمّل: المحافظة، المنطقة'});ok(spoken.at(-1).includes('المحافظة')&&spoken.at(-1).includes('المنطقة'),'blocked step speaks exact missing address parts');
 form.post=async()=>null;ok(!await form.flush(),'failed save stops progression');
 console.log(n+' checks passed');
 })().catch(e=>{console.error(e);process.exitCode=1});

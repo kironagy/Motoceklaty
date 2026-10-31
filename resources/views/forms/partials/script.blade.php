@@ -38,7 +38,9 @@ function applicationForm() {
         plansRequestId: 0,
         capOffer: null,
         capConsent: null,
-        voiceEnabled: false,
+        voiceEnabled: true,
+        voiceStarted: false,
+        voiceStatus: 'الإرشاد الصوتي يعمل تلقائيًا عند لمس أي حقل.',
         saveChains: {},
         saveFailed: {},
         lastSavedValues: {},
@@ -168,15 +170,25 @@ function applicationForm() {
         brands() {
             return [...new Map(this.machines.map(m => [String(m.brand_id ?? ''), {id:String(m.brand_id ?? ''), name:m.brand || 'أخرى'}])).values()];
         },
-        toggleVoice() {
-            this.voiceEnabled = !this.voiceEnabled;
-            if (!this.voiceEnabled) window.speechSynthesis?.cancel();
-            else this.speak('تم تشغيل المساعد الصوتي.');
+        startVoice() {
+            if (this.voiceStarted) return;
+            this.voiceStarted = true;
+            this.speak('أهلاً بيك. كمّل البيانات، وهقولك المطلوب في كل خانة.');
+        },
+        speakProblems(problems) {
+            const items = this.shownSections().flatMap(s => s.items);
+            const messages = Object.entries(problems).map(([key, error]) => {
+                const label = items.find(it => it.key === key)?.label || '';
+                return error === 'مطلوب' ? label : label + ': ' + error;
+            });
+            if (messages.length) this.speak('فاضل تكمل: ' + messages.join('، '));
         },
         speak(text) {
-            if (!this.voiceEnabled || !window.speechSynthesis || !window.SpeechSynthesisUtterance) return;
+            if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) { this.voiceStatus = 'المتصفح ده مش بيدعم الصوت. افتح الرابط في متصفح بيدعم الإرشاد الصوتي.'; return; }
+            this.voiceStatus = 'الإرشاد الصوتي مفعّل تلقائيًا.';
             window.speechSynthesis.cancel();
             const speech = new SpeechSynthesisUtterance(text); speech.lang = 'ar-EG'; speech.rate = 0.9;
+            speech.onerror = () => { this.voiceStatus = 'تعذر تشغيل الصوت على جهازك. التعليمات والنواقص ظاهرة مكتوبة.'; };
             const voice = window.speechSynthesis.getVoices().find(v => v.lang.startsWith('ar')); if (voice) speech.voice = voice;
             window.speechSynthesis.speak(speech);
         },
@@ -330,11 +342,11 @@ function applicationForm() {
                     xhr.setRequestHeader('X-CSRF-TOKEN', csrf);
                     xhr.setRequestHeader('Accept', 'application/json');
                     xhr.upload.onprogress = (e) => { const p = track(); if (p && e.lengthComputable) p.progress = Math.max(2, Math.round(e.loaded / e.total * 95)); };
-                    xhr.onload = () => { let d = {}; try { d = JSON.parse(xhr.responseText); } catch (e) {} d.httpOk = xhr.status >= 200 && xhr.status < 300; resolve(d); };
+                    xhr.onload = () => { let d = {}; try { d = JSON.parse(xhr.responseText); } catch (e) {} d.httpOk = xhr.status >= 200 && xhr.status < 300; if (xhr.status === 429) d.error = 'في محاولات رفع كتير. استنى ' + (xhr.getResponseHeader('Retry-After') || '60') + ' ثانية وجرب تاني، بياناتك محفوظة.'; resolve(d); };
                     xhr.onerror = () => resolve({ httpOk: false, error: 'النت فصل، جرّب تاني.' });
                     xhr.send(body);
                 });
-                if (!data.httpOk || !data.ok) { this.errors[item.key] = data.error || data.message || 'الملف موصلش، جرّب تاني.'; return; }
+                if (!data.httpOk || !data.ok) { this.errors[item.key] = data.error || data.message || 'الملف موصلش، جرّب تاني.'; this.speak(this.errors[item.key]); return; }
                 if (this.maxFiles(item) === 1) this.files = this.files.filter(f => f.key !== item.key);
                 this.files.push(data.file);
                 if (!this.errors[item.key]?.startsWith?.('اخترت')) this.errors[item.key] = null;
@@ -414,18 +426,19 @@ function applicationForm() {
         },
         canOpen(i) { return i <= this.step || i <= this.unlockedUpTo(); },
         go(i) {
-            if (!this.canOpen(i)) { this.savedNote = 'كمّل الخطوة دي الأول.'; return; }
+            if (!this.canOpen(i)) { this.savedNote = 'كمّل الخطوة دي الأول.'; this.speakProblems(this.sectionProblems(this.shownSections()[this.unlockedUpTo()])); return; }
             this.step = i;
             window.scrollTo({ top: 0, behavior: 'smooth' });
         },
         async next(section, i) {
             // what he just typed is saved (and judged by the server) before the step is checked
-            if (!await this.flush(section)) return;
+            if (!await this.flush(section)) { this.speak('تعذر حفظ البيانات. اتأكد من الاتصال وحاول تاني.'); return; }
             const plan=this.selectedPlan(); if (plan && this.needsCap(plan)) {this.capOffer={key:this.keyOf('request.plan'),plan};return;}
             const problems = this.sectionProblems(section);
             const keys = Object.keys(problems);
             if (keys.length) {
                 Object.assign(this.errors, problems);
+                this.speakProblems(problems);
                 this.savedNote = 'كمّل المطلوب في الخطوة دي الأول.';
                 this.$nextTick(() => document.getElementById('f-' + keys[0])?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
                 return;
@@ -455,6 +468,8 @@ function applicationForm() {
                 if (data.code === 'CAP_CONFIRMATION_REQUIRED' && this.selectedPlan()) {this.capConsent=null;this.capOffer={key:this.keyOf('request.plan'),plan:this.selectedPlan()};}
                 this.errors = Object.assign({}, data.errors || {});
                 this.blocking = data.blocking || (data.message ? [data.message] : []);
+                this.speakProblems(this.errors);
+                if (!Object.keys(this.errors).length && this.blocking.length) this.speak(this.blocking.join('، '));
                 const firstKey = Object.keys(this.errors)[0];
                 if (firstKey) {
                     const idx = this.shownSections().findIndex(s => s.items.some(it => it.key === firstKey));

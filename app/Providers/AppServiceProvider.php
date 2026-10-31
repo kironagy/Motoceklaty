@@ -50,6 +50,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Separate budgets: autosaves/polling must never exhaust image uploads.
+        \Illuminate\Support\Facades\RateLimiter::for('form-activity', fn ($request) =>
+            \Illuminate\Cache\RateLimiting\Limit::perMinute(240)->by('form-activity:'.hash('sha256', (string) $request->route('token')).':'.$request->ip()));
+        \Illuminate\Support\Facades\RateLimiter::for('form-uploads', fn ($request) =>
+            \Illuminate\Cache\RateLimiting\Limit::perMinute(30)->by('form-uploads:'.hash('sha256', (string) $request->route('token')).':'.$request->ip()));
+
         // The sidebar follows the layout the owner set on the dashboard settings page.
         $this->app->scoped(\Filament\Navigation\NavigationManager::class, fn () => new \App\Filament\Support\LayoutNavigationManager);
 

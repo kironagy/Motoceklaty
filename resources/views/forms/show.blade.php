@@ -13,7 +13,7 @@
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.14.1/cdn.min.js"></script>
 </head>
 <body>
-<div class="page" x-data="applicationForm()" x-cloak>
+<div class="page" x-data="applicationForm()" @pointerdown.once="startVoice()" @keydown.once="startVoice()" x-cloak>
     <header class="top">
         <img class="logo" src="{{ site_url(site('general.logo')) }}" alt="{{ site('general.site_name') }}">
         <div class="top-text">
@@ -22,7 +22,7 @@
             <small x-text="progress.total ? `${progress.done} من ${progress.total} مطلوب` : ''"></small>
         </div>
     </header>
-    <button type="button" class="voice-toggle" @click="toggleVoice()" :aria-pressed="voiceEnabled" x-show="'speechSynthesis' in window" x-text="voiceEnabled ? 'إيقاف المساعد الصوتي 🔇' : 'تشغيل المساعد الصوتي 🔊'"></button>
+    <p class="muted" role="status" x-text="voiceStatus"></p>
     <div class="cap-overlay" x-show="capOffer" role="dialog" aria-modal="true" aria-label="تأكيد المقدم النقدي" @keydown.escape.window="if(capOffer) declineCap()">
         <section class="card cap-dialog">
             <h2>تأكيد المقدم النقدي</h2>

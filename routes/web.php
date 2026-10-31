@@ -32,14 +32,14 @@ Route::match(['get', 'post'], '/track', [\App\Http\Controllers\TrackingControlle
 // Dynamic Links: the customer's application form (no login - the 40-char token is the key)
 Route::prefix('f/{token}')->where(['token' => '[A-Za-z0-9]{32,64}'])->controller(\App\Http\Controllers\FormLinkController::class)->group(function () {
     Route::get('/', 'show')->name('form-links.show');
-    Route::middleware('throttle:120,1')->group(function () {
+    Route::middleware('throttle:form-activity')->group(function () {
         Route::post('/ping', 'ping');
         Route::post('/answer', 'answer');
         Route::get('/plans', 'plans');
         Route::get('/files', 'files');
         Route::get('/files/{file}', 'fileContent')->whereNumber('file');
     });
-    Route::middleware('throttle:30,1')->group(function () {
+    Route::middleware('throttle:form-uploads')->group(function () {
         Route::post('/files', 'upload');
         Route::delete('/files/{file}', 'deleteFile')->whereNumber('file');
         Route::post('/submit', 'submit');
