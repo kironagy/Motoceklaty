@@ -1,0 +1,32 @@
+<?php
+// Reuse isolated SQLite fixtures and verify the existing cash route still works.
+require __DIR__.'/CashSalesWorkflowSmoke.php';
+use App\Agent\Runtime\{ReplyLanguageReview,EvidenceReview};use App\Agent\Tools\{ToolContext,HandoffToHumanTool};use App\Models\WhatsappConversation;use Illuminate\Support\Facades\DB;
+$review=new class extends EvidenceReview {public bool $allow=false;public int $calls=0;public string $task='';public function judge(string $task,array $data):bool{$this->calls++;$this->task=$task;return $this->allow;}};
+$app->instance(EvidenceReview::class,$review);
+config(['agent.cash.shipping_handoff'=>true,'agent.cash.shipping_handoff_message'=>'shipping approved','agent.cash.shipping_handoff_topic'=>'cash shipping','agent.handoff.customer_only'=>true]);
+$c=WhatsappConversation::create(['phone'=>'test-shipping','status'=>'open']);$ctx=new ToolContext(1,$c->id,null,17,1,new App\Agent\Runtime\TurnResultBuilder);
+$tool=app(HandoffToHumanTool::class);$args=['reason'=>'cash_shipping_request','note'=>'shipping','request_quote'=>'عايزها كاش، فيه شحن؟'];$run=fn()=>$tool->execute($args,$ctx)->toArray();
+$ok(in_array('cash_shipping_request',$tool->inputSchema()['properties']['reason']['enum'],true),'shipping exception declared');
+$ok(($run()['error']['code']??'')==='CURRENT_SHIPPING_REQUEST_REQUIRED','invented shipping quote blocked');
+DB::table('whatsapp_messages')->insert(['whatsapp_conversation_id'=>$c->id,'turn_id'=>17,'sender_type'=>'customer','direction'=>'incoming','text'=>$args['request_quote']]);
+$ok(($run()['error']['code']??'')==='CASH_SHIPPING_NOT_CONFIRMED','ambiguous or installment shipping cannot transfer');
+$ok($c->fresh()->status==='open','failed shipping review does not transfer');
+$review->allow=true;$r=$run();
+$ok(($r['data']['handed_off']??false)&&$r['data']['customer_message']==='shipping approved','cash shipping transfers without model or prior price');
+$ok($c->fresh()->status==='awaiting_agent','shipping enquiry enters transferred queue');
+$ok(!App\Domain\Handoff\HandoffService::botKeepsAnswering($c->fresh()),'bot stops in cash shipping queue');
+$run();$ok(DB::table('handoffs')->where('conversation_id',$c->id)->count()===1,'shipping transfer idempotent');
+$ok(DB::table('handoffs')->where('conversation_id',$c->id)->value('reason')==='cash_shipping_request','shipping transfer has own reason');
+config(['agent.cash.shipping_handoff'=>false]);$ok(($run()['error']['code']??'')==='CASH_SHIPPING_DISABLED','disabled shipping cannot transfer');
+config(['agent.safety.language_enabled'=>true,'agent.safety.language_banned_pattern'=>'/مبغوت[ةه]|يا\s+غبي/u','agent.safety.language_safe_reply'=>'safe reply','agent.safety.reply_guard_mode'=>'advisory']);
+$language=app(ReplyLanguageReview::class);$before=$review->calls;
+$ok(!$language->allows(['messages'=>['المبغوتة تنفع، سنها كام؟']]),'reported nonsense blocked directly');
+$ok(!$language->allows(['messages'=>['يا غبي افهم الكلام']]),'explicit insult blocked directly');
+$ok($review->calls===$before,'direct banned words do not reach model');
+$review->allow=false;$ok(!$language->allows(['messages'=>['سخرية جارحة بدون لفظ محظور']]),'semantic review blocks unacceptable language despite advisory mode');
+$ok($review->task==='reply_language','language uses separate review task');
+$review->allow=true;$ok($language->allows(['messages'=>['زوجتك سنها كام؟']]),'clear respectful wording passes');
+$ok($language->safeReply()['messages']===['safe reply'],'safe fallback comes from dashboard');
+config(['agent.safety.language_banned_pattern'=>'/invalid[']);$ok(!$language->allows(['messages'=>['رسالة']]),'invalid direct policy fails closed');
+echo "$n total checks passed\n";

@@ -41,7 +41,7 @@ class EvidenceReview
     public function judge(string $task, array $data): bool
     {
         $this->lastReason = '';
-        $policy = trim((string) config($task === 'cash_purchase_confirmed' ? 'agent.cash.purchase_review_instructions' : 'agent.safety.review_instructions'));
+        $policy = trim((string) config(match ($task) { 'cash_purchase_confirmed'=>'agent.cash.purchase_review_instructions', 'cash_shipping_request'=>'agent.cash.shipping_review_instructions', 'reply_language'=>'agent.safety.language_review_instructions', default=>'agent.safety.review_instructions' }));
         if ($policy === '') return false;
         try {
             $response = app(AiProvider::class)->chat(new AiRequest(

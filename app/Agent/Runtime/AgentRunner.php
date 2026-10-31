@@ -163,6 +163,7 @@ class AgentRunner
         $repairs = 0;
         $evidenceRepairs = 0;
         $bannedPhraseRepairs = 0;
+        $languageRepairs = 0;
         $openedNow = false;
         $guardEvents = [];
         /** @var array<int, array{name: string, ok: bool, data: array}> $outcomes */
@@ -230,6 +231,21 @@ class AgentRunner
                             'silence' => fn ($a) => $this->silenceWrittenAsText($a, $ctx),
                             'link_written' => fn ($a) => $this->withoutWrittenLink($a, $outcomes, $conversation->id),
                         ]);
+
+                        $language = app(ReplyLanguageReview::class);
+                        if (! $language->allows($toolCall['args'])) {
+                            $guardEvents[] = ['code'=>'UNSAFE_OR_UNCLEAR_LANGUAGE', 'args'=>[]];
+                            if ($languageRepairs >= 1 || $limitReached) {
+                                $this->finishTrace($trace, 'fallback', $guardEvents, $lastResponse, 'UNSAFE_OR_UNCLEAR_LANGUAGE');
+                                return $language->safeReply();
+                            }
+                            $languageRepairs++;
+                            $hint = (string) config('agent.safety.language_repair_instructions');
+                            $contents[] = $toolCall['id'] === 'implicit'
+                                ? ['role'=>'user','parts'=>[['type'=>'text','text'=>$hint]]]
+                                : $this->toolResultContent($toolCall['id'], 'send_reply', ['ok'=>false,'error'=>['code'=>'UNSAFE_OR_UNCLEAR_LANGUAGE','detail'=>$hint]]);
+                            continue;
+                        }
 
                         $phrase = app(ReplyPhrasePolicy::class)->apply($toolCall['args']);
                         if ($phrase['changed']) {

@@ -33,6 +33,22 @@ class HandoffService
         return $handoff;
     }
 
+    /** Confirmed cash shipping enquiry, independent of purchase/stock confirmation. */
+    public function cashShippingRequested(WhatsappConversation $conversation): Handoff
+    {
+        return DB::transaction(function () use ($conversation) {
+            $locked = WhatsappConversation::whereKey($conversation->id)->lockForUpdate()->firstOrFail();
+            $locked->last_topic = config('agent.cash.shipping_handoff_topic');
+            $locked->save();
+            $existing = Handoff::where('conversation_id', $locked->id)->whereNull('closed_at')->latest('id')->first();
+            if ($existing) {
+                $locked->update(['status'=>'awaiting_agent']);
+                return $existing;
+            }
+            return $this->handOff($locked, 'cash_shipping_request', (string) config('agent.cash.shipping_handoff_topic'), 'cash_shipping');
+        });
+    }
+
     /** Owner-approved cash purchase confirmation, independent of stock state. */
     public function cashPurchaseConfirmed(WhatsappConversation $conversation, int $machineId): Handoff
     {
@@ -190,7 +206,7 @@ class HandoffService
         $returned = 0;
 
         Handoff::whereNull('closed_at')
-            ->whereNotIn('reason', ['cash_stock_unavailable', 'cash_purchase_confirmed'])
+            ->whereNotIn('reason', ['cash_stock_unavailable', 'cash_purchase_confirmed', 'cash_shipping_request'])
             ->where('opened_at', '<=', now()->subMinutes((int) $minutes))
             ->with('conversation')
             ->get()
