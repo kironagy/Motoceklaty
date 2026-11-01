@@ -146,6 +146,20 @@ class AgentRunner
             }
         }
 
+        // Deterministic facts from the live database need no model round trip.
+        // Anything ambiguous or involving installments, stock or buying intent
+        // deliberately continues through the normal agent path.
+        if ($resumed === [] && $onlyText && blank($turn->media_items ?? null) && ! $activeApplication) {
+            $direct = app(DatabaseBackedReply::class)->for($this->guard->customerTextSinceLastReply($conversation), $ctx);
+            if ($direct !== null) {
+                app(\App\Domain\Memory\CustomerMemory::class)->recordToolEvent($ctx->customerId, $direct['tool'], $direct['args'], $direct['result']);
+                app(ToolOutcomeRecorder::class)->record($direct['tool'], $direct['args'], $direct['result'], $ctx);
+                $this->resetFailureCounter($conversation);
+                $this->finishTrace($trace, 'done', [['code' => 'DATABASE_BACKED_REPLY', 'args' => ['source' => $direct['tool']]]], null);
+                return ['messages' => $direct['messages']];
+            }
+        }
+
         // read first, so the context shows each photo as its result, not as the image again
         // Dynamic Links: papers come on the form; a photo in the chat is read for his
         // application only when staff asked him for a document (needs_more_info)
