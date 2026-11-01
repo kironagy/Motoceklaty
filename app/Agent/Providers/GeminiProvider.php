@@ -8,6 +8,7 @@ use App\Services\GeminiAlertService;
 use App\Services\GeminiKeyManager;
 use App\Services\GeminiRateLimitParser;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -72,6 +73,15 @@ class GeminiProvider implements AiProvider
     {
         $manager = app(GeminiKeyManager::class);
         $maxTransientFailovers = max(0, (int) config('gemini.rate_limits.max_transient_failovers', 2));
+        $circuitKey = 'gemini:model-circuit:'.hash('sha256', $modelCode.':'.($request->purpose ?? 'reply'));
+
+        // When a pool has just exhausted its quota, every queue worker used to
+        // probe it again immediately. That turned one outage into thousands of
+        // rejected HTTP calls. Let one short cooldown pass before probing again.
+        if (Cache::has($circuitKey)) {
+            throw new AiProviderException("Gemini model {$modelCode} is cooling down after repeated rate limits.", retryable: true);
+        }
+
         $estimatedTokens = $this->estimateTokens($request);
         $payload = $this->buildPayload($request);
 
@@ -101,6 +111,8 @@ class GeminiProvider implements AiProvider
             );
 
             if (! $modelRow) {
+                Cache::put($circuitKey, true, now()->addSeconds(60));
+
                 throw new AiProviderException(
                     "Gemini model {$modelCode} is unavailable or all of its keys are rate-limited.",
                     retryable: true,
@@ -119,6 +131,7 @@ class GeminiProvider implements AiProvider
                     );
 
                 if ($response->successful()) {
+                    Cache::forget($circuitKey);
                     $json = $response->json();
                     $usedTokens = (int) data_get($json, 'usageMetadata.totalTokenCount', $estimatedTokens);
                     $manager->markUsed($modelRow, $usedTokens, $estimatedTokens);
@@ -169,14 +182,18 @@ class GeminiProvider implements AiProvider
                 // tries, so the turn retries soon with the whole pool intact.
                 if ($status === 429 && ! preg_match('/quota_?metric|QuotaFailure|quotaId|PerDay|per day|free_tier/i', $body)) {
                     $manager->markRateLimited(model: $modelRow, error: $body, dailyLimit: false, cooldownSeconds: 10);
+                    $transientFailures++;
 
                     Log::warning('Gemini capacity 429, trying next key', ['key_id' => $modelRow->gemini_api_key_id, 'model' => $modelRow->model_code]);
 
-                    // Server comparison 2026-10-07: api1..api9 share one Google project - all nine answered 429
-                    // while the keys of other accounts sat unused, and the customer got nothing after two tries.
-                    // A capacity 429 costs a fraction of a second: every other key is tried (the call's deadline
-                    // still bounds it), and only then the next model.
-                    continue;
+                    // API keys can share one Google project and therefore one
+                    // quota. Trying the whole pool multiplies the same rejection.
+                    if ($transientFailures <= $maxTransientFailovers) {
+                        continue;
+                    }
+
+                    Cache::put($circuitKey, true, now()->addSeconds(60));
+                    throw new AiProviderException('Gemini is rate-limited.', retryable: true);
                 }
 
                 if ($status === 429 || $this->isQuotaError($body)) {

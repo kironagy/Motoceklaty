@@ -331,7 +331,14 @@ class ProcessWhatsappMessageJobs extends Command
         $startedAt = \Illuminate\Support\Carbon::parse($job->created_at ?? now());
 
         if ($startedAt->copy()->addMinutes($window)->isFuture()) {
-            return ['pending', now()->addSeconds(60)];
+            // Rechecking every minute made a provider outage consume thousands
+            // of calls for the same small set of messages. Back off quickly,
+            // then keep a 30-minute ceiling so recovery is still automatic.
+            $outageAttempt = max(0, $attempts - $max);
+            $delays = [120, 300, 600, 1200, 1800];
+            $delay = $delays[min($outageAttempt, count($delays) - 1)];
+
+            return ['pending', now()->addSeconds($delay)];
         }
 
         return ['failed', null];
