@@ -56,7 +56,7 @@ class CatalogMentions
         $ids = [];
 
         foreach ($this->vocabulary()['names'] as $name => $machineIds) {
-            if (preg_match('/(?<![\p{L}\p{N}])'.preg_quote($name, '/').'(?![\p{L}\p{N}])/u', $text)) {
+            if (preg_match('/(?<![\p{L}\p{N}])(?:و)?'.preg_quote($name, '/').'(?![\p{L}\p{N}])/u', $text)) {
                 $ids = array_merge($ids, $machineIds);
             }
         }

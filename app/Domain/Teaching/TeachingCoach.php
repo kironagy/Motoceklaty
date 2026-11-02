@@ -436,7 +436,7 @@ class TeachingCoach
                 temperature: $attempt['temperature'],
                 // Enough for a long plan; a stuck reply fails fast instead of
                 // making the owner wait for 16k tokens of spaces.
-                maxOutputTokens: 8192,
+                maxOutputTokens: 3072,
                 // gemini-3.5-flash answers a correction in ~10-30s. Overloaded,
                 // it held the connection 2 minutes before the fallback got a
                 // turn - same model and thinking, just no waiting on a dead line.

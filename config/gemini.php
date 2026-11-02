@@ -204,6 +204,18 @@ return [
             ],
         ],
 
+        'bormaa' => [
+            'label' => 'Bormaa Codex',
+            'base_url' => env('BORMAA_CODEX_BASE_URL', 'https://codex-api.bormaa.com/v1'),
+            'default_task' => 'sales_reply',
+
+            // Models are discovered from GET /models when the key is saved.
+            // The prefix keeps routing unambiguous if another provider exposes
+            // the same public model id.
+            'model_prefix' => 'bormaa:',
+            'default_models' => [],
+        ],
+
         'groq' => [
             'label' => 'Groq',
             'base_url' => 'https://api.groq.com/openai/v1',

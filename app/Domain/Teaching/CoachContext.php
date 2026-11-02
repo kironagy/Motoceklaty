@@ -26,9 +26,9 @@ class CoachContext
     public function knowledge(string $focusText): string
     {
         $parts = [];
-        $parts[] = "# تعليمات البوت الحالية (L0)\n".$this->instructions->current()['text'];
+        $parts[] = "# تعليمات البوت الحالية (L0)\n".LessonSync::withoutSection($this->instructions->current()['text']);
 
-        $lessons = $this->lessons->active()->map(fn ($l) => "[lesson_id={$l->id}] ".$this->lessons->line($l, true))->implode("\n");
+        $lessons = $this->lessons->active()->map(fn ($l) => "[lesson_id={$l->id}] ".$this->lessons->line($l, false))->implode("\n");
         $parts[] = "# الدروس الحالية\n".($lessons ?: 'لسه مفيش');
 
         $parts[] = "# مراحل المحادثة (scope_stage)\n".collect(LessonBook::STAGES)->map(fn ($v, $k) => "{$k}: {$v}")->implode("\n");
@@ -36,6 +36,22 @@ class CoachContext
 
         foreach (EditableEntities::MAP as $entity => [$model, $label]) {
             $fields = array_keys(EditableEntities::fields($entity));
+            // A wording correction needs rules, not every row in every
+            // business table. Include data only for the subject being edited.
+            $subjects = [
+                'machine' => '/موديل|مكن|موتوسيكل|سكوتر|سعر|هوج|دايو|TX/iu',
+                'branch' => '/فرع|فروع|عنوان|مواعيد/u',
+                'installment' => '/قسط|تقسيط|مقدم|فايد|فائد|مدد|مدة/u',
+                'requirement' => '/ورق|مستند|بطاق|مطلوب/u',
+            ];
+            $relevant = false;
+            foreach ($subjects as $prefix => $pattern) {
+                if (str_contains($entity, $prefix) && preg_match($pattern, $focusText)) $relevant = true;
+            }
+            if (! $relevant) {
+                $parts[] = "# {$label} (entity={$entity}) - الحقول المسموحة: ".implode(', ', $fields)."\nالصفوف غير محملة لهذا التصحيح؛ لا تخمن معرفات أو تعدل صفاً غير معروض.";
+                continue;
+            }
             $rows = $entity === 'machine'
                 ? $this->machines($focusText)
                 : $model::query()->get(array_merge(['id'], $fields))->toArray();
@@ -44,6 +60,7 @@ class CoachContext
         }
 
         $settings = collect(AgentSettings::definitions())
+            ->filter(fn ($d, $key) => ! in_array($d[0], ['instructions']) && ! str_contains($key, 'instructions'))
             ->map(fn ($d, $key) => "{$key} ({$d[1]}, {$d[2]}) = ".json_encode(config("agent.{$key}"), JSON_UNESCAPED_UNICODE))
             ->implode("\n");
         $parts[] = "# إعدادات البوت (entity=agent_setting)\n{$settings}";
@@ -58,7 +75,7 @@ class CoachContext
         $messages = WhatsappMessage::where('whatsapp_conversation_id', $conversationId)
             ->when($targetMessageId, fn ($q) => $q->where('id', '<=', $targetMessageId))
             ->with('media')
-            ->orderByDesc('id')->take(40)->get()->reverse();
+            ->orderByDesc('id')->take(16)->get()->reverse();
 
         $target = $targetMessageId ? $messages->firstWhere('id', $targetMessageId) : null;
         $lines = [];
@@ -98,7 +115,7 @@ class CoachContext
 
             return $focused
                 ? $m->only(array_merge(['id'], array_keys(EditableEntities::fields('machine'))))
-                : $m->only(self::MACHINE_BRIEF);
+                : $m->only(['id', 'name', 'brand_id']);
         })->all();
     }
 

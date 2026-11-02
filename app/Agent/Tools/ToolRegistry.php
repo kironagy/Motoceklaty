@@ -162,6 +162,16 @@ class ToolRegistry
             return null;
         }
 
+        // A comparison explicitly names several models. Validate the whole
+        // set before applying the single-model brand guard to each row.
+        if (count($ids) > 1) {
+            $text = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $ctx->conversationId)
+                ->where('turn_id', $ctx->turnId)->where('direction', 'incoming')->pluck('text')->implode(' ');
+            $named = app(\App\Agent\Runtime\CatalogMentions::class)->fullNames($text);
+            if (preg_match('/بين|قارن|مقارن/u', $text) && count($named) > 1
+                && array_diff(array_map('intval', $ids), $named) === []) return null;
+        }
+
         foreach (\App\Models\Machine::whereIn('id', $ids)->get() as $machine) {
             if ($conflict = \App\Domain\Conversations\MentionedMotorcycle::conflict($ctx->conversationId, $ctx->turnId, $machine)) {
                 return $conflict;

@@ -50,7 +50,9 @@ class ContextBuilder
         // lessons are folded into it; what follows is data only - catalog
         // names, customer-type keys, then the facts.
         $l0 = $this->buildL0($result->facts['work']['customer_type'] ?? null, $application?->status);
-        $l3 = $this->catalogIsRelevant($conversation, $application) ? $this->buildL3() : ['text' => null, 'count' => 0];
+        // Catalog search supplies authoritative names and IDs on demand.
+        // Sending the entire catalog on every turn duplicates that lookup.
+        $l3 = ['text' => null, 'count' => 0];
         $l3b = $this->buildL3b();
         $l4 = $this->renderFacts($result->facts);
         $told = $this->renderToldSoFar($this->toldSoFar->for($conversation, $application));

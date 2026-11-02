@@ -15,6 +15,16 @@ class CreateGeminiApiKey extends CreateRecord
 
         $provider = $apiKey->provider ?? 'gemini';
 
+        if ($provider === 'bormaa') {
+            try {
+                app(\App\Services\BormaaCodexService::class)->sync($apiKey);
+            } catch (\Throwable $e) {
+                $apiKey->update(['last_error' => mb_substr($e->getMessage(), 0, 2000)]);
+            }
+
+            return;
+        }
+
         foreach (config("gemini.providers.$provider.default_models", []) as $model) {
             $apiKey->models()->firstOrCreate(
                 [

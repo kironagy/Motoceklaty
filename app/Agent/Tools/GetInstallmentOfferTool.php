@@ -205,6 +205,8 @@ class GetInstallmentOfferTool implements ReadTool
                 'motorcycle' => $this->label($machine),
                 'cash_price' => $this->cashPrice($machine),
                 'durations' => array_map(fn (array $o) => $this->duration($o['months']), $offers),
+                'minimum_down_payment' => collect($offers)->pluck('minimum_down_payment')->filter(fn ($v) => is_numeric($v))->min() ?? 0,
+                'presentation' => 'اذكر كل المدد الموجودة في durations دون حذف أي مدة. لو minimum_down_payment أكبر من صفر اذكر الفرق المطلوب مقدماً فوراً قبل سؤال المدة. لا تعد بحساب لاحق: عند اختيار مدة احسبها بالأداة وأرسل الأرقام في نفس الرد.',
             ] + $cap);
         }
 

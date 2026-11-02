@@ -133,11 +133,18 @@ class IdentifyMotorcycleFromImageTool implements ReadTool
 
         $candidates = collect($parsed['candidates'] ?? [])
             ->filter(fn ($c) => in_array((int) ($c['motorcycle_id'] ?? 0), $activeIds, true))
-            ->map(fn ($c) => [
-                'motorcycle_id' => (int) $c['motorcycle_id'],
-                'name' => Machine::find($c['motorcycle_id'])->name,
-                'confidence' => (float) ($c['confidence'] ?? 0),
-            ])
+            ->map(function ($c) {
+                $machine = Machine::with('brand')->find($c['motorcycle_id']);
+                $brand = trim((string) $machine?->brand?->name);
+                $name = trim((string) $machine?->name);
+
+                return [
+                    'motorcycle_id' => (int) $c['motorcycle_id'],
+                    'name' => $brand !== '' && ! str_starts_with(mb_strtolower($name), mb_strtolower($brand))
+                        ? trim($brand.' '.$name) : $name,
+                    'confidence' => (float) ($c['confidence'] ?? 0),
+                ];
+            })
             ->sortByDesc('confidence')
             ->values();
 

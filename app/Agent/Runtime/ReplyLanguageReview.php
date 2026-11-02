@@ -11,6 +11,10 @@ class ReplyLanguageReview
         $pattern=trim((string)config('agent.safety.language_banned_pattern'));
         $plain=preg_replace('/[\x{064B}-\x{065F}\x{0670}\x{0640}]/u','',$text);
         if($pattern!=='' && (@preg_match($pattern,'')===false || preg_match($pattern,$plain)))return false;
+        // The local banned-language check above is deterministic. The
+        // optional semantic reviewer costs a second provider call for every
+        // otherwise-valid reply, so low-cost deployments can disable it.
+        if(!config('agent.safety.language_ai_review',true))return true;
         return app(EvidenceReview::class)->judge('reply_language',['candidate'=>$text]);
     }
     public function safeReply(): array

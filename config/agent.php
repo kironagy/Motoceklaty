@@ -20,6 +20,7 @@ return [
     // a document is a few calls per customer, so a stronger reader is cheap.
     // Empty = the conversation model.
     'document_model' => env('AGENT_DOCUMENT_MODEL'),
+    'image_model' => env('AGENT_IMAGE_MODEL'),
     'document_reasoning_effort' => env('AGENT_DOCUMENT_REASONING_EFFORT', 'low'),
 
     // Voice notes: OpenAI transcription model (gpt-4o-mini-transcribe), with
@@ -294,6 +295,7 @@ return [
         'max_model_calls' => env('AGENT_RUNTIME_MAX_MODEL_CALLS'),
         'max_tool_calls' => env('AGENT_RUNTIME_MAX_TOOL_CALLS'),
         'wall_clock_seconds' => env('AGENT_RUNTIME_WALL_CLOCK_SECONDS'),
+        'max_output_tokens' => env('AGENT_RUNTIME_MAX_OUTPUT_TOKENS', 384),
     ],
 
     'guard' => [

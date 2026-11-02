@@ -38,12 +38,13 @@ class OpenAiProvider
         return true;
     }
 
-    public function chatWith(AiRequest $request, string $modelCode, float $deadline = INF): AiResponse
+    public function chatWith(AiRequest $request, string $modelCode, float $deadline = INF, string $provider = 'openai'): AiResponse
     {
         $manager = app(GeminiKeyManager::class);
         $maxTransientFailovers = max(0, (int) config('gemini.rate_limits.max_transient_failovers', 2));
         $estimatedTokens = $this->estimateTokens($request);
-        $payload = $this->buildPayload($request, $modelCode);
+        $apiModelCode = $provider === 'bormaa' ? preg_replace('/^bormaa:/', '', $modelCode) : $modelCode;
+        $payload = $this->buildPayload($request, $apiModelCode, $provider);
         $triedIds = [];
         $transientFailures = 0;
         $start = microtime(true);
@@ -60,11 +61,11 @@ class OpenAiProvider
                 estimatedTokens: $estimatedTokens,
                 embedding: false,
                 excludedIds: $triedIds,
-                provider: 'openai',
+                provider: $provider,
             );
 
             if (! $modelRow) {
-                throw new AiProviderException("OpenAI model {$modelCode} has no available key.", retryable: true);
+                throw new AiProviderException("{$provider} model {$modelCode} has no available key.", retryable: true);
             }
 
             $triedIds[] = $modelRow->id;
@@ -73,9 +74,9 @@ class OpenAiProvider
             try {
                 $response = Http::timeout((int) max(3, min($request->timeoutSeconds, $remaining)))
                     ->withToken($modelRow->apiKey->api_key)
-                    ->post(self::URL, $payload);
+                    ->post($this->url($provider), $payload);
             } catch (ConnectionException $e) {
-                AiCalls::record($request, 'openai', $modelCode, count($triedIds), [], (int) round((microtime(true) - $attemptStart) * 1000), 'connection');
+                AiCalls::record($request, $provider, $modelCode, count($triedIds), [], (int) round((microtime(true) - $attemptStart) * 1000), 'connection');
                 $manager->markError($modelRow, $e->getMessage(), 30);
                 $manager->refundReservation($modelRow);
 
@@ -95,13 +96,13 @@ class OpenAiProvider
                     'candidatesTokenCount' => $usage['output_tokens'],
                     'thoughtsTokenCount' => $usage['thoughts_tokens'],
                 ]], 'bot');
-                AiCalls::record($request, 'openai', $modelCode, count($triedIds), $usage, (int) round((microtime(true) - $attemptStart) * 1000), 'ok', data_get($json, 'choices.0.message'));
+                AiCalls::record($request, $provider, $modelCode, count($triedIds), $usage, (int) round((microtime(true) - $attemptStart) * 1000), 'ok', data_get($json, 'choices.0.message'));
 
                 return $this->parseResponse($json, $usage, $modelRow, $start);
             }
 
             $status = $response->status();
-            AiCalls::record($request, 'openai', $modelCode, count($triedIds), [], (int) round((microtime(true) - $attemptStart) * 1000), 'http_'.$status);
+            AiCalls::record($request, $provider, $modelCode, count($triedIds), [], (int) round((microtime(true) - $attemptStart) * 1000), 'http_'.$status);
             $body = $response->body();
             $type = (string) data_get($response->json(), 'error.type');
 
@@ -160,7 +161,16 @@ class OpenAiProvider
         }
     }
 
-    private function buildPayload(AiRequest $request, string $modelCode): array
+    private function url(string $provider): string
+    {
+        if ($provider === 'bormaa') {
+            return rtrim((string) config('gemini.providers.bormaa.base_url'), '/').'/chat/completions';
+        }
+
+        return self::URL;
+    }
+
+    private function buildPayload(AiRequest $request, string $modelCode, string $provider = 'openai'): array
     {
         // Side calls (a thinkingBudget: work reading, address split) ran past
         // their timeouts at the bot's medium effort - the work checks were
@@ -171,13 +181,19 @@ class OpenAiProvider
                 ? config('agent.document_reasoning_effort')
                 : ($request->thinkingBudget !== null ? 'low' : (config('agent.openai_reasoning_effort') ?: 'minimal')));
 
+        // Codex Army currently accepts low..max, while OpenAI also accepts
+        // minimal. Keep the cheapest supported Bormaa level.
+        if ($provider === 'bormaa' && $effort === 'minimal') {
+            $effort = 'low';
+        }
+
         $payload = [
             'model' => $modelCode,
             'messages' => $this->messages($request),
             // GPT-5 accepts only its default temperature. Reasoning tokens
             // come out of max_completion_tokens, so they get room on top.
             'reasoning_effort' => $effort,
-            'max_completion_tokens' => $request->maxOutputTokens + ($effort === 'minimal' ? 1024 : 4096),
+            'max_completion_tokens' => $request->maxOutputTokens + ($provider === 'bormaa' ? 256 : ($effort === 'minimal' ? 1024 : 4096)),
         ];
 
         if ($request->responseSchema !== null) {

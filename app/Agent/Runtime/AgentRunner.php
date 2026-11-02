@@ -121,17 +121,76 @@ class AgentRunner
         // (read before this attempt runs anything itself).
         $resumed = $this->completedSteps((int) $turn->id);
 
+        if ($resumed === [] && \App\Domain\Forms\FormLinkService::formsMode()) {
+            $text = trim($this->guard->customerTextSinceLastReply($conversation));
+            $previous = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+                ->where('direction', 'outgoing')->latest('id')->value('text') ?? '';
+            $explicit = preg_match('/(?:عايز|عاوز|محتاج)\s+(?:اقدم|أقدم)|(?:لينك|رابط)\s*التقديم/u', $text);
+            $accepted = preg_match('/^(?:نبدأ|نبدا|ابدأ|ابدا|يلا|تمام|اه|أه|ايوه|أيوه)[.!؟?\s]*$/u', $text)
+                && preg_match('/نبدأ|نبدا|طلب التقسيط|التقديم/u', $previous);
+            if ($explicit || $accepted) {
+                $this->tools->execute('check_eligibility', [], $ctx);
+                $result = $this->tools->execute('send_application_link', [], $ctx);
+                if (($result['ok'] ?? false) && data_get($result, 'data.link_sent_after_your_reply')) {
+                    $this->finishTrace($trace, 'done', [['code'=>'DIRECT_APPLICATION_LINK','args'=>[]]], null);
+                    return ['messages'=>['ده رابط التقديم، املأ بياناتك وارفع المستندات عليه، ولو حاجة مش واضحة أنا معاك.']];
+                }
+            }
+        }
+
+        // A simple photo-identification question needs one compact vision
+        // call, not a full agent call before it and another after it.
+        if ($resumed === [] && ! $activeApplication) {
+            $customerText = $this->guard->customerTextSinceLastReply($conversation);
+            $media = \App\Models\MessageMedia::query()
+                ->whereIn('media_type', ['image', 'sticker'])
+                ->whereHas('message', fn ($query) => $query->where('turn_id', $turn->id)->where('direction', 'incoming'))
+                ->first();
+
+            if ($media && preg_match('/(?:المكن[هة] دي|الموتوسيكل ده|دي ايه|اسمها|متاح[هة]?|موجود[هة]?)/u', $customerText)
+                && ! preg_match('/(?:قسط|تقسيط|سعر|بكام|مقدم)/u', $customerText)) {
+                $name = 'identify_motorcycle_from_image';
+                $args = ['media_id' => $media->id];
+                $result = $this->tools->execute($name, $args, $ctx);
+
+                if ($result['ok'] ?? false) {
+                    app(\App\Domain\Memory\CustomerMemory::class)->recordToolEvent($ctx->customerId, $name, $args, $result);
+                    app(ToolOutcomeRecorder::class)->record($name, $args, $result, $ctx);
+                    $reply = app(ImageIdentificationReply::class)->for($result);
+                    $this->resetFailureCounter($conversation);
+                    $this->finishTrace($trace, 'done', [['code' => 'DIRECT_IMAGE_IDENTIFICATION', 'args' => []]], null);
+
+                    return $reply;
+                }
+            }
+        }
+
         // Owner 2026-10-05: a message that is only a greeting gets the
         // showroom's greeting, never the model's improvisation.
         $onlyText = ! \App\Models\WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')
             ->whereNotIn('type', ['text', 'audio', 'voice', 'ptt'])->exists();
 
         if ($resumed === [] && $onlyText && blank($turn->media_items ?? null)) {
-            $social = app(SocialReply::class)->for($this->guard->customerTextSinceLastReply($conversation));
+            $customerText = $this->guard->customerTextSinceLastReply($conversation);
+            $social = app(SocialReply::class)->for($customerText);
             if ($social !== null) {
                 $this->resetFailureCounter($conversation);
                 $this->finishTrace($trace, 'done', [['code'=>'APPROVED_SOCIAL_REPLY','args'=>[]]], null);
                 return $social;
+            }
+
+            $faq = app(SimpleFaqReply::class)->for($customerText);
+            if ($faq !== null) {
+                $this->resetFailureCounter($conversation);
+                $this->finishTrace($trace, 'done', [['code'=>'APPROVED_SIMPLE_FAQ','args'=>[]]], null);
+                return $faq;
+            }
+
+            $installment = app(GenericInstallmentReply::class)->for($customerText);
+            if ($installment !== null && ! $activeApplication) {
+                $this->resetFailureCounter($conversation);
+                $this->finishTrace($trace, 'done', [['code'=>'GENERIC_INSTALLMENT_CLARIFICATION','args'=>[]]], null);
+                return $installment;
             }
         }
 
@@ -171,6 +230,20 @@ class AgentRunner
         $request = $this->context->build($turn);
         $contents = $request->contents;
         $toolDeclarations = $this->toolsFor($activeApplication !== null);
+        if (! $activeApplication) {
+            $text = $this->guard->customerTextSinceLastReply($conversation);
+            $needed = ['send_reply', 'search_motorcycles', 'get_motorcycle_details', 'get_earlier_messages'];
+            if (preg_match('/قسط|تقسيط|مقدم|فايد|فائد|سنه|سنة|سنتين|شغل|شغال|موظف|معاش|ميكانيكي|ورشه|ورشة|دخل/u', $text))
+                $needed = array_merge($needed, ['get_installment_offer', 'get_installment_options', 'record_work_profile', 'check_eligibility']);
+            if (preg_match('/قدم|طلب|ورق|مستند|بطاق/u', $text))
+                $needed = array_merge($needed, ['send_application_link', 'get_application_requirements', 'record_work_profile', 'check_eligibility']);
+            if (preg_match('/موظف|حد|كلمني|اكلم|أكلم|حول|كاش|اشتري|شحن/u', $text)) $needed[] = 'handoff_to_human';
+            if (preg_match('/فرع|فروع|عنوان|مكان|مواعيد|فين/u', $text)) $needed[] = 'get_branch_information';
+            if (preg_match('/صور|صوره|صورة|شكل/u', $text)) $needed[] = 'send_motorcycle_images';
+            if (preg_match('/مواصف|سرع|استهلاك|بنزين|موتور/u', $text)) $needed[] = 'lookup_motorcycle_specs_online';
+            if (! $onlyText) $needed = array_merge($needed, self::PHOTO_TOOLS);
+            $toolDeclarations = array_values(array_filter($toolDeclarations, fn ($tool) => in_array($tool['name'], $needed, true)));
+        }
 
         $modelCalls = 0;
         $toolCallCount = 0;
@@ -564,7 +637,27 @@ class AgentRunner
         $stable = array_values(array_filter($all, fn ($d) => ! in_array($d['name'], [...self::PHOTO_TOOLS, ...self::APPLICATION_TOOLS], true)));
         $byName = array_column($all, null, 'name');
 
-        return array_merge($stable, array_values(array_filter(array_map(fn ($name) => $byName[$name] ?? null, $tail))));
+        $declarations = array_merge($stable, array_values(array_filter(array_map(fn ($name) => $byName[$name] ?? null, $tail))));
+        // Runtime validation still uses the original schemas. Repeated JSON
+        // presentation metadata is unnecessary in every model request.
+        $compact = function (array $schema) use (&$compact): array {
+            unset($schema['title'], $schema['examples'], $schema['default']);
+            foreach ($schema as $key => $value) {
+                if (is_array($value)) $schema[$key] = $compact($value);
+            }
+            return $schema;
+        };
+        foreach ($declarations as &$declaration) {
+            $declaration['parameters'] = $compact($declaration['parameters']);
+            // Keep semantic work/evidence contracts intact; ordinary catalog
+            // scalar fields are already named and constrained by their schema.
+            if (in_array($declaration['name'], ['search_motorcycles', 'get_motorcycle_details', 'get_earlier_messages', 'send_motorcycle_images', 'get_branch_information'], true)) {
+                foreach ($declaration['parameters']['properties'] ?? [] as $key => $property) {
+                    unset($declaration['parameters']['properties'][$key]['description']);
+                }
+            }
+        }
+        return $declarations;
     }
 
     /**
@@ -716,6 +809,7 @@ class AgentRunner
             tools: $tools,
             toolMode: $allowed === [] ? 'auto' : 'any',
             allowedTools: $allowed,
+            maxOutputTokens: max(128, (int) config('agent.runtime.max_output_tokens', 384)),
             label: 'main',
         ));
     }

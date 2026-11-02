@@ -42,9 +42,10 @@ class GeminiApiKeyResource extends Resource
                             ->options([
                                 'openai' => 'GPT (OpenAI) - gpt-5-nano',
                                 'gemini' => 'Gemini',
+                                'bormaa' => 'Bormaa Codex (external)',
                             ])
                             ->default('openai')
-                            ->helperText('مفتاح GPT بيتضاف معاه gpt-5-nano. الموديل اللي البوت بيرد بيه بيتختار من إعدادات البوت.')
+                            ->helperText('Bormaa Codex يسحب الموديلات والاستهلاك تلقائيًا من API بعد الحفظ.')
                             ->required()
                             ->native(false),
 
@@ -91,12 +92,14 @@ class GeminiApiKeyResource extends Resource
                         'gemini' => 'info',
                         'openai' => 'success',
                         'groq' => 'warning',
+                        'bormaa' => 'primary',
                         default => 'gray',
                     })
                     ->formatStateUsing(fn (?string $state): string => match ($state) {
                         'gemini' => 'Gemini',
                         'openai' => 'GPT',
                         'groq' => 'Groq',
+                        'bormaa' => 'Bormaa Codex',
                         default => $state ?? '—',
                     })
                     ->sortable(),
@@ -128,6 +131,18 @@ class GeminiApiKeyResource extends Resource
                     ->counts('models')
                     ->badge(),
 
+                Tables\Columns\TextColumn::make('bormaa_remaining')
+                    ->label('Codex Remaining')
+                    ->state(fn (GeminiApiKey $record) => $record->isBormaa() ? data_get($record->usage_snapshot, 'quota.remaining') : null)
+                    ->suffix(fn (GeminiApiKey $record) => $record->isBormaa() ? '%' : '')
+                    ->placeholder('—'),
+
+                Tables\Columns\TextColumn::make('bormaa_monthly_tokens')
+                    ->label('Monthly Tokens')
+                    ->state(fn (GeminiApiKey $record) => $record->isBormaa() ? data_get($record->usage_snapshot, 'limits.monthly_tokens.used') : null)
+                    ->numeric()
+                    ->placeholder('—'),
+
                 Tables\Columns\TextColumn::make('last_error')
                     ->label('Last Error')
                     ->limit(30)
@@ -145,12 +160,26 @@ class GeminiApiKeyResource extends Resource
                         'gemini' => 'Gemini',
                         'openai' => 'GPT',
                         'groq' => 'Groq',
+                        'bormaa' => 'Bormaa Codex',
                     ]),
 
                 Tables\Filters\TernaryFilter::make('is_active')
                     ->label('Active'),
             ])
             ->actions([
+                Tables\Actions\Action::make('sync_bormaa')
+                    ->label('Sync Codex')
+                    ->icon('heroicon-o-arrow-path')
+                    ->visible(fn (GeminiApiKey $record) => $record->isBormaa())
+                    ->action(function (GeminiApiKey $record): void {
+                        try {
+                            $result = app(\App\Services\BormaaCodexService::class)->sync($record);
+                            \Filament\Notifications\Notification::make()->title("تم تحديث {$result['models']} موديل والاستهلاك")->success()->send();
+                        } catch (\Throwable $e) {
+                            $record->update(['last_error' => mb_substr($e->getMessage(), 0, 2000)]);
+                            \Filament\Notifications\Notification::make()->title('فشل تحديث Bormaa Codex')->body($e->getMessage())->danger()->send();
+                        }
+                    }),
                 Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make(),
             ])

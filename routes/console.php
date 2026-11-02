@@ -17,6 +17,21 @@ Schedule::call(fn () => app(\App\Services\GeminiAlertService::class)->repeatOpen
     ->name('gemini-alerts-repeat')
     ->withoutOverlapping();
 
+// Codex Army documents /usage as a cheap read-only endpoint and recommends
+// polling roughly once a minute, not before every generation request.
+Schedule::call(function (): void {
+    \App\Models\GeminiApiKey::query()
+        ->where('provider', 'bormaa')
+        ->where('is_active', true)
+        ->each(function (\App\Models\GeminiApiKey $key): void {
+            try {
+                app(\App\Services\BormaaCodexService::class)->sync($key);
+            } catch (\Throwable $e) {
+                $key->update(['last_error' => mb_substr($e->getMessage(), 0, 2000)]);
+            }
+        });
+})->everyMinute()->name('bormaa-codex-usage')->withoutOverlapping();
+
 
 // Handoffs no staff member answered in time go back to the bot.
 Schedule::call(fn () => app(\App\Domain\Handoff\HandoffService::class)->returnUnansweredToAgent())

@@ -18,6 +18,8 @@ class GeminiApiKey extends Model
         'last_used_at',
         'cooldown_until',
         'last_error',
+        'usage_snapshot',
+        'usage_refreshed_at',
     ];
 
     protected $casts = [
@@ -26,6 +28,8 @@ class GeminiApiKey extends Model
         'cooldown_until' => 'datetime',
         'is_paid' => 'boolean',
         'credit_since' => 'datetime',
+        'usage_snapshot' => 'array',
+        'usage_refreshed_at' => 'datetime',
     ];
 
     public function models(): HasMany
@@ -41,5 +45,10 @@ class GeminiApiKey extends Model
     public function isGroq(): bool
     {
         return $this->provider === 'groq';
+    }
+
+    public function isBormaa(): bool
+    {
+        return $this->provider === 'bormaa';
     }
 }

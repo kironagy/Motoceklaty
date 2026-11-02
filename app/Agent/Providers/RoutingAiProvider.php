@@ -24,6 +24,10 @@ class RoutingAiProvider implements AiProvider
 
     public static function providerFor(string $model): string
     {
+        if (str_starts_with($model, 'bormaa:')) {
+            return 'bormaa';
+        }
+
         return preg_match('/^(gpt-|o\d)/i', $model) ? 'openai' : 'gemini';
     }
 
@@ -33,7 +37,9 @@ class RoutingAiProvider implements AiProvider
             return GeminiKeyManager::for($request->purpose, fn () => $this->chat($request));
         }
 
-        $modelCode = config('agent.model');
+        $modelCode = $request->purpose === 'image' && filled(config('agent.image_model'))
+            ? config('agent.image_model')
+            : config('agent.model');
 
         if (! $modelCode) {
             throw new \RuntimeException('config("agent.model") is not set (AGENT_MODEL). See DEC-06.');
@@ -65,8 +71,10 @@ class RoutingAiProvider implements AiProvider
             $modelDeadline = $index < count($models) - 1 ? min($deadline, microtime(true) + $cap) : $deadline;
 
             try {
-                if (self::providerFor($model) === 'openai') {
-                    return $this->openai->chatWith($request, $model, $modelDeadline);
+                $provider = self::providerFor($model);
+
+                if (in_array($provider, ['openai', 'bormaa'], true)) {
+                    return $this->openai->chatWith($request, $model, $modelDeadline, $provider);
                 }
 
                 // Gemini's fallback thinking setting is for a Gemini model

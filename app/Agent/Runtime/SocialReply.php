@@ -11,7 +11,13 @@ class SocialReply
         $map=json_decode((string)config('agent.social.replies','{}'),true);
         if(!is_array($map))return null;
         foreach($map as $input=>$reply){
-            if(!is_string($reply) || ($text==='' ? $raw!==trim((string)$input) : $text!==$normalize((string)$input)))continue;
+            $expected=$normalize((string)$input);
+            // A failed turn can leave the same greeting queued twice before
+            // any bot reply exists. Treat repeated identical social messages
+            // as one, instead of sending them to the model to improvise.
+            $parts=array_values(array_filter(array_map($normalize,preg_split('/[\r\n]+/u',$raw)?:[]),fn($part)=>$part!==''));
+            $sameRepeated=$parts!==[] && count(array_unique($parts))===1 && $parts[0]===$expected;
+            if(!is_string($reply) || ($text==='' ? $raw!==trim((string)$input) : $text!==$expected && !$sameRepeated))continue;
             return $reply===''?['messages'=>[],'no_reply'=>true]:['messages'=>[$reply]];
         }
         return null;
