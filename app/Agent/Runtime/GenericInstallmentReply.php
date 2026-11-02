@@ -14,7 +14,7 @@ class GenericInstallmentReply
         if (mb_strlen($text) <= 100 && preg_match('/قسط|تقسيط|اقساط/u', $text)
             && ! preg_match('/\d|[a-z]|موديل|سنتين|سنه|سنين|مقدم|فايد|فائد|ورق|بطاق|شغل|موظف|معاش|هوج|دايو|بوكسر|فجور|فيجور|سكوتر/u', $text)
             && preg_match('/تفصيل|تفاصيل|نظام|في مكنه|فيه|مفيش/u', $text)) {
-            return ['messages'=>['التقسيط متاح، والقسط بيتحسب حسب الموديل والمدة. بتسأل على أنهي موديل؟']];
+            return ['messages'=>['القسط بيتحسب على حسب الموديل. بتسأل على قسط أنهي موديل؟']];
         }
 
         // Deliberately narrow: richer requests (work/use/budget/no down
