@@ -7,6 +7,9 @@ class SocialReply
     {
         $normalize=fn($s)=>trim(preg_replace('/\s+/u',' ',\App\Support\ArabicTextNormalizer::normalize($s)));
         $raw=trim($text);
+        if (preg_match('/^[\s.؟?!،…👍🏻🏼🏽🏾🏿❤️]+$/u', $raw) && $raw !== '') {
+            return ['messages'=>[], 'no_reply'=>true];
+        }
         $text=$normalize($text);
         $map=json_decode((string)config('agent.social.replies','{}'),true);
         if(!is_array($map))return null;

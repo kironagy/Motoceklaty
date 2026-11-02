@@ -120,6 +120,12 @@ class AgentRunner
         // ARCH-006 / ERR-002: what an earlier attempt of this turn already did
         // (read before this attempt runs anything itself).
         $resumed = $this->completedSteps((int) $turn->id);
+        $latestIncoming = WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')->latest('id')->first();
+        if ($resumed === [] && $latestIncoming?->type === 'text'
+            && preg_match('/^[\s.؟?!،…👍🏻🏼🏽🏾🏿❤️]+$/u', trim((string) $latestIncoming->text))) {
+            $this->finishTrace($trace, 'done', [['code'=>'PUNCTUATION_OR_ACK_ONLY','args'=>[]]], null);
+            return ['messages'=>[], 'no_reply'=>true];
+        }
 
         if ($resumed === [] && \App\Domain\Forms\FormLinkService::formsMode()) {
             $text = trim($this->guard->customerTextSinceLastReply($conversation));

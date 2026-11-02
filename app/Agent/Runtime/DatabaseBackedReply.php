@@ -47,7 +47,7 @@ class DatabaseBackedReply
         // reasoning task. Answering it here avoids the model -> tool -> model
         // loop (and its duplicated prompt) while keeping prices authoritative.
         if (preg_match('/(?:رشح|ترشح|اقتراح|انسب|مناسب|عايز|محتاج).*(?:شغل|دليفري|اقتصاد|اقتصادي)|(?:شغل|دليفري).*(?:مكن[هة]|موتوسيكل|اقتصاد|اقتصادي)/u', $normalized)
-            && ! preg_match('/(?:سكوتر|تروسيكل|تروسيكل)/u', $normalized)) {
+            && ! preg_match('/(?:سكوتر|تروسيكل|ورق|اوراق|مستند|مطلوب|بطاق|شروط|طلب|مقدم|فايد|فائد)/u', $normalized)) {
             $reply = $this->economicWorkRecommendation($ctx);
             if ($reply !== null) return $reply;
         }
