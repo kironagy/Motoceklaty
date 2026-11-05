@@ -65,6 +65,15 @@ class ReplyGuard
         $replyText = preg_replace('/[\x{064B}-\x{065F}\x{0670}\x{0640}]/u', '', implode(' ', $args['messages'] ?? []));
         $succeeded = array_column(array_filter($outcomes, fn ($o) => $o['ok'] && $this->changedSomething($o)), 'name');
         $toolResultsBlob = json_encode(array_column($outcomes, 'data'), JSON_UNESCAPED_UNICODE) ?: '';
+        // Financial failures take precedence over advisory style violations.
+        if ($this->percentWithWrongDuration($replyText)) {
+            $this->detail = $this->realRates();
+            return 'PERCENT_DURATION_MISMATCH';
+        }
+        if (preg_match('/قسط|تقسيط|مقدم|مصاريف/u',$replyText)
+            && $this->hasUnverifiedNumber($replyText,$system,$toolResultsBlob,$contents,true)) {
+            return 'UNVERIFIED_NUMBER';
+        }
 
         // Staying silent on a closing "تمام"/emoji is checked by send_reply
         // itself (SendReplyTool::mayStaySilent) - there is no text to judge.

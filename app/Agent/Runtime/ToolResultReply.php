@@ -7,6 +7,7 @@ class ToolResultReply
 {
     public function for(string $tool, array $result, string $text = ''): ?array
     {
+        if (data_get($result,'error.code') === 'MODEL_VERSION_CLARIFICATION') return ['messages'=>[(string)data_get($result,'error.detail')]];
         if (data_get($result,'error.code') === 'MODEL_SELECTION_REQUIRED') return ['messages'=>['القسط والمصاريف بيتحسبوا حسب الموديل. تحب نحسب أنهي موتوسيكل؟']];
         if (! ($result['ok'] ?? false)) return null;
         $data = (array) ($result['data'] ?? []);
@@ -39,6 +40,7 @@ class ToolResultReply
         if ($offers !== []) {
             $lines = array_values(array_filter(array_map(fn ($offer) => trim((string) ($offer['line'] ?? '')), $offers)));
             if (count($lines) !== count($offers)) return null;
+            if (collect($offers)->contains(fn($offer)=>(float)($offer['down_payment']??0)>0) && !empty($data['cap_reason'])) $lines[]=$data['cap_reason'];
             if (! empty($data['first_payment'])) $lines[] = $data['first_payment'];
             return ['messages'=>[implode("\n", $lines)]];
         }

@@ -225,7 +225,7 @@ class AgentRunner
             }
 
             $installment = app(GenericInstallmentReply::class)->for($customerText);
-            if ($installment !== null && ! $activeApplication) {
+            if ($installment !== null && ! $activeApplication && app(MotorcycleSelection::class)->lastNamed($conversation->id) === null) {
                 $this->resetFailureCounter($conversation);
                 $this->finishTrace($trace, 'done', [['code'=>'GENERIC_INSTALLMENT_CLARIFICATION','args'=>[]]], null);
                 return $installment;
@@ -441,8 +441,39 @@ class AgentRunner
 
                         // PHP checks only what the AI may not decide: claims of
                         // actions, numbers and facts no tool gave, promises.
+                        // Once selection is known, financial answers come from the
+                        // calculator, not another promise/question or an AI estimate.
+                        $candidate=implode(' ',(array)($toolCall['args']['messages']??[]));
+                        if(\App\Domain\Forms\FormLinkService::formsMode() && app(FormLinkIntakePolicy::class)->asksForPrivateData($candidate)){
+                            $this->tools->execute('check_eligibility',[],$ctx);
+                            $link=$this->tools->execute('send_application_link',[],$ctx);
+                            if(($link['ok']??false) && data_get($link,'data.link_sent_after_your_reply')){
+                                $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'CHAT_INTAKE_REPLACED_WITH_FORM_LINK','args'=>[]]],$lastResponse);
+                                return ['messages'=>['ده رابط التقديم، املأ بياناتك وارفع المستندات عليه. بيانات التقديم والمستندات مكانها الاستمارة، مش الشات.']];
+                            }
+                            $contents[]=$this->toolResultContent($toolCall['id'],'send_reply',['ok'=>false,'error'=>['code'=>'FORM_LINK_ONLY','detail'=>'Do not request personal data or documents in chat. Use send_application_link; if it failed, explain its exact blocker without asking for private data.']]);
+                            if($limitReached) return ['messages'=>['التقديم ورفع المستندات بيكونوا من الاستمارة الإلكترونية. تعذر تجهيز رابط التقديم حاليًا.']];
+                            continue;
+                        }
+                        if(!$ctx->activeApplicationId && preg_match('/قسط|تقسيط|مصاريف|مقدم/u',$candidate)
+                            && ($selected=app(MotorcycleSelection::class)->lastNamed($ctx->conversationId))){
+                            $exactArgs=['motorcycle_id'=>$selected];
+                            if($duration=app(MotorcycleSelection::class)->lastDuration($ctx->conversationId)) $exactArgs['months']=$duration;
+                            $priced=collect($outcomes)->where('name','get_installment_offer')->where('ok',true)->last();
+                            $exact=$priced ? ['ok'=>true,'data'=>$priced['data']] : $this->tools->execute('get_installment_offer',$exactArgs,$ctx);
+                            if($formatted=app(ToolResultReply::class)->for('get_installment_offer',$exact)){
+                                app(ToolOutcomeRecorder::class)->record('get_installment_offer',$exactArgs,$exact,$ctx);
+                                $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'EXACT_INSTALLMENT_REPLY','args'=>[]]],$lastResponse);
+                                return $formatted;
+                            }
+                        }
                         $violation = $this->guard->check($toolCall['args'], $conversation, $request->system, $contents, $outcomes);
-                        if ($violation !== null && config('agent.safety.reply_guard_mode') === 'advisory') {
+                        if ($violation === 'PERCENT_DURATION_MISMATCH' && ($rates=app(LiveInstallmentRates::class)->reply())) {
+                            $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'LIVE_RATES_REPLACED_STALE_PERCENT','args'=>[]]],$lastResponse);
+                            return ['messages'=>[$rates]];
+                        }
+                        if ($violation !== null && config('agent.safety.reply_guard_mode') === 'advisory'
+                            && !in_array($violation,['PERCENT_DURATION_MISMATCH','UNVERIFIED_NUMBER','INTEREST_DENIED'],true)) {
                             $guardEvents[] = ['code'=>'OBSERVED:'.$violation, 'args'=>$toolCall['args']];
                             $violation = null;
                         }
@@ -578,12 +609,13 @@ class AgentRunner
                         && ($result['ok'] ?? false) && data_get($result, 'data.question') === 'none') {
                         $step = \App\Models\AiTraceStep::where('tool_name','get_installment_offer')
                             ->whereHas('trace', fn ($q) => $q->where('conversation_id',$ctx->conversationId))->latest('id')->first();
-                        $id = data_get($step?->args_redacted,'motorcycle_id');
+                        $id = app(MotorcycleSelection::class)->lastNamed($ctx->conversationId);
                         if (! $id) $id = \App\Domain\Conversations\QuotedMotorcycle::last($ctx->conversationId);
                         if (! $id) $id = data_get(WhatsappConversation::find($ctx->conversationId)?->state,'interest.id');
                         if ($id) {
                             $args = ['motorcycle_id'=>(int)$id];
-                            $recent = WhatsappMessage::where('whatsapp_conversation_id',$ctx->conversationId)->where('direction','incoming')->latest('id')->take(5)->pluck('text');
+                            if($duration=app(MotorcycleSelection::class)->lastDuration($ctx->conversationId)) $args['months']=$duration;
+                            $recent = [];
                             foreach ($recent as $line) {
                                 $line = \App\Support\ArabicTextNormalizer::normalize((string)$line);
                                 if (preg_match('/سنتين|24 شهر/u',$line)) { $args['months']=24; break; }

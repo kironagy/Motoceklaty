@@ -61,6 +61,15 @@ class GetInstallmentOfferTool implements ReadTool
             return ToolResult::error('UNKNOWN_MOTORCYCLE');
         }
         if (! $ctx->activeApplicationId && ! app(\App\Agent\Runtime\MotorcycleSelection::class)->confirms($ctx->conversationId,(int)$machine->id)) {
+            $recent=\App\Models\WhatsappMessage::where('whatsapp_conversation_id',$ctx->conversationId)->where('direction','incoming')->latest('id')->limit(12)->get(['text','transcript']);
+            foreach($recent as $message){
+                $text=trim((string)$message->text.' '.(string)$message->transcript);
+                $ids=app(\App\Agent\Runtime\CatalogMentions::class)->fullNames($text);
+                if($ids!==[] && preg_match('/استيراد|فرز|اصلي|أصلي/u',$text)){
+                    $names=Machine::whereIn('id',$ids)->where('is_active',true)->pluck('name')->implode(' أو ');
+                    return ToolResult::error('MODEL_VERSION_CLARIFICATION','أنت سألت عن «'.$text.'». الاسم المسجل عندنا هو «'.$names.'». تقصد النسخة دي ولا موديل تاني؟');
+                }
+            }
             return ToolResult::error('MODEL_SELECTION_REQUIRED','العميل لم يحدد موديلًا واحدًا. اسأله على أنهي موديل قبل ذكر أي مقدم أو قسط أو مصاريف. نتائج البحث والترشيحات ليست اختيارًا.');
         }
 
@@ -129,6 +138,11 @@ class GetInstallmentOfferTool implements ReadTool
         }
 
         $months = isset($args['months']) ? (int) $args['months'] : null;
+        if ($months === null && empty($args['months_list']) && empty($args['all_durations'])) {
+            $remembered = app(\App\Agent\Runtime\MotorcycleSelection::class)->lastDurations($ctx->conversationId);
+            if(count($remembered)===1) $months=$remembered[0];
+            elseif(count($remembered)>1) $args['months_list']=$remembered;
+        }
 
         // He already chose a duration: a freelancer's financing cap then
         // listed three durations again and asked him to pick. He gets the

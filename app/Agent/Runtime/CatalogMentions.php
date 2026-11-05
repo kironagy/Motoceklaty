@@ -81,7 +81,11 @@ class CatalogMentions
     public function normalize(string $text): string
     {
         // "(cc200) هوجن ٤", "N-MAX", "G- Max": brackets and dashes are not part of the name
-        return ArabicTextNormalizer::normalize(preg_replace('/[()\-–_]+/u', ' ', $text) ?? $text);
+        $text = ArabicTextNormalizer::normalize(preg_replace('/[()\-–_]+/u', ' ', $text) ?? $text);
+        $text = preg_replace('/(?<=\p{L})(?=\d)|(?<=\d)(?=\p{L})/u', ' ', $text);
+        $text = preg_replace('/(?<!\p{L})دايون(?!\p{L})/u', 'دايو', $text);
+        $text = preg_replace('/(?<!\p{L})(?:اتنين|اثنين)(?!\p{L})/u', '2', $text);
+        return trim(preg_replace('/\s+/u', ' ', $text));
     }
 
     /** @return string[] */
@@ -108,7 +112,7 @@ class CatalogMentions
     private function vocabulary(): array
     {
         // Cached for ten minutes like reply_guard.latin_names: the workers live for days, the catalog changes.
-        return Cache::remember('reply_guard.catalog_mentions', 600, function () {
+        return Cache::remember('reply_guard.catalog_mentions.v2', 600, function () {
             $words = [];
             $names = [];
             $byMachine = [];
@@ -116,6 +120,11 @@ class CatalogMentions
             foreach (Machine::with('brand')->where('is_active', true)->get() as $machine) {
                 $brand = (string) $machine->brand?->name;
                 $own = array_filter(array_merge([(string) $machine->name], array_map('strval', (array) ($machine->aliases ?? []))));
+                // Customer shorthand is accepted only when the catalog makes it unique.
+                $short = trim(preg_replace('/\b(?:scooter|scooters)\b|\bi\b/iu', ' ', (string)$machine->name));
+                $short = trim(preg_replace('/\s+/u', ' ', $short));
+                if ($short !== '') $own[] = $short;
+                if (preg_match('/^([a-z]{3,})\s+\d+$/i', trim((string)$machine->name), $match)) $own[] = $match[1];
 
                 foreach ($own as $name) {
                     $normalized = $this->normalize($name);

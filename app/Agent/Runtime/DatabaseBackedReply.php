@@ -16,6 +16,10 @@ class DatabaseBackedReply
     {
         $normalized = trim(preg_replace('/\s+/u', ' ', ArabicTextNormalizer::normalize($text)));
         $requestedDurations = app(RequestedDurations::class)->months($text);
+        if (preg_match('/فايد|فائد|فوائد/u',$normalized) && !preg_match('/احسب|قسط.*كام/u',$normalized)
+            && ($rates=app(LiveInstallmentRates::class)->reply())) {
+            return ['messages'=>[$rates],'tool'=>'get_installment_options','args'=>[],'result'=>['ok'=>true,'data'=>['live_rates'=>$rates]]];
+        }
         if (count($requestedDurations)>1 && preg_match('/بكام|قسط|احسب|علي|على/u',$normalized)) {
             $id=$this->lastInstallmentMotorcycleId($ctx->conversationId);
             if($id){
