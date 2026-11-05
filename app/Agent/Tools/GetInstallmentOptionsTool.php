@@ -97,7 +97,7 @@ class GetInstallmentOptionsTool implements ReadTool
 
         return ToolResult::ok([
             'systems' => array_map(function (array $s) use ($machine, $customerTypeId, $cap) {
-                $minimum = $this->minimumDownPayment($machine, $s, $cap, $customerTypeId);
+                $minimum = $this->minimumDownPayment($machine, $s, $cap);
 
                 return [
                     'system_id' => $s['installment_system_id'],
@@ -108,7 +108,7 @@ class GetInstallmentOptionsTool implements ReadTool
                 ];
             }, $systems),
             'restrictions' => $restrictions,
-        ] + ($cap !== null && ! $this->caps->noMandatoryDownPayment($machine,$customerTypeId ? CustomerType::whereKey($customerTypeId)->value('key') : null) ? ['financing_cap' => [
+        ] + ($cap !== null ? ['financing_cap' => [
             'max_financed_amount' => $cap,
             'cap_reason' => $this->caps->explanation($cap, $customerTypeId),
             // the price above the cap is already in minimum_down_payment (rule in the instructions)
@@ -117,7 +117,7 @@ class GetInstallmentOptionsTool implements ReadTool
     }
 
     /** The system's own minimum, raised to whatever keeps the financed amount within a cap. */
-    private function minimumDownPayment(Machine $machine, array $system, ?float $cap, ?int $customerTypeId = null): float
+    private function minimumDownPayment(Machine $machine, array $system, ?float $cap): float
     {
         $minimum = (float) ($system['minimum_down_payment'] ?? 0);
 
@@ -125,8 +125,7 @@ class GetInstallmentOptionsTool implements ReadTool
             return $minimum;
         }
 
-        $key=$customerTypeId ? CustomerType::whereKey($customerTypeId)->value('key') : null;
-        return max($minimum, $this->caps->minimumDownPayment($machine, InstallmentSystem::findOrFail($system['installment_system_id']), $cap,$key));
+        return max($minimum, $this->caps->minimumDownPayment($machine, InstallmentSystem::findOrFail($system['installment_system_id']), $cap));
     }
 
     /**

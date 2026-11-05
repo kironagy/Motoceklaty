@@ -33,7 +33,6 @@ class BestOfferService
      */
     public function offers(Machine $machine, ?int $customerTypeId, ?string $governorate = null, ?int $months = null, ?float $downPayment = null, bool $noUpfront = false, ?int $systemId = null): array
     {
-        $customerTypeKey = $customerTypeId ? \App\Models\CustomerType::whereKey($customerTypeId)->value('key') : null;
         $systems = $machine->installmentSystems()
             ->with(['installmentPlans' => fn ($q) => $q->where('is_active', true)])
             ->get()
@@ -51,7 +50,7 @@ class BestOfferService
             $cap = $this->caps->capForSystem($system, $customerTypeId);
             $minimum = max(
                 (float) ($system->minimum_down_payment ?? 0),
-                $cap !== null ? $this->caps->minimumDownPayment($machine, $system, $cap, $customerTypeKey) : 0.0,
+                $cap !== null ? $this->caps->minimumDownPayment($machine, $system, $cap) : 0.0,
             );
             $down = max($minimum, (float) ($downPayment ?? 0));
 
