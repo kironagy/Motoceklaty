@@ -126,6 +126,17 @@ class AgentRunner
         $resumed = $this->completedSteps((int) $turn->id);
         $latestIncoming = WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')->latest('id')->first();
         if ($resumed === [] && $latestIncoming?->type === 'text'
+            && app(TalabatWorkContext::class)->isWorkStatement((string)$latestIncoming->text)) {
+            $workText = \App\Support\ArabicTextNormalizer::normalize((string)$latestIncoming->text);
+            if (preg_match('/كنت شغال|هشتغل|هشتغل|ناوي اشتغل/u',$workText)) {
+                $reply = 'تقصد شغل التوصيل على تطبيق طلبات. حضرتك شغال حاليًا ولا لسه هتبدأ؟';
+            } else {
+                $reply = 'تقصد شغلك في تطبيق طلبات، تمام. بتشتغل توصيل ولا موظف داخل الشركة؟';
+            }
+            $this->finishTrace($trace,'done',[['code'=>'TALABAT_WORK_DISAMBIGUATION','args'=>[]]],null);
+            return ['messages'=>[$reply]];
+        }
+        if ($resumed === [] && $latestIncoming?->type === 'text'
             && ($policyReply = app(CurrentBusinessPolicy::class)->reply((string)$latestIncoming->text)) !== null) {
             $this->finishTrace($trace,'done',[['code'=>'CURRENT_BUSINESS_POLICY','args'=>[]]],null);
             return ['messages'=>[$policyReply]];
@@ -204,7 +215,9 @@ class AgentRunner
                 return $social;
             }
 
-            $faq = app(SimpleFaqReply::class)->for($customerText);
+            $previousReply = WhatsappMessage::where('whatsapp_conversation_id',$conversation->id)->where('direction','outgoing')->latest('id')->value('text') ?? '';
+            $answeringWorkRole = str_contains($previousReply,'تطبيق طلبات') || str_contains($previousReply,'توصيل ولا موظف');
+            $faq = $answeringWorkRole ? null : app(SimpleFaqReply::class)->for($customerText);
             if ($faq !== null) {
                 $this->resetFailureCounter($conversation);
                 $this->finishTrace($trace, 'done', [['code'=>'APPROVED_SIMPLE_FAQ','args'=>[]]], null);
@@ -283,7 +296,7 @@ class AgentRunner
         if (! $activeApplication) {
             $text = $this->guard->customerTextSinceLastReply($conversation);
             $needed = ['send_reply', 'search_motorcycles', 'get_motorcycle_details', 'get_earlier_messages'];
-            if (preg_match('/قسط|تقسيط|مقدم|فايد|فائد|سنه|سنة|سنتين|شغل|شغال|موظف|معاش|ميكانيكي|ورشه|ورشة|دخل/u', $text))
+            if (preg_match('/قسط|تقسيط|مقدم|فايد|فائد|سنه|سنة|سنتين|شغل|شغال|موظف|معاش|ميكانيكي|ورشه|ورشة|دخل|طلبات|talabat|توصيل|دليفري/iu', $text))
                 $needed = array_merge($needed, ['get_installment_offer', 'get_installment_options', 'record_work_profile', 'check_eligibility']);
             if (preg_match('/قدم|طلب|ورق|مستند|بطاق/u', $text))
                 $needed = array_merge($needed, ['send_application_link', 'get_application_requirements', 'record_work_profile', 'check_eligibility']);
