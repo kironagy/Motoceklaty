@@ -380,6 +380,7 @@ class AgentRunner
                     }
 
                     if ($toolCall['name'] === 'send_reply') {
+                        $toolCall['args'] = app(PaymentWording::class)->apply($toolCall['args'],$outcomes);
                         $candidate = implode(' ',(array)($toolCall['args']['messages'] ?? []));
                         if (preg_match('/(?:رسوم|مصاريف).{0,35}الجواب|الجواب.{0,35}(?:رسوم|مصاريف)/u',$candidate)
                             && ! preg_match('/مفيش رسوم|لا توجد رسوم|بدون رسوم/u',$candidate)) {
