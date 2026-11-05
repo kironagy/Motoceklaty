@@ -15,6 +15,15 @@ class DatabaseBackedReply
     public function for(string $text, ToolContext $ctx): ?array
     {
         $normalized = trim(preg_replace('/\s+/u', ' ', ArabicTextNormalizer::normalize($text)));
+        $requestedDurations = app(RequestedDurations::class)->months($text);
+        if (count($requestedDurations)>1 && preg_match('/بكام|قسط|احسب|علي|على/u',$normalized)) {
+            $id=$this->lastInstallmentMotorcycleId($ctx->conversationId);
+            if($id){
+                $args=['motorcycle_id'=>$id,'months_list'=>$requestedDurations];
+                $result=$this->tools->execute('get_installment_offer',$args,$ctx);
+                if($reply=app(ToolResultReply::class)->for('get_installment_offer',$result)) return $reply+['tool'=>'get_installment_offer','args'=>$args,'result'=>$result];
+            }
+        }
         if (preg_match('/(?:مش عايز|مش عاوز|بدون|من غير|مفيش).*مقدم/u', $normalized)) {
             $id = $this->lastInstallmentMotorcycleId($ctx->conversationId);
             if ($id) {
@@ -76,7 +85,7 @@ class DatabaseBackedReply
         }
 
         if (($months = $this->durationMonths($normalized)) !== null
-            && (preg_match('/(?:قسط|تقسيط|احسب|حسبه)/u', $normalized) || preg_match('/^(?:علي|على)?\s*(?:سنتين|سنه|سنة|3 سنين|٣ سنين|24 شهر|٢٤ شهر)/u', $normalized))) {
+            && (preg_match('/(?:قسط|تقسيط|احسب|حسبه)/u', $normalized) || preg_match('/^(?:طب\s*)?و?(?:علي|على|ع)?\s*(?:ال)?(?:سنتين|سنه|سنة|3 سنين|٣ سنين|24 شهر|٢٤ شهر)/u', $normalized))) {
             $reply = $this->installmentForDuration($text, $months, $ctx);
             if ($reply !== null) return $reply;
         }
@@ -262,6 +271,7 @@ class DatabaseBackedReply
 
     private function lastInstallmentMotorcycleId(int $conversationId): ?int
     {
+        if ($named=app(MotorcycleSelection::class)->lastNamed($conversationId)) return $named;
         $step = \App\Models\AiTraceStep::query()
             ->where('tool_name', 'get_installment_offer')
             ->whereHas('trace', fn ($query) => $query->where('conversation_id', $conversationId))

@@ -54,11 +54,19 @@ class CatalogMentions
     {
         $text = $this->normalize($text);
         $ids = [];
+        $matches = [];
 
         foreach ($this->vocabulary()['names'] as $name => $machineIds) {
-            if (preg_match('/(?<![\p{L}\p{N}])(?:و)?'.preg_quote($name, '/').'(?![\p{L}\p{N}])/u', $text)) {
-                $ids = array_merge($ids, $machineIds);
+            if (preg_match_all('/(?<![\p{L}\p{N}])(?:و)?'.preg_quote($name, '/').'(?![\p{L}\p{N}])/u', $text,$found,PREG_OFFSET_CAPTURE)) {
+                foreach ($found[0] as [$value,$offset]) $matches[] = ['start'=>$offset,'end'=>$offset+strlen($value),'ids'=>$machineIds];
             }
+        }
+        usort($matches,fn($a,$b)=>($b['end']-$b['start'])<=>($a['end']-$a['start']));
+        $accepted=[];
+        foreach ($matches as $match) {
+            foreach ($accepted as $span) if ($match['start']<$span['end'] && $match['end']>$span['start']) continue 2;
+            $accepted[]=$match;
+            $ids=array_merge($ids,$match['ids']);
         }
 
         return array_values(array_unique($ids));

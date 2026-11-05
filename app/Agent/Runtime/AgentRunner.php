@@ -247,7 +247,7 @@ class AgentRunner
         // Anything ambiguous or involving installments, stock or buying intent
         // deliberately continues through the normal agent path.
         if ($resumed === [] && $onlyText && blank($turn->media_items ?? null) && ! $activeApplication) {
-            $direct = app(DatabaseBackedReply::class)->for($this->guard->customerTextSinceLastReply($conversation), $ctx);
+            $direct = app(DatabaseBackedReply::class)->for($latestIncoming?->text ?? $this->guard->customerTextSinceLastReply($conversation), $ctx);
             if ($direct !== null) {
                 app(\App\Domain\Memory\CustomerMemory::class)->recordToolEvent($ctx->customerId, $direct['tool'], $direct['args'], $direct['result']);
                 app(ToolOutcomeRecorder::class)->record($direct['tool'], $direct['args'], $direct['result'], $ctx);
