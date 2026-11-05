@@ -53,13 +53,20 @@ class FinancingCapPolicy
     }
 
     /** The smallest down payment that keeps the financed amount within the cap. */
-    public function minimumDownPayment(Machine $machine, InstallmentSystem $system, float $cap): float
+    public function minimumDownPayment(Machine $machine, InstallmentSystem $system, float $cap, ?string $customerTypeKey = null): float
     {
+        if ($this->noMandatoryDownPayment($machine,$customerTypeKey)) return 0.0;
         // mirrors InstallmentCalculator: which price gets financed depends on the system
         $base = $system->isZeroFees()
             ? (float) $machine->cash_price
             : (float) ($machine->installment_price ?: $machine->cash_price);
 
         return max(0.0, round($base - $cap, 2));
+    }
+
+    public function noMandatoryDownPayment(Machine $machine, ?string $customerTypeKey): bool
+    {
+        $cash = (float)$machine->cash_price;
+        return $cash>0 && $cash<60000 && in_array($customerTypeKey,['employee','self_employed'],true);
     }
 }

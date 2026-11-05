@@ -257,6 +257,7 @@ class GetInstallmentOfferTool implements ReadTool
 
     private function cappedWorkTypes(Machine $machine): ?string
     {
+        if ((float)$machine->cash_price>0 && (float)$machine->cash_price<60000) return null;
         $price = (float) ($machine->installment_price ?: $machine->cash_price);
         $capped = \App\Models\EligibilityRule::where('is_active', true)->where('rule_type', 'financing_cap')->whereNotNull('customer_type_id')->get()
             ->filter(fn ($r) => ($cap = (float) ($r->params['max_amount'] ?? 0)) > 0 && $cap < $price);
