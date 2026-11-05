@@ -15,6 +15,44 @@ class DatabaseBackedReply
     public function for(string $text, ToolContext $ctx): ?array
     {
         $normalized = trim(preg_replace('/\s+/u', ' ', ArabicTextNormalizer::normalize($text)));
+        if (preg_match('/(?:مش عايز|مش عاوز|بدون|من غير|مفيش).*مقدم/u', $normalized)) {
+            $id = $this->lastInstallmentMotorcycleId($ctx->conversationId);
+            if ($id) {
+                // No down payment does not mean no administrative fees.
+                $args = ['motorcycle_id'=>$id, 'down_payment'=>0, 'all_durations'=>true];
+                $result = $this->tools->execute('get_installment_offer',$args,$ctx);
+                $offers = (array)data_get($result,'data.offers',[]);
+                if (($result['ok'] ?? false) && $offers !== []) {
+                    $minimum = collect($offers)->min('minimum_down_payment');
+                    if (is_numeric($minimum) && $minimum > 0) {
+                        return ['messages'=>['الموديل ده محتاج مقدم '.number_format((float)$minimum).' جنيه لأن سعره أعلى من التمويل المتاح حسب شغلك، والمصاريف الإدارية منفصلة. تحب نشوف موديل في حدود التمويل من غير مقدم؟'],'tool'=>'get_installment_offer','args'=>$args,'result'=>$result];
+                    }
+                    if ($reply = app(ToolResultReply::class)->for('get_installment_offer',$result)) return $reply + ['tool'=>'get_installment_offer','args'=>$args,'result'=>$result];
+                }
+            }
+        }
+        if (preg_match('/قسط|تقسيط/u', $normalized) && ! preg_match('/فايد|فائد|مقدم|بدون|من غير/u', $normalized)) {
+            $ids = app(CatalogMentions::class)->fullNames($text);
+            if (count($ids) === 1 && $this->durationMonths($normalized) === null) {
+                $args = ['motorcycle_id'=>(int)$ids[0]];
+                $result = $this->tools->execute('get_installment_offer', $args, $ctx);
+                if (data_get($result, 'error.code') === 'ASK_WORK_FIRST') {
+                    $machine = \App\Models\Machine::find($ids[0]);
+                    return ['messages'=>[$machine->name.' سعرها كاش '.number_format((float)$machine->cash_price).' جنيه. حضرتك موظف ولا معاش ولا صاحب نشاط ولا دخل حر؟'], 'tool'=>'get_installment_offer','args'=>$args,'result'=>$result];
+                }
+                if ($reply = app(ToolResultReply::class)->for('get_installment_offer', $result)) return $reply + ['tool'=>'get_installment_offer','args'=>$args,'result'=>$result];
+            }
+        }
+
+        if (preg_match('/^(?:(?:انا )?عايز\s+)?(?:هوجن|هوجان)\s+(?:اف|أف|إف|f)[؟?\s]*$/iu', $normalized)) {
+            $args = ['name_query'=>'هوجان F', 'limit'=>8];
+            $result = $this->tools->execute('search_motorcycles', $args, $ctx);
+            $items = (array) data_get($result, 'data.items', []);
+            if (($result['ok'] ?? false) && $items !== []) {
+                $names = collect($items)->map(fn ($item) => $this->modelLabel($item))->unique()->implode(' ولا ');
+                return ['messages'=>['تقصد '.$names.'؟'], 'tool'=>'search_motorcycles','args'=>$args,'result'=>$result];
+            }
+        }
 
         if (preg_match('/بين|قارن|مقارنه|مقارنة/u', $normalized)) {
             $ids = app(CatalogMentions::class)->fullNames($text);
@@ -38,7 +76,7 @@ class DatabaseBackedReply
         }
 
         if (($months = $this->durationMonths($normalized)) !== null
-            && (preg_match('/(?:قسط|تقسيط)/u', $normalized) || preg_match('/^(?:علي|على)?\s*(?:سنتين|سنه|سنة|3 سنين|٣ سنين|24 شهر|٢٤ شهر)/u', $normalized))) {
+            && (preg_match('/(?:قسط|تقسيط|احسب|حسبه)/u', $normalized) || preg_match('/^(?:علي|على)?\s*(?:سنتين|سنه|سنة|3 سنين|٣ سنين|24 شهر|٢٤ شهر)/u', $normalized))) {
             $reply = $this->installmentForDuration($text, $months, $ctx);
             if ($reply !== null) return $reply;
         }
@@ -65,7 +103,8 @@ class DatabaseBackedReply
 
         // Only a plain cash-price question. Installments, stock, availability,
         // color, comparisons and buying intent continue through the full agent.
-        if (! preg_match('/(?:سعر|بكام|بكم|عامل\s+كام)/u', $normalized)
+        $bareModel = preg_match('/^(?:(?:انا )?(?:عايز|عاوز)\s+)?(?:هوجن|هوجان)?\s*f\s*250[؟?\s]*$/iu', $normalized);
+        if ((! $bareModel && ! preg_match('/(?:سعر|بكام|بكم|عامل\s+كام)/u', $normalized))
             || preg_match('/(?:قسط|تقسيط|مقدم|متاح|موجود|لون|فرع|اشتري|احجز|قارن|الفرق)/u', $normalized)) return null;
 
         $ids = app(CatalogMentions::class)->fullNames($text);
@@ -117,6 +156,11 @@ class DatabaseBackedReply
             "{$model} بـ ".number_format((float) $price).' جنيه كاش. لو حابب أشرحلك التقسيط قولّي.',
         ];
         $reply = $this->varied('price:'.$ctx->conversationId.':'.$machine->id, $templates);
+        if ($bareModel) {
+            $work = app(\App\Domain\Applications\WorkProfiles::class)->get($ctx->conversationId);
+            $reply = "{$model} سعرها كاش ".number_format((float) $price).' جنيه.';
+            if (empty($work['work_stated'])) $reply .= ' حضرتك موظف ولا معاش ولا صاحب نشاط ولا دخل حر؟';
+        }
 
         return ['messages' => [$reply], 'tool' => $name, 'args' => $args, 'result' => $result];
     }
@@ -224,6 +268,8 @@ class DatabaseBackedReply
             ->latest('id')
             ->first();
         $id = data_get($step?->args_redacted, 'motorcycle_id');
+        if (! is_numeric($id)) $id = \App\Domain\Conversations\QuotedMotorcycle::last($conversationId);
+        if (! is_numeric($id)) $id = data_get(\App\Models\WhatsappConversation::find($conversationId)?->state, 'interest.id');
         if (! is_numeric($id)) {
             $image = \App\Models\AiTraceStep::query()->where('tool_name', 'identify_motorcycle_from_image')
                 ->whereHas('trace', fn ($query) => $query->where('conversation_id', $conversationId))->latest('id')->first();

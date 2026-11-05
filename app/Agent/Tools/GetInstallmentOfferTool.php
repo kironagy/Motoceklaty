@@ -60,6 +60,9 @@ class GetInstallmentOfferTool implements ReadTool
         if (! $machine) {
             return ToolResult::error('UNKNOWN_MOTORCYCLE');
         }
+        if (! $ctx->activeApplicationId && ! app(\App\Agent\Runtime\MotorcycleSelection::class)->confirms($ctx->conversationId,(int)$machine->id)) {
+            return ToolResult::error('MODEL_SELECTION_REQUIRED','العميل لم يحدد موديلًا واحدًا. اسأله على أنهي موديل قبل ذكر أي مقدم أو قسط أو مصاريف. نتائج البحث والترشيحات ليست اختيارًا.');
+        }
 
         $conversation = \App\Models\WhatsappConversation::find($ctx->conversationId);
         if ($conversation && ($age = app(\App\Domain\Applications\AgeEligibilityGate::class)->for($conversation))) {

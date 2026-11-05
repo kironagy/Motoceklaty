@@ -55,11 +55,15 @@ class AgentRunner
         // there is none (live 2026-10-19: staff had cancelled it and he got the dead one twice),
         // a new one with everything he wrote, unless a request of his waits for a decision
         if (! $link && \App\Domain\Forms\FormLinkService::formsMode()
-            && preg_match('/(?:ال)?رابط/u', implode(' ', (array) ($result['messages'] ?? [])))) {
+            && preg_match('/رابط|لينك|الفورم/u', implode(' ', (array) ($result['messages'] ?? [])))) {
             $link = $this->openFormLink((int) $turn->whatsapp_conversation_id) ?? $this->freshFormLink((int) $turn->whatsapp_conversation_id, (int) $turn->id);
         }
 
         if (! $link || ! $link->isOpen()) {
+            if (\App\Domain\Forms\FormLinkService::formsMode()
+                && preg_match('/(?:هبعت|هيتبعت|اتبعت|ده رابط|ده لينك|فين.*رابط|مش ظاهر.*لينك)/u',implode(' ',(array)($result['messages'] ?? [])))) {
+                return ['messages'=>['علشان نكمل التقديم: حضرتك موظف ولا معاش ولا صاحب نشاط ولا دخل حر؟']];
+            }
             return $result;
         }
 
@@ -122,6 +126,11 @@ class AgentRunner
         $resumed = $this->completedSteps((int) $turn->id);
         $latestIncoming = WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')->latest('id')->first();
         if ($resumed === [] && $latestIncoming?->type === 'text'
+            && ($policyReply = app(CurrentBusinessPolicy::class)->reply((string)$latestIncoming->text)) !== null) {
+            $this->finishTrace($trace,'done',[['code'=>'CURRENT_BUSINESS_POLICY','args'=>[]]],null);
+            return ['messages'=>[$policyReply]];
+        }
+        if ($resumed === [] && $latestIncoming?->type === 'text'
             && preg_match('/^[\s.؟?!،…👍🏻🏼🏽🏾🏿❤️]+$/u', trim((string) $latestIncoming->text))) {
             $this->finishTrace($trace, 'done', [['code'=>'PUNCTUATION_OR_ACK_ONLY','args'=>[]]], null);
             return ['messages'=>[], 'no_reply'=>true];
@@ -131,8 +140,9 @@ class AgentRunner
             $text = trim($this->guard->customerTextSinceLastReply($conversation));
             $previous = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
                 ->where('direction', 'outgoing')->latest('id')->value('text') ?? '';
-            $explicit = preg_match('/(?:عايز|عاوز|محتاج)\s+(?:اقدم|أقدم)|(?:لينك|رابط)\s*التقديم/u', $text);
-            $accepted = preg_match('/^(?:نبدأ|نبدا|ابدأ|ابدا|يلا|تمام|اه|أه|ايوه|أيوه)[.!؟?\s]*$/u', $text)
+            $explicit = preg_match('/(?:عايز|عاوز|محتاج)\s+(?:اقدم|أقدم)|(?:لينك|رابط)\s*التقديم|فين\s*(?:الفورم|اللينك|الرابط)|ابعت.*(?:فورم|لينك|رابط)/u', $text);
+            $explicit = $explicit || preg_match('/^(?:نبدأ|نبدا|ابدأ|ابدا)[.!؟?\s]*$/u', $text);
+            $accepted = preg_match('/^(?:نبدأ|نبدا|ابدأ|ابدا|يلا|تمام|اه|أه|ايوه|أيوه|اتفضل|اتفضل)[.!؟?\s]*$/u', $text)
                 && preg_match('/نبدأ|نبدا|طلب التقسيط|التقديم/u', $previous);
             if ($explicit || $accepted) {
                 $this->tools->execute('check_eligibility', [], $ctx);
@@ -178,6 +188,15 @@ class AgentRunner
 
         if ($resumed === [] && $onlyText && blank($turn->media_items ?? null)) {
             $customerText = $this->guard->customerTextSinceLastReply($conversation);
+            $latestText = \App\Support\ArabicTextNormalizer::normalize((string) $latestIncoming?->text);
+            if (! $activeApplication && preg_match('/اوراق|ورق|مستند|بالبطاقه بس/u', $latestText)
+                && preg_match('/مطلوب|ايه|اي|بس/u', $latestText)) {
+                $work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id);
+                if (empty($work['work_stated'])) {
+                    $this->finishTrace($trace,'done',[['code'=>'REQUIREMENTS_NEED_INCOME_TYPE','args'=>[]]],null);
+                    return ['messages'=>['الأوراق بتختلف حسب نوع الدخل. حضرتك موظف ولا معاش ولا صاحب نشاط ولا دخل حر؟']];
+                }
+            }
             $social = app(SocialReply::class)->for($customerText);
             if ($social !== null) {
                 $this->resetFailureCounter($conversation);
@@ -222,6 +241,31 @@ class AgentRunner
                 $this->resetFailureCounter($conversation);
                 $this->finishTrace($trace, 'done', [['code' => 'DATABASE_BACKED_REPLY', 'args' => ['source' => $direct['tool']]]], null);
                 return ['messages' => $direct['messages']];
+            }
+        }
+
+        $photoRequest = \App\Support\ArabicTextNormalizer::normalize((string)$latestIncoming?->text);
+        if ($resumed === [] && $onlyText && preg_match('/(?:كل|صور).{0,35}250|250.{0,35}صور/u',$photoRequest)
+            && ! preg_match('/متبعتش|ما تبعتش|مش عايز/u',$photoRequest)) {
+            $found = $this->tools->execute('search_motorcycles',['cc_min'=>250,'cc_max'=>250,'limit'=>8],$ctx);
+            if ($found['ok'] ?? false) {
+                $lines = [];
+                foreach ((array)data_get($found,'data.items',[]) as $item) {
+                    $photo = $this->tools->execute('send_motorcycle_images',['motorcycle_id'=>(int)$item['id'],'max'=>1,'different_motorcycle_confirmed'=>true],$ctx);
+                    if ($photo['ok'] ?? false) {
+                        $price = !empty($item['is_offer']) && is_numeric($item['offer_price'] ?? null) ? $item['offer_price'] : ($item['cash_price'] ?? null);
+                        $label = trim((string)($item['brand'] ?? '').' '.$item['name']);
+                        $lines[(int)$item['id']] = $label.(is_numeric($price) ? ': كاش '.number_format((float)$price).' جنيه.' : '');
+                    }
+                }
+                if ($lines !== []) {
+                    $reply = $ctx->outbound->toArray();
+                    foreach ($reply['media'] as &$image) $image['caption'] = $lines[(int)($image['motorcycle_id'] ?? 0)] ?? '';
+                    unset($image);
+                    $reply['messages'] = [implode("\n",$lines)];
+                    $this->finishTrace($trace,'done',[['code'=>'BATCH_CATALOG_PHOTOS','args'=>[]]],null);
+                    return $reply;
+                }
             }
         }
 
@@ -288,6 +332,10 @@ class AgentRunner
                     || (microtime(true) - $started) >= (int) $wallClockSeconds;
 
                 if ($modelCalls >= (int) $maxModelCalls) {
+                    if ($known = app(ToolResultReply::class)->catalogFallback($outcomes)) {
+                        $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'CATALOG_RESULT_AT_LIMIT','args'=>[]]],$lastResponse);
+                        return $known + ['media'=>$ctx->outbound->toArray()['media'] ?? []];
+                    }
                     return $this->unverifiedReply($conversation, $trace, $guardEvents, 'LIMIT_REACHED_WITHOUT_REPLY');
                 }
 
@@ -319,6 +367,15 @@ class AgentRunner
                     }
 
                     if ($toolCall['name'] === 'send_reply') {
+                        $candidate = implode(' ',(array)($toolCall['args']['messages'] ?? []));
+                        if (preg_match('/(?:رسوم|مصاريف).{0,35}الجواب|الجواب.{0,35}(?:رسوم|مصاريف)/u',$candidate)
+                            && ! preg_match('/مفيش رسوم|لا توجد رسوم|بدون رسوم/u',$candidate)) {
+                            $toolCall['args']['messages'] = ['مفيش رسوم على الجواب عندنا. المصاريف الإدارية للتقسيط منفصلة وبتتحسب حسب الموديل والنظام والمدة.'];
+                        }
+                        if (preg_match('/حكومي/u',$candidate) && preg_match('/مش متاح|غير متاح|مرفوض|نفس الحكم/u',$candidate)
+                            && ! preg_match('/شرط|محامي|قاضي|نياب/u',$candidate)) {
+                            $toolCall['args']['messages'] = ['الشغل الحكومي في حد ذاته مش سبب للرفض. بنراجع طبيعة الوظيفة وباقي الشروط؛ حضرتك بتشتغل إيه تحديدًا؟'];
+                        }
                         // Only technical cleanup (emoji, markdown, dashes) - never his words changed.
                         $toolCall['args'] = $this->rewritten($toolCall['args'], $guardEvents, [
                             'tidy' => fn ($a) => $this->guard->tidy($a),
@@ -478,6 +535,16 @@ class AgentRunner
                     }
 
                     $result = $this->tools->execute($toolCall['name'], $toolCall['args'], $ctx);
+                    if ($toolCall['name'] === 'handoff_to_human' && data_get($result,'error.code') === 'CUSTOMER_REQUEST_REQUIRED') {
+                        $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'HANDOFF_PERMISSION_QUESTION','args'=>[]]],$lastResponse);
+                        return ['messages'=>['تحب أحوّل محادثتك لموظف من فريقنا يكمل معاك؟']];
+                    }
+                    // Quoting is optional presentation metadata. An invented
+                    // quote must not discard an otherwise valid customer reply.
+                    if ($toolCall['name'] === 'send_reply' && data_get($result, 'error.code') === 'QUOTE_NOT_FOUND') {
+                        unset($toolCall['args']['quote_wa_message_id']);
+                        $result = $this->tools->execute('send_reply', $toolCall['args'], $ctx);
+                    }
 
                     // What a tool proves (a price looked up = he asked about
                     // that motorcycle) goes to his memory without a model call.
@@ -492,6 +559,43 @@ class AgentRunner
                         'ok' => (bool) ($result['ok'] ?? false),
                         'data' => ($result['ok'] ?? false) ? (array) ($result['data'] ?? []) : (array) ($result['error'] ?? []),
                     ];
+
+                    if (! $ctx->activeApplicationId && $toolCall['name'] === 'record_work_profile'
+                        && ($result['ok'] ?? false) && data_get($result, 'data.question') === 'none') {
+                        $step = \App\Models\AiTraceStep::where('tool_name','get_installment_offer')
+                            ->whereHas('trace', fn ($q) => $q->where('conversation_id',$ctx->conversationId))->latest('id')->first();
+                        $id = data_get($step?->args_redacted,'motorcycle_id');
+                        if (! $id) $id = \App\Domain\Conversations\QuotedMotorcycle::last($ctx->conversationId);
+                        if (! $id) $id = data_get(WhatsappConversation::find($ctx->conversationId)?->state,'interest.id');
+                        if ($id) {
+                            $args = ['motorcycle_id'=>(int)$id];
+                            $recent = WhatsappMessage::where('whatsapp_conversation_id',$ctx->conversationId)->where('direction','incoming')->latest('id')->take(5)->pluck('text');
+                            foreach ($recent as $line) {
+                                $line = \App\Support\ArabicTextNormalizer::normalize((string)$line);
+                                if (preg_match('/سنتين|24 شهر/u',$line)) { $args['months']=24; break; }
+                                if (preg_match('/3 سنين|ثلاث سنين/u',$line)) { $args['months']=36; break; }
+                                if (preg_match('/سنه ونص/u',$line)) { $args['months']=18; break; }
+                                if (preg_match('/(?:علي|ع|على) سنه/u',$line)) { $args['months']=12; break; }
+                            }
+                            $offer = $this->tools->execute('get_installment_offer',$args,$ctx);
+                            if ($direct = app(ToolResultReply::class)->for('get_installment_offer',$offer)) {
+                                app(ToolOutcomeRecorder::class)->record('get_installment_offer',$args,$offer,$ctx);
+                                $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'WORK_TO_OFFER_DIRECT','args'=>[]]],$lastResponse);
+                                return $direct;
+                            }
+                        } elseif (empty($result['data']['age_blocked']) && empty($result['data']['other_applicant_line'])) {
+                            $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'WORK_RECORDED_MODEL_REQUIRED','args'=>[]]],$lastResponse);
+                            return ['messages'=>['تمام، تحب نحسب التقسيط على أنهي موديل؟']];
+                        }
+                    }
+
+                    if (! $ctx->activeApplicationId && in_array($toolCall['name'], ['get_installment_offer','search_motorcycles','get_branch_information'], true)) {
+                        $direct = app(ToolResultReply::class)->for($toolCall['name'], $result, $this->guard->customerTextSinceLastReply($conversation));
+                        if ($direct !== null) {
+                            $this->finishTrace($trace, 'done', [...$guardEvents, ['code'=>'DIRECT_TOOL_RESULT','args'=>[]]], $lastResponse);
+                            return $direct;
+                        }
+                    }
 
                     if (in_array($toolCall['name'], ['check_cash_inventory', 'handoff_to_human'], true) && ($result['ok'] ?? false) && ($result['data']['handed_off'] ?? false) && isset($result['data']['customer_message'])) {
                         $this->finishTrace($trace, 'done', $guardEvents, $lastResponse);
@@ -557,8 +661,6 @@ class AgentRunner
         }
 
     }
-
-
 
     /**
      * Rebuild: one short factual line per refusal - what is untrue and what
@@ -724,6 +826,10 @@ class AgentRunner
         if (! $conversation || ! $tool->maySendLink($conversation)) {
             return null;
         }
+        $classification = app(\App\Domain\Applications\WorkClassification::class);
+        $work = $classification->reading($conversationId);
+        if (! $work || empty($work['work_stated']) || $classification->problem($conversationId,$work['customer_type'] ?? 'unknown')
+            || app(\App\Domain\Applications\AgeEligibilityGate::class)->for($conversation)) return null;
 
         try {
             $link = $tool->linkForChat($conversation);

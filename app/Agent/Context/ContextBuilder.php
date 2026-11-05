@@ -65,6 +65,9 @@ class ContextBuilder
             // cache covers it on every call.
             $l0['text'], $l3['text'], $l3b['text'], $l4['text'], $told['text'], $l6['text'], $this->ownStyleNote($conversation),
         ], fn ($block) => $block !== null && trim($block) !== '')));
+        if (\App\Domain\Forms\FormLinkService::formsMode()) {
+            $system .= "\n\nالتقديم الحالي بالفورم فقط: استعمل send_application_link عند بدء التقديم. العميل يرفع بياناته ومستنداته على الرابط، ممنوع طلب إرسال البطاقة أو المستندات في الشات. لو نوع دخله ناقص اسأل: حضرتك موظف ولا معاش ولا صاحب نشاط ولا دخل حر؟";
+        }
 
         $request = new AiRequest(
             system: $system,

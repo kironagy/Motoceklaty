@@ -45,6 +45,14 @@ class WorkProfiles
         if ($profile['evidence'] === '' || $this->statements->messageContainingQuote($conversationId, $profile['evidence']) === null) {
             return ['ok' => false, 'code' => 'EVIDENCE_NOT_IN_HIS_MESSAGES'];
         }
+        if (preg_match('/^(?:لو|مثلا|افترض)\s/u',trim($profile['evidence']))) return ['ok'=>false,'code'=>'HYPOTHETICAL_WORK_NOT_A_FACT'];
+        $previous = $this->get($conversationId);
+        if ($previous && $previous['applicant'] === $profile['applicant']
+            && ($previous['applicant_relation'] ?? null) === ($profile['applicant_relation'] ?? null)) {
+            foreach (['insured','sector','working_now','customer_type','relation_to_workplace'] as $key) {
+                if (($profile[$key] ?? 'unknown') === 'unknown' && ($previous[$key] ?? 'unknown') !== 'unknown') $profile[$key] = $previous[$key];
+            }
+        }
 
         // "اخ" + "اه" to "قصدك أبوك؟" is no father: a relation stands only on
         // his own words naming that person; otherwise it stays unclear.

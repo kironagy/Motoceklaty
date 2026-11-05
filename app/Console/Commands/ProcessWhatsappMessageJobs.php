@@ -469,6 +469,9 @@ class ProcessWhatsappMessageJobs extends Command
             $busySenders = $busy->pluck('from')->filter()->unique()->values()->all();
 
             $job = DB::table('whatsapp_message_jobs')
+                // Paused bots keep their jobs and generated replies, but do
+                // not consume model calls or block newly connected bots.
+                ->whereIn('whatsapp_bot_id', \App\Models\WhatsappBot::where('is_active', true)->select('id'))
                 /*
                  * 'generated' = the reply/state mutation already happened
                  * and is stored in `result`; only delivery failed or never

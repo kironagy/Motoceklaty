@@ -60,6 +60,24 @@ class WorkClassification
         }
 
         $words = $r['evidence'] !== '' ? $r['evidence'] : $r['occupation'];
+        $workEvidence = \App\Support\ArabicTextNormalizer::normalize((string)$words);
+        $occupationWords = $workEvidence.' '.\App\Support\ArabicTextNormalizer::normalize((string)($r['job_title'] ?? '').' '.(string)$r['occupation']);
+        $officer = preg_match('/ضابط|ظابط|نقيب|رائد|مقدم|عقيد|عميد|لواء|ملازم/u', $occupationWords);
+        $armyOfficer = $officer && preg_match('/جيش|قوات مسلحه/u', $occupationWords) && ! str_contains($occupationWords,'شرطه');
+        if ($r['customer_type'] !== 'pension' && preg_match('/شرطه/u',$occupationWords)
+            && ($officer || str_contains($occupationWords,'امين'))) {
+            return ['code'=>'OCCUPATION_NOT_ACCEPTED','hint'=>'ضباط الشرطة بكل الرتب وأمناء الشرطة غير متاح لهم التقديم للتقسيط لأن جهات التمويل لا تتعامل معهم. لا تفتح الطلب ولا تعرض استثناء أو مراجعة لتجاوز الشرط. الكاش متاح.'];
+        }
+        if ($officer && ! $armyOfficer && ! str_contains($occupationWords,'شرطه') && $r['customer_type'] !== 'pension') {
+            return ['code'=>'OFFICER_BRANCH_REQUIRED','hint'=>'اسأل: حضرتك ضابط جيش ولا شرطة؟ لا تستنتج الجهة من الرتبة.'];
+        }
+        if (preg_match('/تحت (?:ال)?تدريب|تحت (?:ال)?اختبار|(?:بقاله|بقالي|بقالها)\s*(?:3|ثلاث|تلات|ثلاثه|تلاته)\s*ايام/u',$workEvidence)) {
+            return ['code'=>'EMPLOYMENT_TENURE_NOT_MET','hint'=>'العمل تحت التدريب أو من ٣ أيام لا يستوفي شرط مدة العمل، المطلوب من ٣ إلى ٦ شهور حسب الحالة. لا تعتبر البطاقة وحدها استيفاء لهذا الشرط.'];
+        }
+        $job = \App\Support\ArabicTextNormalizer::normalize((string)($r['job_title'] ?? '').' '.(string)$r['occupation']);
+        if (preg_match('/(?<!\p{L})(?:محامي(?:ه)?|قاضي|وكيل نيابه)(?!\p{L})/u', $job) && $r['customer_type'] !== 'pension') {
+            return ['code'=>'OCCUPATION_NOT_ACCEPTED','hint'=>'المحامون والقضاة ووكلاء النيابة غير متاح لهم التقديم للتقسيط لأن جهات التمويل لا تتعامل معهم. لا تفتح طلبًا ولا تعرض استثناء أو مراجعة لتجاوز الشرط. الكاش متاح.'];
+        }
 
         if (($r['applicant_nationality'] ?? null) === 'foreign') {
             return ['code' => 'FOREIGNER_NO_INSTALLMENTS', 'hint' => ''];
@@ -72,7 +90,7 @@ class WorkClassification
         // Simulation 2026-10-04: a retired postal manager was refused as
         // "government work". Sector alone cannot decide eligibility; a flagged
         // current occupation pauses automation for a staff decision.
-        if ($r['refused_work'] && $r['customer_type'] !== 'pension') {
+        if ($r['refused_work'] && ! $armyOfficer && $r['customer_type'] !== 'pension') {
             return ['code' => 'OCCUPATION_REQUIRES_STAFF_REVIEW', 'hint' => (string) config('agent.eligibility.occupation_review_hint')];
         }
 
