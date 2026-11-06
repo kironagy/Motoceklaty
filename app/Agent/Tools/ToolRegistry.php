@@ -80,6 +80,11 @@ class ToolRegistry
             ->first();
 
         if ($existing && $name !== 'check_cash_inventory') {
+            // Media queues are in-memory. A resumed generation must rehydrate them; replaying only the JSON loses the photos.
+            if ($name === 'send_motorcycle_images' && ($existing->result_redacted['ok'] ?? false)) {
+                if ($ctx->outbound->hasMediaFor((int) ($args['motorcycle_id'] ?? 0))) return $existing->result_redacted;
+                return $this->executeWithReconnect($tool, $args + ['resend'=>true], $ctx);
+            }
             return $existing->result_redacted;
         }
 
@@ -161,6 +166,16 @@ class ToolRegistry
         if ($ids === []) {
             return null;
         }
+
+        $currentText = app(\App\Agent\Runtime\ReplyGuard::class)->customerTextSinceLastReply(\App\Models\WhatsappConversation::findOrFail($ctx->conversationId));
+        $named = app(\App\Agent\Runtime\CatalogMentions::class)->fullNames($currentText);
+        // "صور دايو ٢ و٤" is an explicit request for both, not a different-model incident.
+        if (count($named) > 1 && (preg_match('/صور|صوره|صورة|وريني/u', $currentText) || ($args['different_motorcycle_confirmed'] ?? false) === true)
+            && array_diff(array_map('intval', $ids), $named) === []) return null;
+        // A bare "3" answering the duration question is not motorcycle id 3.
+        if (preg_match('/^\s*[123١٢٣]\s*$/u', $currentText)
+            && app(\App\Agent\Runtime\MotorcycleSelection::class)->lastDuration($ctx->conversationId) !== null
+            && count($ids) === 1 && app(\App\Agent\Runtime\MotorcycleSelection::class)->confirms($ctx->conversationId, (int) reset($ids))) return null;
 
         // A comparison explicitly names several models. Validate the whole
         // set before applying the single-model brand guard to each row.

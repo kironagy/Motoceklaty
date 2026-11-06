@@ -29,6 +29,8 @@ class OpenAiVoiceTranscriber implements VoiceTranscriber
 
     public function transcribe(MessageMedia $media): TranscriptionResult
     {
+        // Owner: Gemini transcribes only; its transcript is answered by Bormaa in a separate call.
+        if (str_starts_with((string) config('agent.voice_model'), 'gemini-')) return $this->fallback->transcribe($media);
         $disk = Storage::disk($media->disk);
 
         if (! $disk->exists($media->path) || $disk->size($media->path) > self::MAX_BYTES) {

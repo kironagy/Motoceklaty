@@ -122,7 +122,7 @@ class TurnScheduler implements TurnSchedulerHook
         DB::table('whatsapp_message_jobs')
             ->where('whatsapp_conversation_id', $conversation->id)
             ->where('status', 'pending')
-            ->update(['process_after' => $conversation->state['staff_active_until'], 'updated_at' => now()]);
+            ->update(['process_after' => \Illuminate\Support\Carbon::parse($conversation->state['staff_active_until'])->toDateTimeString(), 'updated_at' => now()]);
     }
 
     /** The customer's message joins (or opens) a turn that runs once staff have been quiet for the window. */

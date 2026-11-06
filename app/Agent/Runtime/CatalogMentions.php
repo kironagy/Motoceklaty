@@ -58,7 +58,16 @@ class CatalogMentions
 
         foreach ($this->vocabulary()['names'] as $name => $machineIds) {
             if (preg_match_all('/(?<![\p{L}\p{N}])(?:و)?'.preg_quote($name, '/').'(?![\p{L}\p{N}])/u', $text,$found,PREG_OFFSET_CAPTURE)) {
-                foreach ($found[0] as [$value,$offset]) $matches[] = ['start'=>$offset,'end'=>$offset+strlen($value),'ids'=>$machineIds];
+                foreach ($found[0] as [$value,$offset]) {
+                    $eligible = $machineIds;
+                    // A shorthand followed by an engine/model number cannot identify a model with a different number.
+                    if (!preg_match('/\d/',$name) && preg_match('/^\s*(\d{2,4})(?!\d)/u',substr($text,$offset+strlen($value)),$number)) {
+                        $eligible = array_values(array_filter($eligible,function($id)use($number){
+                            return collect($this->namesOf($id))->contains(fn($own)=>preg_match('/(?<!\d)'.preg_quote($number[1],'/').'(?!\d)/u',$own));
+                        }));
+                    }
+                    if ($eligible !== []) $matches[] = ['start'=>$offset,'end'=>$offset+strlen($value),'ids'=>$eligible];
+                }
             }
         }
         usort($matches,fn($a,$b)=>($b['end']-$b['start'])<=>($a['end']-$a['start']));
@@ -82,8 +91,15 @@ class CatalogMentions
     {
         // "(cc200) هوجن ٤", "N-MAX", "G- Max": brackets and dashes are not part of the name
         $text = ArabicTextNormalizer::normalize(preg_replace('/[()\-–_]+/u', ' ', $text) ?? $text);
+        $text = preg_replace('/(?<!\p{L})(?:وال|بال|ال|لل)(?=[a-z])/u', '', $text);
+        $text = preg_replace('/(?<!\p{L})(?:ال)?(?:زد|زيد)(?!\p{L})/u', 'z', $text);
+        $text = preg_replace('/(?<!\p{L})(?:ال)?(?:اف|إف)(?!\p{L})/u', 'f', $text);
+        $text = preg_replace('/(?<!\p{L})(?:ال)?اكس\s*رود(?!\p{L})/u', 'x road', $text);
+        $text = preg_replace('/(?<!\p{L})(و)?(?:كيوي|كيواي)(?!\p{L})/u', '$1keeway', $text);
+        $text = preg_replace('/(?<!\p{L})(و)?كيت(?!\p{L})/u', '$1keet', $text);
         $text = preg_replace('/(?<=\p{L})(?=\d)|(?<=\d)(?=\p{L})/u', ' ', $text);
         $text = preg_replace('/(?<!\p{L})دايون(?!\p{L})/u', 'دايو', $text);
+        $text = preg_replace('/(?<!\p{L})(دايو|هوجن|هوجان)\s*(\d+)\s*و\s*(\d+)(?!\d)/u', '$1 $2 و $1 $3', $text);
         $text = preg_replace('/(?<!\p{L})(?:اتنين|اثنين)(?!\p{L})/u', '2', $text);
         return trim(preg_replace('/\s+/u', ' ', $text));
     }
@@ -112,7 +128,7 @@ class CatalogMentions
     private function vocabulary(): array
     {
         // Cached for ten minutes like reply_guard.latin_names: the workers live for days, the catalog changes.
-        return Cache::remember('reply_guard.catalog_mentions.v2', 600, function () {
+        return Cache::remember('reply_guard.catalog_mentions.v6', 600, function () {
             $words = [];
             $names = [];
             $byMachine = [];
@@ -124,13 +140,17 @@ class CatalogMentions
                 $short = trim(preg_replace('/\b(?:scooter|scooters)\b|\bi\b/iu', ' ', (string)$machine->name));
                 $short = trim(preg_replace('/\s+/u', ' ', $short));
                 if ($short !== '') $own[] = $short;
-                if (preg_match('/^([a-z]{3,})\s+\d+$/i', trim((string)$machine->name), $match)) $own[] = $match[1];
+                if (preg_match('/^([a-z]{1,})\s*\d+$/i', trim((string)$machine->name), $match)) $own[] = $match[1];
+                $normalizedName = $this->normalize((string) $machine->name);
+                // rk200 R -> rk200; keet 2000w -> keet. Shared shorthands remain ambiguous, never first-row wins.
+                if (preg_match('/^(.+\d)\s+[a-z]$/i', $normalizedName, $match)) $own[] = $match[1];
+                if (preg_match('/^([a-z]{2,}(?:\s+[a-z]+)*)\s+\d+(?:\s+[a-z])?$/i', $normalizedName, $match)) $own[] = $match[1];
 
                 foreach ($own as $name) {
                     $normalized = $this->normalize($name);
 
                     // a whole name needs a letter and three characters ("بوكسر", "F16", not "ال")
-                    if (mb_strlen($normalized) >= 3 && preg_match('/\p{L}/u', $normalized)) {
+                    if ((mb_strlen($normalized) >= 3 || preg_match('/^[a-z]$/', $normalized)) && preg_match('/\p{L}/u', $normalized)) {
                         $names[$normalized][] = $machine->id;
                         $byMachine[$machine->id][] = $normalized;
                     }

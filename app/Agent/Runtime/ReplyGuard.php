@@ -952,9 +952,8 @@ class ReplyGuard
         return match ($rule['rule'] ?? null) {
             'card_only_last_resort' => "Never skip a required paper on your own. If he said he truly cannot bring ".($rule['papers'] ?? 'his work papers')." at all: {$call}. "
                 .'If he only asked or has not said it, ask him once whether he can bring them - do not drop them.',
-            'insurance_print_then_card_only' => "The substitute for the missing paper is the insurance print (برنت التأمينات). Only if he says he cannot bring that either: {$call}. "
-                .'Until he says so, ask for the insurance print, do not drop the paper.',
-            'insurance_print_only' => 'The only substitute is the insurance print (برنت التأمينات); there is no ID-only route for him. Say so and ask for it.',
+            'insurance_print_then_card_only' => 'Insurance print is optional, not a mandatory condition to apply. Explain the actual application form requirements and accepted alternatives without demanding it in chat.',
+            'insurance_print_only', 'insurance_print_optional' => 'Insurance print (برنت التأمينات) is OPTIONAL, never a mandatory condition to apply. Show the actual form requirements and their accepted alternatives; do not demand an insurance print in chat.',
             'no_salary_slip_needed' => 'His ID shows no job, so no salary slip is asked: say that plainly and ask for what is still missing.',
             default => 'Every paper on his list is required and cannot be waived; if he cannot bring one, ask for what the application lists as its substitute (documents.if_unavailable) - never invent one.',
         };

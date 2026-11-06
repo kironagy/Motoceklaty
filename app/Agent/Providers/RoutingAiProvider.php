@@ -13,9 +13,6 @@ use Illuminate\Support\Facades\Log;
  */
 class RoutingAiProvider implements AiProvider
 {
-    /** Answers a voice note when every configured model is GPT. */
-    private const AUDIO_MODEL = 'gemini-3.1-flash-lite';
-
     public function __construct(
         private readonly GeminiProvider $gemini,
         private readonly OpenAiProvider $openai,
@@ -40,6 +37,8 @@ class RoutingAiProvider implements AiProvider
         $modelCode = $request->purpose === 'image' && filled(config('agent.image_model'))
             ? config('agent.image_model')
             : config('agent.model');
+        $voiceTranscription = $request->purpose === 'voice' && $request->toolMode === 'none';
+        if ($voiceTranscription && filled(config('agent.voice_model'))) $modelCode = config('agent.voice_model');
 
         if (! $modelCode) {
             throw new \RuntimeException('config("agent.model") is not set (AGENT_MODEL). See DEC-06.');
@@ -53,10 +52,14 @@ class RoutingAiProvider implements AiProvider
             $models = array_values(array_unique(array_merge([trim((string) $documentModel)], $models)));
         }
 
-        // GPT cannot hear a voice note
-        if (! OpenAiProvider::accepts($request)) {
-            $models = array_values(array_filter($models, fn ($m) => self::providerFor($m) === 'gemini')) ?: [self::AUDIO_MODEL];
+        // VoiceTranscriptionService transcribes voice with Gemini before the reply is built.
+        // Never turn a failed transcription into a Gemini customer reply.
+        if (! OpenAiProvider::accepts($request) && ! $voiceTranscription) {
+            throw new AiProviderException('Audio must be transcribed before building a customer reply.', retryable: true);
         }
+        if ($voiceTranscription) $models = array_values(array_filter($models, fn ($m) => self::providerFor($m) === 'gemini'));
+        $models = self::allowedModels($request, $models);
+        if ($models === []) throw new AiProviderException('No permitted model for this purpose.', retryable: false);
 
         // One budget for the whole call, across keys and models.
         // a document photo gets a longer budget: its reader and one fallback both get a real try
@@ -92,5 +95,13 @@ class RoutingAiProvider implements AiProvider
         }
 
         throw new AiProviderException('No AI model configured.', retryable: true);
+    }
+
+    /** Owner policy: Gemini reads images; Bormaa alone answers/reviews customer messages. */
+    public static function allowedModels(AiRequest $request, array $models): array
+    {
+        $mediaReading = in_array($request->purpose, ['image','document'], true)
+            || ($request->purpose === 'voice' && $request->toolMode === 'none');
+        return array_values(array_filter($models, fn ($model) => $mediaReading || self::providerFor($model) === 'bormaa'));
     }
 }

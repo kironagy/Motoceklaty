@@ -95,4 +95,18 @@ class TurnResultBuilder
             'focus_motorcycle_ids' => $this->focusMotorcycleIds,
         ];
     }
+
+    /** Early financial/policy replies must not discard photos already queued by a successful tool. */
+    public function mergeInto(array $result): array
+    {
+        $media = [];
+        foreach (array_merge($this->media, (array) ($result['media'] ?? [])) as $item) {
+            $key = ($item['path'] ?? $item['url'] ?? '').':'.($item['motorcycle_id'] ?? '');
+            $media[$key] = $item;
+        }
+        $result['media'] = array_values($media);
+        $result['messages'] = array_values(array_unique(array_merge((array) ($result['messages'] ?? []), $this->trailing)));
+        if ($result['media'] !== []) unset($result['no_reply']);
+        return $result;
+    }
 }

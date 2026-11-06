@@ -8,7 +8,8 @@ class ToolResultReply
     public function for(string $tool, array $result, string $text = ''): ?array
     {
         if (data_get($result,'error.code') === 'MODEL_VERSION_CLARIFICATION') return ['messages'=>[(string)data_get($result,'error.detail')]];
-        if (data_get($result,'error.code') === 'MODEL_SELECTION_REQUIRED') return ['messages'=>['القسط والمصاريف بيتحسبوا حسب الموديل. تحب نحسب أنهي موتوسيكل؟']];
+        // A missing selection needs context repair, not the same canned question after every answer.
+        if (data_get($result,'error.code') === 'MODEL_SELECTION_REQUIRED') return null;
         if (! ($result['ok'] ?? false)) return null;
         $data = (array) ($result['data'] ?? []);
         if ($tool === 'get_branch_information') {

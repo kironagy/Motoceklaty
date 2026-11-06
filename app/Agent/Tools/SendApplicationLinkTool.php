@@ -116,6 +116,13 @@ class SendApplicationLinkTool implements WriteTool
             return ToolResult::error('NO_CONVERSATION');
         }
 
+        $text = app(\App\Agent\Runtime\ReplyGuard::class)->customerTextSinceLastReply($conversation);
+        $previous = (string) \App\Models\WhatsappMessage::where('whatsapp_conversation_id',$ctx->conversationId)->where('direction','outgoing')->latest('id')->value('text');
+        $intent = app(\App\Agent\Runtime\ConversationIntent::class);
+        if ($intent->refusesApplication($text) || $intent->asksForPhotos($text,$previous)) {
+            return ToolResult::error('APPLICATION_NOT_REQUESTED','The customer is asking about the motorcycle/photos, not applying. Answer that request and send the catalog photos. Do not ask work or application questions.');
+        }
+
         // Existing request facts take priority over application eligibility/link generation.
         if (! $this->maySendLink($conversation)) {
             return ToolResult::ok([

@@ -24,6 +24,7 @@ use App\Models\WhatsappMessage;
  */
 class AgentRunner
 {
+    private ?ToolContext $turnContext = null;
     public function __construct(
         private readonly AiProvider $ai,
         private readonly ToolRegistry $tools,
@@ -36,7 +37,81 @@ class AgentRunner
     /** @return array{messages: string[], quote_wa_message_id?: ?string, media?: array, focus_motorcycle_ids?: array} */
     public function run(object $turn): array
     {
-        return $this->withApplicationLink($turn, $this->runTurn($turn));
+        $purpose = \App\Services\GeminiKeyManager::isTestPhone(WhatsappConversation::whereKey($turn->whatsapp_conversation_id)->value('phone')) ? 'simulator' : 'reply';
+        if (\App\Services\GeminiKeyManager::purpose() !== $purpose) {
+            return \App\Services\GeminiKeyManager::for($purpose, fn () => $this->run($turn));
+        }
+        $this->turnContext = null;
+        $result = $this->runTurn($turn);
+        if ($this->turnContext) $result = $this->turnContext->outbound->mergeInto($result);
+        $result = $this->continueWithoutRepeating($turn, $result);
+        if ($this->turnContext) $result = $this->turnContext->outbound->mergeInto($result);
+        return $this->withApplicationLink($turn, $result);
+    }
+
+    private function continuityFacts(WhatsappConversation $conversation, string $burst): string
+    {
+        $selection = app(MotorcycleSelection::class);
+        $id = $selection->lastNamed($conversation->id);
+        $work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id);
+        return "## Verified conversation continuity (all customer messages in this turn count)\n"
+            .json_encode(['customer_burst'=>$burst, 'confirmed_model_id'=>$id, 'confirmed_model'=>$id ? \App\Models\Machine::find($id)?->name : null,
+                'requested_months'=>$selection->lastDurations($conversation->id), 'recorded_work'=>$work], JSON_UNESCAPED_UNICODE)
+            ."\nAnswer his actual current request before suggesting an application. Never ask a known model, duration, work or insurance answer again. A model answer to a photo question means SEND PHOTOS, not application intake. A bare 3 after duration choices means 36 months. If he refuses applying, stop all application/work questions. Use actual tools, not promises of a later calculation/link. insurance_print is optional, never mandatory. The 100 EGP/day advertisement means 3000 EGP/month on a 30-day basis; it is not a guaranteed quote for every model. Explain the ad, then calculate the selected model. Never invent missing stock, media or lending requirements.";
+    }
+
+    /** Last gate also covers deterministic early returns, which previously bypassed the reply guard entirely. */
+    private function continueWithoutRepeating(object $turn, array $result): array
+    {
+        $cid = (int) $turn->whatsapp_conversation_id;
+        $conversation = WhatsappConversation::findOrFail($cid);
+        $text = $this->guard->customerTextSinceLastReply($conversation);
+        $intent = app(ConversationIntent::class);
+        $candidate = implode("\n", (array) ($result['messages'] ?? []));
+        $previous = WhatsappMessage::where('whatsapp_conversation_id', $cid)->where('direction','outgoing')->where('sender_type','bot')->latest('id')->limit(12)->pluck('text')->all();
+        // A refusal must not be turned into a new application interview by any fallback.
+        if ($intent->refusesApplication($text) && $intent->questionKind($candidate) === 'work') {
+            $result['messages'] = ['تمام، مش هنبدأ تقديم. أنا معاك في استفسارك عن المكنة.'];
+            return $result;
+        }
+        if (preg_match('/بر[ني]نت|برنت/u', $candidate) && preg_match('/(?:إجباري|اجباري|إلزامي|الزامي|لازم|ضروري|شرط)/u', $candidate)
+            && ! preg_match('/مش شرط|مش إلزامي|مش الزامي|اختياري/u', $candidate)) {
+            $result['messages'] = ['برنت التأمينات مش شرط إلزامي للتقديم. المستندات المطلوبة حسب حالتك هتلاقيها في استمارة التقديم.'];
+            $candidate = $result['messages'][0];
+        }
+        $kind = $intent->questionKind($candidate);
+        if ($kind === null) return $result;
+        $selection = app(MotorcycleSelection::class);
+        $selected = $selection->lastNamed($cid);
+        $duration = $selection->lastDuration($cid);
+        $work = app(\App\Domain\Applications\WorkProfiles::class)->get($cid);
+        $known = ($kind === 'model' && $selected) || ($kind === 'duration' && $duration)
+            || ($kind === 'work' && ! empty($work['work_stated']))
+            || ($kind === 'insurance' && in_array($work['insured'] ?? '', ['yes','no'], true));
+        $alreadyAsked = collect($previous)->contains(fn ($p) => $intent->questionKind((string) $p) === $kind);
+        if (! $known && ! $alreadyAsked) return $result;
+        if ($selected && $this->turnContext && ! $intent->asksForPhotos($text, (string) ($previous[0] ?? ''))) {
+            $args = ['motorcycle_id'=>$selected];
+            if ($duration) $args['months'] = $duration;
+            $offer = $this->tools->execute('get_installment_offer', $args, $this->turnContext);
+            if ($formatted = app(ToolResultReply::class)->for('get_installment_offer', $offer)) {
+                // Do not replace one answered duration question with the same question from another path.
+                if ($intent->questionKind(implode(' ', $formatted['messages'])) !== $kind) return $formatted + array_diff_key($result, ['messages'=>1]);
+            }
+            $code = data_get($offer, 'error.code');
+            $questions = ['ASK_WORK_FIRST'=>'حضرتك بتشتغل إيه؟', 'ASK_INSURED'=>'متأمن عليك ولا لأ؟', 'ASK_SECTOR'=>'شغلك حكومي ولا خاص؟'];
+            if (isset($questions[$code]) && ! collect($previous)->contains(fn ($p) => $intent->questionKind((string)$p) === $intent->questionKind($questions[$code]))) {
+                $result['messages'] = [$questions[$code]];
+                return $result;
+            }
+        }
+        // Once a clarification failed, do not keep interrogating him with an equivalent question.
+        $url = rtrim((string) config('app.url'), '/').'/machines';
+        $result['messages'] = [$kind === 'model'
+            ? 'مش هكرر عليك سؤال الموديل. دي الموديلات بصورها وأسمائها عشان تختار المقصود بوضوح: '.$url
+            : 'مش هطلب منك تعيد نفس الإجابة. تعذر إكمال التفاصيل تلقائيًا بالمعلومات الحالية؛ تحب موظف يكمل معاك؟'];
+        \Illuminate\Support\Facades\Log::info('Bot repeated question prevented', ['conversation_id'=>$cid, 'turn_id'=>$turn->id, 'kind'=>$kind, 'answer_known'=>(bool)$known]);
+        return $result;
     }
 
     /**
@@ -54,7 +129,9 @@ class AgentRunner
         // "ده رابط التقديم" without the tool (he asked for it again): his open link - or, when
         // there is none (live 2026-10-19: staff had cancelled it and he got the dead one twice),
         // a new one with everything he wrote, unless a request of his waits for a decision
-        if (! $link && \App\Domain\Forms\FormLinkService::formsMode()
+        $customerText = $this->guard->customerTextSinceLastReply(WhatsappConversation::findOrFail($turn->whatsapp_conversation_id));
+        $previous = (string) WhatsappMessage::where('whatsapp_conversation_id', $turn->whatsapp_conversation_id)->where('direction', 'outgoing')->latest('id')->value('text');
+        if (! $link && app(ConversationIntent::class)->asksToApply($customerText, $previous) && \App\Domain\Forms\FormLinkService::formsMode()
             && preg_match('/رابط|لينك|الفورم/u', implode(' ', (array) ($result['messages'] ?? [])))) {
             $link = $this->openFormLink((int) $turn->whatsapp_conversation_id) ?? $this->freshFormLink((int) $turn->whatsapp_conversation_id, (int) $turn->id);
         }
@@ -62,7 +139,9 @@ class AgentRunner
         if (! $link || ! $link->isOpen()) {
             if (\App\Domain\Forms\FormLinkService::formsMode()
                 && preg_match('/(?:هبعت|هيتبعت|اتبعت|ده رابط|ده لينك|فين.*رابط|مش ظاهر.*لينك)/u',implode(' ',(array)($result['messages'] ?? [])))) {
-                return ['messages'=>['علشان نكمل التقديم: حضرتك موظف ولا معاش ولا صاحب نشاط ولا دخل حر؟']];
+                // A missing form link is not permission to replace an unrelated photo/model answer with an intake question.
+                $result['messages'] = ['تعذر تجهيز رابط التقديم حاليًا. بيانات التقديم والمستندات بتتسجل في الاستمارة الإلكترونية.'];
+                return $result;
             }
             return $result;
         }
@@ -82,13 +161,6 @@ class AgentRunner
     /** @return array{messages: string[], quote_wa_message_id?: ?string, media?: array, focus_motorcycle_ids?: array} */
     private function runTurn(object $turn): array
     {
-        $purpose = \App\Services\GeminiKeyManager::isTestPhone(WhatsappConversation::whereKey($turn->whatsapp_conversation_id)->value('phone'))
-            ? 'simulator' : 'reply';
-
-        if (\App\Services\GeminiKeyManager::purpose() !== $purpose) {
-            return \App\Services\GeminiKeyManager::for($purpose, fn () => $this->run($turn));
-        }
-
         $maxModelCalls = config('agent.runtime.max_model_calls');
         $maxToolCalls = config('agent.runtime.max_tool_calls');
         $wallClockSeconds = config('agent.runtime.wall_clock_seconds');
@@ -120,11 +192,31 @@ class AgentRunner
         $ctx = new ToolContext(
             $customer->id, $conversation->id, $activeApplication?->id, $turn->id, $trace->id, new TurnResultBuilder()
         );
+        $this->turnContext = $ctx;
 
         // ARCH-006 / ERR-002: what an earlier attempt of this turn already did
         // (read before this attempt runs anything itself).
         $resumed = $this->completedSteps((int) $turn->id);
         $latestIncoming = WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')->latest('id')->first();
+        $burstText = $this->guard->customerTextSinceLastReply($conversation);
+        $previousText = (string) WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'outgoing')->latest('id')->value('text');
+        $photoIntent = app(ConversationIntent::class)->asksForPhotos($burstText, $previousText);
+        $adText = \App\Support\ArabicTextNormalizer::normalize($burstText);
+        $adContext = \App\Support\ArabicTextNormalizer::normalize(WhatsappMessage::where('whatsapp_conversation_id',$conversation->id)->where('direction','incoming')->latest('id')->limit(6)->get(['text','transcript'])->map(fn($m)=>($m->text??'').' '.($m->transcript??''))->implode(' '));
+        if ($resumed === [] && preg_match('/(?<!\d)100\s*(?:جنيه|ج)(?!\p{L})/u', $adText)
+            && preg_match('/اعلان|فيس|كدب|كذب|يوم|بتقولو|بتقولوا/u',$adContext) && ! preg_match('/مقدم|حجز/u',$adText)) {
+            $reply = 'المقصود بالإعلان ١٠٠ جنيه في اليوم، يعني ٣٠٠٠ جنيه في الشهر على أساس ٣٠ يوم. ده شرح مبلغ الإعلان، مش سعر المكنة كاش ولا قسط ثابت لكل الموديلات؛ القسط والمقدم والمصاريف بيتحسبوا للموديل والمدة المختارين.';
+            if ($id = app(MotorcycleSelection::class)->lastNamed($conversation->id)) {
+                $offer = $this->tools->execute('get_installment_offer', ['motorcycle_id'=>$id], $ctx);
+                if ($quote = app(ToolResultReply::class)->for('get_installment_offer', $offer)) $reply .= "\n".implode("\n", $quote['messages']);
+            }
+            $this->finishTrace($trace, 'done', [['code'=>'DAILY_AD_PAYMENT_EXPLAINED','args'=>[]]], null);
+            return ['messages'=>[$reply]];
+        }
+        if ($resumed === [] && ($photos = app(CatalogPhotoReply::class)->for($burstText, $ctx, $this->tools)) !== null) {
+            $this->finishTrace($trace, 'done', [['code'=>'REQUESTED_CATALOG_PHOTOS', 'args'=>[]]], null);
+            return $photos;
+        }
         if ($resumed === [] && $latestIncoming?->type === 'text'
             && app(TalabatWorkContext::class)->isWorkStatement((string)$latestIncoming->text)) {
             $workText = \App\Support\ArabicTextNormalizer::normalize((string)$latestIncoming->text);
@@ -151,11 +243,7 @@ class AgentRunner
             $text = trim($this->guard->customerTextSinceLastReply($conversation));
             $previous = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
                 ->where('direction', 'outgoing')->latest('id')->value('text') ?? '';
-            $explicit = preg_match('/(?:عايز|عاوز|محتاج)\s+(?:اقدم|أقدم)|(?:لينك|رابط)\s*التقديم|فين\s*(?:الفورم|اللينك|الرابط)|ابعت.*(?:فورم|لينك|رابط)/u', $text);
-            $explicit = $explicit || preg_match('/^(?:نبدأ|نبدا|ابدأ|ابدا)[.!؟?\s]*$/u', $text);
-            $accepted = preg_match('/^(?:نبدأ|نبدا|ابدأ|ابدا|يلا|تمام|اه|أه|ايوه|أيوه|اتفضل|اتفضل)[.!؟?\s]*$/u', $text)
-                && preg_match('/نبدأ|نبدا|طلب التقسيط|التقديم/u', $previous);
-            if ($explicit || $accepted) {
+            if (app(ConversationIntent::class)->asksToApply($text, $previous)) {
                 $this->tools->execute('check_eligibility', [], $ctx);
                 $result = $this->tools->execute('send_application_link', [], $ctx);
                 if (($result['ok'] ?? false) && data_get($result, 'data.link_sent_after_your_reply')) {
@@ -199,7 +287,7 @@ class AgentRunner
 
         if ($resumed === [] && $onlyText && blank($turn->media_items ?? null)) {
             $customerText = $this->guard->customerTextSinceLastReply($conversation);
-            $latestText = \App\Support\ArabicTextNormalizer::normalize((string) $latestIncoming?->text);
+            $latestText = \App\Support\ArabicTextNormalizer::normalize($customerText);
             if (! $activeApplication && preg_match('/اوراق|ورق|مستند|بالبطاقه بس/u', $latestText)
                 && preg_match('/مطلوب|ايه|اي|بس/u', $latestText)) {
                 $work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id);
@@ -225,7 +313,7 @@ class AgentRunner
             }
 
             $installment = app(GenericInstallmentReply::class)->for($customerText);
-            if ($installment !== null && ! $activeApplication && app(MotorcycleSelection::class)->lastNamed($conversation->id) === null) {
+            if ($installment !== null && ! $photoIntent && ! $activeApplication && app(MotorcycleSelection::class)->lastNamed($conversation->id) === null) {
                 $this->resetFailureCounter($conversation);
                 $this->finishTrace($trace, 'done', [['code'=>'GENERIC_INSTALLMENT_CLARIFICATION','args'=>[]]], null);
                 return $installment;
@@ -247,7 +335,7 @@ class AgentRunner
         // Anything ambiguous or involving installments, stock or buying intent
         // deliberately continues through the normal agent path.
         if ($resumed === [] && $onlyText && blank($turn->media_items ?? null) && ! $activeApplication) {
-            $direct = app(DatabaseBackedReply::class)->for($latestIncoming?->text ?? $this->guard->customerTextSinceLastReply($conversation), $ctx);
+            $direct = $photoIntent ? null : app(DatabaseBackedReply::class)->for($burstText, $ctx);
             if ($direct !== null) {
                 app(\App\Domain\Memory\CustomerMemory::class)->recordToolEvent($ctx->customerId, $direct['tool'], $direct['args'], $direct['result']);
                 app(ToolOutcomeRecorder::class)->record($direct['tool'], $direct['args'], $direct['result'], $ctx);
@@ -257,7 +345,7 @@ class AgentRunner
             }
         }
 
-        $photoRequest = \App\Support\ArabicTextNormalizer::normalize((string)$latestIncoming?->text);
+        $photoRequest = \App\Support\ArabicTextNormalizer::normalize($burstText);
         if ($resumed === [] && $onlyText && preg_match('/(?:كل|صور).{0,35}250|250.{0,35}صور/u',$photoRequest)
             && ! preg_match('/متبعتش|ما تبعتش|مش عايز/u',$photoRequest)) {
             $found = $this->tools->execute('search_motorcycles',['cc_min'=>250,'cc_max'=>250,'limit'=>8],$ctx);
@@ -292,10 +380,14 @@ class AgentRunner
         // (record_customer_data); no separate understanding call before it.
         $request = $this->context->build($turn);
         $contents = $request->contents;
+        $contents[] = ['role'=>'user', 'parts'=>[['type'=>'text', 'text'=>$this->continuityFacts($conversation, $burstText)]]];
         $toolDeclarations = $this->toolsFor($activeApplication !== null);
         if (! $activeApplication) {
             $text = $this->guard->customerTextSinceLastReply($conversation);
-            $needed = ['send_reply', 'search_motorcycles', 'get_motorcycle_details', 'get_earlier_messages'];
+            // Follow-up answers ("الزد", "٣", "موظف", "تمام") must retain the same capabilities as the original question.
+            $needed = ['send_reply', 'search_motorcycles', 'get_motorcycle_details', 'get_earlier_messages',
+                'send_motorcycle_images', 'get_installment_offer', 'get_installment_options', 'record_work_profile',
+                'check_eligibility', 'send_application_link', 'get_application_requirements', 'get_branch_information'];
             if (preg_match('/قسط|تقسيط|مقدم|فايد|فائد|سنه|سنة|سنتين|شغل|شغال|موظف|معاش|ميكانيكي|ورشه|ورشة|دخل|طلبات|talabat|توصيل|دليفري/iu', $text))
                 $needed = array_merge($needed, ['get_installment_offer', 'get_installment_options', 'record_work_profile', 'check_eligibility']);
             if (preg_match('/قدم|طلب|ورق|مستند|بطاق/u', $text))
@@ -455,7 +547,8 @@ class AgentRunner
                             if($limitReached) return ['messages'=>['التقديم ورفع المستندات بيكونوا من الاستمارة الإلكترونية. تعذر تجهيز رابط التقديم حاليًا.']];
                             continue;
                         }
-                        if(!$ctx->activeApplicationId && preg_match('/قسط|تقسيط|مصاريف|مقدم/u',$candidate)
+                        if(!$photoIntent && !app(ConversationIntent::class)->refusesApplication($burstText) && !$ctx->activeApplicationId
+                            && preg_match('/قسط|تقسيط|مصاريف|مقدم/u',$candidate) && preg_match('/قسط|تقسيط|مصاريف|مقدم|سنه|سنتين|سنين|^\s*[123٣٢١]\s*$/u',$burstText)
                             && ($selected=app(MotorcycleSelection::class)->lastNamed($ctx->conversationId))){
                             $exactArgs=['motorcycle_id'=>$selected];
                             if($duration=app(MotorcycleSelection::class)->lastDuration($ctx->conversationId)) $exactArgs['months']=$duration;
@@ -605,7 +698,7 @@ class AgentRunner
                         'data' => ($result['ok'] ?? false) ? (array) ($result['data'] ?? []) : (array) ($result['error'] ?? []),
                     ];
 
-                    if (! $ctx->activeApplicationId && $toolCall['name'] === 'record_work_profile'
+                    if (! $photoIntent && ! $ctx->activeApplicationId && $toolCall['name'] === 'record_work_profile'
                         && ($result['ok'] ?? false) && data_get($result, 'data.question') === 'none') {
                         $step = \App\Models\AiTraceStep::where('tool_name','get_installment_offer')
                             ->whereHas('trace', fn ($q) => $q->where('conversation_id',$ctx->conversationId))->latest('id')->first();
@@ -629,13 +722,10 @@ class AgentRunner
                                 $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'WORK_TO_OFFER_DIRECT','args'=>[]]],$lastResponse);
                                 return $direct;
                             }
-                        } elseif (empty($result['data']['age_blocked']) && empty($result['data']['other_applicant_line'])) {
-                            $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'WORK_RECORDED_MODEL_REQUIRED','args'=>[]]],$lastResponse);
-                            return ['messages'=>['تمام، تحب نحسب التقسيط على أنهي موديل؟']];
                         }
                     }
 
-                    if (! $ctx->activeApplicationId && in_array($toolCall['name'], ['get_installment_offer','search_motorcycles','get_branch_information'], true)) {
+                    if (! $photoIntent && ! $ctx->activeApplicationId && in_array($toolCall['name'], ['get_installment_offer','search_motorcycles','get_branch_information'], true)) {
                         $direct = app(ToolResultReply::class)->for($toolCall['name'], $result, $this->guard->customerTextSinceLastReply($conversation));
                         if ($direct !== null) {
                             $this->finishTrace($trace, 'done', [...$guardEvents, ['code'=>'DIRECT_TOOL_RESULT','args'=>[]]], $lastResponse);
