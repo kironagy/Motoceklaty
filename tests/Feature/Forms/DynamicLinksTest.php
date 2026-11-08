@@ -390,8 +390,43 @@ class DynamicLinksTest extends TestCase
         $this->assertSame(0, $followUps->run());
         Carbon::setTestNow(now()->addHours(23));
         $this->assertSame(1, $followUps->run());
+        // the second one really reaches him, in other words (the same text again was a repeat)
+        $sent = WhatsappMessage::where('whatsapp_conversation_id', $this->conversation->id)->where('direction', 'outgoing')
+            ->where('delivery_status', 'sent')->latest('id')->limit(2)->pluck('text');
+        $this->assertCount(2, $sent->unique());
+        $this->assertStringContainsString($link->url(), $sent->first());
         Carbon::setTestNow(now()->addDays(2)->setTime(12, 0));
         $this->assertSame(0, $followUps->run());
+    }
+
+    /** Conversation 375: a send that failed (or timed out while WhatsApp still delivered it) was re-sent as a NEW message on every run - 7 reminders. */
+    public function test_a_follow_up_whose_send_failed_is_retried_as_the_same_message_never_a_new_one(): void
+    {
+        $link = $this->link();
+        $clientIds = [];
+        $calls = 0;
+        Http::swap(new \Illuminate\Http\Client\Factory);
+        Http::fake(function ($request) use (&$clientIds, &$calls) {
+            $clientIds[] = $request['client_id'] ?? null;
+
+            return ++$calls === 1
+                ? Http::response(['ok' => false], 500)
+                : Http::response(['ok' => true, 'wa_message_id' => 'wamid.F'], 200);
+        });
+
+        $before = (int) WhatsappMessage::max('id');
+        Carbon::setTestNow(now()->addMinutes(20));
+        $this->assertSame(0, app(FormLinkFollowUpService::class)->run());
+
+        Carbon::setTestNow(now()->addMinutes(20));
+        $this->assertSame(1, app(FormLinkFollowUpService::class)->run());
+
+        $rows = WhatsappMessage::where('whatsapp_conversation_id', $this->conversation->id)
+            ->where('direction', 'outgoing')->where('id', '>', $before)->get();
+        $this->assertCount(1, $rows, 'one reminder row, retried in place');
+        $this->assertSame('sent', $rows->first()->delivery_status);
+        $this->assertSame([$clientIds[0], $clientIds[0]], $clientIds, 'the worker sees the same client_id, so it never sends twice');
+        $this->assertSame(1, $link->refresh()->followups_sent);
     }
 
     public function test_follow_up_never_at_night_and_not_after_he_sent_it(): void
@@ -614,7 +649,10 @@ class DynamicLinksTest extends TestCase
         $this->form();
         $this->workProfile(['customer_type' => 'employee', 'work_type' => 'none', 'stated_monthly_income' => 8000]);
 
-        $result = app(SendApplicationLinkTool::class)->execute(['customer_name' => 'محمد علي حسن', 'motorcycle_id' => $this->machine->id, 'months' => 12], $this->toolContext())->toArray();
+        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $this->conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer',
+            'type' => 'text', 'text' => 'عايز اقسط البوكسر Boxer على سنة']);
+
+        $result = app(SendApplicationLinkTool::class)->execute(['customer_name' => 'محمد علي حسن', 'motorcycle_id' => $this->machine->id, 'his_words' => 'Boxer', 'months' => 12], $this->toolContext())->toArray();
 
         $answers = FormLink::firstOrFail()->answerValues();
         $this->assertSame('محمد علي حسن', $answers['name']);
@@ -748,7 +786,12 @@ class DynamicLinksTest extends TestCase
         $args = $strip->invoke($runner, ['messages' => ['ده رابط التقديم: '.$link->url()]], [], $this->conversation->id);
         $this->assertSame(['ده رابط التقديم'], $args['messages']);
 
+        // Rescue 2026-11-08: the link goes out only through send_application_link this turn
+        // (a reply merely saying "رابط" no longer attaches or creates one).
         $turn = (object) ['id' => 4242, 'whatsapp_conversation_id' => $this->conversation->id];
+        $this->assertSame(['ده رابط التقديم'], $attach->invoke($runner, $turn, ['messages' => $args['messages']])['messages']);
+
+        app(SendApplicationLinkTool::class)->execute([], $this->toolContext(4242));
         $result = $attach->invoke($runner, $turn, ['messages' => $args['messages']]);
 
         $fresh = FormLink::where('id', '!=', $link->id)->firstOrFail();

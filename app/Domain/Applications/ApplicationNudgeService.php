@@ -131,7 +131,7 @@ class ApplicationNudgeService
             return false;
         }
 
-        $this->delivery->deliverForConversation($conversation, ['messages' => [$text]], 'bot');
+        $this->delivery->deliverForConversation($conversation, ['messages' => [$text]], 'bot', dedupeKey: 'nudge:'.$application->id.':'.((int) ($nudges['total'] ?? 0) + 1));
 
         // re-read: the delivery may have written the state meanwhile
         $state = $conversation->fresh()->state ?? [];
@@ -146,6 +146,8 @@ class ApplicationNudgeService
     {
         return WhatsappMessage::where('whatsapp_conversation_id', $conversationId)->where('direction', 'outgoing')
             ->where('created_at', '>=', $application->created_at)
+            // one that never reached him is not a nudge he got (and a retry must keep its key)
+            ->where('delivery_status', 'sent')
             ->where(fn ($q) => $q->where('text', 'like', 'لسه معايا؟%')->orWhere('text', 'like', 'لو لسه حابب%'))
             ->count();
     }

@@ -51,6 +51,34 @@ class DeliveryServiceTest extends TestCase
         return \Illuminate\Support\Facades\DB::table('whatsapp_message_jobs')->find($turnId);
     }
 
+    /** Conversations 231/372/375: the same bot text again before the customer said anything new never reaches him, whoever sends it. */
+    public function test_the_same_bot_text_is_never_sent_twice_before_the_customer_writes_again(): void
+    {
+        $n = 0;
+        Http::fake(function () use (&$n) { return Http::response(['ok' => true, 'wa_message_id' => 'w'.(++$n)]); });
+        $turn = $this->turn();
+        $conversation = WhatsappConversation::find($turn->whatsapp_conversation_id);
+        $delivery = app(DeliveryService::class);
+
+        $delivery->deliver($turn, ['messages' => ['وعليكم السلام، نورتنا. أقدر أساعدك في إيه؟']]);
+        $delivery->deliverForConversation($conversation, ['messages' => ['وعليكم السلام،  نورتنا! أقدر أساعدك في إيه؟']], 'bot');
+        $delivery->deliverForConversation($conversation, ['messages' => ['حضرتك لسه الطلب مظهرش عندي']], 'bot');
+        $delivery->deliverForConversation($conversation, ['messages' => ['حضرتك لسه الطلب مظهرش عندي']], 'bot');
+
+        $this->assertSame(2, WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'outgoing')->count());
+        Http::assertSentCount(2);
+
+        // he writes again: the same answer to the same question is allowed
+        WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'whatsapp_bot_id' => $conversation->whatsapp_bot_id,
+            'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'السلام عليكم']);
+        $delivery->deliverForConversation($conversation, ['messages' => ['حضرتك لسه الطلب مظهرش عندي']], 'bot');
+        $this->assertSame(3, WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'outgoing')->count());
+
+        // a colleague's own words are never blocked
+        $delivery->deliverForConversation($conversation, ['messages' => ['حضرتك لسه الطلب مظهرش عندي']], 'agent');
+        $this->assertSame(4, WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'outgoing')->count());
+    }
+
     public function test_refuses_to_deliver_while_agent_disabled(): void
     {
         config(['agent.enabled' => false]);

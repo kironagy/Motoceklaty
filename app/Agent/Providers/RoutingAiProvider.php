@@ -97,11 +97,22 @@ class RoutingAiProvider implements AiProvider
         throw new AiProviderException('No AI model configured.', retryable: true);
     }
 
-    /** Owner policy: Gemini reads images; Bormaa alone answers/reviews customer messages. */
+    /**
+     * Policy (2026-11-06): with Bormaa configured, Gemini only reads media and
+     * Bormaa alone answers customers. Without any Bormaa model (local Gemini)
+     * the configured models answer - the restriction used to leave no model
+     * at all, so every customer reply failed with "No permitted model".
+     */
     public static function allowedModels(AiRequest $request, array $models): array
     {
         $mediaReading = in_array($request->purpose, ['image','document'], true)
             || ($request->purpose === 'voice' && $request->toolMode === 'none');
-        return array_values(array_filter($models, fn ($model) => $mediaReading || self::providerFor($model) === 'bormaa'));
+        $bormaaConfigured = collect($models)->contains(fn ($model) => self::providerFor($model) === 'bormaa');
+
+        if ($mediaReading || ! $bormaaConfigured) {
+            return array_values($models);
+        }
+
+        return array_values(array_filter($models, fn ($model) => self::providerFor($model) === 'bormaa'));
     }
 }

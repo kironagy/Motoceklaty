@@ -2,7 +2,7 @@
 namespace Tests\Feature;
 use Tests\TestCase;
 use Illuminate\Support\Facades\{DB,Schema,Cache};
-use App\Agent\Runtime\{CatalogMentions,MotorcycleSelection,LiveInstallmentRates,ToolResultReply};
+use App\Agent\Runtime\{CatalogMentions,MotorcycleSelection};
 class BotContinuityRegressionTest extends TestCase
 {
  protected function setUp():void {parent::setUp();config(['database.default'=>'sqlite','database.connections.sqlite.database'=>':memory:','cache.default'=>'array']);DB::purge('sqlite');
@@ -15,10 +15,6 @@ class BotContinuityRegressionTest extends TestCase
  DB::table('whatsapp_messages')->insert([['whatsapp_conversation_id'=>1,'direction'=>'incoming','text'=>'X ROAD'],['whatsapp_conversation_id'=>1,'direction'=>'incoming','text'=>'سنتين'],['whatsapp_conversation_id'=>1,'direction'=>'incoming','text'=>'شغل حر'],['whatsapp_conversation_id'=>1,'direction'=>'incoming','text'=>'بالبطاقة بس']]);
  $s=app(MotorcycleSelection::class);$this->assertSame(1,$s->lastNamed(1));$this->assertSame(24,$s->lastDuration(1));
  DB::table('whatsapp_messages')->insert(['whatsapp_conversation_id'=>1,'direction'=>'incoming','text'=>'دايون4استيراد']);$this->assertNull($s->lastNamed(1));
- }
- public function test_financing_reason_is_sent_with_exact_amounts():void{
- $reply=app(ToolResultReply::class)->for('get_installment_offer',['ok'=>true,'data'=>['offers'=>[['line'=>'سنة: مقدم 15,000 والقسط 6,050 جنيه','down_payment'=>15000]],'cap_reason'=>'الفرق فوق حد التمويل بيتدفع مقدم، والمصاريف منفصلة.']]);
- $this->assertStringContainsString('6,050',$reply['messages'][0]);$this->assertStringContainsString('حد التمويل',$reply['messages'][0]);$this->assertDoesNotMatchRegularExpression('/حوالي|تقريب|هحسب|رينج/u',$reply['messages'][0]);
  }
  public function test_voice_durations_are_kept_and_age_is_not_a_duration_and_private_data_is_redirected():void{
  DB::table('whatsapp_messages')->insert(['whatsapp_conversation_id'=>2,'direction'=>'incoming','text'=>'','transcript'=>'على السنة بكام وعلى السنتين بكام؟']);

@@ -27,6 +27,14 @@ class BusinessMemory extends Model
         'scope_application_statuses' => 'array',
     ];
 
+    protected static function booted(): void
+    {
+        // an edit in the dashboard publishes a new instruction version, like a lesson does
+        $sync = fn () => app(\App\Domain\Teaching\LessonSync::class)->sync(auth()->id());
+        static::saved($sync);
+        static::deleted($sync);
+    }
+
     public function updatedBy(): BelongsTo
     {
         return $this->belongsTo(Staff::class, 'updated_by');

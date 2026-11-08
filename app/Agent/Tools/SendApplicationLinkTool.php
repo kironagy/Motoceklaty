@@ -42,7 +42,9 @@ class SendApplicationLinkTool implements WriteTool
             'type' => 'object',
             'properties' => [
                 'customer_name' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Only the name he wrote himself (e.g. "كريم سامي"). Omit it when he never said his name - never "العميل" or a placeholder.'],
-                'motorcycle_id' => ['type' => 'integer', 'description' => 'Only a motorcycle he chose, id from a catalog tool.'],
+                'motorcycle_id' => ['type' => 'integer', 'description' => 'Only a motorcycle he chose, id from a catalog tool - with his_words.'],
+                'his_words' => ['type' => 'string', 'description' => 'With motorcycle_id: his exact words, copied from his messages, that name it. Without them the link goes out with no motorcycle and he picks it on the form.'],
+                'new_application' => ['type' => 'boolean', 'description' => 'true only when he clearly asks to apply again / for a new request although he applied before.'],
                 'months' => ['type' => 'integer', 'description' => 'Only months he chose.'],
             ],
         ];
@@ -60,19 +62,16 @@ class SendApplicationLinkTool implements WriteTool
             ->whereIn('status', FormSubmissionService::UNDECIDED_STATUSES)->latest('id')->first();
     }
 
-    public function maySendLink(WhatsappConversation $conversation): bool
+    /**
+     * No request yet: yes. A request under review: no. An earlier decided request: only when he asked
+     * for a new one - read by the AI ($newApplication), not a regex over his words.
+     */
+    public function maySendLink(WhatsappConversation $conversation, bool $newApplication = false): bool
     {
         if ($this->openRequest($conversation)) return false;
-        $text = app(\App\Agent\Runtime\ReplyGuard::class)->customerTextSinceLastReply($conversation);
-        $new = (bool) preg_match('/(?:عايز|عاوز|محتاج|ممكن|ابعت)[^.؟?\\n]{0,45}(?:اقدم|أقدم|تقديم|طلب)[^.؟?\\n]{0,25}(?:جديد|تاني|تانية|تانيه)|(?:عايز|عاوز|محتاج)[^.؟?\\n]{0,25}(?:اقدم|أقدم)\\s+من\\s+جديد/u', $text);
         $request = app(\App\Domain\Applications\RequestIdentity::class)->query($conversation->customer, $conversation)->latest('id')->first();
-        if ($request) return $new;
-        // An unverified old request is not a reason to start another application.
-        $history = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
-            ->where('direction', 'incoming')->where('sender_type', 'customer')->latest('id')->limit(20)->get(['text','transcript'])
-            ->map(fn ($m) => trim((string) $m->text.' '.(string) $m->transcript))->implode(' ');
-        $followup = (bool) preg_match('/(?:طلب|طلبي|طلبى)\\s+(?:ب?رقم|وصل|اتقدم|قدمته)|(?:قدمت|قدّمت)\\s+(?:طلب|قبل|من)/u', $history);
-        return $new || ! $followup;
+
+        return $request ? $newApplication : true;
     }
 
     /**
@@ -116,15 +115,8 @@ class SendApplicationLinkTool implements WriteTool
             return ToolResult::error('NO_CONVERSATION');
         }
 
-        $text = app(\App\Agent\Runtime\ReplyGuard::class)->customerTextSinceLastReply($conversation);
-        $previous = (string) \App\Models\WhatsappMessage::where('whatsapp_conversation_id',$ctx->conversationId)->where('direction','outgoing')->latest('id')->value('text');
-        $intent = app(\App\Agent\Runtime\ConversationIntent::class);
-        if ($intent->refusesApplication($text) || $intent->asksForPhotos($text,$previous)) {
-            return ToolResult::error('APPLICATION_NOT_REQUESTED','The customer is asking about the motorcycle/photos, not applying. Answer that request and send the catalog photos. Do not ask work or application questions.');
-        }
-
         // Existing request facts take priority over application eligibility/link generation.
-        if (! $this->maySendLink($conversation)) {
+        if (! $this->maySendLink($conversation, ($args['new_application'] ?? false) === true)) {
             return ToolResult::ok([
                 'has_existing_request' => true,
                 'has_open_request' => $this->openRequest($conversation) !== null,
@@ -137,24 +129,29 @@ class SendApplicationLinkTool implements WriteTool
             return ToolResult::ok(['age_blocked'=>true,'work_questions_required'=>false,'link_sent_after_your_reply'=>false,'customer_message'=>$age['customer_message']]);
         }
 
-        if (config('agent.safety.enabled')) {
-            $classification = app(\App\Domain\Applications\WorkClassification::class);
-            $work = $classification->reading($ctx->conversationId);
-            if (! $work || empty($work['work_stated'])) {
-                return ToolResult::error('WORK_NOT_RECORDED');
-            }
-            if ($problem = $classification->problem($ctx->conversationId, $work['customer_type'] ?? 'unknown')) {
+        // Owner rules (refused current job, foreigners, women on free income, eligibility)
+        // always apply - on what is KNOWN. Work not said yet is no blocker: the form asks it first.
+        $classification = app(\App\Domain\Applications\WorkClassification::class);
+        $work = $classification->reading($ctx->conversationId);
+        // a foreigner is known before his job is
+        if (($work['applicant_nationality'] ?? null) === 'foreign') {
+            return ToolResult::error('FOREIGNER_NO_INSTALLMENTS');
+        }
+        if ($work && ! empty($work['work_stated'])) {
+            $problem = $classification->problem($ctx->conversationId, $work['customer_type'] ?? 'unknown');
+            if ($problem && in_array($problem['code'], \App\Domain\Applications\WorkClassification::BLOCKING, true)) {
                 return ToolResult::error($problem['code'], $problem['hint']);
             }
             $check = \App\Models\AiTraceStep::where('turn_id', $ctx->turnId)
                 ->where('tool_name', 'check_eligibility')->latest('id')->first();
-            $result = $check?->result_redacted ?? [];
-            if (! ($result['ok'] ?? false)) {
-                return ToolResult::error('ELIGIBILITY_CHECK_REQUIRED');
-            }
+            // Not checked this turn: check now instead of costing the model another round trip.
+            $result = $check?->result_redacted ?? app(CheckEligibilityTool::class)->execute([], $ctx)->toArray();
             $data = $result['data'] ?? [];
-            if (in_array($data['status'] ?? '', ['not_eligible', 'needs_id'], true) || ! empty($data['occupation_not_accepted']) || ! empty($data['ask_sector'])) {
-                return ToolResult::error('ELIGIBILITY_NOT_CONFIRMED');
+            if (! ($result['ok'] ?? false)) {
+                return ToolResult::error('ELIGIBILITY_CHECK_REQUIRED', (string) data_get($result, 'error.detail', ''));
+            }
+            if (($data['status'] ?? '') === 'not_eligible' || ! empty($data['occupation_not_accepted'])) {
+                return ToolResult::error('ELIGIBILITY_NOT_CONFIRMED', (string) ($data['reason'] ?? ''));
             }
         }
 
@@ -163,6 +160,29 @@ class SendApplicationLinkTool implements WriteTool
                 'has_open_request' => true,
                 'request_id' => $open->id,
                 'hint' => 'He already has a request under review: no new link. Tell him its number and that the answer reaches him here.',
+            ]);
+        }
+
+        // Simulation 2026-11-08: the link was made for "Keeway keet 150", a model she never named.
+        // The same check as the offer: his own words must name it; otherwise he picks it on the form.
+        $motorcycleDropped = false;
+        if (isset($args['motorcycle_id']) && ! $ctx->activeApplicationId) {
+            $machine = \App\Models\Machine::where('is_active', true)->find($args['motorcycle_id']);
+            if (! $machine || ! app(GetInstallmentOfferTool::class)->hisWordsPick($args, $ctx, $machine)) {
+                unset($args['motorcycle_id']);
+                $motorcycleDropped = true;
+            }
+        }
+
+        // Simulation 2026-11-08: the same link again, alone, one message after it was sent.
+        $open = FormLink::where('whatsapp_conversation_id', $conversation->id)->whereIn('status', FormLink::OPEN_STATUSES)->latest('id')->first();
+        if ($open?->isOpen() && ($lastBot = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+                ->where('direction', 'outgoing')->latest('id')->limit(2)->pluck('text'))
+                ->contains(fn ($t) => str_contains((string) $t, '/f/'.$open->token))) {
+            return ToolResult::ok([
+                'link_sent_after_your_reply' => false,
+                'link_already_above' => true,
+                'hint' => 'His link is the message right above - do not send it again. Answer what he said; if it is about the form, tell him it is on that same link.',
             ]);
         }
 
@@ -188,6 +208,6 @@ class SendApplicationLinkTool implements WriteTool
             'already_filled_percent' => $progress['percent'],
             'still_missing' => array_slice($progress['missing'], 0, 6),
             'expires_at' => $link->expires_at?->toDateString(),
-        ]);
+        ] + ($motorcycleDropped ? ['motorcycle_not_prefilled' => 'He did not name that motorcycle himself: the link has none, he picks it on the form. Do not say the link is for that model.'] : []));
     }
 }

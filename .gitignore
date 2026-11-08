@@ -3,6 +3,7 @@
 /sessions/
 /auth/
 /whatsapp-bot/node_modules
+/whatsapp-bot/factory-runtime
 /chatgpt-worker/node_modules
 /ocr-service/.venv/
 /ocr-service/.venv312/

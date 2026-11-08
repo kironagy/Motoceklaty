@@ -9,7 +9,11 @@ class ConversationIntent
 {
     public function refusesApplication(string $text): bool
     {
-        return (bool) preg_match('/(?:مش|ما|لا)\s*(?:عايز|عاوز|محتاج)?\s*(?:اقدم|تقديم)|مش.*(?:طلب|تقديم)/u', ArabicTextNormalizer::normalize($text));
+        // "مش عايز اقدم دلوقتي" yes; "مش عارف افتح رابط التقديم" / "مش لاقي طلبي" no (he wants to apply / asks about it)
+        $text = ArabicTextNormalizer::normalize($text);
+
+        return (bool) preg_match('/(?:مش|ما|لا)\s*(?:عايز|عاوز|محتاج|ناوي)\s*(?:ا|ن)?(?:قدم|تقديم|اقسط|قسط)|(?:لا|مش)\s+(?:هقدم|هنقدم|هقسط)|(?:بلاش|خليها)\s+(?:التقديم|تقديم|بعدين)|مش\s+دلوقتي/u', $text)
+            && ! preg_match('/مش\s+(?:عارف|قادر|لاقي|بيفتح|شغال|ظاهر|واضح)/u', $text);
     }
 
     public function asksToApply(string $text, string $previous = ''): bool

@@ -1,7 +1,7 @@
 <?php
 foreach(['APP_ENV'=>'testing','APP_CONFIG_CACHE'=>'/tmp/cash-sales-test.php','DB_CONNECTION'=>'sqlite','DB_DATABASE'=>':memory:','CACHE_STORE'=>'array','SESSION_DRIVER'=>'array','LOG_CHANNEL'=>'stderr'] as $k=>$v){putenv("$k=$v");$_ENV[$k]=$v;$_SERVER[$k]=$v;}
 require dirname(__DIR__,2).'/vendor/autoload.php';$app=require dirname(__DIR__,2).'/bootstrap/app.php';$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
-use Illuminate\Support\Facades\{DB,Schema};use App\Agent\Tools\{HandoffToHumanTool,ToolContext};use App\Agent\Runtime\{EvidenceReview,SocialReply};use App\Models\WhatsappConversation;
+use Illuminate\Support\Facades\{DB,Schema};use App\Agent\Tools\{HandoffToHumanTool,ToolContext};use App\Agent\Runtime\EvidenceReview;use App\Models\WhatsappConversation;
 if(DB::connection()->getDriverName()!=='sqlite'||config('database.connections.sqlite.database')!==':memory:')throw new RuntimeException('Unsafe DB');
 Schema::create('whatsapp_conversations',function($t){$t->id();$t->string('phone')->nullable();$t->string('status');$t->text('last_topic')->nullable();$t->json('state')->nullable();$t->timestamps();});
 Schema::create('whatsapp_messages',function($t){$t->id();$t->integer('whatsapp_conversation_id');$t->integer('turn_id')->nullable();$t->string('sender_type');$t->string('direction');$t->text('text')->nullable();$t->text('transcript')->nullable();$t->timestamps();});
@@ -35,11 +35,5 @@ $ok(!App\Domain\Handoff\HandoffService::botKeepsAnswering($c->fresh()),'bot stop
 $run();$ok(DB::table('handoffs')->count()===1,'purchase transfer is idempotent');
 $ok(DB::table('handoffs')->value('reason')==='cash_purchase_confirmed','cash purchase has its own reason');
 config(['agent.cash.sales_handoff'=>false]);$ok(($run()['error']['code']??'')==='CASH_SALES_DISABLED','disabled route cannot be invoked');
-config(['agent.social.replies'=>json_encode(['تمام'=>'العفو','مساء الخير'=>'مساء النور','👍'=>''],JSON_UNESCAPED_UNICODE)]);
-$social=new SocialReply;
-$ok($social->for('تمام')['messages']===['العفو'],'acknowledgment uses approved memory response');
-$ok($social->for('مساء الخير')['messages']===['مساء النور'],'greeting bypasses business-fact review safely');
-$ok(($social->for('👍')['no_reply']??false)===true,'reaction can be silent');
-$ok($social->for('تمام طلبي وصل لفين')===null,'status question is never mistaken for thanks');
-$ok($social->for('عايز VLM كاش')===null,'business question still uses agent tools');
+// SocialReply removed 2026-11-08 (rescue): greetings/acks are GreetingReply + PUNCTUATION_OR_ACK_ONLY in the runner.
 echo "$n passed\n";

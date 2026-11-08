@@ -53,19 +53,35 @@ class ReplyLoopTest extends TestCase
         $this->assertLessThan(160, mb_strlen($feedback['detail']));
     }
 
-    public function test_a_second_false_fact_is_never_cut_and_never_argued_with(): void
+    /** Simulation 2026-11-08: cutting after one repair left "بيكون كالتالي" with no numbers - the AI rewrites twice. */
+    public function test_a_second_false_fact_gets_one_more_rewrite(): void
     {
         $conversation = $this->conversation();
         $fake = $this->fakeAi();
         $fake->queue($this->sendReply('السعر 99999 جنيه. تحب تقسط؟'));
         $fake->queue($this->sendReply('السعر 88888 جنيه. تحب تقسط؟'));
+        $fake->queue($this->sendReply('قولي الموديل اللي عايزه وأقولك سعره'));
+
+        $result = app(AgentRunner::class)->run($this->turnFor($conversation, 'بكام'));
+
+        $this->assertCount(3, $fake->requests());
+        $this->assertSame(['قولي الموديل اللي عايزه وأقولك سعره'], $result['messages']);
+    }
+
+    public function test_a_third_false_fact_is_never_cut_and_never_argued_with(): void
+    {
+        $conversation = $this->conversation();
+        $fake = $this->fakeAi();
+        $fake->queue($this->sendReply('السعر 99999 جنيه. تحب تقسط؟'));
+        $fake->queue($this->sendReply('السعر 88888 جنيه. تحب تقسط؟'));
+        $fake->queue($this->sendReply('السعر 77777 جنيه. تحب تقسط؟'));
         $fake->queue($this->sendReply('مش هيتنادى'));
 
         $result = app(AgentRunner::class)->run($this->turnFor($conversation, 'بكام'));
 
-        $this->assertCount(2, $fake->requests());
+        $this->assertCount(3, $fake->requests());
         $this->assertNotSame(['تحب تقسط؟'], $result['messages'], 'no sentence of the AI is deleted');
-        $this->assertStringNotContainsString('88888', implode(' ', $result['messages']));
+        $this->assertStringNotContainsString('77777', implode(' ', $result['messages']));
         $this->assertSame('fallback', AiTrace::sole()->status);
     }
 

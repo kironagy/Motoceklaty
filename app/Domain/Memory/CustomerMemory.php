@@ -427,6 +427,12 @@ class CustomerMemory
     /** @return ?string the stored source, or null when refused */
     private function putFact(array &$memory, string $key, string $value, string $source, ?string $quote, int $conversationId, string $now): ?string
     {
+        // Simulation 2026-11-08: "رقمي 01098655527" was filed as monthly_income. A mobile number is never an amount.
+        if (in_array($key, ['monthly_income', 'monthly_budget', 'cash_budget', 'down_payment'], true)
+            && preg_match('/(?<!\d)01[0125]\d{8}(?!\d)/', $this->westernDigits(str_replace([' ', '-'], '', $value)))) {
+            return null;
+        }
+
         $current = $memory['facts'][$key] ?? null;
 
         // A guess never replaces what he said, or a document / staff value.

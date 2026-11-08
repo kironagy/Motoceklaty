@@ -1,4 +1,8 @@
 <?php
+// RETIRED 2026-11-08 (bot rescue): every policy here is merged into resources/agent/instructions/agent.md (v6.0.0),
+// the ONE instruction source. Running this would append a second, contradicting copy to the live instructions.
+fwrite(STDERR, "Retired: publish resources/agent/instructions/agent.md instead (docs/superpowers/specs/2026-11-08-bot-rescue-design.md).\n"); exit(2);
+
 // Explicit, idempotent dashboard update with a recoverable policy snapshot.
 if (($argv[1] ?? '') !== '--apply') { fwrite(STDERR,"Usage: php scripts/deploy-work-document-policy.php --apply\n"); exit(2); }
 require dirname(__DIR__).'/vendor/autoload.php';$app=require dirname(__DIR__).'/bootstrap/app.php';$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();

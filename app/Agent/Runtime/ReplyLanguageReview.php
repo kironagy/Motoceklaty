@@ -12,11 +12,9 @@ class ReplyLanguageReview
         $plain=preg_replace('/[\x{064B}-\x{065F}\x{0670}\x{0640}]/u','',$text);
         if (preg_match('/\p{Cyrillic}/u',$plain)) return false;
         if($pattern!=='' && (@preg_match($pattern,'')===false || preg_match($pattern,$plain)))return false;
-        // The local banned-language check above is deterministic. The
-        // optional semantic reviewer costs a second provider call for every
-        // otherwise-valid reply, so low-cost deployments can disable it.
-        if(!config('agent.safety.language_ai_review',true))return true;
-        return app(EvidenceReview::class)->judge('reply_language',['candidate'=>$text]);
+        // Rescue 2026-11-08: no second AI call per reply. A failed judge call
+        // (timeout, quota) rejected good replies and ended in one canned line.
+        return true;
     }
     public function safeReply(): array
     {

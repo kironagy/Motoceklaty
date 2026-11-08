@@ -528,11 +528,11 @@ class SnapshotService
         }
 
         if ($occupation !== null) {
-            return ['if_unavailable' => ['rule' => 'insurance_print_optional', 'occupation_on_id' => $occupation]];
+            return ['if_unavailable' => ['rule' => 'insurance_print_only', 'occupation_on_id' => $occupation]];
         }
 
         if (in_array('salary_slip', $workPapers, true)) {
-            return ['if_unavailable' => ['rule' => 'insurance_print_optional']];
+            return ['if_unavailable' => ['rule' => 'insurance_print_then_card_only']];
         }
 
         // Owner 2026-10-04: "the important thing is that he applies" - the

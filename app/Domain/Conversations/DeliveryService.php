@@ -104,22 +104,41 @@ class DeliveryService
      * preserve that pre-existing behavior while still getting a persisted
      * outbound row for its audit trail.
      */
-    public function deliverForConversation(WhatsappConversation $conversation, array $result, string $senderType = 'agent', ?string $jidOverride = null, bool $requireAgentEnabled = true): void
+    public function deliverForConversation(WhatsappConversation $conversation, array $result, string $senderType = 'agent', ?string $jidOverride = null, bool $requireAgentEnabled = true, ?string $dedupeKey = null): void
     {
         $jid = $jidOverride ?? $conversation->customer?->jid ?? $conversation->phone;
 
-        $turnId = DB::table('whatsapp_message_jobs')->insertGetId([
-            'whatsapp_bot_id' => $conversation->whatsapp_bot_id,
-            'whatsapp_conversation_id' => $conversation->id,
-            'from' => $jid,
-            'reply_jid' => $jid,
-            'message' => $result['messages'][0] ?? '[media]',
-            'status' => 'done',
-            'attempts' => 0,
-            'processed_at' => now(),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        // Conversation 375: a reminder whose send failed or timed out (the worker
+        // may still deliver it) went out again as a NEW turn on every run - 7 times.
+        // The same key reuses the same turn and outbound row, so the worker's
+        // client_id registry sends it at most once.
+        $existing = $dedupeKey === null ? null
+            : DB::table('whatsapp_message_jobs')->where('dedupe_key', $dedupeKey)->first();
+
+        if ($existing) {
+            $this->deliver($existing, $result, $senderType, $requireAgentEnabled);
+
+            return;
+        }
+
+        try {
+            $turnId = DB::table('whatsapp_message_jobs')->insertGetId([
+                'whatsapp_bot_id' => $conversation->whatsapp_bot_id,
+                'whatsapp_conversation_id' => $conversation->id,
+                'from' => $jid,
+                'reply_jid' => $jid,
+                'message' => $result['messages'][0] ?? '[media]',
+                'status' => 'done',
+                'attempts' => 0,
+                'dedupe_key' => $dedupeKey,
+                'processed_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } catch (\Illuminate\Database\UniqueConstraintViolationException) {
+            // a parallel run claimed the key first: it sends, this one does not
+            return;
+        }
 
         $turn = DB::table('whatsapp_message_jobs')->find($turnId);
 
@@ -131,6 +150,12 @@ class DeliveryService
         $text = \App\Support\WhatsAppText::format($text);
 
         if (trim($text) === '' || $this->alreadySent($turn->id, 'text', $index)) {
+            return;
+        }
+
+        if ($senderType !== 'agent' && $this->repeatsSinceCustomer($turn, $text)) {
+            Log::info('Outbound repeat dropped', ['turn_id' => $turn->id, 'sender_type' => $senderType]);
+
             return;
         }
 
@@ -218,6 +243,41 @@ class DeliveryService
         $entries[] = ['motorcycle_id' => $item['motorcycle_id'], 'color' => $item['color'] ?? null, 'sent_at' => now()->toIso8601String()];
         $state['last_media_sent'] = $entries;
         $conversation->update(['state' => $state]);
+    }
+
+    /**
+     * The last safety net against repeats (conversations 231, 372, 375): the same
+     * automated or bot text, already sent (or possibly sent) since his last message,
+     * is not sent again - he has not said anything it could be answering.
+     * A colleague's own words ('agent') are never blocked.
+     */
+    private function repeatsSinceCustomer(object $turn, string $text): bool
+    {
+        $key = self::sameText($text);
+
+        if ($key === '') {
+            return false;
+        }
+
+        $lastIncoming = WhatsappMessage::where('whatsapp_conversation_id', $turn->whatsapp_conversation_id)
+            ->where('direction', 'incoming')->max('id');
+
+        return WhatsappMessage::where('whatsapp_conversation_id', $turn->whatsapp_conversation_id)
+            ->where('direction', 'outgoing')
+            ->where('turn_id', '!=', $turn->id)
+            ->whereIn('delivery_status', ['sent', 'queued'])
+            ->when($lastIncoming, fn ($q) => $q->where('id', '>', $lastIncoming))
+            ->whereNotNull('text')
+            ->pluck('text')
+            ->contains(fn ($sent) => self::sameText((string) $sent) === $key);
+    }
+
+    /** Text compared without punctuation, spacing, emoji or Arabic letter variants. */
+    public static function sameText(string $text): string
+    {
+        $text = \App\Support\ArabicTextNormalizer::normalize($text);
+
+        return (string) preg_replace('/[^\p{L}\p{N}]+/u', '', $text);
     }
 
     private function alreadySent(int $turnId, string $kind, int $index): bool

@@ -43,75 +43,10 @@ class AgentRunner
         }
         $this->turnContext = null;
         $result = $this->runTurn($turn);
+        // photos and links a tool queued are sent even when the turn ended on an early return
         if ($this->turnContext) $result = $this->turnContext->outbound->mergeInto($result);
-        $result = $this->continueWithoutRepeating($turn, $result);
-        if ($this->turnContext) $result = $this->turnContext->outbound->mergeInto($result);
+
         return $this->withApplicationLink($turn, $result);
-    }
-
-    private function continuityFacts(WhatsappConversation $conversation, string $burst): string
-    {
-        $selection = app(MotorcycleSelection::class);
-        $id = $selection->lastNamed($conversation->id);
-        $work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id);
-        return "## Verified conversation continuity (all customer messages in this turn count)\n"
-            .json_encode(['customer_burst'=>$burst, 'confirmed_model_id'=>$id, 'confirmed_model'=>$id ? \App\Models\Machine::find($id)?->name : null,
-                'requested_months'=>$selection->lastDurations($conversation->id), 'recorded_work'=>$work], JSON_UNESCAPED_UNICODE)
-            ."\nAnswer his actual current request before suggesting an application. Never ask a known model, duration, work or insurance answer again. A model answer to a photo question means SEND PHOTOS, not application intake. A bare 3 after duration choices means 36 months. If he refuses applying, stop all application/work questions. Use actual tools, not promises of a later calculation/link. insurance_print is optional, never mandatory. The 100 EGP/day advertisement means 3000 EGP/month on a 30-day basis; it is not a guaranteed quote for every model. Explain the ad, then calculate the selected model. Never invent missing stock, media or lending requirements.";
-    }
-
-    /** Last gate also covers deterministic early returns, which previously bypassed the reply guard entirely. */
-    private function continueWithoutRepeating(object $turn, array $result): array
-    {
-        $cid = (int) $turn->whatsapp_conversation_id;
-        $conversation = WhatsappConversation::findOrFail($cid);
-        $text = $this->guard->customerTextSinceLastReply($conversation);
-        $intent = app(ConversationIntent::class);
-        $candidate = implode("\n", (array) ($result['messages'] ?? []));
-        $previous = WhatsappMessage::where('whatsapp_conversation_id', $cid)->where('direction','outgoing')->where('sender_type','bot')->latest('id')->limit(12)->pluck('text')->all();
-        // A refusal must not be turned into a new application interview by any fallback.
-        if ($intent->refusesApplication($text) && $intent->questionKind($candidate) === 'work') {
-            $result['messages'] = ['تمام، مش هنبدأ تقديم. أنا معاك في استفسارك عن المكنة.'];
-            return $result;
-        }
-        if (preg_match('/بر[ني]نت|برنت/u', $candidate) && preg_match('/(?:إجباري|اجباري|إلزامي|الزامي|لازم|ضروري|شرط)/u', $candidate)
-            && ! preg_match('/مش شرط|مش إلزامي|مش الزامي|اختياري/u', $candidate)) {
-            $result['messages'] = ['برنت التأمينات مش شرط إلزامي للتقديم. المستندات المطلوبة حسب حالتك هتلاقيها في استمارة التقديم.'];
-            $candidate = $result['messages'][0];
-        }
-        $kind = $intent->questionKind($candidate);
-        if ($kind === null) return $result;
-        $selection = app(MotorcycleSelection::class);
-        $selected = $selection->lastNamed($cid);
-        $duration = $selection->lastDuration($cid);
-        $work = app(\App\Domain\Applications\WorkProfiles::class)->get($cid);
-        $known = ($kind === 'model' && $selected) || ($kind === 'duration' && $duration)
-            || ($kind === 'work' && ! empty($work['work_stated']))
-            || ($kind === 'insurance' && in_array($work['insured'] ?? '', ['yes','no'], true));
-        $alreadyAsked = collect($previous)->contains(fn ($p) => $intent->questionKind((string) $p) === $kind);
-        if (! $known && ! $alreadyAsked) return $result;
-        if ($selected && $this->turnContext && ! $intent->asksForPhotos($text, (string) ($previous[0] ?? ''))) {
-            $args = ['motorcycle_id'=>$selected];
-            if ($duration) $args['months'] = $duration;
-            $offer = $this->tools->execute('get_installment_offer', $args, $this->turnContext);
-            if ($formatted = app(ToolResultReply::class)->for('get_installment_offer', $offer)) {
-                // Do not replace one answered duration question with the same question from another path.
-                if ($intent->questionKind(implode(' ', $formatted['messages'])) !== $kind) return $formatted + array_diff_key($result, ['messages'=>1]);
-            }
-            $code = data_get($offer, 'error.code');
-            $questions = ['ASK_WORK_FIRST'=>'حضرتك بتشتغل إيه؟', 'ASK_INSURED'=>'متأمن عليك ولا لأ؟', 'ASK_SECTOR'=>'شغلك حكومي ولا خاص؟'];
-            if (isset($questions[$code]) && ! collect($previous)->contains(fn ($p) => $intent->questionKind((string)$p) === $intent->questionKind($questions[$code]))) {
-                $result['messages'] = [$questions[$code]];
-                return $result;
-            }
-        }
-        // Once a clarification failed, do not keep interrogating him with an equivalent question.
-        $url = rtrim((string) config('app.url'), '/').'/machines';
-        $result['messages'] = [$kind === 'model'
-            ? 'مش هكرر عليك سؤال الموديل. دي الموديلات بصورها وأسمائها عشان تختار المقصود بوضوح: '.$url
-            : 'مش هطلب منك تعيد نفس الإجابة. تعذر إكمال التفاصيل تلقائيًا بالمعلومات الحالية؛ تحب موظف يكمل معاك؟'];
-        \Illuminate\Support\Facades\Log::info('Bot repeated question prevented', ['conversation_id'=>$cid, 'turn_id'=>$turn->id, 'kind'=>$kind, 'answer_known'=>(bool)$known]);
-        return $result;
     }
 
     /**
@@ -126,23 +61,10 @@ class AgentRunner
             ->latest('id')
             ->first();
 
-        // "ده رابط التقديم" without the tool (he asked for it again): his open link - or, when
-        // there is none (live 2026-10-19: staff had cancelled it and he got the dead one twice),
-        // a new one with everything he wrote, unless a request of his waits for a decision
-        $customerText = $this->guard->customerTextSinceLastReply(WhatsappConversation::findOrFail($turn->whatsapp_conversation_id));
-        $previous = (string) WhatsappMessage::where('whatsapp_conversation_id', $turn->whatsapp_conversation_id)->where('direction', 'outgoing')->latest('id')->value('text');
-        if (! $link && app(ConversationIntent::class)->asksToApply($customerText, $previous) && \App\Domain\Forms\FormLinkService::formsMode()
-            && preg_match('/رابط|لينك|الفورم/u', implode(' ', (array) ($result['messages'] ?? [])))) {
-            $link = $this->openFormLink((int) $turn->whatsapp_conversation_id) ?? $this->freshFormLink((int) $turn->whatsapp_conversation_id, (int) $turn->id);
-        }
-
+        // Rescue 2026-11-08: only the link send_application_link made THIS turn goes out.
+        // Attaching one whenever the reply said "رابط" sent it to people who never asked
+        // ("أبعتلك رابط التقديم؟" arrived with the link) and again on every later reply.
         if (! $link || ! $link->isOpen()) {
-            if (\App\Domain\Forms\FormLinkService::formsMode()
-                && preg_match('/(?:هبعت|هيتبعت|اتبعت|ده رابط|ده لينك|فين.*رابط|مش ظاهر.*لينك)/u',implode(' ',(array)($result['messages'] ?? [])))) {
-                // A missing form link is not permission to replace an unrelated photo/model answer with an intake question.
-                $result['messages'] = ['تعذر تجهيز رابط التقديم حاليًا. بيانات التقديم والمستندات بتتسجل في الاستمارة الإلكترونية.'];
-                return $result;
-            }
             return $result;
         }
 
@@ -168,6 +90,11 @@ class AgentRunner
         if ($maxModelCalls === null || $maxToolCalls === null || $wallClockSeconds === null) {
             throw new \RuntimeException('AgentRunner: agent.runtime.* limits are not configured (DEC-23).');
         }
+
+        // Rescue 2026-11-08: 2 calls (the server setting) left no room for a repair - every
+        // price turn is tool + reply, so a wrong reply had to be sent or dropped. 4 at least.
+        // Two repairs (2026-11-08) need one more call: tool + reply + 2 repairs + 1 spare.
+        $maxModelCalls = max(5, (int) $maxModelCalls);
 
         $conversation = WhatsappConversation::with('customer')->findOrFail($turn->whatsapp_conversation_id);
         if ($conversation->status === 'awaiting_agent' && ! \App\Domain\Handoff\HandoffService::botKeepsAnswering($conversation)) return ['messages'=>[], 'no_reply'=>true];
@@ -197,87 +124,18 @@ class AgentRunner
         // ARCH-006 / ERR-002: what an earlier attempt of this turn already did
         // (read before this attempt runs anything itself).
         $resumed = $this->completedSteps((int) $turn->id);
+        $this->guard->forgetKnown();
         $latestIncoming = WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')->latest('id')->first();
-        $burstText = $this->guard->customerTextSinceLastReply($conversation);
-        $previousText = (string) WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'outgoing')->latest('id')->value('text');
-        $photoIntent = app(ConversationIntent::class)->asksForPhotos($burstText, $previousText);
-        $adText = \App\Support\ArabicTextNormalizer::normalize($burstText);
-        $adContext = \App\Support\ArabicTextNormalizer::normalize(WhatsappMessage::where('whatsapp_conversation_id',$conversation->id)->where('direction','incoming')->latest('id')->limit(6)->get(['text','transcript'])->map(fn($m)=>($m->text??'').' '.($m->transcript??''))->implode(' '));
-        if ($resumed === [] && preg_match('/(?<!\d)100\s*(?:جنيه|ج)(?!\p{L})/u', $adText)
-            && preg_match('/اعلان|فيس|كدب|كذب|يوم|بتقولو|بتقولوا/u',$adContext) && ! preg_match('/مقدم|حجز/u',$adText)) {
-            $reply = 'المقصود بالإعلان ١٠٠ جنيه في اليوم، يعني ٣٠٠٠ جنيه في الشهر على أساس ٣٠ يوم. ده شرح مبلغ الإعلان، مش سعر المكنة كاش ولا قسط ثابت لكل الموديلات؛ القسط والمقدم والمصاريف بيتحسبوا للموديل والمدة المختارين.';
-            if ($id = app(MotorcycleSelection::class)->lastNamed($conversation->id)) {
-                $offer = $this->tools->execute('get_installment_offer', ['motorcycle_id'=>$id], $ctx);
-                if ($quote = app(ToolResultReply::class)->for('get_installment_offer', $offer)) $reply .= "\n".implode("\n", $quote['messages']);
-            }
-            $this->finishTrace($trace, 'done', [['code'=>'DAILY_AD_PAYMENT_EXPLAINED','args'=>[]]], null);
-            return ['messages'=>[$reply]];
-        }
-        if ($resumed === [] && ($photos = app(CatalogPhotoReply::class)->for($burstText, $ctx, $this->tools)) !== null) {
-            $this->finishTrace($trace, 'done', [['code'=>'REQUESTED_CATALOG_PHOTOS', 'args'=>[]]], null);
-            return $photos;
-        }
-        if ($resumed === [] && $latestIncoming?->type === 'text'
-            && app(TalabatWorkContext::class)->isWorkStatement((string)$latestIncoming->text)) {
-            $workText = \App\Support\ArabicTextNormalizer::normalize((string)$latestIncoming->text);
-            if (preg_match('/كنت شغال|هشتغل|هشتغل|ناوي اشتغل/u',$workText)) {
-                $reply = 'تقصد شغل التوصيل على تطبيق طلبات. حضرتك شغال حاليًا ولا لسه هتبدأ؟';
-            } else {
-                $reply = 'تقصد شغلك في تطبيق طلبات، تمام. بتشتغل توصيل ولا موظف داخل الشركة؟';
-            }
-            $this->finishTrace($trace,'done',[['code'=>'TALABAT_WORK_DISAMBIGUATION','args'=>[]]],null);
-            return ['messages'=>[$reply]];
-        }
-        if ($resumed === [] && $latestIncoming?->type === 'text'
-            && ($policyReply = app(CurrentBusinessPolicy::class)->reply((string)$latestIncoming->text)) !== null) {
-            $this->finishTrace($trace,'done',[['code'=>'CURRENT_BUSINESS_POLICY','args'=>[]]],null);
-            return ['messages'=>[$policyReply]];
-        }
+
+        // Rescue 2026-11-08: the model writes every reply. The regex shortcuts
+        // that answered before it (ads, FAQ, jobs, Talabat, prices, photos...)
+        // refused the wrong people ("اخويا محامي" refused HIM) and repeated
+        // canned lines; what they knew is now in the instructions and the tools.
+        // Only messages that need no words at all are settled here.
         if ($resumed === [] && $latestIncoming?->type === 'text'
             && preg_match('/^[\s.؟?!،…👍🏻🏼🏽🏾🏿❤️]+$/u', trim((string) $latestIncoming->text))) {
             $this->finishTrace($trace, 'done', [['code'=>'PUNCTUATION_OR_ACK_ONLY','args'=>[]]], null);
             return ['messages'=>[], 'no_reply'=>true];
-        }
-
-        if ($resumed === [] && \App\Domain\Forms\FormLinkService::formsMode()) {
-            $text = trim($this->guard->customerTextSinceLastReply($conversation));
-            $previous = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
-                ->where('direction', 'outgoing')->latest('id')->value('text') ?? '';
-            if (app(ConversationIntent::class)->asksToApply($text, $previous)) {
-                $this->tools->execute('check_eligibility', [], $ctx);
-                $result = $this->tools->execute('send_application_link', [], $ctx);
-                if (($result['ok'] ?? false) && data_get($result, 'data.link_sent_after_your_reply')) {
-                    $this->finishTrace($trace, 'done', [['code'=>'DIRECT_APPLICATION_LINK','args'=>[]]], null);
-                    return ['messages'=>['ده رابط التقديم، املأ بياناتك وارفع المستندات عليه، ولو حاجة مش واضحة أنا معاك.']];
-                }
-            }
-        }
-
-        // A simple photo-identification question needs one compact vision
-        // call, not a full agent call before it and another after it.
-        if ($resumed === [] && ! $activeApplication) {
-            $customerText = $this->guard->customerTextSinceLastReply($conversation);
-            $media = \App\Models\MessageMedia::query()
-                ->whereIn('media_type', ['image', 'sticker'])
-                ->whereHas('message', fn ($query) => $query->where('turn_id', $turn->id)->where('direction', 'incoming'))
-                ->first();
-
-            if ($media && preg_match('/(?:المكن[هة] دي|الموتوسيكل ده|دي ايه|اسمها|متاح[هة]?|موجود[هة]?)/u', $customerText)
-                && ! preg_match('/(?:قسط|تقسيط|سعر|بكام|مقدم)/u', $customerText)) {
-                $name = 'identify_motorcycle_from_image';
-                $args = ['media_id' => $media->id];
-                $result = $this->tools->execute($name, $args, $ctx);
-
-                if ($result['ok'] ?? false) {
-                    app(\App\Domain\Memory\CustomerMemory::class)->recordToolEvent($ctx->customerId, $name, $args, $result);
-                    app(ToolOutcomeRecorder::class)->record($name, $args, $result, $ctx);
-                    $reply = app(ImageIdentificationReply::class)->for($result);
-                    $this->resetFailureCounter($conversation);
-                    $this->finishTrace($trace, 'done', [['code' => 'DIRECT_IMAGE_IDENTIFICATION', 'args' => []]], null);
-
-                    return $reply;
-                }
-            }
         }
 
         // Owner 2026-10-05: a message that is only a greeting gets the
@@ -286,41 +144,14 @@ class AgentRunner
             ->whereNotIn('type', ['text', 'audio', 'voice', 'ptt'])->exists();
 
         if ($resumed === [] && $onlyText && blank($turn->media_items ?? null)) {
-            $customerText = $this->guard->customerTextSinceLastReply($conversation);
-            $latestText = \App\Support\ArabicTextNormalizer::normalize($customerText);
-            if (! $activeApplication && preg_match('/اوراق|ورق|مستند|بالبطاقه بس/u', $latestText)
-                && preg_match('/مطلوب|ايه|اي|بس/u', $latestText)) {
-                $work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id);
-                if (empty($work['work_stated'])) {
-                    $this->finishTrace($trace,'done',[['code'=>'REQUIREMENTS_NEED_INCOME_TYPE','args'=>[]]],null);
-                    return ['messages'=>['الأوراق بتختلف حسب نوع الدخل. حضرتك موظف ولا معاش ولا صاحب نشاط ولا دخل حر؟']];
-                }
-            }
-            $social = app(SocialReply::class)->for($customerText);
-            if ($social !== null) {
-                $this->resetFailureCounter($conversation);
-                $this->finishTrace($trace, 'done', [['code'=>'APPROVED_SOCIAL_REPLY','args'=>[]]], null);
-                return $social;
+            // Conversation 231: "السلام عليكم" five times got five greetings. Greeted twice
+            // already and he has said nothing but greetings since (message by message): silence.
+            if (app(GreetingReply::class)->alreadyGreeted($conversation)) {
+                $this->finishTrace($trace, 'done', [['code' => 'GREETED_ALREADY', 'args' => []]], null);
+
+                return ['messages' => [], 'no_reply' => true];
             }
 
-            $previousReply = WhatsappMessage::where('whatsapp_conversation_id',$conversation->id)->where('direction','outgoing')->latest('id')->value('text') ?? '';
-            $answeringWorkRole = str_contains($previousReply,'تطبيق طلبات') || str_contains($previousReply,'توصيل ولا موظف');
-            $faq = $answeringWorkRole ? null : app(SimpleFaqReply::class)->for($customerText);
-            if ($faq !== null) {
-                $this->resetFailureCounter($conversation);
-                $this->finishTrace($trace, 'done', [['code'=>'APPROVED_SIMPLE_FAQ','args'=>[]]], null);
-                return $faq;
-            }
-
-            $installment = app(GenericInstallmentReply::class)->for($customerText);
-            if ($installment !== null && ! $photoIntent && ! $activeApplication && app(MotorcycleSelection::class)->lastNamed($conversation->id) === null) {
-                $this->resetFailureCounter($conversation);
-                $this->finishTrace($trace, 'done', [['code'=>'GENERIC_INSTALLMENT_CLARIFICATION','args'=>[]]], null);
-                return $installment;
-            }
-        }
-
-        if (! app(EvidenceReview::class)->enabled() && $resumed === [] && $onlyText && blank($turn->media_items ?? null)) {
             $greeting = app(GreetingReply::class)->for($conversation, $this->guard->customerTextSinceLastReply($conversation));
 
             if ($greeting !== null) {
@@ -328,45 +159,6 @@ class AgentRunner
                 $this->finishTrace($trace, 'done', [], null);
 
                 return ['messages' => [$greeting]];
-            }
-        }
-
-        // Deterministic facts from the live database need no model round trip.
-        // Anything ambiguous or involving installments, stock or buying intent
-        // deliberately continues through the normal agent path.
-        if ($resumed === [] && $onlyText && blank($turn->media_items ?? null) && ! $activeApplication) {
-            $direct = $photoIntent ? null : app(DatabaseBackedReply::class)->for($burstText, $ctx);
-            if ($direct !== null) {
-                app(\App\Domain\Memory\CustomerMemory::class)->recordToolEvent($ctx->customerId, $direct['tool'], $direct['args'], $direct['result']);
-                app(ToolOutcomeRecorder::class)->record($direct['tool'], $direct['args'], $direct['result'], $ctx);
-                $this->resetFailureCounter($conversation);
-                $this->finishTrace($trace, 'done', [['code' => 'DATABASE_BACKED_REPLY', 'args' => ['source' => $direct['tool']]]], null);
-                return ['messages' => $direct['messages']];
-            }
-        }
-
-        $photoRequest = \App\Support\ArabicTextNormalizer::normalize($burstText);
-        if ($resumed === [] && $onlyText && preg_match('/(?:كل|صور).{0,35}250|250.{0,35}صور/u',$photoRequest)
-            && ! preg_match('/متبعتش|ما تبعتش|مش عايز/u',$photoRequest)) {
-            $found = $this->tools->execute('search_motorcycles',['cc_min'=>250,'cc_max'=>250,'limit'=>8],$ctx);
-            if ($found['ok'] ?? false) {
-                $lines = [];
-                foreach ((array)data_get($found,'data.items',[]) as $item) {
-                    $photo = $this->tools->execute('send_motorcycle_images',['motorcycle_id'=>(int)$item['id'],'max'=>1,'different_motorcycle_confirmed'=>true],$ctx);
-                    if ($photo['ok'] ?? false) {
-                        $price = !empty($item['is_offer']) && is_numeric($item['offer_price'] ?? null) ? $item['offer_price'] : ($item['cash_price'] ?? null);
-                        $label = trim((string)($item['brand'] ?? '').' '.$item['name']);
-                        $lines[(int)$item['id']] = $label.(is_numeric($price) ? ': كاش '.number_format((float)$price).' جنيه.' : '');
-                    }
-                }
-                if ($lines !== []) {
-                    $reply = $ctx->outbound->toArray();
-                    foreach ($reply['media'] as &$image) $image['caption'] = $lines[(int)($image['motorcycle_id'] ?? 0)] ?? '';
-                    unset($image);
-                    $reply['messages'] = [implode("\n",$lines)];
-                    $this->finishTrace($trace,'done',[['code'=>'BATCH_CATALOG_PHOTOS','args'=>[]]],null);
-                    return $reply;
-                }
             }
         }
 
@@ -380,30 +172,14 @@ class AgentRunner
         // (record_customer_data); no separate understanding call before it.
         $request = $this->context->build($turn);
         $contents = $request->contents;
-        $contents[] = ['role'=>'user', 'parts'=>[['type'=>'text', 'text'=>$this->continuityFacts($conversation, $burstText)]]];
+        // Every tool, every turn (TOOL-013): a short answer ("الزد", "٣") keeps
+        // the tools its question needed, and the provider cache keeps hitting.
         $toolDeclarations = $this->toolsFor($activeApplication !== null);
-        if (! $activeApplication) {
-            $text = $this->guard->customerTextSinceLastReply($conversation);
-            // Follow-up answers ("الزد", "٣", "موظف", "تمام") must retain the same capabilities as the original question.
-            $needed = ['send_reply', 'search_motorcycles', 'get_motorcycle_details', 'get_earlier_messages',
-                'send_motorcycle_images', 'get_installment_offer', 'get_installment_options', 'record_work_profile',
-                'check_eligibility', 'send_application_link', 'get_application_requirements', 'get_branch_information'];
-            if (preg_match('/قسط|تقسيط|مقدم|فايد|فائد|سنه|سنة|سنتين|شغل|شغال|موظف|معاش|ميكانيكي|ورشه|ورشة|دخل|طلبات|talabat|توصيل|دليفري/iu', $text))
-                $needed = array_merge($needed, ['get_installment_offer', 'get_installment_options', 'record_work_profile', 'check_eligibility']);
-            if (preg_match('/قدم|طلب|ورق|مستند|بطاق/u', $text))
-                $needed = array_merge($needed, ['send_application_link', 'get_application_requirements', 'record_work_profile', 'check_eligibility']);
-            if (preg_match('/موظف|حد|كلمني|اكلم|أكلم|حول|كاش|اشتري|شحن/u', $text)) $needed[] = 'handoff_to_human';
-            if (preg_match('/فرع|فروع|عنوان|مكان|مواعيد|فين/u', $text)) $needed[] = 'get_branch_information';
-            if (preg_match('/صور|صوره|صورة|شكل/u', $text)) $needed[] = 'send_motorcycle_images';
-            if (preg_match('/مواصف|سرع|استهلاك|بنزين|موتور/u', $text)) $needed[] = 'lookup_motorcycle_specs_online';
-            if (! $onlyText) $needed = array_merge($needed, self::PHOTO_TOOLS);
-            $toolDeclarations = array_values(array_filter($toolDeclarations, fn ($tool) => in_array($tool['name'], $needed, true)));
-        }
 
         $modelCalls = 0;
         $toolCallCount = 0;
         $repairs = 0;
-        $evidenceRepairs = 0;
+        $reaskRepairs = 0;
         $bannedPhraseRepairs = 0;
         $languageRepairs = 0;
         $handoffRepairs = 0;
@@ -472,28 +248,17 @@ class AgentRunner
                     }
 
                     if ($toolCall['name'] === 'send_reply') {
-                        $toolCall['args'] = app(PaymentWording::class)->apply($toolCall['args'],$outcomes);
-                        $candidate = implode(' ',(array)($toolCall['args']['messages'] ?? []));
-                        if (preg_match('/(?:رسوم|مصاريف).{0,35}الجواب|الجواب.{0,35}(?:رسوم|مصاريف)/u',$candidate)
-                            && ! preg_match('/مفيش رسوم|لا توجد رسوم|بدون رسوم/u',$candidate)) {
-                            $toolCall['args']['messages'] = ['مفيش رسوم على الجواب عندنا. المصاريف الإدارية للتقسيط منفصلة وبتتحسب حسب الموديل والنظام والمدة.'];
-                        }
-                        if (preg_match('/حكومي/u',$candidate) && preg_match('/مش متاح|غير متاح|مرفوض|نفس الحكم/u',$candidate)
-                            && ! preg_match('/شرط|محامي|قاضي|نياب/u',$candidate)) {
-                            $toolCall['args']['messages'] = ['الشغل الحكومي في حد ذاته مش سبب للرفض. بنراجع طبيعة الوظيفة وباقي الشروط؛ حضرتك بتشتغل إيه تحديدًا؟'];
-                        }
                         // Only technical cleanup (emoji, markdown, dashes) - never his words changed.
                         $toolCall['args'] = $this->rewritten($toolCall['args'], $guardEvents, [
                             'tidy' => fn ($a) => $this->guard->tidy($a),
-                            'silence' => fn ($a) => $this->silenceWrittenAsText($a, $ctx),
+                            'silence' => fn ($a) => $this->silenceWrittenAsText($a, $ctx, $repairs),
                             'link_written' => fn ($a) => $this->withoutWrittenLink($a, $outcomes, $conversation->id),
                         ]);
 
                         if ($this->guard->handoffClaimWithoutAction($toolCall['args'], $conversation, $outcomes)) {
                             $guardEvents[]=['code'=>'HANDOFF_CLAIMED_NOT_DONE','args'=>[]];
                             if ($handoffRepairs >= 1 || $limitReached) {
-                                $this->finishTrace($trace,'fallback',$guardEvents,$lastResponse,'HANDOFF_CLAIMED_NOT_DONE');
-                                return app(EvidenceReview::class)->uncertainty();
+                                return $this->unverifiedReply($conversation, $trace, $guardEvents, 'HANDOFF_CLAIMED_NOT_DONE');
                             }
                             $handoffRepairs++;
                             $hint=(string)config('agent.handoff.tool_description');
@@ -505,8 +270,7 @@ class AgentRunner
                         if (! $language->allows($toolCall['args'])) {
                             $guardEvents[] = ['code'=>'UNSAFE_OR_UNCLEAR_LANGUAGE', 'args'=>[]];
                             if ($languageRepairs >= 1 || $limitReached) {
-                                $this->finishTrace($trace, 'fallback', $guardEvents, $lastResponse, 'UNSAFE_OR_UNCLEAR_LANGUAGE');
-                                return $language->safeReply();
+                                return $this->fallback($conversation, $trace, $guardEvents, 'UNSAFE_OR_UNCLEAR_LANGUAGE');
                             }
                             $languageRepairs++;
                             $hint = (string) config('agent.safety.language_repair_instructions');
@@ -535,40 +299,56 @@ class AgentRunner
                         // actions, numbers and facts no tool gave, promises.
                         // Once selection is known, financial answers come from the
                         // calculator, not another promise/question or an AI estimate.
-                        $candidate=implode(' ',(array)($toolCall['args']['messages']??[]));
-                        if(\App\Domain\Forms\FormLinkService::formsMode() && app(FormLinkIntakePolicy::class)->asksForPrivateData($candidate)){
-                            $this->tools->execute('check_eligibility',[],$ctx);
-                            $link=$this->tools->execute('send_application_link',[],$ctx);
-                            if(($link['ok']??false) && data_get($link,'data.link_sent_after_your_reply')){
-                                $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'CHAT_INTAKE_REPLACED_WITH_FORM_LINK','args'=>[]]],$lastResponse);
-                                return ['messages'=>['ده رابط التقديم، املأ بياناتك وارفع المستندات عليه. بيانات التقديم والمستندات مكانها الاستمارة، مش الشات.']];
-                            }
-                            $contents[]=$this->toolResultContent($toolCall['id'],'send_reply',['ok'=>false,'error'=>['code'=>'FORM_LINK_ONLY','detail'=>'Do not request personal data or documents in chat. Use send_application_link; if it failed, explain its exact blocker without asking for private data.']]);
-                            if($limitReached) return ['messages'=>['التقديم ورفع المستندات بيكونوا من الاستمارة الإلكترونية. تعذر تجهيز رابط التقديم حاليًا.']];
-                            continue;
-                        }
-                        if(!$photoIntent && !app(ConversationIntent::class)->refusesApplication($burstText) && !$ctx->activeApplicationId
-                            && preg_match('/قسط|تقسيط|مصاريف|مقدم/u',$candidate) && preg_match('/قسط|تقسيط|مصاريف|مقدم|سنه|سنتين|سنين|^\s*[123٣٢١]\s*$/u',$burstText)
-                            && ($selected=app(MotorcycleSelection::class)->lastNamed($ctx->conversationId))){
-                            $exactArgs=['motorcycle_id'=>$selected];
-                            if($duration=app(MotorcycleSelection::class)->lastDuration($ctx->conversationId)) $exactArgs['months']=$duration;
-                            $priced=collect($outcomes)->where('name','get_installment_offer')->where('ok',true)->last();
-                            $exact=$priced ? ['ok'=>true,'data'=>$priced['data']] : $this->tools->execute('get_installment_offer',$exactArgs,$ctx);
-                            if($formatted=app(ToolResultReply::class)->for('get_installment_offer',$exact)){
-                                app(ToolOutcomeRecorder::class)->record('get_installment_offer',$exactArgs,$exact,$ctx);
-                                $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'EXACT_INSTALLMENT_REPLY','args'=>[]]],$lastResponse);
-                                return $formatted;
-                            }
-                        }
                         $violation = $this->guard->check($toolCall['args'], $conversation, $request->system, $contents, $outcomes);
-                        if ($violation === 'PERCENT_DURATION_MISMATCH' && ($rates=app(LiveInstallmentRates::class)->reply())) {
-                            $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'LIVE_RATES_REPLACED_STALE_PERCENT','args'=>[]]],$lastResponse);
-                            return ['messages'=>[$rates]];
-                        }
+                        // Rescue 2026-11-08: owner rules and facts are always enforced;
+                        // "advisory" only lets wording/style notes through.
                         if ($violation !== null && config('agent.safety.reply_guard_mode') === 'advisory'
-                            && !in_array($violation,['PERCENT_DURATION_MISMATCH','UNVERIFIED_NUMBER','INTEREST_DENIED'],true)) {
+                            && in_array($violation, ReplyGuard::STYLE_CODES, true)) {
                             $guardEvents[] = ['code'=>'OBSERVED:'.$violation, 'args'=>$toolCall['args']];
                             $violation = null;
+                        }
+
+                        // Asking about a known answer is told to the model once; if it asks
+                        // again after seeing the facts, he is probably changing it.
+                        if ($violation === 'REASK_KNOWN' && ($reaskRepairs >= 1 || $limitReached)) {
+                            $guardEvents[] = ['code' => 'OBSERVED:REASK_KNOWN', 'args' => []];
+                            $violation = null;
+                        }
+
+                        // Its own repair, not the turn's one: a later false number still gets fixed.
+                        if ($violation === 'REASK_KNOWN') {
+                            $reaskRepairs++;
+                            $guardEvents[] = ['code' => $violation, 'args' => []];
+                            $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => [
+                                'code' => $violation, 'detail' => trim(self::GUARD_HINTS[$violation].' '.$this->guard->lastDetail()),
+                            ]]);
+
+                            continue;
+                        }
+
+                        // A rule about what he wants (no interview after "مش عايز اقدم", nothing private in
+                        // chat): if the one repair did not fix it, an honest varied line, never the bad reply.
+                        // He asked for the link and the model twice failed to send it (simulation 2026-11-08:
+                        // "عايز اقدم عليها" ended in "معلش وضّحلي"): the tool itself, with all its eligibility rules.
+                        if (in_array($violation, ['FORM_LINK_ONLY', 'LINK_CLAIMED_NOT_SENT'], true) && ($repairs >= 1 || $limitReached)) {
+                            $link = $this->tools->execute('send_application_link', [], $ctx);
+
+                            if (($link['ok'] ?? false) && ! empty($link['data']['link_sent_after_your_reply'])) {
+                                $this->finishTrace($trace, 'done', [...$guardEvents, ['code' => $violation, 'args' => []], ['code' => 'REWRITE:link_sent_by_code', 'args' => []]], $lastResponse);
+
+                                return ['messages' => ['ده رابط التقديم، املا بياناتك وارفع ورقك عليه، ولو وقفت في حاجة قولّي.']];
+                            }
+                        }
+
+                        // A wrong rate twice: the live rates themselves, never an unrelated line.
+                        if ($violation === 'PERCENT_DURATION_MISMATCH' && ($repairs >= 1 || $limitReached) && ($rates = $this->context->currentRates()) !== null) {
+                            $this->finishTrace($trace, 'done', [...$guardEvents, ['code' => $violation, 'args' => []], ['code' => 'REWRITE:live_rates', 'args' => []]], $lastResponse);
+
+                            return ['messages' => ['النسب الحالية: '.trim(preg_replace('/^##[^\n]*\n/u', '', $rates)).' والقسط بيتحسب للموديل والمدة اللي تختارها.']];
+                        }
+
+                        if (in_array($violation, ['APPLICATION_REFUSED', 'FORM_LINK_ONLY', 'LINK_CLAIMED_NOT_SENT'], true) && ($repairs >= 1 || $limitReached)) {
+                            return $this->unverifiedReply($conversation, $trace, [...$guardEvents, ['code' => $violation, 'args' => []]], $violation);
                         }
 
                         if ($violation !== null) {
@@ -610,16 +390,20 @@ class AgentRunner
                                 }
                             }
 
-                            if ($evidenceRepairs >= (int) config('agent.safety.max_evidence_repairs', 2) || $limitReached) {
+                            // Simulation 2026-11-08: cutting the false sentences after ONE repair sent "قسطها على سنة
+                            // ونص بيكون كالتالي" with the numbers gone. The AI rewrites twice; cutting is the last resort.
+                            if ($repairs >= 2 || $limitReached) {
                                 // Replay of conversation 206 (Gemini): a second repeat ended
                                 // in "مش متأكد إني فهمتك" three times - worse than the repeat.
                                 // What he already got is dropped and the rest is sent.
                                 $trimmed = $violation === 'REPEATED_REPLY' ? $this->guard->withoutRepeatedSentences((array) ($toolCall['args']['messages'] ?? []), $conversation) : null;
                                 $step = 'repeated_sentences_dropped';
+                                // `asks` describes the whole reply; one sentence is judged on its own words
+                                $sentenceArgs = array_diff_key($toolCall['args'], ['asks' => 1]);
 
-                                if ($trimmed === null || $this->guard->check(['messages' => $trimmed] + $toolCall['args'], $conversation, $request->system, $contents, $outcomes) !== null) {
+                                if ($trimmed === null || $this->guard->check(['messages' => $trimmed] + $sentenceArgs, $conversation, $request->system, $contents, $outcomes) !== null) {
                                     // owner 2026-10-07: keep the true sentences, drop the false ones
-                                    $trimmed = $this->guard->passingSentences($toolCall['args'], $conversation, $request->system, $contents, $outcomes);
+                                    $trimmed = $this->guard->passingSentences($sentenceArgs, $conversation, $request->system, $contents, $outcomes);
                                     $step = 'failing_sentences_dropped';
                                 }
 
@@ -630,6 +414,13 @@ class AgentRunner
                                 if ($trimmed === null && $difference !== null) {
                                     $trimmed = ['الفرق بينهم من بياناتنا: '.$difference, 'تحب أحسبلك القسط على أنهي واحدة فيهم؟'];
                                     $step = 'difference_from_data';
+                                }
+
+                                // A short exact repeat with no tries left: the repeat itself, never an outage line
+                                // and a handoff (a repeat is wording, not a false fact).
+                                if ($trimmed === null && $violation === 'REPEATED_REPLY' && ($toolCall['args']['messages'] ?? []) !== []) {
+                                    $trimmed = (array) $toolCall['args']['messages'];
+                                    $step = 'repeat_sent_out_of_tries';
                                 }
 
                                 if ($trimmed === null) {
@@ -657,26 +448,7 @@ class AgentRunner
                         $toolCall['args'] = $this->rewritten($toolCall['args'], $guardEvents, ['next_step_added' => fn ($a) => $this->withNextStep($a, $ctx->activeApplicationId)]);
                     }
 
-                    if ($toolCall['name'] === 'send_reply') {
-                        $review = app(EvidenceReview::class);
-                        $rejection = $review->check($toolCall['args'], $request->system, $outcomes, $this->guard->customerTextSinceLastReply($conversation));
-                        if ($rejection !== null) {
-                            $guardEvents[] = ['code' => $rejection, 'args' => []];
-                            if ($evidenceRepairs >= (int) config('agent.safety.max_evidence_repairs', 2) || $limitReached) {
-                                $this->finishTrace($trace, 'fallback', $guardEvents, $lastResponse, $rejection);
-                                return $review->uncertainty();
-                            }
-                            $evidenceRepairs++;
-                            $contents[] = $this->toolResultContent($toolCall['id'], 'send_reply', ['ok' => false, 'error' => ['code' => $rejection, 'detail' => $review->lastReason().' '.config('agent.safety.repair_instructions')]]);
-                            continue;
-                        }
-                    }
-
                     $result = $this->tools->execute($toolCall['name'], $toolCall['args'], $ctx);
-                    if ($toolCall['name'] === 'handoff_to_human' && data_get($result,'error.code') === 'CUSTOMER_REQUEST_REQUIRED') {
-                        $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'HANDOFF_PERMISSION_QUESTION','args'=>[]]],$lastResponse);
-                        return ['messages'=>['تحب أحوّل محادثتك لموظف من فريقنا يكمل معاك؟']];
-                    }
                     // Quoting is optional presentation metadata. An invented
                     // quote must not discard an otherwise valid customer reply.
                     if ($toolCall['name'] === 'send_reply' && data_get($result, 'error.code') === 'QUOTE_NOT_FOUND') {
@@ -697,41 +469,6 @@ class AgentRunner
                         'ok' => (bool) ($result['ok'] ?? false),
                         'data' => ($result['ok'] ?? false) ? (array) ($result['data'] ?? []) : (array) ($result['error'] ?? []),
                     ];
-
-                    if (! $photoIntent && ! $ctx->activeApplicationId && $toolCall['name'] === 'record_work_profile'
-                        && ($result['ok'] ?? false) && data_get($result, 'data.question') === 'none') {
-                        $step = \App\Models\AiTraceStep::where('tool_name','get_installment_offer')
-                            ->whereHas('trace', fn ($q) => $q->where('conversation_id',$ctx->conversationId))->latest('id')->first();
-                        $id = app(MotorcycleSelection::class)->lastNamed($ctx->conversationId);
-                        if (! $id) $id = \App\Domain\Conversations\QuotedMotorcycle::last($ctx->conversationId);
-                        if (! $id) $id = data_get(WhatsappConversation::find($ctx->conversationId)?->state,'interest.id');
-                        if ($id) {
-                            $args = ['motorcycle_id'=>(int)$id];
-                            if($duration=app(MotorcycleSelection::class)->lastDuration($ctx->conversationId)) $args['months']=$duration;
-                            $recent = [];
-                            foreach ($recent as $line) {
-                                $line = \App\Support\ArabicTextNormalizer::normalize((string)$line);
-                                if (preg_match('/سنتين|24 شهر/u',$line)) { $args['months']=24; break; }
-                                if (preg_match('/3 سنين|ثلاث سنين/u',$line)) { $args['months']=36; break; }
-                                if (preg_match('/سنه ونص/u',$line)) { $args['months']=18; break; }
-                                if (preg_match('/(?:علي|ع|على) سنه/u',$line)) { $args['months']=12; break; }
-                            }
-                            $offer = $this->tools->execute('get_installment_offer',$args,$ctx);
-                            if ($direct = app(ToolResultReply::class)->for('get_installment_offer',$offer)) {
-                                app(ToolOutcomeRecorder::class)->record('get_installment_offer',$args,$offer,$ctx);
-                                $this->finishTrace($trace,'done',[...$guardEvents,['code'=>'WORK_TO_OFFER_DIRECT','args'=>[]]],$lastResponse);
-                                return $direct;
-                            }
-                        }
-                    }
-
-                    if (! $photoIntent && ! $ctx->activeApplicationId && in_array($toolCall['name'], ['get_installment_offer','search_motorcycles','get_branch_information'], true)) {
-                        $direct = app(ToolResultReply::class)->for($toolCall['name'], $result, $this->guard->customerTextSinceLastReply($conversation));
-                        if ($direct !== null) {
-                            $this->finishTrace($trace, 'done', [...$guardEvents, ['code'=>'DIRECT_TOOL_RESULT','args'=>[]]], $lastResponse);
-                            return $direct;
-                        }
-                    }
 
                     if (in_array($toolCall['name'], ['check_cash_inventory', 'handoff_to_human'], true) && ($result['ok'] ?? false) && ($result['data']['handed_off'] ?? false) && isset($result['data']['customer_message'])) {
                         $this->finishTrace($trace, 'done', $guardEvents, $lastResponse);
@@ -804,7 +541,11 @@ class AgentRunner
      * instructions' job, never a refusal.
      */
     public const GUARD_HINTS = [
-        'EMPTY_REPLY' => 'The reply is empty.',
+        'EMPTY_REPLY' => 'The reply is empty. Write your answer to what he said in messages; only if his message truly needs no answer, set no_reply: true.',
+        'FORM_LINK_ONLY' => 'Personal data and documents are never collected in the chat: call send_application_link (it checks eligibility); if it fails, tell him its blocker.',
+        'APPLICATION_REFUSED' => 'He said he does not want to apply now. Answer what he asked; no work, insurance or application questions.',
+        'REASK_KNOWN' => 'It asks him for something he already answered.',
+        'LINK_CLAIMED_NOT_SENT' => 'It says the application link is here, but send_application_link did not send one this turn. Call it (it reuses his open link), or do not say a link is sent.',
         'GARBLED_TEXT' => 'A word mixes Latin letters into Arabic (a typing glitch).',
         'INTERNAL_KEY_IN_REPLY' => 'The reply shows an internal key or code name.',
         'PLACEHOLDER_IN_REPLY' => 'The reply contains a placeholder in brackets, not real text.',
@@ -853,7 +594,7 @@ class AgentRunner
         'MASCULINE_ADDRESS_TO_WOMAN' => 'She is recorded as a woman: speak to her in the feminine and drop "يا باشا / يا غالي / يا معلم" - use "يا فندم" or no title.',
         'REQUIRED_DOCUMENT_WAIVED' => 'Every document on his list is required; it cannot be waived.',
         'INTEREST_DENIED' => 'Installments do carry interest; it cannot be denied.',
-        'REPEATED_REPLY' => 'He already got these exact words from you. Answer his new message itself in one short line in other words; a refusal he already heard = one short line ("زي ما قلتلك، للأسف مش هينفع وهو مش شغال") with no list of options again.',
+        'REPEATED_REPLY' => 'He already got these exact words from you. Answer his new message itself in other, shorter words. If he asks for the same thing again (the list, the prices), give it again briefly - never "قولتلك قبل كده" / "في الرسالة اللي فاتت". A refusal he already heard = one short line with no list of options again.',
         'PERSON_NOT_RECORDED' => 'His relatives are "أخوك/أبوك/والدتك" when you speak to him - never "أخويا/ابويا/امي". The reply speaks of one person (أخوك/أبوك...) as the one applying, but that is not who is recorded. If his own words clearly name ONE person, call record_work_profile (applicant=someone_else, applicant_relation, applicant_quote = his words) first; if they do not ("اخ اخويا حبيب صاحب", or "اه" to your own guess), reply only: مين اللي هيقدّم؟',
     ];
 
@@ -932,9 +673,16 @@ class AgentRunner
      * reply with no Arabic in it, where staying silent is allowed, is the
      * silence it meant.
      */
-    private function silenceWrittenAsText(array $args, ToolContext $ctx): array
+    private function silenceWrittenAsText(array $args, ToolContext $ctx, int $repairs = 1): array
     {
         $text = trim(implode(' ', (array) ($args['messages'] ?? [])));
+
+        // Simulation 2026-11-08: "طيب ينفع كشف حساب البنك؟" got messages [] (no_reply not set) and was
+        // taken as silence - his question went unanswered. Nothing written at all is first sent back
+        // (EMPTY_REPLY: answer him, or set no_reply); only a second empty reply is the silence it meant.
+        if ($text === '' && ($args['no_reply'] ?? false) !== true && $repairs === 0) {
+            return $args;
+        }
 
         if (($args['no_reply'] ?? false) === true || preg_match('/\p{Arabic}/u', $text) || ! \App\Agent\Tools\SendReplyTool::mayStaySilent($ctx)) {
             return $args;
@@ -949,36 +697,6 @@ class AgentRunner
      *
      * @param  array<string, callable(array): array>  $steps
      */
-    /**
-     * Dynamic Links: the real form link goes out by itself after the reply. A URL the model
-     * typed anyway (simulator 2026-10-18: "https://motoget.com/apply/123456789", then
-     * "[رابط التقديم]") is dropped, never sent.
-     */
-    private function freshFormLink(int $conversationId, int $turnId): ?\App\Models\FormLink
-    {
-        $conversation = WhatsappConversation::find($conversationId);
-        $tool = app(\App\Agent\Tools\SendApplicationLinkTool::class);
-
-        if (! $conversation || ! $tool->maySendLink($conversation)) {
-            return null;
-        }
-        $classification = app(\App\Domain\Applications\WorkClassification::class);
-        $work = $classification->reading($conversationId);
-        if (! $work || empty($work['work_stated']) || $classification->problem($conversationId,$work['customer_type'] ?? 'unknown')
-            || app(\App\Domain\Applications\AgeEligibilityGate::class)->for($conversation)) return null;
-
-        try {
-            $link = $tool->linkForChat($conversation);
-            $link->update(['prefill' => array_merge((array) $link->prefill, ['_sent_turn_id' => $turnId])]);
-
-            return $link;
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Fresh form link failed', ['conversation_id' => $conversationId, 'error' => $e->getMessage()]);
-
-            return null;
-        }
-    }
-
     private function openFormLink(int $conversationId): ?\App\Models\FormLink
     {
         if (! \App\Domain\Forms\FormLinkService::formsMode()) {
@@ -1233,12 +951,6 @@ class AgentRunner
      */
     private function unverifiedReply(WhatsappConversation $conversation, AiTrace $trace, array $guardEvents, string $reason): array
     {
-        if (config('agent.safety.reply_guard_mode') === 'advisory') return $this->fallback($conversation, $trace, $guardEvents, $reason);
-        if (config('agent.handoff.customer_only')) {
-            $this->finishTrace($trace, 'fallback', $guardEvents, null, $reason);
-            return app(EvidenceReview::class)->uncertainty();
-        }
-
         $waiting = config('agent.handoff.waiting_message');
 
         if (blank($waiting)) {
@@ -1350,7 +1062,7 @@ class AgentRunner
             $link = \App\Models\FormLink::where('whatsapp_conversation_id', $conversation->id)->whereIn('status', \App\Models\FormLink::OPEN_STATUSES)->latest('id')->first();
 
             if ($link?->isOpen()) {
-                return ['ده رابط التقديم، املا بياناتك وارفع ورقك عليه، ولو وقفت في حاجة قولّي.', 'كمّل طلبك من رابط التقديم، وكل اللي كتبته محفوظ. لو فيه حاجة مش واضحة قولّي.'];
+                return ['كمّل طلبك من رابط التقديم اللي معاك، وكل اللي كتبته فيه محفوظ. لو وقفت في حاجة قولّي.', 'رابط التقديم اللي بعتهولك لسه شغال وبياناتك فيه محفوظة، كمّل منه ولو حاجة مش واضحة قولّي.'];
             }
 
             $quote = \App\Domain\Conversations\QuotedOffer::classify($conversation)['valid'][0] ?? null;
@@ -1374,15 +1086,6 @@ class AgentRunner
     /** @return array{messages: string[]} */
     private function fallback(WhatsappConversation $conversation, AiTrace $trace, array $guardEvents, string $reason): array
     {
-        if (config('agent.safety.reply_guard_mode') === 'advisory') {
-            $this->finishTrace($trace, 'fallback', $guardEvents, null, $reason);
-            return ['messages'=>[(string) config('agent.fallback.message')]];
-        }
-        if (config('agent.handoff.customer_only') && app(EvidenceReview::class)->enabled()) {
-            $this->finishTrace($trace, 'fallback', $guardEvents, null, $reason);
-            return app(EvidenceReview::class)->uncertainty();
-        }
-
         $message = config('agent.fallback.message');
 
         if ($message === null) {
@@ -1394,11 +1097,17 @@ class AgentRunner
 
         $maxFailedTurns = config('agent.handoff.max_failed_turns');
 
-        if (! config('agent.handoff.customer_only') && $maxFailedTurns !== null && $failures >= (int) $maxFailedTurns) {
+        // A stuck customer is never left alone: handoff.customer_only stops the
+        // bot from handing off on its own judgement, not after repeated failures.
+        if ($maxFailedTurns !== null && $failures >= (int) $maxFailedTurns) {
             $this->handoff->handOffForFailures($conversation, $reason);
         }
 
-        return ['messages' => [$message]];
+        // The same fallback line twice in a row reads as a machine (owner 2026-10-06).
+        $last = trim((string) WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')->where('sender_type', 'bot')->latest('id')->value('text'));
+
+        return ['messages' => [$last === trim((string) $message) ? $this->keepGoingReply($conversation) : $message]];
     }
 
     /**

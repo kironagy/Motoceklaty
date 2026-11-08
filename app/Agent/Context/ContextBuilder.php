@@ -49,10 +49,9 @@ class ContextBuilder
         // Rebuild: ONE instruction source (L0). Pinned/scoped knowledge and
         // lessons are folded into it; what follows is data only - catalog
         // names, customer-type keys, then the facts.
-        $l0 = $this->buildL0($result->facts['work']['customer_type'] ?? null, $application?->status);
-        // Catalog search supplies authoritative names and IDs on demand.
-        // Sending the entire catalog on every turn duplicates that lookup.
-        $l3 = ['text' => null, 'count' => 0];
+        $l0 = $this->buildL0();
+        // ~600 fixed tokens that spare a whole search call (~16k) whenever he names a model.
+        $l3 = $this->catalogIsRelevant($conversation, $application) ? $this->buildL3() : ['text' => null, 'count' => 0];
         $l3b = $this->buildL3b();
         $l4 = $this->renderFacts($result->facts);
         $told = $this->renderToldSoFar($this->toldSoFar->for($conversation, $application));
@@ -62,13 +61,9 @@ class ContextBuilder
 
         $system = implode("\n\n", array_values(array_filter([
             // The same text for every customer goes first, so the provider's
-            // cache covers it on every call.
-            $l0['text'], $l3['text'], $l3b['text'], $l4['text'], $told['text'], $l6['text'], $this->ownStyleNote($conversation),
+            // cache covers it on every call; what is his comes after.
+            $l0['text'], $this->currentRates(), $l3['text'], $l3b['text'], $l4['text'], $told['text'], $l6['text'], $this->ownStyleNote($conversation),
         ], fn ($block) => $block !== null && trim($block) !== '')));
-        if (\App\Domain\Forms\FormLinkService::formsMode()) {
-            $system .= "\n\nالتقديم الحالي بالفورم فقط: استعمل send_application_link عند بدء التقديم. العميل يرفع بياناته ومستنداته على الرابط، ممنوع طلب إرسال البطاقة أو المستندات في الشات. لو نوع دخله ناقص اسأل: حضرتك موظف ولا معاش ولا صاحب نشاط ولا دخل حر؟";
-        }
-        $system .= "\n\nتمييز طلبات: شغال في طلبات أو شغل طلبات = عمل في شركة/تطبيق Talabat وليس متابعة طلب تقسيط. لا تفترض أنه مندوب لو لم يوضح دوره. التوصيل يختلف عن موظف داخل الشركة. كنت شغال أو هشتغل لا يثبت العمل الحالي. بعد سؤال الدور اقرأ إجابته مع السياق السابق وسجل العمل من كلامه. طلبي أو طلب التقسيط = متابعة الطلب ولا يغيّر المهنة.";
 
         $request = new AiRequest(
             system: $system,
@@ -110,6 +105,7 @@ class ContextBuilder
     {
         $last = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
             ->where('direction', 'outgoing')->where('sender_type', 'bot')
+            ->where(fn ($q) => $q->whereNull('delivery_status')->orWhere('delivery_status', '!=', 'failed'))
             ->latest('id')->limit(4)->pluck('text')->filter()->values();
 
         if ($last->count() < 2) {
@@ -176,25 +172,40 @@ class ContextBuilder
     }
 
     /** @return array{version: string, text: string} */
-    private function buildL0(?string $customerType = null, ?string $stage = null): array
+    /**
+     * Rescue 2026-11-08 (simulation): "الفايدة كام؟" got "بتختلف حسب المدة" - the model never
+     * looked the rates up. They are data, not a lesson: read from the active plans, the same for
+     * every customer (so it stays in the cached prefix) until the owner changes a plan.
+     */
+    public function currentRates(): ?string
+    {
+        $lines = [];
+
+        foreach (\App\Models\InstallmentSystem::where('is_active', true)
+            ->with(['installmentPlans' => fn ($q) => $q->where('is_active', true)->orderBy('months')])->get() as $system) {
+            $fee = (float) $system->administrative_fees;
+            $plans = $system->installmentPlans->map(function ($plan) {
+                $rate = rtrim(rtrim(number_format((float) $plan->interest_percent, 2, '.', ''), '0'), '.');
+
+                return "{$plan->months} شهر {$rate}٪";
+            })->implode('، ');
+
+            if ($plans !== '') {
+                $lines[$plans.'|'.$fee] = '- '.$plans.($fee > 0 ? ' + '.rtrim(rtrim(number_format($fee, 2, '.', ''), '0'), '.').'٪ مصاريف إدارية مرة واحدة وقت الاستلام' : ' من غير مصاريف إدارية');
+            }
+        }
+
+        return $lines === [] ? null
+            : "## نسب التقسيط الحالية (من الأنظمة المفعلة؛ لو سأل عن الفايدة دي النسب، والقسط نفسه من get_installment_offer)\n".implode("\n", array_values($lines));
+    }
+
+    /** @return array{version: string, text: string} - ONE instruction source: the published version (rebuild 2026-10-05). */
+    private function buildL0(): array
     {
         $current = $this->instructions->current();
 
-        $text = app(\App\Domain\Teaching\LessonSync::class)->withLessons($current['text']);
-        $knowledge = \App\Models\BusinessMemory::where('is_active', true)->orderBy('priority')->get()
-            ->filter(function ($row) use ($customerType, $stage) {
-                $types = (array) ($row->scope_customer_types ?? []);
-                $stages = (array) ($row->scope_application_statuses ?? []);
-                return ($types === [] && $stages === []) || in_array($customerType, $types, true) || in_array($stage, $stages, true);
-            })
-            ->map(fn ($row) => $row->title.': '.$row->content)->implode("\n");
-        if ($knowledge !== '') {
-            $text .= "\n\n## المعرفة التجارية المعتمدة من الداشبورد\n".$knowledge;
-        }
-        return ['version' => $current['version'], 'text' => $text];
+        return ['version' => $current['version'], 'text' => $current['text']];
     }
-
-
 
     /**
      * CTX-004: the 58-line index (~2,000 chars) rode along every call, also
@@ -420,6 +431,11 @@ class ContextBuilder
                 : "(اتبعت للعميل {$note} - ده سجل مش نص تكتبه)";
 
             return ['role' => $role, 'parts' => [['type' => 'text', 'text' => $record]]];
+        }
+
+        // A text that never reached him is not something he was told (rescue 2026-11-08).
+        if (! $isCustomer && $message->delivery_status === 'failed' && filled($message->text)) {
+            return ['role' => $role, 'parts' => [['type' => 'text', 'text' => '(رد ماوصلش للعميل - الإرسال فشل؛ هو ما شافوش)']]];
         }
 
         if (! $isCustomer) {

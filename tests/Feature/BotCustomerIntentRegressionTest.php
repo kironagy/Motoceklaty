@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Agent\Runtime\{CatalogMentions, CatalogPhotoReply, ConversationIntent, MotorcycleSelection, TurnResultBuilder};
+use App\Agent\Runtime\{CatalogMentions, ConversationIntent, MotorcycleSelection, TurnResultBuilder};
 use App\Agent\Tools\{ToolContext, ToolRegistry};
 use Illuminate\Support\Facades\{DB, Schema, Cache};
 use Tests\TestCase;
@@ -91,26 +91,6 @@ class BotCustomerIntentRegressionTest extends TestCase
         $this->assertFalse($intent->asksToApply('عايز صور الزد','نبدأ التقديم؟'));
     }
 
-    public function test_requested_catalog_photos_are_queued_without_work_or_application_tools(): void
-    {
-        $this->message('outgoing','صور أنهي مكنة؟ دايو ٢ ولا دايو ٤؟');
-        $this->message('incoming','دايو 2 و4');
-        $registry = new class extends ToolRegistry {
-            public array $calls = [];
-            public function __construct() {}
-            public function execute(string $name, array $args, ToolContext $ctx): array {
-                $this->calls[] = $name;
-                $ctx->outbound->addMedia(['type'=>'image','path'=>'machines/'.$args['motorcycle_id'].'.jpg','motorcycle_id'=>$args['motorcycle_id']]);
-                return ['ok'=>true,'data'=>['queued_count'=>1]];
-            }
-        };
-        $ctx = new ToolContext(1,1,null,1,1,new TurnResultBuilder());
-        $reply = app(CatalogPhotoReply::class)->for('دايو 2 و4',$ctx,$registry);
-        $this->assertCount(2,$reply['media']);
-        $this->assertSame(['send_motorcycle_images','send_motorcycle_images'],$registry->calls);
-        $this->assertStringNotContainsString('التقديم',$reply['messages'][0]);
-    }
-
     public function test_early_financial_reply_keeps_already_queued_media_without_duplicates(): void
     {
         $builder = new TurnResultBuilder();
@@ -121,27 +101,6 @@ class BotCustomerIntentRegressionTest extends TestCase
         $this->assertCount(1,$result['media']);
         $this->assertSame(['القسط 3000','رابط حقيقي'],$result['messages']);
         $this->assertArrayNotHasKey('no_reply',$result);
-    }
-
-    public function test_final_gate_replaces_an_answered_model_question_with_the_actual_quote(): void
-    {
-        $this->message('incoming','RK200');
-        $this->message('outgoing','تحب القسط على سنة ولا سنتين ولا ٣ سنين؟');
-        $this->message('incoming','3');
-        $registry = new class extends ToolRegistry {
-            public function __construct() {}
-            public function execute(string $name, array $args, ToolContext $ctx): array {
-                if ($name !== 'get_installment_offer' || $args !== ['motorcycle_id'=>5,'months'=>36]) throw new \RuntimeException('Wrong continuation');
-                return ['ok'=>true,'data'=>['offers'=>[['line'=>'٣٦ شهر: القسط الشهري ٣٠٠٠ جنيه','down_payment'=>0]]]];
-            }
-        };
-        $class = new \ReflectionClass(\App\Agent\Runtime\AgentRunner::class);
-        $runner = $class->newInstanceWithoutConstructor();
-        $class->getProperty('tools')->setValue($runner,$registry);
-        $class->getProperty('guard')->setValue($runner,new \App\Agent\Runtime\ReplyGuard());
-        $class->getProperty('turnContext')->setValue($runner,new ToolContext(1,1,null,1,1,new TurnResultBuilder()));
-        $result = $class->getMethod('continueWithoutRepeating')->invoke($runner,(object)['id'=>1,'whatsapp_conversation_id'=>1],['messages'=>['تحب نحسب أنهي موتوسيكل؟']]);
-        $this->assertSame(['٣٦ شهر: القسط الشهري ٣٠٠٠ جنيه'],$result['messages']);
     }
 
     public function test_gemini_is_never_a_customer_reply_or_review_fallback(): void

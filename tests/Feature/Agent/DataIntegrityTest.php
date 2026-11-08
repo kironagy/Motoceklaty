@@ -300,7 +300,7 @@ class DataIntegrityTest extends TestCase
         $result = app(StartApplicationTool::class)->execute(['customer_type' => 'employee', 'customer_type_quote' => 'انا أمين شرطة'], $this->ctx(0));
 
         $this->assertSame('OCCUPATION_NOT_ACCEPTED', $result->error['code']);
-        $this->assertStringContainsString('هيترفض', $result->error['detail']);
+        $this->assertStringContainsString('غير متاح', $result->error['detail']);
     }
 
     public function test_an_ocr_name_missing_the_first_name_does_not_replace_the_full_name(): void

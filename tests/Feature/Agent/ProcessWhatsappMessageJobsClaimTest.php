@@ -25,9 +25,23 @@ class ProcessWhatsappMessageJobsClaimTest extends TestCase
         return $method->invoke($command);
     }
 
+    private ?int $botId = null;
+
+    /** Only an active bot's turns are claimed (a paused bot keeps its jobs). */
+    private function activeBotId(): int
+    {
+        if ($this->botId === null) {
+            $staff = \App\Models\Staff::create(['name' => 'S', 'email' => 'claim'.uniqid().'@x.com', 'password' => 'secret']);
+            $this->botId = \App\Models\WhatsappBot::create(['staff_id' => $staff->id, 'name' => 'B', 'whatsapp_phone_number_id' => uniqid(), 'is_active' => true])->id;
+        }
+
+        return $this->botId;
+    }
+
     private function insertTurn(array $overrides = []): int
     {
         return DB::table('whatsapp_message_jobs')->insertGetId(array_merge([
+            'whatsapp_bot_id' => $this->activeBotId(),
             'whatsapp_conversation_id' => 1,
             'from' => '201000000000@s.whatsapp.net',
             'status' => 'pending',

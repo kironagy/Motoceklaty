@@ -42,7 +42,10 @@ class OneSourceOfTruthTest extends TestCase
 
         $system = app(ContextBuilder::class)->build($this->turnFor($conversation, 'السلام عليكم'))->system;
 
-        $this->assertStringNotContainsString('محتوى مثبت', $system);
+        // rescue 2026-11-08: dashboard knowledge is folded INTO the one published version (an edit
+        // there used to reach no prompt at all) - once, under its heading, never a second layer
+        $this->assertSame(1, substr_count($system, 'محتوى مثبت'));
+        $this->assertStringContainsString(\App\Domain\Teaching\LessonSync::KNOWLEDGE_HEADING, app(\App\Domain\Settings\AgentInstructions::class)->current()['text']);
         $this->assertSame(1, substr_count($system, 'ما تبعتش صور غير لو طلبها'));
         $this->assertStringContainsString(\App\Domain\Teaching\LessonSync::HEADING, $system);
     }

@@ -77,7 +77,7 @@ class FormLinkFollowUpService
         }
 
         $text = $this->message($link);
-        $this->delivery->deliverForConversation($conversation, ['messages' => [$text]], 'bot');
+        $this->delivery->deliverForConversation($conversation, ['messages' => [$text]], 'bot', dedupeKey: 'form_followup:'.$link->id.':'.($link->followups_sent + 1));
         $link->update(['followups_sent' => $link->followups_sent + 1, 'last_followup_at' => now()]);
 
         return true;
@@ -105,6 +105,16 @@ class FormLinkFollowUpService
             return strtr((string) config('agent.form_links.followup_warned', 'فيه صورة محتاجة تتعدّل في طلبك ({label}): {problem} ارفعها تاني من نفس الرابط: {url}'), [
                 '{label}' => $label, '{problem}' => $warned->message, '{url}' => $link->url(),
             ]);
+        }
+
+        // The second reminder in other words: the same text again was the repeat he complained of
+        // (and the outbound repeat net would drop it, so the second one never arrived).
+        if ($link->followups_sent >= 1) {
+            $left = $link->status === 'in_progress' && $progress['missing'] !== []
+                ? '، فاضل فيه: '.collect($progress['missing'])->take(3)->implode('، ') : '';
+
+            return strtr((string) (config('agent.form_links.followup_second') ?: 'لسه رابط التقديم مستنيك{left}، وكل اللي كتبته فيه محفوظ. لو حاجة وقفاك قولّي وأنا أساعدك: {url}'),
+                ['{left}' => $left, '{url}' => $link->url()]);
         }
 
         if ($link->status === 'in_progress' && $progress['missing'] !== []) {

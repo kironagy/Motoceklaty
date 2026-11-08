@@ -266,6 +266,31 @@ return [
         'fix_message' => 'محتاجين نعدّل حاجة في طلبك: {reason}. افتح الرابط ده وعدّلها وابعته تاني: {url}',
     ],
 
+    /*
+     * Rescue 2026-11-08: these settings were added on the server with no default,
+     * so anywhere else they were empty (cap reason, refusal lines, age stop...).
+     * A dashboard value still overrides each one (AgentSettings::apply).
+     */
+    'eligibility' => [
+        'age_block_message' => 'فاهم حضرتك، لكن طبيعة الشغل ما بتغيرش شرط السن اللي وضحناه؛ لازم صاحب الطلب يكون مستوفي شروط السن للتقسيط. ينفع أي شخص تاني مستوفي شروط السن والعمل يقدم باسمه وبمستنداته، ومش شرط يكون من أهلك.',
+        'age_stop_instructions' => 'السن المصرح به غير مستوفٍ: لا تسأل عن عمل نفس الشخص أو نوع شغله أو تأمينه. وضح شرط السن واعرض شخصًا آخر مستوفيًا الشروط يقدم باسمه وبمستنداته، مش شرط من أهله. أسئلة الشغل تخص الشخص البديل بعد التأكد أنه مستوفٍ السن.',
+        // customer-facing lines (said as is): plain Egyptian, never an instruction
+        'other_applicant' => 'ينفع حد تاني يقدّم بدالك، مش شرط من أهلك، بس الطلب كله يبقى باسمه هو وبمستنداته هو، ولازم سنه من 21 لـ 62 ويكون شغال أو على المعاش. هو بيشتغل إيه؟',
+        'other_applicant_refused' => 'للأسف اللي هيقدّم لازم يكون شغال أو على المعاش وسنه من 21 لـ 62. فيه حد تاني كده يقدر يقدّم؟',
+        'no_work_hint' => null,
+        'occupation_review_hint' => 'His job is on the list a colleague reviews: no application link now, and do not refuse or accept it yourself. Tell him the installment needs a colleague to look at his job first and the cash price is open; offer to put him in touch with a colleague and call handoff_to_human only if he says yes.',
+    ],
+
+    'safety' => [
+        // owner rules and facts are always enforced; "advisory" only relaxes style notes
+        'reply_guard_mode' => env('AGENT_REPLY_GUARD_MODE', 'enforce'),
+        'language_enabled' => true,
+        'language_banned_pattern' => '/(?:مبغوت[ةه]|مبغوط[ةه]|يا\s+(?:غبي|حمار|اهبل|أهبل))/u',
+        'language_repair_instructions' => 'أعد الرد كاملًا بلغة مصرية محترمة ومفهومة بدون شتائم أو سخرية أو هزار ثقيل أو ألفاظ مخترعة. أجب السؤال من مصادره فقط.',
+        'banned_reply_pattern' => '/(?:ما\s*عنديش|معنديش|لا\s*أملك|لا\s*املك|ليس\s*لدي)[^.!؟?\n]{0,60}معلوم(?:[ةه]|ات)[^.!؟?\n]{0,30}(?:مؤكد[ةه]|موكد[ةه]|موثق[ةه])/u',
+        'banned_reply_repair' => 'الجملة الجاهزة عن عدم وجود معلومة مؤكدة ممنوعة. أعد الإجابة عن سؤال العميل الحالي بالمعلومات المسجلة، ولو التفصيل يحتاج تحديدًا اسأل سؤالًا محددًا عنه. لا تخترع معلومة.',
+    ],
+
     'handoff' => [
         // DEC-13: automatic handoff threshold is still OPEN. No default -
         // T17 must not trigger handOffForFailures until this is set.

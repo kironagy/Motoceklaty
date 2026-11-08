@@ -93,7 +93,8 @@ class ContextBuilderTest extends TestCase
         $request = app(ContextBuilder::class)->build($turn);
 
         // one instruction source: dashboard knowledge is no longer a prompt layer
-        $this->assertStringNotContainsString('قاعدة مثبتة', $request->system);
+        // rescue 2026-11-08: general dashboard knowledge is folded into the one published version
+        $this->assertSame(1, substr_count($request->system, 'قاعدة مثبتة: محتوى مثبت'));
         $this->assertStringNotContainsString('note1: ملاحظة عامة', $request->system);
         $this->assertStringContainsString('بوكسر 150', $request->system);
         $this->assertStringContainsString((string) $application->id, $request->system);

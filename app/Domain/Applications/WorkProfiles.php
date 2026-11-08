@@ -14,6 +14,8 @@ use App\Models\WhatsappConversation;
  */
 class WorkProfiles
 {
+    public const OCCUPATION_CATEGORIES = ['police_officer', 'police_amin', 'army_officer', 'officer_unknown_branch', 'lawyer', 'judge_or_prosecutor', 'civilian_in_police_or_army', 'other'];
+
     public const CUSTOMER_TYPES = ['employee', 'self_employed', 'business_owner', 'pension', 'unknown'];
 
     public const WORK_TYPES = ['craftsman', 'delivery_app', 'delivery_app_bicycle', 'delivery_company', 'other', 'none'];
@@ -51,6 +53,10 @@ class WorkProfiles
             && ($previous['applicant_relation'] ?? null) === ($profile['applicant_relation'] ?? null)) {
             foreach (['insured','sector','working_now','customer_type','relation_to_workplace'] as $key) {
                 if (($profile[$key] ?? 'unknown') === 'unknown' && ($previous[$key] ?? 'unknown') !== 'unknown') $profile[$key] = $previous[$key];
+            }
+            // the same person's job category stays until a new reading names one
+            foreach (['occupation_category', 'in_training'] as $key) {
+                if (($profile[$key] ?? null) === null && ($previous[$key] ?? null) !== null) $profile[$key] = $previous[$key];
             }
         }
 
@@ -126,6 +132,10 @@ class WorkProfiles
             'sector' => $pick('sector', ['government', 'private', 'unknown'], 'unknown'),
             'could_be_government' => (bool) ($r['could_be_government'] ?? false),
             'refused_work' => (bool) ($r['refused_work'] ?? false),
+            // the APPLICANT's own current job, read by the model (a relative's job or a civilian post is not it)
+            'occupation_category' => in_array($r['occupation_category'] ?? null, self::OCCUPATION_CATEGORIES, true) ? $r['occupation_category'] : null,
+            // the applicant himself is still in training / probation or started days ago (model-read, not a word match)
+            'in_training' => isset($r['in_training']) ? (bool) $r['in_training'] : null,
             'customer_type' => $pick('customer_type', self::CUSTOMER_TYPES, 'unknown'),
             'work_type' => $pick('work_type', self::WORK_TYPES, 'none'),
             'question' => $pick('question', self::QUESTIONS, 'none'),

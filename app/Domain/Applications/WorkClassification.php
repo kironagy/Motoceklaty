@@ -17,6 +17,14 @@ use App\Models\EligibilityRule;
  */
 class WorkClassification
 {
+    /**
+     * A known breach of an owner rule (refused current job, foreigner, woman on free income,
+     * no work, tenure, income) - no application link. The ASK_* / *_NOT_STATED codes only
+     * mean a question is still open, and the form asks it.
+     */
+    public const BLOCKING = ['FOREIGNER_NO_INSTALLMENTS', 'FEMALE_FREE_INCOME_NOT_ACCEPTED', 'OCCUPATION_NOT_ACCEPTED',
+        'OCCUPATION_REQUIRES_STAFF_REVIEW', 'OFFICER_BRANCH_REQUIRED', 'APPLICANT_HAS_NO_WORK', 'EMPLOYMENT_TENURE_NOT_MET', 'STATED_INCOME_BELOW_MINIMUM'];
+
 
     /** Codes that end the installment talk (cash stays open) - never followed by numbers. */
     public const REFUSALS = ['FOREIGNER_NO_INSTALLMENTS', 'APPLICANT_HAS_NO_WORK', 'OCCUPATION_NOT_ACCEPTED',
@@ -62,20 +70,30 @@ class WorkClassification
         $words = $r['evidence'] !== '' ? $r['evidence'] : $r['occupation'];
         $workEvidence = \App\Support\ArabicTextNormalizer::normalize((string)$words);
         $occupationWords = $workEvidence.' '.\App\Support\ArabicTextNormalizer::normalize((string)($r['job_title'] ?? '').' '.(string)$r['occupation']);
-        $officer = preg_match('/ضابط|ظابط|نقيب|رائد|مقدم|عقيد|عميد|لواء|ملازم/u', $occupationWords);
-        $armyOfficer = $officer && preg_match('/جيش|قوات مسلحه/u', $occupationWords) && ! str_contains($occupationWords,'شرطه');
-        if ($r['customer_type'] !== 'pension' && preg_match('/شرطه/u',$occupationWords)
-            && ($officer || str_contains($occupationWords,'امين'))) {
+        // The model's reading of HIS current job decides (rescue 2026-11-08: the regex on his words
+        // refused "امين مخازن مدني في الشرطه"). Old profiles without it fall back to the words.
+        $category = $r['occupation_category'] ?? null;
+        $officer = $category !== null ? in_array($category, ['police_officer', 'army_officer'], true)
+            : (bool) preg_match('/ضابط|ظابط|نقيب|رائد|مقدم|عقيد|عميد|لواء|ملازم/u', $occupationWords);
+        $armyOfficer = $category !== null ? $category === 'army_officer'
+            : $officer && preg_match('/جيش|قوات مسلحه/u', $occupationWords) && ! str_contains($occupationWords,'شرطه');
+        $police = $category !== null ? in_array($category, ['police_officer', 'police_amin'], true)
+            : preg_match('/شرطه/u',$occupationWords) && ($officer || str_contains($occupationWords,'امين'));
+        if ($r['customer_type'] !== 'pension' && $police) {
             return ['code'=>'OCCUPATION_NOT_ACCEPTED','hint'=>'ضباط الشرطة بكل الرتب وأمناء الشرطة غير متاح لهم التقديم للتقسيط لأن جهات التمويل لا تتعامل معهم. لا تفتح الطلب ولا تعرض استثناء أو مراجعة لتجاوز الشرط. الكاش متاح.'];
         }
-        if ($officer && ! $armyOfficer && ! str_contains($occupationWords,'شرطه') && $r['customer_type'] !== 'pension') {
+        if (($category === 'officer_unknown_branch' || ($category === null && $officer && ! $armyOfficer && ! str_contains($occupationWords,'شرطه'))) && $r['customer_type'] !== 'pension') {
             return ['code'=>'OFFICER_BRANCH_REQUIRED','hint'=>'اسأل: حضرتك ضابط جيش ولا شرطة؟ لا تستنتج الجهة من الرتبة.'];
         }
-        if (preg_match('/تحت (?:ال)?تدريب|تحت (?:ال)?اختبار|(?:بقاله|بقالي|بقالها)\s*(?:3|ثلاث|تلات|ثلاثه|تلاته)\s*ايام/u',$workEvidence)) {
+        $training = ($r['in_training'] ?? null) !== null ? (bool) $r['in_training']
+            : (bool) preg_match('/تحت (?:ال)?تدريب|تحت (?:ال)?اختبار|(?:بقاله|بقالي|بقالها)\s*(?:3|ثلاث|تلات|ثلاثه|تلاته)\s*ايام/u',$workEvidence);
+        if ($training) {
             return ['code'=>'EMPLOYMENT_TENURE_NOT_MET','hint'=>'العمل تحت التدريب أو من ٣ أيام لا يستوفي شرط مدة العمل، المطلوب من ٣ إلى ٦ شهور حسب الحالة. لا تعتبر البطاقة وحدها استيفاء لهذا الشرط.'];
         }
         $job = \App\Support\ArabicTextNormalizer::normalize((string)($r['job_title'] ?? '').' '.(string)$r['occupation']);
-        if (preg_match('/(?<!\p{L})(?:محامي(?:ه)?|قاضي|وكيل نيابه)(?!\p{L})/u', $job) && $r['customer_type'] !== 'pension') {
+        $legal = $category !== null ? in_array($category, ['lawyer', 'judge_or_prosecutor'], true)
+            : (bool) preg_match('/(?<!\p{L})(?:محامي(?:ه)?|قاضي|وكيل نيابه)(?!\p{L})/u', $job);
+        if ($legal && $r['customer_type'] !== 'pension') {
             return ['code'=>'OCCUPATION_NOT_ACCEPTED','hint'=>'المحامون والقضاة ووكلاء النيابة غير متاح لهم التقديم للتقسيط لأن جهات التمويل لا تتعامل معهم. لا تفتح طلبًا ولا تعرض استثناء أو مراجعة لتجاوز الشرط. الكاش متاح.'];
         }
 
@@ -84,14 +102,15 @@ class WorkClassification
         }
 
         if (in_array($r['working_now'], ['no', 'not_yet'], true) && $r['customer_type'] !== 'pension') {
-            return ['code' => 'APPLICANT_HAS_NO_WORK', 'hint' => 'his words: "'.$words.'". Say exactly: "'.trim((string) config('agent.eligibility.no_work_hint')).'"'];
+            return ['code' => 'APPLICANT_HAS_NO_WORK', 'hint' => 'his words: "'.$words.'". Say exactly: "'.(trim((string) config('agent.eligibility.no_work_hint')) ?: OtherApplicant::line(($r['applicant'] ?? null) === 'someone_else')).'"'];
         }
 
         // Simulation 2026-10-04: a retired postal manager was refused as
         // "government work". Sector alone cannot decide eligibility; a flagged
         // current occupation pauses automation for a staff decision.
         if ($r['refused_work'] && ! $armyOfficer && $r['customer_type'] !== 'pension') {
-            return ['code' => 'OCCUPATION_REQUIRES_STAFF_REVIEW', 'hint' => (string) config('agent.eligibility.occupation_review_hint')];
+            return ['code' => 'OCCUPATION_REQUIRES_STAFF_REVIEW', 'hint' => (string) (config('agent.eligibility.occupation_review_hint')
+                ?: 'His job is on the list a colleague reviews: no application link now, and do not refuse or accept it yourself. Tell him the installment needs a colleague to look at his job first and the cash price is open; offer to put him in touch with a colleague and call handoff_to_human only if he says yes.')];
         }
 
         // Owner 2026-10-04: a day's pay with no trade (tuk-tuk, café by the

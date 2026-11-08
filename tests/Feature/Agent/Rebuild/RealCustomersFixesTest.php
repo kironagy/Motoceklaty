@@ -247,7 +247,9 @@ class RealCustomersFixesTest extends TestCase
         $trace = AiTrace::create(['conversation_id' => $conversation->id, 'turn_id' => 1, 'status' => 'running']);
         $ctx = new ToolContext($conversation->customer_id, $conversation->id, null, 1, $trace->id, new TurnResultBuilder());
 
-        $result = app(GetInstallmentOfferTool::class)->execute(['motorcycle_id' => $machine->id, 'months' => 24, 'customer_type' => 'employee'], $ctx);
+        // he picked it himself (a lookup alone is not his choice)
+        \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $conversation->id, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'عايز الدايو 2 على سنتين']);
+        $result = app(GetInstallmentOfferTool::class)->execute(['motorcycle_id' => $machine->id, 'months' => 24, 'customer_type' => 'employee', 'his_words' => 'الدايو 2'], $ctx);
 
         $this->assertTrue($result->ok, json_encode($result->error ?? null));
         $this->assertArrayHasKey('minimum_down_payment', $result->data['offers'][0]);

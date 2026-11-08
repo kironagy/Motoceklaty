@@ -331,6 +331,7 @@ class AgentRunnerTest extends TestCase
         $fake = $this->fake();
         $fake->queue($this->response([['id' => 't1', 'name' => 'send_reply', 'args' => ['messages' => ['تمام يا فندم']]]]));
         $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['تمام يا فندم']]]]));
+        $fake->queue($this->response([['id' => 't3', 'name' => 'send_reply', 'args' => ['messages' => ['تمام يا فندم']]]]));
 
         $result = app(AgentRunner::class)->run($this->turnFor($conversation));
 
@@ -358,13 +359,16 @@ class AgentRunnerTest extends TestCase
 
     public function test_limit_reached_forces_send_reply(): void
     {
-        // the last allowed call is the reply; no call after the limit
+        // the last allowed call is the reply; no call after the limit (rescue: never fewer than 4,
+        // so a price turn - tool + reply - still has room for one repair)
         config(['agent.runtime.max_model_calls' => 2]);
         $conversation = $this->conversation();
 
         $fake = $this->fake();
-        $fake->queue($this->response([['id' => 't1', 'name' => 'get_business_knowledge', 'args' => ['keys' => ['x']]]]));
-        $fake->queue($this->response([['id' => 't2', 'name' => 'send_reply', 'args' => ['messages' => ['تمام كده']]]]));
+        foreach (['t1', 't2', 't3'] as $id) {
+            $fake->queue($this->response([['id' => $id, 'name' => 'get_business_knowledge', 'args' => ['keys' => [$id]]]]));
+        }
+        $fake->queue($this->response([['id' => 't4', 'name' => 'send_reply', 'args' => ['messages' => ['تمام كده']]]]));
 
         $result = app(AgentRunner::class)->run($this->turnFor($conversation));
 

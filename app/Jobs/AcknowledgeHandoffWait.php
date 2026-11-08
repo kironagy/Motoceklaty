@@ -62,7 +62,7 @@ class AcknowledgeHandoffWait implements ShouldQueue
         }
 
         try {
-            $delivery->deliverForConversation($conversation, ['messages' => [$message]], senderType: 'system');
+            $delivery->deliverForConversation($conversation, ['messages' => [$message]], senderType: 'system', dedupeKey: 'handoff_wait:'.$handoff->id.':'.intdiv(now()->timestamp, max(60, $interval * 60)));
         } catch (\Throwable $e) {
             // Best effort: a failed acknowledgement must never break ingestion.
             Log::warning('Handoff wait acknowledgement failed', ['conversation_id' => $conversation->id, 'error' => $e->getMessage()]);

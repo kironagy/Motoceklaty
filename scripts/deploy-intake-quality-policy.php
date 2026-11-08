@@ -1,4 +1,8 @@
 <?php
+// RETIRED 2026-11-08 (bot rescue): every policy here is merged into resources/agent/instructions/agent.md (v6.0.0),
+// the ONE instruction source. Running this would append a second, contradicting copy to the live instructions.
+fwrite(STDERR, "Retired: publish resources/agent/instructions/agent.md instead (docs/superpowers/specs/2026-11-08-bot-rescue-design.md).\n"); exit(2);
+
 if(($argv[1]??'')!=='--apply')exit("Use --apply\n");
 require dirname(__DIR__).'/vendor/autoload.php';$app=require dirname(__DIR__).'/bootstrap/app.php';$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 use App\Domain\Settings\{AgentInstructions,AgentSettings};use App\Domain\Teaching\LessonSync;use Illuminate\Support\Facades\DB;

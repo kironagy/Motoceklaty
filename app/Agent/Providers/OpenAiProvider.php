@@ -193,7 +193,7 @@ class OpenAiProvider
             // GPT-5 accepts only its default temperature. Reasoning tokens
             // come out of max_completion_tokens, so they get room on top.
             'reasoning_effort' => $effort,
-            'max_completion_tokens' => $request->maxOutputTokens + ($provider === 'bormaa' ? 256 : ($effort === 'minimal' ? 1024 : 4096)),
+            'max_completion_tokens' => $request->maxOutputTokens + ($provider === 'bormaa' ? 1024 : ($effort === 'minimal' ? 1024 : 4096)),
         ];
 
         if ($request->responseSchema !== null) {

@@ -77,9 +77,11 @@ class WebsiteTest extends TestCase
         $post = Post::published()->first();
 
         foreach (['/', '/about', '/machines', '/machines?category=sport', '/machines/' . $this->machine->id,
-            '/blog', '/blog/' . rawurlencode($post->slug), '/contact', '/installment', '/apply-installment'] as $url) {
+            '/blog', '/blog/' . rawurlencode($post->slug), '/contact', '/installment'] as $url) {
             $this->get($url)->assertOk();
         }
+        // 2026-10-29: applying from the website is off; the bot's form link is the only intake.
+        $this->get('/apply-installment')->assertRedirect(route('machines.index'));
         // The approved design has no team page; its team lives on the about page.
         $this->get('/team')->assertRedirect(route('about.index') . '#team');
 
@@ -197,36 +199,18 @@ class WebsiteTest extends TestCase
 
     public function test_installment_application_is_saved_even_when_ocr_is_unavailable(): void
     {
+        // 2026-10-29: the public website form is closed; applications come only through the bot's form link.
         Storage::fake('public');
-        $this->app->bind(OcrProvider::class, fn () => new class implements OcrProvider {
-            public function extractText(string $base64Image, string $mime): OcrResult
-            {
-                throw new OcrException('OCR_UNAVAILABLE: no key');
-            }
-        });
-
-        $this->post(route('installments.store'), $this->application())
-            ->assertRedirect()
-            ->assertSessionHas('success')->assertSessionHas('tracking_code');
-
-        $request = \App\Models\InstallmentRequest::latest('id')->first();
-        $this->assertSame('أحمد محمد علي', $request->applicant_name);
-        $this->assertStringContainsString('مراجعتها يدوياً', $request->checks_report);
+        $this->post(route('installments.store'), $this->application())->assertStatus(410);
+        $this->assertSame(0, \App\Models\InstallmentRequest::count());
     }
 
     public function test_installment_application_reads_the_national_id_when_ocr_works(): void
     {
+        // 2026-10-29: the public website form is closed; applications come only through the bot's form link.
         Storage::fake('public');
-        $this->app->bind(OcrProvider::class, fn () => new class implements OcrProvider {
-            public function extractText(string $base64Image, string $mime): OcrResult
-            {
-                return new OcrResult("جمهورية مصر العربية\nأحمد محمد علي\n29501011234567");
-            }
-        });
-
-        $this->post(route('installments.store'), $this->application())->assertSessionHas('success');
-
-        $this->assertSame('29501011234567', \App\Models\InstallmentRequest::latest('id')->first()->applicant_national_id);
+        $this->post(route('installments.store'), $this->application())->assertStatus(410);
+        $this->assertSame(0, \App\Models\InstallmentRequest::count());
     }
 
     protected function application(): array
@@ -385,16 +369,10 @@ class WebsiteTest extends TestCase
 
     public function test_application_rejects_unavailable_terms_models_and_invalid_deposits_before_uploading(): void
     {
+        // 2026-10-29: the public website form is closed; applications come only through the bot's form link.
         Storage::fake('public');
-        $data = $this->application();
-        $this->post(route('installments.store'), array_replace($data, ['months' => 999]))
-            ->assertSessionHasErrors('installment_type');
-        $this->post(route('installments.store'), array_replace($data, ['deposit' => 55000]))
-            ->assertSessionHasErrors('deposit');
-        $this->machine->update(['is_active' => false]);
-        $this->post(route('installments.store'), $data)->assertSessionHasErrors('installment_type');
-        $this->assertDatabaseCount('installment_requests', 0);
-        $this->assertSame([], Storage::disk('public')->allFiles());
+        $this->post(route('installments.store'), $this->application())->assertStatus(410);
+        $this->assertSame(0, \App\Models\InstallmentRequest::count());
     }
 
     protected function admin(): Staff

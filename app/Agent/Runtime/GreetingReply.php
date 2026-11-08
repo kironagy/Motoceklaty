@@ -60,6 +60,29 @@ class GreetingReply
         return trim((string) $last) === $reply ? self::GREETINGS[$first][1].'، معاك.' : $reply;
     }
 
+    /**
+     * Conversation 231: five greetings in a row got five answers. True when our last
+     * delivered reply was a greeting and he has said nothing but greetings since.
+     */
+    public function alreadyGreeted(WhatsappConversation $conversation): bool
+    {
+        // a greeting, then "…، معاك." to the second one (owner 2026-10-06); after that, silence
+        $replies = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'outgoing')->where('sender_type', 'bot')->where('delivery_status', 'sent')
+            ->latest('id')->limit(2)->get(['id', 'text', 'created_at']);
+        $answers = array_column(self::GREETINGS, 1);
+        $isGreeting = fn ($m) => collect($answers)->contains(fn ($a) => str_starts_with(trim((string) $m->text), $a));
+
+        if ($replies->count() < 2 || ! $replies->every($isGreeting) || $replies->first()->created_at?->lt(now()->subHours(12))) {
+            return false;
+        }
+
+        return WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+            ->where('direction', 'incoming')->where('id', '>', $replies->last()->id)->get(['text'])
+            ->every(fn ($m) => ($parts = $this->parts((string) $m->text)) !== null
+                && collect($parts)->every(fn ($p) => $this->greetingOf($p) !== null));
+    }
+
     /** "السلام عليكم ، مساء الخير 🌹" -> ['السلام عليكم', 'مساء الخير']; null when there is nothing to read. */
     private function parts(string $text): ?array
     {

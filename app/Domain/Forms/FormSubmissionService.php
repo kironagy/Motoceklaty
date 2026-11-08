@@ -506,7 +506,7 @@ class FormSubmissionService
             : (string) config('agent.form_links.received_message');
 
         try {
-            $this->delivery->deliverForConversation($conversation, ['messages' => [$text]], 'bot', null, false);
+            $this->delivery->deliverForConversation($conversation, ['messages' => [$text]], 'bot', null, false, 'form_receipt:'.$link->id.':'.$link->submitted_at?->timestamp);
             $link->update(['receipt_status' => 'sent']);
         } catch (\Throwable $e) {
             Log::warning('Form receipt not delivered', ['form_link_id' => $link->id, 'error' => $e->getMessage()]);

@@ -275,6 +275,13 @@ class InstallmentTest extends TestCase
             $this->worksAs($ctx, $args['customer_type']);
         }
 
+        // He picked this motorcycle in his own words (a lookup alone is not his choice).
+        if (! array_key_exists('his_words', $args) && isset($args['motorcycle_id'])) {
+            $name = \App\Models\Machine::find($args['motorcycle_id'])?->name;
+            \App\Models\WhatsappMessage::create(['whatsapp_conversation_id' => $ctx->conversationId, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'text', 'text' => 'عايز '.$name]);
+            $args['his_words'] = 'عايز '.$name;
+        }
+
         return app(\App\Agent\Tools\GetInstallmentOfferTool::class)->execute($args, $ctx);
     }
 

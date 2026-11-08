@@ -36,7 +36,8 @@ class GetInstallmentOfferTool implements ReadTool
             'required' => ['motorcycle_id'],
             'properties' => [
                 'motorcycle_id' => ['type' => 'integer'],
-                'months' => ['type' => 'integer', 'minimum' => 1, 'description' => 'The one duration he named ("على سنة" = 12, "سنة ونص" = 18, "سنتين" = 24, "٣ سنين" = 36).'],
+                'his_words' => ['type' => 'string', 'description' => 'Needed unless he has an open application: his exact words, copied from any of his messages, that name this motorcycle ("هوجن 4 فرز تاني", "اللي بـ46 ألف", "الزد", "KTX"). A model you suggested that he never named is not his pick - ask.'],
+                'months' => ['type' => 'integer', 'minimum' => 1, 'description' => 'The one duration he named, now or earlier in the chat ("على سنة" = 12, "سنة ونص" = 18, "سنتين" = 24, "٣ سنين" = 36). Never ask a duration he already said.'],
                 'months_list' => ['type' => 'array', 'items' => ['type' => 'integer', 'minimum' => 1], 'description' => 'Only when he asked for more than one duration ("احسبهالي على سنة وسنتين").'],
                 'all_durations' => ['type' => 'boolean', 'description' => 'true only when he asked for every duration ("قولي كل المدد", "على كل الفترات"). Without months, months_list or this, you get the durations to ask him about - no numbers.'],
                 'down_payment' => ['type' => 'number', 'minimum' => 0],
@@ -53,6 +54,63 @@ class GetInstallmentOfferTool implements ReadTool
         return 'READ';
     }
 
+    /**
+     * Incident 11-06: shorthand the name regex missed ("X ROAD", "KTX", "اللي بـ46 ألف")
+     * refused the offer, and he was asked for the model again. The model now quotes his
+     * words; they only count when he really wrote (or said) them.
+     */
+    public function hisWordsPick(array $args, ToolContext $ctx, Machine $machine): bool
+    {
+        $quote = trim((string) ($args['his_words'] ?? ''));
+        $words = \App\Domain\Conversations\DeliveryService::sameText($quote);
+
+        if (mb_strlen($words) < 2) {
+            return false;
+        }
+
+        $said = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $ctx->conversationId)
+            ->where('direction', 'incoming')->latest('id')->limit(20)->get(['text', 'transcript'])
+            ->contains(fn ($m) => str_contains(\App\Domain\Conversations\DeliveryService::sameText(trim($m->text.' '.$m->transcript)), $words));
+
+        if (! $said) {
+            return false;
+        }
+
+        // Simulation 2026-11-08: "هوجن 4 فرز تاني" (catalog: "هوجن ٤ استيراد فرز تاني") and "كيواي سوبر لايت"
+        // (catalog: "Superlight") were refused five times because the FULL name had to match, and he was
+        // asked for the model he had named. Which model his words mean is the AI's reading; code only
+        // checks the words name something of this motorcycle - its name, a word of it or its brand, or its
+        // price - so a bare "عايز" is still no pick.
+        $catalog = app(\App\Agent\Runtime\CatalogMentions::class);
+        if (in_array((int) $machine->id, array_map('intval', $catalog->fullNames($quote)), true)) {
+            return true;
+        }
+        foreach ($catalog->words($quote) as $machineIds) {
+            if (in_array((int) $machine->id, array_map('intval', (array) $machineIds), true)) {
+                return true;
+            }
+        }
+
+        return $this->namesPrice($quote, $machine);
+    }
+
+    private function namesPrice(string $quote, Machine $machine): bool
+    {
+        $text = \App\Support\ArabicTextNormalizer::normalize($quote);
+        preg_match_all('/(\d+(?:[.,]\d+)?)\s*(الف|ألف|k)?/u', $text, $m, PREG_SET_ORDER);
+
+        foreach ($m as $hit) {
+            $amount = (float) str_replace(',', '', $hit[1]) * (! empty($hit[2]) || (float) $hit[1] < 1000 ? 1000 : 1);
+            foreach ([$machine->cash_price, $machine->offer_price ?? null, $machine->installment_price ?? null] as $price) {
+                if (is_numeric($price) && (float) $price > 0 && abs((float) $price - $amount) <= 1000) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     public function execute(array $args, ToolContext $ctx): ToolResult
     {
         $machine = Machine::where('is_active', true)->find($args['motorcycle_id']);
@@ -60,17 +118,12 @@ class GetInstallmentOfferTool implements ReadTool
         if (! $machine) {
             return ToolResult::error('UNKNOWN_MOTORCYCLE');
         }
-        if (! $ctx->activeApplicationId && ! app(\App\Agent\Runtime\MotorcycleSelection::class)->confirms($ctx->conversationId,(int)$machine->id)) {
-            $recent=\App\Models\WhatsappMessage::where('whatsapp_conversation_id',$ctx->conversationId)->where('direction','incoming')->latest('id')->limit(12)->get(['text','transcript']);
-            foreach($recent as $message){
-                $text=trim((string)$message->text.' '.(string)$message->transcript);
-                $ids=app(\App\Agent\Runtime\CatalogMentions::class)->fullNames($text);
-                if($ids!==[] && preg_match('/استيراد|فرز|اصلي|أصلي/u',$text)){
-                    $names=Machine::whereIn('id',$ids)->where('is_active',true)->pluck('name')->implode(' أو ');
-                    return ToolResult::error('MODEL_VERSION_CLARIFICATION','أنت سألت عن «'.$text.'». الاسم المسجل عندنا هو «'.$names.'». تقصد النسخة دي ولا موديل تاني؟');
-                }
-            }
-            return ToolResult::error('MODEL_SELECTION_REQUIRED','العميل لم يحدد موديلًا واحدًا. اسأله على أنهي موديل قبل ذكر أي مقدم أو قسط أو مصاريف. نتائج البحث والترشيحات ليست اختيارًا.');
+        // His pick is read by the AI (his_words); no regex guesses it from his messages.
+        if (! $ctx->activeApplicationId && ! $this->hisWordsPick($args, $ctx, $machine)) {
+            return ToolResult::error('MODEL_SELECTION_REQUIRED', trim(($args['his_words'] ?? '') === ''
+                ? 'his_words is missing. '
+                : 'his_words «'.$args['his_words'].'» is not in his messages word for word, or does not name «'.$machine->name.'» (its name, brand or price). ')
+                .'If he did name this motorcycle, copy his own words exactly into his_words. If his words fit more than one model, or he only accepted your suggestion without naming it, ask him which one.');
         }
 
         $conversation = \App\Models\WhatsappConversation::find($ctx->conversationId);
@@ -137,12 +190,8 @@ class GetInstallmentOfferTool implements ReadTool
                 .'installment depends on his work ('.$capLabels.' pay part of the price at pickup). When he answers, call again with customer_type.');
         }
 
+        // The duration he said is read by the AI from his words (months); no regex fills it in.
         $months = isset($args['months']) ? (int) $args['months'] : null;
-        if ($months === null && empty($args['months_list']) && empty($args['all_durations'])) {
-            $remembered = app(\App\Agent\Runtime\MotorcycleSelection::class)->lastDurations($ctx->conversationId);
-            if(count($remembered)===1) $months=$remembered[0];
-            elseif(count($remembered)>1) $args['months_list']=$remembered;
-        }
 
         // He already chose a duration: a freelancer's financing cap then
         // listed three durations again and asked him to pick. He gets the

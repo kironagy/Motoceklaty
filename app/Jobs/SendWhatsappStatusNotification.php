@@ -79,6 +79,8 @@ class SendWhatsappStatusNotification implements ShouldQueue
             'system',
             $jid,
             requireAgentEnabled: false,
+            // a retried job (timeout, worker restart) is the same notice, not a new one - request 372 got it 6 times
+            dedupeKey: ($uuid = $this->job?->uuid()) ? 'status:'.$uuid : null,
         );
 
         Log::info('WHATSAPP STATUS NOTIFICATION SENT', [

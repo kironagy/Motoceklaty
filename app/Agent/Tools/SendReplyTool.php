@@ -13,6 +13,8 @@ use App\Models\WhatsappMessage;
  */
 class SendReplyTool implements WriteTool
 {
+    public const ASKS = ['model', 'duration', 'work', 'insured', 'sector', 'age', 'other'];
+
     public function name(): string
     {
         return 'send_reply';
@@ -87,6 +89,9 @@ class SendReplyTool implements WriteTool
                 ],
                 'no_reply' => ['type' => 'boolean', 'description' => 'true with messages [] when his message needs no answer (thanks/emoji after the talk ended).'],
                 'ends_conversation' => ['type' => 'boolean', 'description' => 'true when he declined, paused or said goodbye: no reminders until he writes again.'],
+                // Rescue 2026-11-08: what this reply asks him for. Asking for something the facts already hold is refused.
+                'asks' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => self::ASKS],
+                    'description' => 'What this reply asks him for; [] when it asks nothing.'],
                 'memory' => $this->memorySchema(),
             ],
             'required' => ['messages'],

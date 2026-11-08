@@ -41,6 +41,83 @@ class ReplyGuard
      */
     public const CHAT_INTAKE_CODES = ['DOCUMENT_PHOTO_NOT_PROCESSED', 'PERSON_NOT_RECORDED', 'SUMMARY_CLAIMED_NOT_SENT', 'SUBMISSION_DENIED_BUT_DONE', 'DATA_CLAIMED_NOT_SAVED', 'DATA_GIVEN_NOT_RECORDED', 'DATA_OVERCLAIMED', 'SUBMIT_NOT_CALLED', 'REAPPLY_OFFERED_AFTER_SUBMIT', 'SELECTION_CLAIMED_NOT_SET', 'COMPLETION_OVERCLAIMED', 'DOCUMENTS_ASKED_WITHOUT_APPLICATION', 'ACCEPTED_DOCUMENT_ASKED_AGAIN'];
 
+    /** Wording/style only: "advisory" mode may let these through. Facts and owner rules are always enforced. */
+    public const STYLE_CODES = ['FORMAL_ARABIC', 'JOB_AS_TITLE', 'MASCULINE_ADDRESS_TO_WOMAN', 'KIND_NOT_ASKED', 'GARBLED_TEXT'];
+
+    /**
+     * The bot saying it saved/recorded something, in any person: "سجلت" and (simulation 2026-11-08)
+     * "سجلنا الرقم", "سجلناه", "اتسجلك", "تم تسجيل", "حفظنا", "ثبتنالك". Text without shadda.
+     */
+    private const SAVED_CLAIM = '/(?<!\p{L})و?(?:(?:سجل|حفظ|ثبت|عدل|حدث)(?:ت|نا)(?:ها|هم|ه|هولك|هالك|لك|ي)?|ات(?:سجل|حفظ|عدل)(?:ت)?(?:لك|ه|ها)?|تم\s+(?:تسجيل|حفظ|تعديل|تحديث))(?!\p{L})/u';
+
+    private function withoutShadda(string $text): string
+    {
+        return str_replace("\u{0651}", '', $text);
+    }
+
+    /** @var array<int, array<string, mixed>> known answers per conversation, for this turn (facts read once) */
+    private array $knownCache = [];
+
+    public function forgetKnown(): void
+    {
+        $this->knownCache = [];
+    }
+
+    /**
+     * What of $asks HE already settled - his own words, his application, or what he chose
+     * (memory selected/preferred/applied). Never the bot's own quote or suggestion: a default
+     * duration or a model it proposed must not stop it from asking him.
+     *
+     * @return array<string, mixed>
+     */
+    public function knownAnswers(WhatsappConversation $conversation, array $asks): array
+    {
+        if ($asks === []) {
+            return [];
+        }
+
+        $known = $this->knownCache[$conversation->id] ??= $this->settledByHim($conversation);
+
+        // "هقدم باسم اخويا": the new applicant's age and work are new questions
+        if (preg_match('/(?:اخويا|اخوي|ابويا|ابوي|والدي|امي|والدتي|مراتي|اختي|ابني|بنتي|خالي|عمي|صاحبي|قريبي|حد تاني|شخص تاني|باسم)/u',
+            \App\Support\ArabicTextNormalizer::normalize($this->customerTextSinceLastReply($conversation)))) {
+            unset($known['work'], $known['age'], $known['insured'], $known['sector']);
+        }
+
+        return array_filter(array_intersect_key($known, array_flip($asks)), fn ($v) => $v !== null && $v !== '' && $v !== []);
+    }
+
+    /** @return array<string, mixed> */
+    private function settledByHim(WhatsappConversation $conversation): array
+    {
+        $application = $conversation->customer_id ? \App\Models\Application::where('customer_id', $conversation->customer_id)
+            ->whereIn('status', \App\Models\Application::agentActiveStatuses())->latest('id')->first() : null;
+        // Only what the AI recorded from his words (memory with his quote) or his application - no regex reading of his messages.
+        $memory = $conversation->customer_id ? app(\App\Domain\Memory\CustomerMemory::class)->current($conversation->customer_id) : [];
+        $chosen = collect($memory['motorcycles'] ?? [])
+            ->first(fn ($bike) => in_array($bike['stage'] ?? null, ['selected', 'preferred', 'applied'], true) && ! empty($bike['id']));
+        $modelId = $application?->machine_id ?? ($chosen['id'] ?? null);
+        $duration = ($memory['facts']['preferred_duration']['source'] ?? null) === 'customer_statement' ? ($memory['facts']['preferred_duration']['value'] ?? null) : null;
+        $months = $application?->installmentPlan?->months ?? $duration;
+        $work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id) ?? [];
+        $facts = app(\App\Agent\Context\Facts\ConversationFacts::class)->for($conversation)->facts;
+
+        return [
+            'model' => $modelId ? (\App\Models\Machine::whereKey($modelId)->value('name') ?? $modelId) : null,
+            'duration' => $months,
+            'work' => ! empty($work['work_stated']) ? ($work['occupation'] ?: $work['customer_type'] ?? true) : null,
+            'insured' => in_array($work['insured'] ?? null, ['yes', 'no'], true) ? $work['insured'] : null,
+            'sector' => in_array($work['sector'] ?? null, ['government', 'private'], true) ? $work['sector'] : null,
+            'age' => data_get($facts, 'person.age'),
+        ];
+    }
+
+    private function staffAskedForAPaper(WhatsappConversation $conversation): bool
+    {
+        return $conversation->customer_id !== null && \App\Models\Application::where('customer_id', $conversation->customer_id)
+            ->where('status', 'needs_more_info')->exists();
+    }
+
     private function applies(string $code): bool
     {
         return ! (\App\Domain\Forms\FormLinkService::formsMode() && in_array($code, self::CHAT_INTAKE_CODES, true));
@@ -89,6 +166,29 @@ class ReplyGuard
             return 'EMPTY_REPLY';
         }
 
+        // Owner 2026-10-18: data and papers go on the form, never into the chat
+        // (unless staff asked him for one paper on a request under review).
+        if (\App\Domain\Forms\FormLinkService::formsMode() && app(FormLinkIntakePolicy::class)->asksForPrivateData($replyText)
+            && ! $this->staffAskedForAPaper($conversation)) {
+            return 'FORM_LINK_ONLY';
+        }
+
+        // "ده رابط التقديم" with no link made this turn: he would get the words and no link.
+        if (\App\Domain\Forms\FormLinkService::formsMode()
+            && preg_match('/(?<!\p{L})(?:ده|دا)\s+(?:ال)?(?:رابط|لينك)|(?<!\p{L})(?:ببعتلك|بعتلك|اتبعتلك|هيوصلك)\s+(?:ال)?(?:رابط|لينك)(?![^.!؟?\n]*[؟?])/u', $replyText)
+            && ! collect($outcomes)->contains(fn ($o) => $o['name'] === 'send_application_link' && $o['ok'] && ! empty($o['data']['link_sent_after_your_reply']))) {
+            return 'LINK_CLAIMED_NOT_SENT';
+        }
+
+        $asks = array_values(array_intersect((array) ($args['asks'] ?? []), \App\Agent\Tools\SendReplyTool::ASKS));
+
+        // Owner 2026-11-08: never ask for something he already answered.
+        if (($known = $this->knownAnswers($conversation, $asks)) !== []) {
+            $this->detail = 'Already known: '.json_encode($known, JSON_UNESCAPED_UNICODE).'. Use it; if he is changing it, say what you understood he wants to change instead of asking from scratch.';
+
+            return 'REASK_KNOWN';
+        }
+
         // QA 2026-10-04: he sent the back of his ID and the reply asked him
         // for "a clearer back" - the photo was never read.
         if ($this->ignoresNewDocumentPhoto($conversation, $outcomes)) {
@@ -102,7 +202,8 @@ class ReplyGuard
         // Simulator 2026-10-13: "وايه الفرق بين ال40 وال45" - the right answer reuses what the
         // last reply said about the 45, was refused as a repeat and cut down to "تحب أحسبلك القسط؟".
         // A new question answered with mostly new words is not the conversation-206 loop.
-        if ($this->repeatsAnEarlierReply($replyText, $conversation) && ! $this->answersNewQuestion($replyText, $conversation)) {
+        if ($this->repeatsLastReplyExactly($replyText, $conversation)
+            || ($this->repeatsAnEarlierReply($replyText, $conversation) && ! $this->answersNewQuestion($replyText, $conversation))) {
             return 'REPEATED_REPLY';
         }
 
@@ -161,10 +262,20 @@ class ReplyGuard
             return 'RESUBMISSION_PROMISED';
         }
 
+        // Rescue 2026-11-08 (simulation): on the form nothing he writes in the chat reaches his
+        // request, yet "سجلت العنوان في طلبك" / "الرقم اتسجل" went out. Any such claim is untrue there.
+        if (\App\Domain\Forms\FormLinkService::formsMode() && ! $this->staffAskedForAPaper($conversation)
+            && preg_match(self::SAVED_CLAIM, $this->withoutShadda($assertions))) {
+            $this->detail = 'On the form nothing he writes in the chat is saved to his request. Say it goes on the application form (the link), not that you saved it.';
+
+            return 'DATA_CLAIMED_NOT_SAVED';
+        }
+
         // "سجلت البيانات" with no write this turn: the customer's phone and
         // address were lost while they were told they had been saved.
         // "أنا عدلتها عندي في الطلب" - the company name was never changed.
-        if ((preg_match('/(?:^|\s)و?(?:سجلت|سجّلت|اتسجل|اتسجلت|تم تسجيل|حفظت|ثبت|ثبّت|غيرت|غيّرت|عدلت|عدّلت|حدثت|حدّثت|اتغيرت|اتعدلت|صححت|صحّحت)(?:ها|هم|ه|هولك|هالك|لك|ت)?(?:\s|$|[،.!])/u', $assertions)
+        if ((preg_match(self::SAVED_CLAIM, $this->withoutShadda($assertions))
+                || preg_match('/(?:^|\s)و?(?:غيرت|غيرنا|اتغيرت|صححت|صححنا)(?:ها|هم|ه|هولك|هالك|لك|ت)?(?:\s|$|[،.!])/u', $this->withoutShadda($assertions))
                 || preg_match('/(?:الرقم|رقمك|العنوان|عنوانك|بياناتك|البيانات|الاسم|اسمك)\s+(?:\S+\s+)?(?:وصل|وصلت|وصلني|وصلتني|اتسجل|اتسجلت|اتعدل|اتعدلت|اتحفظ)(?:\s|$|[،.!])/u', $assertions))
             // his work recorded is a save too (owner simulation 2026-10-07: "سجلت شغلك" was refused)
             && array_intersect($succeeded, [...self::WRITE_TOOLS, 'record_work_profile']) === []) {
@@ -952,8 +1063,10 @@ class ReplyGuard
         return match ($rule['rule'] ?? null) {
             'card_only_last_resort' => "Never skip a required paper on your own. If he said he truly cannot bring ".($rule['papers'] ?? 'his work papers')." at all: {$call}. "
                 .'If he only asked or has not said it, ask him once whether he can bring them - do not drop them.',
-            'insurance_print_then_card_only' => 'Insurance print is optional, not a mandatory condition to apply. Explain the actual application form requirements and accepted alternatives without demanding it in chat.',
-            'insurance_print_only', 'insurance_print_optional' => 'Insurance print (برنت التأمينات) is OPTIONAL, never a mandatory condition to apply. Show the actual form requirements and their accepted alternatives; do not demand an insurance print in chat.',
+            // owner 2026-10-04: the job on the ID decides; برنت التأمينات is the ONLY substitute for the slip
+            'insurance_print_then_card_only' => "The substitute for the missing paper is the insurance print (برنت التأمينات). Only if he says he cannot bring that either: {$call}. "
+                .'Until he says so, ask for the insurance print, do not drop the paper.',
+            'insurance_print_only' => 'The only substitute is the insurance print (برنت التأمينات); there is no ID-only route for him. Say so and ask for it.',
             'no_salary_slip_needed' => 'His ID shows no job, so no salary slip is asked: say that plainly and ask for what is still missing.',
             default => 'Every paper on his list is required and cannot be waived; if he cannot bring one, ask for what the application lists as its substitute (documents.if_unavailable) - never invent one.',
         };
@@ -1434,6 +1547,18 @@ class ReplyGuard
         return $repeated / $total < 0.6;
     }
 
+    /** Simulation 2026-11-08: "حضرتك بتشتغل إيه؟" twice in a row - word for word our last message, any length. */
+    private function repeatsLastReplyExactly(string $replyText, WhatsappConversation $conversation): bool
+    {
+        $words = fn (string $t) => preg_split('/\s+/u', trim(preg_replace('/[.،,؟?!:\n]+/u', ' ', \App\Support\ArabicTextNormalizer::normalize($t))), -1, PREG_SPLIT_NO_EMPTY);
+        $last = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'outgoing')
+            ->where('sender_type', 'bot')->where(fn ($q) => $q->whereNull('delivery_status')->orWhere('delivery_status', '!=', 'failed'))
+            ->latest('id')->value('text');
+        $reply = $words($replyText);
+
+        return $reply !== [] && $last !== null && $words((string) $last) === $reply;
+    }
+
     /** 12+ words in a row already sent in one of the last three replies. */
     private function repeatsAnEarlierReply(string $replyText, WhatsappConversation $conversation): bool
     {
@@ -1451,7 +1576,7 @@ class ReplyGuard
         }
 
         $earlier = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'outgoing')
-            ->where('sender_type', 'bot')->latest('id')->limit(3)->pluck('text');
+            ->where('sender_type', 'bot')->where(fn ($q) => $q->whereNull('delivery_status')->orWhere('delivery_status', '!=', 'failed'))->latest('id')->limit(3)->pluck('text');
 
         foreach ($earlier as $text) {
             $before = $words((string) $text);
@@ -2242,8 +2367,10 @@ class ReplyGuard
     /** What the customer wrote since our last reply. */
     public function customerTextSinceLastReply(WhatsappConversation $conversation): string
     {
+        // a reply that never reached him (send failed) did not answer anything he said
         $lastOut = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
-            ->where('direction', 'outgoing')->whereIn('sender_type', ['bot', 'human', 'human_phone', 'staff'])->max('id');
+            ->where('direction', 'outgoing')->whereIn('sender_type', ['bot', 'human', 'human_phone', 'staff'])
+            ->where(fn ($q) => $q->whereNull('delivery_status')->orWhere('delivery_status', '!=', 'failed'))->max('id');
 
         return WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
             ->where('direction', 'incoming')
