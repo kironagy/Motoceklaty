@@ -59,7 +59,7 @@ class SalarySlipAndClosingTest extends TestCase
 
         // rebuild: a rule code; what it means (insurance print, then card-only) is in the instructions
         $this->assertSame(['rule' => 'insurance_print_then_card_only'], app(SnapshotService::class)->for($application)['documents']['if_unavailable']);
-        $this->assertStringContainsString('`insurance_print_then_card_only` = الشركة مش بتطلع مفردات؟ برنت التأمينات', app(\App\Domain\Settings\AgentInstructions::class)->fromFile()['text']);
+        $this->assertStringContainsString('`insurance_print_then_card_only` = الشركة مش بتطلع مفردات؟ قوله في نفس الرسالة الاختيارين: برنت التأمينات', app(\App\Domain\Settings\AgentInstructions::class)->fromFile()['text']);
     }
 
     public function test_going_on_with_the_id_needs_the_switch_first(): void

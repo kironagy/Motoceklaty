@@ -154,6 +154,13 @@ class SendReplyTool implements WriteTool
         // reply too long for one message stays split.
         $messages = self::asOneMessage($messages);
 
+        // Owner 2026-11-09: branch lists went out with cut links and half addresses.
+        $lookedUpBranches = \App\Models\AiTraceStep::where('trace_id', $ctx->traceId)
+            ->where('tool_name', 'get_branch_information')->whereNull('result_code')->exists();
+        $messages = array_map(fn ($m) => \App\Support\BranchListReply::repair($m, $lookedUpBranches), $messages);
+        // Owner 2026-11-09: installment numbers came as one run-on paragraph.
+        $messages = array_map([\App\Support\InstallmentLayout::class, 'format'], $messages);
+
         $ctx->outbound->addMessages($messages);
         $ctx->outbound->setQuote($args['quote_wa_message_id'] ?? null);
         $ctx->outbound->setFocus($focusIds);

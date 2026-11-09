@@ -104,6 +104,10 @@ class EnhanceGuardsTest extends TestCase
     {
         $this->assertSame('UNRECORDED_PROMISE', $this->check('مدة التقديم بتاعة التقسيط عادةً من يومين لغاية أسبوع لما المستندات تكون كاملة.'));
         $this->assertNull($this->check('مفيش مدة ثابتة للرد، والرد بيوصلك هنا أول ما يطلع.'));
+        // owner 2026-11-09: the recorded review window
+        $this->assertNull($this->check('الرد على الطلب بيكون خلال من ٤٨ ساعة لأسبوع بالكتير، وبيوصلك هنا.'));
+        $this->assertNull($this->check('الرد بياخد من 48 ساعة لحد أسبوع بالكتير.'));
+        $this->assertSame('UNRECORDED_PROMISE', $this->check('الرد بيكون خلال شهر.'));
         $this->assertSame('UNRECORDED_PROMISE', $this->check('مش فيه مدة ثابتة للرد، عادةً بين يومين لحد أسبوع حسب اكتمال المستندات.'));
         $this->assertNull($this->check('أول قسط بيبدأ بعد 45 يوم من الاستلام.', [], [['name' => 'get_installment_offer', 'ok' => true, 'data' => ['first_payment' => 'بعد 45 يوم من الاستلام']]]));
     }

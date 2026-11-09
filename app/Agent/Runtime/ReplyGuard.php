@@ -422,7 +422,7 @@ class ReplyGuard
 
         // "المكنة محجوزة باسمك", "بتخلص في نفس اليوم", "بضمان المعرض":
         // nothing reserves a motorcycle, and no time or warranty is recorded.
-        if ($this->makesUnrecordedPromise($replyText, $toolResultsBlob)) {
+        if ($this->makesUnrecordedPromise(self::withoutReviewWindow($replyText), $toolResultsBlob)) {
             return 'UNRECORDED_PROMISE';
         }
 
@@ -435,7 +435,7 @@ class ReplyGuard
             return 'STOCK_OR_CHECK_CLAIMED';
         }
 
-        if ($this->inventsTimeFrame($assertions, $toolResultsBlob.' '.$system)) {
+        if ($this->inventsTimeFrame(self::withoutReviewWindow($assertions), $toolResultsBlob.' '.$system)) {
             return 'UNRECORDED_PROMISE';
         }
 
@@ -1064,8 +1064,8 @@ class ReplyGuard
             'card_only_last_resort' => "Never skip a required paper on your own. If he said he truly cannot bring ".($rule['papers'] ?? 'his work papers')." at all: {$call}. "
                 .'If he only asked or has not said it, ask him once whether he can bring them - do not drop them.',
             // owner 2026-10-04: the job on the ID decides; برنت التأمينات is the ONLY substitute for the slip
-            'insurance_print_then_card_only' => "The substitute for the missing paper is the insurance print (برنت التأمينات). Only if he says he cannot bring that either: {$call}. "
-                .'Until he says so, ask for the insurance print, do not drop the paper.',
+            // owner 2026-11-09: tell him both ways in the same reply - the print instead, or his ID only if he cannot
+            'insurance_print_then_card_only' => "The substitute for the missing paper is the insurance print (برنت التأمينات); tell him in the same reply that if he cannot bring it he can apply with his ID only. If he says he cannot bring it: {$call}.",
             'insurance_print_only' => 'The only substitute is the insurance print (برنت التأمينات); there is no ID-only route for him. Say so and ask for it.',
             'no_salary_slip_needed' => 'His ID shows no job, so no salary slip is asked: say that plainly and ask for what is still missing.',
             default => 'Every paper on his list is required and cannot be waived; if he cannot bring one, ask for what the application lists as its substitute (documents.if_unavailable) - never invent one.',
@@ -1629,6 +1629,20 @@ class ReplyGuard
         $work = app(\App\Domain\Applications\WorkProfiles::class)->get($conversation->id);
 
         return ($work['applicant'] ?? null) !== 'someone_else' || ($work['applicant_relation'] ?? 'unclear') !== $named[0];
+    }
+
+    /**
+     * Owner 2026-11-09: the answer on an application comes within 48 hours to
+     * a week at most. That one window is recorded policy, not an invented
+     * promise; any other time frame still needs a source.
+     */
+    public static function withoutReviewWindow(string $text): string
+    {
+        return (string) preg_replace(
+            '/(?:(?:في\s+)?خلال\s+)?(?:من\s+)?(?:48|٤٨)\s*ساع[ةه]\s*(?:(?:لحد|لغاي[ةه]|إلى|الى|لـ?|ل|و|-|–)\s*)?(?:ال)?(?:أسبوع|اسبوع)(?:\s+(?:بالكتير|بالكثير|كحد\s+أقصى|كحد\s+اقصى|أقصى\s+حاجة|اقصى\s+حاجة|أقصى\s+حد|اقصى\s+حد))?/u',
+            ' ',
+            $text
+        );
     }
 
     /** A promise no record backs: a reservation, a time frame, a warranty or a guarantor. */
