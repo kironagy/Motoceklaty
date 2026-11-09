@@ -210,17 +210,16 @@ class FormSubmissionService
         ))->saveQuietly();
 
         $after = $request->getAttributes();
-        $changes = [];$old=[];$new=[];
+        $old = [];
+        $new = [];
         foreach (array_keys($columns) as $field) {
             if (($before[$field] ?? null) != ($after[$field] ?? null)) {
                 $old[$field]=$before[$field]??null;$new[$field]=$after[$field]??null;
-                $changes[]=['field'=>\App\Support\GuideRecorder::FIELDS[$field]??$field,'before'=>$old[$field],'after'=>$new[$field]];
             }
         }
-        if ($changes !== []) {
+        if ($new !== []) {
             activity('installment_requests')->performedOn($request)->causedBy($application->customer)
                 ->withProperties(['old'=>$old,'attributes'=>$new,'source'=>'customer_form'])->log('العميل عدّل بيانات الطلب من الفورم');
-            app(\App\Support\GuideRecorder::class)->write('customer_form_updated','طلب #'.$request->id,'العميل عدّل بيانات الطلب من الفورم',$changes,$request,$application->customer,['source'=>'customer_form','form_link_id'=>$link->id]);
         }
 
         $machine = app(\App\Domain\Applications\ApplicationStateMachine::class);

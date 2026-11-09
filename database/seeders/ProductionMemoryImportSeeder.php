@@ -44,9 +44,7 @@ class ProductionMemoryImportSeeder extends Seeder
         $branches = [
             ['name' => 'فرع عين شمس', 'governorate' => 'cairo', 'city' => 'عين شمس', 'address' => 'عين شمس، ش الزهراء مع تقاطع شارع العشرين، أمام مدرسة الخنساء', 'map_url' => 'https://maps.app.goo.gl/hyyoCboo2ccQfDBz7'],
             ['name' => 'فرع جسر السويس', 'governorate' => 'cairo', 'city' => 'جسر السويس', 'address' => 'ش متحف المطرية، متفرع من منشية التحرير، أمام بنك مصر', 'map_url' => 'https://maps.app.goo.gl/kfC22wfnDA9Esec76'],
-            ['name' => 'فرع الخصوص', 'governorate' => 'qalyubia', 'city' => 'الخصوص', 'address' => 'ش الخصوص العمومي، ميدان الديب، أسفل مول أبو سعده', 'map_url' => 'https://maps.app.goo.gl/C2mnEtZGKQSvPt376'],
             ['name' => 'فرع العمرانية', 'governorate' => 'giza', 'city' => 'العمرانية الغربية', 'address' => '٢٨ ش ترعة الزمر، بجوار مستشفى الصدر، العمرانية الغربية', 'map_url' => 'https://maps.app.goo.gl/5b2YAaAbzdf8mam48'],
-            ['name' => 'فرع الهرم', 'governorate' => 'giza', 'city' => 'الهرم', 'address' => 'ش العروبة، متفرع من التلاتيني، الهرم', 'map_url' => 'https://maps.app.goo.gl/nHSP3QMGw7DgJwoh8'],
         ];
 
         foreach ($branches as $i => $b) {

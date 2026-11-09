@@ -479,8 +479,6 @@ class DynamicLinksTest extends TestCase
         $log=\Spatie\Activitylog\Models\Activity::where('subject_id',$request->id)->where('description','العميل عدّل بيانات الطلب من الفورم')->firstOrFail();
         $this->assertSame('7',$log->properties['attributes']['applicant_apartment']);
         $this->assertSame('App\\Models\\Customer',$log->causer_type);
-        $guide=\App\Models\GuideEvent::where('event','customer_form_updated')->where('subject_id',$request->id)->firstOrFail();
-        $this->assertSame('العميل',$guide->actor_name);
         $this->assertSame('submitted', Application::find($request->application_id)->status);
     }
 
