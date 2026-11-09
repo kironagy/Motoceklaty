@@ -60,6 +60,21 @@ class AnswerWaitingCustomers extends Command
                 continue;
             }
 
+            // A turn that ran and chose silence ("شكرا" after a closing reply) was the agent's answer;
+            // answering it hours later is itself a strange message. Only a message no turn handled
+            // (written while the number was down, a failed or skipped turn) or whose reply never
+            // reached him is answered again.
+            $turnIds = $unanswered->pluck('turn_id')->filter()->unique();
+            $handled = $turnIds->count() === 1 && $unanswered->every(fn ($m) => $m->turn_id !== null)
+                && DB::table('whatsapp_message_jobs')->where('id', $turnIds->first())->where('status', 'done')->exists()
+                && ! WhatsappMessage::where('turn_id', $turnIds->first())->where('direction', 'outgoing')->where('delivery_status', 'failed')->exists()
+                // the old "." / "؟" shortcut answered silence before the model ever read him
+                && ! DB::table('ai_traces')->where('turn_id', $turnIds->first())->where('guard_events', 'like', '%PUNCTUATION_OR_ACK_ONLY%')->exists();
+
+            if ($handled) {
+                continue;
+            }
+
             $this->line($row->id.'  '.$row->created_at.'  «'.mb_substr(str_replace("\n", ' ', (string) $row->text), 0, 50).'»');
 
             if (! $this->option('apply') || ! $conversation) {
