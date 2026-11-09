@@ -6,6 +6,7 @@ const {
     downloadMediaMessage,
     generateMessageIDV2,
     Browsers,
+    proto,
 } = require('@whiskeysockets/baileys');
 
 const pino = require('pino');
@@ -613,10 +614,15 @@ function messageTimestampSeconds(msg) {
  * (only when newer than anything it already has) and lets the waiting-customers sweep answer it.
  */
 const HISTORY_RECOVER_HOURS = Number(process.env.HISTORY_RECOVER_HOURS || 72);
+// set by POST /sessions/:botId/recover-history: a wider window for one bot (unix seconds)
+const historyRecoverSince = {};
 
 function recoverHistory(sock, botId, messages, syncType) {
     try {
-        const cutoff = Math.floor(Date.now() / 1000) - HISTORY_RECOVER_HOURS * 3600;
+        const cutoff = Math.min(
+            Math.floor(Date.now() / 1000) - HISTORY_RECOVER_HOURS * 3600,
+            historyRecoverSince[botId] || Infinity,
+        );
         const recent = (messages || [])
             .filter(m => m?.message && m.key?.remoteJid && !m.key.remoteJid.endsWith('@g.us') && m.key.remoteJid !== 'status@broadcast')
             .filter(m => messageTimestampSeconds(m) >= cutoff)
@@ -624,7 +630,7 @@ function recoverHistory(sock, botId, messages, syncType) {
 
         if (!recent.length) return;
 
-        console.log(`🕘 Bot ${botId}: recovering ${recent.length} history message(s) from the last ${HISTORY_RECOVER_HOURS}h (sync ${syncType})`);
+        console.log(`🕘 Bot ${botId}: recovering ${recent.length} history message(s) since ${new Date(cutoff * 1000).toISOString()} (sync ${syncType})`);
 
         for (const msg of recent) {
             enqueueChat(`${botId}_${msg.key.remoteJid}`, () => handleIncomingMessage(sock, botId, msg, { recovered: true }));
@@ -860,6 +866,38 @@ enqueueChat(
         }
     });
 }
+
+/*
+ * Owner 2026-11-10: bot 93 was logged out 11-03..11-09; ~3500 customer messages of that week reached
+ * only the phone. This asks the phone for its history again (full history sync on demand - no new
+ * QR) and lets recoverHistory pass everything since `since` to Laravel as recovered messages.
+ */
+app.post('/sessions/:botId/recover-history', checkToken, async (req, res) => {
+    const botId = normalizeBotId(req.params.botId);
+    const sock = sessions[botId];
+    const since = Number(req.body.since);
+
+    if (!sock || statuses[botId] !== 'connected') return res.status(409).json({ ok: false, error: 'session not connected' });
+    if (!Number.isFinite(since) || since <= 0) return res.status(422).json({ ok: false, error: 'since (unix seconds) required' });
+
+    historyRecoverSince[botId] = since;
+    const days = Math.min(30, Math.ceil((Date.now() / 1000 - since) / 86400) + 1);
+
+    try {
+        const requestId = await sock.sendPeerDataOperationMessage({
+            peerDataOperationRequestType: proto.Message.PeerDataOperationRequestType.FULL_HISTORY_SYNC_ON_DEMAND,
+            fullHistorySyncOnDemandRequest: {
+                requestMetadata: { requestId: `recover-${botId}-${Date.now()}` },
+                historySyncConfig: { fullSyncDaysLimit: days, recentSyncDaysLimit: days, fullSyncSizeMbLimit: 512, storageQuotaMb: 2048 },
+            },
+        });
+        console.log(`🕘 Bot ${botId}: full history sync requested (${days} days, since ${new Date(since * 1000).toISOString()})`);
+
+        return res.json({ ok: true, request: requestId || null, days });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'history request failed' });
+    }
+});
 
 app.post('/sessions/start', checkToken, async (req, res) => {
     try {

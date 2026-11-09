@@ -18,6 +18,9 @@ class AnswerWaitingCustomers extends Command
         {--minutes=5 : only messages at least this old}
         {--hours=48 : only messages at most this old}
         {--all : kept for compatibility; every unanswered message is looked at}
+        {--bot= : only this bot}
+        {--gap-min=25 : seconds at least between two re-answers (anti-ban pacing)}
+        {--gap-max=50 : seconds at most between two re-answers}
         {--apply : queue the turns; without it only lists them}';
 
     protected $description = 'Queue a bot turn for customers whose last message got no reply';
@@ -30,6 +33,7 @@ class AnswerWaitingCustomers extends Command
             ->join('whatsapp_messages as m', 'm.id', '=', DB::raw("(select max(id) from whatsapp_messages where whatsapp_conversation_id = c.id and not (direction = 'outgoing' and delivery_status = 'failed'))"))
             ->where('b.is_active', true)
             ->whereIn('b.session_status', ['connected'])
+            ->when($this->option('bot'), fn ($q, $bot) => $q->where('c.whatsapp_bot_id', (int) $bot))
             ->where('c.status', '!=', 'awaiting_agent')
             ->where('m.direction', 'incoming')->where('m.sender_type', 'customer')
             ->whereBetween('m.created_at', [now()->subHours((int) $this->option('hours')), now()->subMinutes((int) $this->option('minutes'))])
@@ -45,6 +49,24 @@ class AnswerWaitingCustomers extends Command
             ->get(['c.id', 'm.text', 'm.created_at']);
 
         $queued = 0;
+
+        // Owner 2026-11-10: thousands of re-answers at once would get the number banned and push live
+        // customers behind them. Each re-answer gets its own slot, a random 25-50 s after the previous
+        // one (per bot), never at night. A customer who writes again meanwhile is answered at once:
+        // first_message_at is the slot, so TurnScheduler::attachToTurn pulls the turn to now+debounce.
+        $slots = [];
+        $nextSlot = function (int $botId) use (&$slots) {
+            $slots[$botId] ??= max(now(), \Illuminate\Support\Carbon::parse(DB::table('whatsapp_message_jobs')
+                ->where('whatsapp_bot_id', $botId)->where('status', 'pending')->where('payload', 'like', '%"answer_waiting"%')
+                ->max('process_after') ?? now()));
+            $slot = $slots[$botId]->copy()->addSeconds(random_int((int) $this->option('gap-min'), max((int) $this->option('gap-min'), (int) $this->option('gap-max'))));
+            $cairo = $slot->copy()->timezone('Africa/Cairo');
+            if ($cairo->hour >= 1 && $cairo->hour < 9) {
+                $slot = $cairo->setTime(9, 0)->addSeconds(random_int(0, 120))->timezone(config('app.timezone'));
+            }
+
+            return $slots[$botId] = $slot;
+        };
 
         foreach ($waiting as $row) {
             $conversation = WhatsappConversation::with('customer')->find($row->id);
@@ -82,16 +104,18 @@ class AnswerWaitingCustomers extends Command
             }
 
             $jid = $conversation->customer?->jid ?? $conversation->phone;
+            $slot = $nextSlot((int) $conversation->whatsapp_bot_id);
             $jobId = DB::table('whatsapp_message_jobs')->insertGetId([
                 'whatsapp_bot_id' => $conversation->whatsapp_bot_id,
                 'whatsapp_conversation_id' => $conversation->id,
                 'from' => $jid,
                 'reply_jid' => $jid,
                 'message' => (string) ($unanswered->last()?->text ?: '[media]'),
+                'payload' => json_encode(['source' => 'answer_waiting']),
                 'status' => 'pending',
                 'attempts' => 0,
-                'first_message_at' => now(),
-                'process_after' => now(),
+                'first_message_at' => $slot,
+                'process_after' => $slot,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -99,7 +123,9 @@ class AnswerWaitingCustomers extends Command
             $queued++;
         }
 
-        $this->info($this->option('apply') ? "Queued {$queued} turns." : 'Dry run - add --apply to queue them.');
+        $this->info($this->option('apply')
+            ? "Queued {$queued} turns".($slots !== [] ? ', last at '.collect($slots)->max()->timezone('Africa/Cairo')->format('m-d H:i').' Cairo' : '').'.'
+            : 'Dry run - add --apply to queue them.');
 
         return self::SUCCESS;
     }
