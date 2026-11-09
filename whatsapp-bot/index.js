@@ -628,6 +628,8 @@ function recoverHistory(sock, botId, messages, syncType) {
             .filter(m => messageTimestampSeconds(m) >= cutoff)
             .sort((a, b) => messageTimestampSeconds(a) - messageTimestampSeconds(b));
 
+        console.log(`🕘 Bot ${botId}: history batch (sync ${syncType}) - ${(messages || []).length} message(s), ${recent.length} in window`);
+
         if (!recent.length) return;
 
         console.log(`🕘 Bot ${botId}: recovering ${recent.length} history message(s) since ${new Date(cutoff * 1000).toISOString()} (sync ${syncType})`);
@@ -900,6 +902,26 @@ app.post('/sessions/:botId/recover-history', checkToken, async (req, res) => {
         return res.json({ ok: true, request: requestId || null, days });
     } catch (error) {
         return res.status(500).json({ ok: false, error: error?.message || 'history request failed' });
+    }
+});
+
+// One chat's history before a message we know (WhatsApp on-demand history; arrives as messaging-history.set).
+app.post('/sessions/:botId/fetch-chat-history', checkToken, async (req, res) => {
+    const botId = normalizeBotId(req.params.botId);
+    const sock = sessions[botId];
+    const { jid, id, fromMe = false, timestamp, count = 50, since } = req.body || {};
+
+    if (!sock || statuses[botId] !== 'connected') return res.status(409).json({ ok: false, error: 'session not connected' });
+    if (!jid || !id || !timestamp) return res.status(422).json({ ok: false, error: 'jid, id, timestamp required' });
+    if (Number(since) > 0) historyRecoverSince[botId] = Math.min(historyRecoverSince[botId] || Infinity, Number(since));
+
+    try {
+        const ms = Number(timestamp) < 1e12 ? Number(timestamp) * 1000 : Number(timestamp);
+        const requestId = await sock.fetchMessageHistory(Math.min(Number(count) || 50, 200), { remoteJid: jid, id, fromMe: !!fromMe }, ms);
+
+        return res.json({ ok: true, request: requestId || null });
+    } catch (error) {
+        return res.status(500).json({ ok: false, error: error?.message || 'fetch failed' });
     }
 });
 
