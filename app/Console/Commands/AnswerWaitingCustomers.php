@@ -17,7 +17,7 @@ class AnswerWaitingCustomers extends Command
     protected $signature = 'whatsapp:answer-waiting
         {--minutes=5 : only messages at least this old}
         {--hours=48 : only messages at most this old}
-        {--all : also messages without a question mark (thanks, "تمام")}
+        {--all : kept for compatibility; every unanswered message is looked at}
         {--apply : queue the turns; without it only lists them}';
 
     protected $description = 'Queue a bot turn for customers whose last message got no reply';
@@ -26,16 +26,21 @@ class AnswerWaitingCustomers extends Command
     {
         $waiting = DB::table('whatsapp_conversations as c')
             ->join('whatsapp_bots as b', 'b.id', '=', 'c.whatsapp_bot_id')
-            ->join('whatsapp_messages as m', 'm.id', '=', DB::raw('(select max(id) from whatsapp_messages where whatsapp_conversation_id = c.id)'))
+            // a bot reply that never reached him (delivery failed: number logged out, worker down) is no reply
+            ->join('whatsapp_messages as m', 'm.id', '=', DB::raw("(select max(id) from whatsapp_messages where whatsapp_conversation_id = c.id and not (direction = 'outgoing' and delivery_status = 'failed'))"))
             ->where('b.is_active', true)
+            ->whereIn('b.session_status', ['connected'])
             ->where('c.status', '!=', 'awaiting_agent')
             ->where('m.direction', 'incoming')->where('m.sender_type', 'customer')
             ->whereBetween('m.created_at', [now()->subHours((int) $this->option('hours')), now()->subMinutes((int) $this->option('minutes'))])
             ->whereNotExists(fn ($q) => $q->from('whatsapp_message_jobs as j')->whereColumn('j.whatsapp_conversation_id', 'c.id')
                 ->whereIn('j.status', ['pending', 'processing', 'generated']))
             // one retry per message: a turn made after his message already tried (no loop on a failing number)
+            // Only a turn that answered customer messages counts: reminders and dashboard sends are jobs
+            // too, and the reminders retried while a number was logged out hid every waiting customer.
             ->whereNotExists(fn ($q) => $q->from('whatsapp_message_jobs as r')->whereColumn('r.whatsapp_conversation_id', 'c.id')
-                ->whereRaw('r.created_at > m.created_at + interval 1 minute'))
+                ->whereRaw('r.created_at > m.created_at + interval 1 minute')
+                ->whereExists(fn ($i) => $i->from('whatsapp_messages as im')->whereColumn('im.turn_id', 'r.id')->where('im.direction', 'incoming')))
             ->orderBy('m.created_at')
             ->get(['c.id', 'm.text', 'm.created_at']);
 
@@ -43,13 +48,15 @@ class AnswerWaitingCustomers extends Command
 
         foreach ($waiting as $row) {
             $conversation = WhatsappConversation::with('customer')->find($row->id);
-            $lastOutgoing = WhatsappMessage::where('whatsapp_conversation_id', $row->id)->where('direction', 'outgoing')->max('id') ?? 0;
+            $lastOutgoing = WhatsappMessage::where('whatsapp_conversation_id', $row->id)->where('direction', 'outgoing')
+                ->where(fn ($q) => $q->whereNull('delivery_status')->orWhere('delivery_status', '!=', 'failed'))->max('id') ?? 0;
             $unanswered = WhatsappMessage::where('whatsapp_conversation_id', $row->id)->where('direction', 'incoming')
                 ->where('sender_type', 'customer')->where('id', '>', $lastOutgoing)->orderBy('id')->get();
-            $asks = $unanswered->contains(fn ($m) => preg_match('/[؟?]/u', (string) $m->text.' '.(string) $m->transcript)
-                || preg_match('/^[\s.!،,؟?…]+$/u', (string) $m->text));
 
-            if (! $asks && ! $this->option('all')) {
+            // Owner 2026-11-09: no keyword test decides whether he expects an answer ("؟" missed
+            // "عاوز tvs" and "Tvs 150 f"). The agent reads his words and stays silent itself after
+            // a plain "شكرا" - one extra look per message, never a loop (see the retry rule above).
+            if ($unanswered->isEmpty()) {
                 continue;
             }
 

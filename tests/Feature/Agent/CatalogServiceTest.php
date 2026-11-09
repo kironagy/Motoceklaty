@@ -115,6 +115,35 @@ class CatalogServiceTest extends TestCase
         $this->assertStringContainsString('VLR200', $sent->data['motorcycle']);
     }
 
+    public function test_a_misspelled_model_comes_back_with_the_whole_catalog_never_as_not_carried(): void
+    {
+        // Live 2026-11-06: "TVS HXL 150" (catalog: HLX 150) was told "مش متوفرة عندنا".
+        $this->machine(['name' => 'HLX 150', 'aliases' => []]);
+        $this->machine(['name' => '26 Max', 'aliases' => [], 'cc' => null]);
+
+        $staff = \App\Models\Staff::create(['name' => 'S', 'email' => uniqid().'@x.com', 'password' => 'secret']);
+        $bot = \App\Models\WhatsappBot::create(['staff_id' => $staff->id, 'name' => 'B', 'whatsapp_phone_number_id' => uniqid(), 'is_active' => true]);
+        $conversation = \App\Models\WhatsappConversation::create(['whatsapp_bot_id' => $bot->id, 'phone' => '2012', 'status' => 'open']);
+        $ctx = new \App\Agent\Tools\ToolContext(1, $conversation->id, null, 1, 1, new \App\Agent\Runtime\TurnResultBuilder());
+
+        $result = app(\App\Agent\Tools\SearchMotorcyclesTool::class)->execute(['name_query' => 'TVS HXL 150', 'kind' => 'motorcycle'], $ctx);
+
+        $this->assertTrue($result->ok);
+        $this->assertSame([], $result->data['items']);
+        $this->assertArrayNotHasKey('not_carried', $result->data);
+        $this->assertContains('HLX 150', array_column($result->data['full_catalog'], 'name'));
+
+        // a hit still brings the catalog, so other versions he could mean are seen
+        $hit = app(\App\Agent\Tools\SearchMotorcyclesTool::class)->execute(['name_query' => 'HLX 150'], $ctx);
+        $this->assertSame(['HLX 150'], array_column($hit->data['items'], 'name'));
+        $this->assertCount(2, $hit->data['full_catalog']);
+
+        // a budget with nothing inside it still names the nearest real rows
+        $budget = app(\App\Agent\Tools\SearchMotorcyclesTool::class)->execute(['max_cash_price' => 1000], $ctx);
+        $this->assertTrue($budget->data['nothing_matches_these_filters']);
+        $this->assertCount(2, $budget->data['full_catalog']);
+    }
+
     public function test_a_model_we_do_not_carry_gets_the_same_size_and_so_does_a_later_what_do_you_have(): void
     {
         // Simulator 690: "srk 200" (not carried), then "ايه الموجود حاليا؟"
@@ -133,8 +162,12 @@ class CatalogServiceTest extends TestCase
         $tool = app(\App\Agent\Tools\SearchMotorcyclesTool::class);
 
         $missing = $tool->execute(['name_query' => 'srk 200'], $ctx);
-        $this->assertTrue($missing->data['not_carried']);
-        $this->assertEqualsCanonicalizing(['VLR200', 'وينج ٢٠٠'], array_column($missing->data['similar_available'], 'name'));
+        // 2026-11-09: no spelling match is not "not carried" - the whole catalog goes back and the
+        // agent decides by meaning (live: "فيجوري ماكس" = 26 Max was told "مش متوفر").
+        $this->assertTrue($missing->data['no_spelling_match']);
+        $this->assertArrayNotHasKey('not_carried', $missing->data);
+        $this->assertSame(200, $missing->data['size_in_his_words']);
+        $this->assertEqualsCanonicalizing(['دايو ٤', 'L250', 'VLR200', 'وينج ٢٠٠'], array_column($missing->data['full_catalog'], 'name'));
 
         // the tool only reads; the runner records what the search proved
         app(\App\Agent\Runtime\ToolOutcomeRecorder::class)->record('search_motorcycles', ['name_query' => 'srk 200'], $missing->toArray(), $ctx);

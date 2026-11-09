@@ -440,6 +440,30 @@ class CatalogService
             ->all();
     }
 
+    /**
+     * Live 2026-11-06..09: "فيجوري ماكس" (26 Max), "كواي كيت 150" (Keeway keet 150), "TVS HXL 150"
+     * (HLX 150), "كيواي سوبر لايت" (Superlight), "فيجوري كينج 200" (King C 200) all matched no
+     * spelling and the customer was told "مش متوفر" although we sell them. Spelling rules can not
+     * keep up with how customers write; the whole active catalog (61 rows) is small enough for the
+     * model to read and decide by meaning which row he means.
+     *
+     * @return list<array{id: int, brand: ?string, name: string, aliases: array, kind: string, cc: ?int, cash_price: mixed}>
+     */
+    public function compactCatalog(): array
+    {
+        return Machine::query()->where('is_active', true)->with('brand')->orderBy('brand_id')->get()
+            ->map(fn (Machine $m) => array_filter([
+                'id' => $m->id,
+                'brand' => trim((string) $m->brand?->name),
+                'name' => trim((string) $m->name),
+                'aliases' => array_values(array_filter((array) ($m->aliases ?? []))),
+                'kind' => self::kindLabel($m),
+                'cc' => self::engineCc($m),
+                'cash_price' => $m->type === 'offer' && $m->new_price ? $m->new_price : $m->cash_price,
+            ], fn ($v) => $v !== null && $v !== '' && $v !== []))
+            ->values()->all();
+    }
+
     public function machineExists(int $id): bool
     {
         return Machine::where('id', $id)->where('is_active', true)->exists();

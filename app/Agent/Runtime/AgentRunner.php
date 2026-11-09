@@ -185,18 +185,15 @@ class AgentRunner
         // (read before this attempt runs anything itself).
         $resumed = $this->completedSteps((int) $turn->id);
         $this->guard->forgetKnown();
-        $latestIncoming = WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')->latest('id')->first();
 
         // Rescue 2026-11-08: the model writes every reply. The regex shortcuts
         // that answered before it (ads, FAQ, jobs, Talabat, prices, photos...)
         // refused the wrong people ("اخويا محامي" refused HIM) and repeated
         // canned lines; what they knew is now in the instructions and the tools.
-        // Only messages that need no words at all are settled here.
-        if ($resumed === [] && $latestIncoming?->type === 'text'
-            && preg_match('/^[\s.؟?!،…👍🏻🏼🏽🏾🏿❤️]+$/u', trim((string) $latestIncoming->text))) {
-            $this->finishTrace($trace, 'done', [['code'=>'PUNCTUATION_OR_ACK_ONLY','args'=>[]]], null);
-            return ['messages'=>[], 'no_reply'=>true];
-        }
+        // Live 2026-11-09: the last shortcut - "." / "؟" / "👍" answered with silence before the
+        // model saw it - left 53 customers in three days waiting: "." after "مش متوفر" is him
+        // asking "and now?". Whether a short message needs words is the model's call
+        // (SendReplyTool::mayStaySilent says when silence is allowed at all).
 
         // Owner 2026-10-05: a message that is only a greeting gets the
         // showroom's greeting, never the model's improvisation.
@@ -400,12 +397,9 @@ class AgentRunner
                             }
                         }
 
-                        // A wrong rate twice: the live rates themselves, never an unrelated line.
-                        if ($violation === 'PERCENT_DURATION_MISMATCH' && ($repairs >= 1 || $limitReached) && ($rates = $this->context->currentRates()) !== null) {
-                            $this->finishTrace($trace, 'done', [...$guardEvents, ['code' => $violation, 'args' => []], ['code' => 'REWRITE:live_rates', 'args' => []]], $lastResponse);
-
-                            return ['messages' => ['النسب الحالية: '.trim(preg_replace('/^##[^\n]*\n/u', '', $rates)).' والقسط بيتحسب للموديل والمدة اللي تختارها.']];
-                        }
+                        // Live 2026-11-09: replacing the whole reply with the rate table (54 times that day) answered
+                        // questions about specs and photos with percentages. A wrong rate goes through the normal
+                        // repair, and only its sentence is dropped if it stays wrong.
 
                         if (in_array($violation, ['APPLICATION_REFUSED', 'FORM_LINK_ONLY', 'LINK_CLAIMED_NOT_SENT'], true) && ($repairs >= 1 || $limitReached)) {
                             return $this->unverifiedReply($conversation, $trace, [...$guardEvents, ['code' => $violation, 'args' => []]], $violation);

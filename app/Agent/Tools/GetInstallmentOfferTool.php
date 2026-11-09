@@ -36,7 +36,7 @@ class GetInstallmentOfferTool implements ReadTool
             'required' => ['motorcycle_id'],
             'properties' => [
                 'motorcycle_id' => ['type' => 'integer'],
-                'his_words' => ['type' => 'string', 'description' => 'Needed unless he has an open application: his exact words, copied from any of his messages, that name this motorcycle ("هوجن 4 فرز تاني", "اللي بـ46 ألف", "الزد", "KTX"). A model you suggested that he never named is not his pick - ask.'],
+                'his_words' => ['type' => 'string', 'description' => 'Optional: his own words that name this motorcycle ("هوجن 4 فرز تاني", "اللي بـ46 ألف", "الزد", "KTX").'],
                 'months' => ['type' => 'integer', 'minimum' => 1, 'description' => 'The one duration he named, now or earlier in the chat ("على سنة" = 12, "سنة ونص" = 18, "سنتين" = 24, "٣ سنين" = 36). Never ask a duration he already said.'],
                 'months_list' => ['type' => 'array', 'items' => ['type' => 'integer', 'minimum' => 1], 'description' => 'Only when he asked for more than one duration ("احسبهالي على سنة وسنتين").'],
                 'all_durations' => ['type' => 'boolean', 'description' => 'true only when he asked for every duration ("قولي كل المدد", "على كل الفترات"). Without months, months_list or this, you get the durations to ask him about - no numbers.'],
@@ -162,18 +162,32 @@ class GetInstallmentOfferTool implements ReadTool
 
     public function execute(array $args, ToolContext $ctx): ToolResult
     {
-        $machine = Machine::where('is_active', true)->find($args['motorcycle_id']);
+        $machine = Machine::where('is_active', true)->find($args['motorcycle_id'] ?? 0);
 
         if (! $machine) {
             return ToolResult::error('UNKNOWN_MOTORCYCLE');
         }
-        // His pick is read by the AI (his_words); no regex guesses it from his messages.
-        if (! $ctx->activeApplicationId && ! $this->hisWordsPick($args, $ctx, $machine)) {
-            return ToolResult::error('MODEL_SELECTION_REQUIRED', trim(($args['his_words'] ?? '') === ''
-                ? 'his_words is missing. '
-                : 'his_words «'.$args['his_words'].'» is not in his messages word for word, or does not name «'.$machine->name.'» (its name, brand or price). ')
-                .'If he did name this motorcycle, copy his own words exactly into his_words. If his words fit more than one model, or he only accepted your suggestion without naming it, ask him which one.');
+
+        // Live 2026-11-07..09: MODEL_SELECTION_REQUIRED refused 1,072 offers in three days. Whether
+        // his words proved the pick was decided by spelling tests (CatalogMentions), so "ايوه هي",
+        // "التي اكس" or a model he chose from our list were refused, the agent asked "تقصد أنهي؟"
+        // again and again, and customers left after 5-10 turns without ever getting a number.
+        // Which motorcycle he means is the agent's reading of the chat; the numbers are computed,
+        // and when no word of his names this model the result says so, so the reply names it.
+        $result = $this->offer($args, $ctx, $machine);
+
+        if ($result->ok && ! $ctx->activeApplicationId && ! $this->hisWordsPick($args, $ctx, $machine)) {
+            return ToolResult::ok(($result->data ?? []) + [
+                'for_motorcycle' => trim(($machine->brand?->name ? $machine->brand->name.' ' : '').$machine->name),
+                'name_it_in_reply' => 'He has not written this model\'s name himself: say plainly which model these numbers are for.',
+            ]);
         }
+
+        return $result;
+    }
+
+    private function offer(array $args, ToolContext $ctx, Machine $machine): ToolResult
+    {
 
         $conversation = \App\Models\WhatsappConversation::find($ctx->conversationId);
         if ($conversation && ($age = app(\App\Domain\Applications\AgeEligibilityGate::class)->for($conversation))) {

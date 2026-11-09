@@ -598,7 +598,43 @@ setInterval(() => {
     if (spool.files().length) spool.replay();
 }, 60000).unref();
 
-async function handleIncomingMessage(sock, botId, msg) {
+function messageTimestampSeconds(msg) {
+    const ts = msg?.messageTimestamp;
+    const n = ts && typeof ts === 'object' && typeof ts.toNumber === 'function' ? ts.toNumber() : Number(ts);
+
+    return Number.isFinite(n) && n > 0 ? n : Math.floor(Date.now() / 1000);
+}
+
+/*
+ * Owner 2026-11-09: numbers logged out by WhatsApp (96, 99, 101, 104) were down for hours to days;
+ * what customers wrote meanwhile never reached Laravel - after the new QR it only sits on the
+ * phone. On (re)link WhatsApp sends recent history (messaging-history.set): the last
+ * HISTORY_RECOVER_HOURS of it goes to Laravel marked `recovered`, which stores it with its real time
+ * (only when newer than anything it already has) and lets the waiting-customers sweep answer it.
+ */
+const HISTORY_RECOVER_HOURS = Number(process.env.HISTORY_RECOVER_HOURS || 72);
+
+function recoverHistory(sock, botId, messages, syncType) {
+    try {
+        const cutoff = Math.floor(Date.now() / 1000) - HISTORY_RECOVER_HOURS * 3600;
+        const recent = (messages || [])
+            .filter(m => m?.message && m.key?.remoteJid && !m.key.remoteJid.endsWith('@g.us') && m.key.remoteJid !== 'status@broadcast')
+            .filter(m => messageTimestampSeconds(m) >= cutoff)
+            .sort((a, b) => messageTimestampSeconds(a) - messageTimestampSeconds(b));
+
+        if (!recent.length) return;
+
+        console.log(`🕘 Bot ${botId}: recovering ${recent.length} history message(s) from the last ${HISTORY_RECOVER_HOURS}h (sync ${syncType})`);
+
+        for (const msg of recent) {
+            enqueueChat(`${botId}_${msg.key.remoteJid}`, () => handleIncomingMessage(sock, botId, msg, { recovered: true }));
+        }
+    } catch (error) {
+        console.error(`history recovery error ${botId}:`, error?.message || error);
+    }
+}
+
+async function handleIncomingMessage(sock, botId, msg, { recovered = false } = {}) {
     const originalFrom = msg.key.remoteJid;
 
     if (!originalFrom || originalFrom === 'status@broadcast' || originalFrom.endsWith('@g.us')) {
@@ -609,7 +645,8 @@ async function handleIncomingMessage(sock, botId, msg) {
 
     if (isFromMe && botSentIds.has(msg.key.id)) return;
     const cleanText = getMessageText(msg);
-    const media = await extractMediaBase64(msg);
+    // an old history photo may no longer download - the text still counts
+    const media = await extractMediaBase64(msg).catch(() => null);
     const type = getMessageType(msg);
     const location = getLocationInfo(msg);
 
@@ -637,7 +674,7 @@ async function handleIncomingMessage(sock, botId, msg) {
         const customerJid = isFromMe ? null : await resolveCustomerJid(sock, originalFrom, msg);
 
         // seen waits for the reply (see pendingReads)
-        if (!isFromMe) {
+        if (!isFromMe && !recovered) {
             queueRead(sock, botId, [originalFrom, customerJid], msg.key);
         }
 
@@ -647,7 +684,7 @@ async function handleIncomingMessage(sock, botId, msg) {
             chat_jid: originalFrom,
             customer_jid: customerJid,
             push_name: msg.pushName || null,
-            timestamp: Number(msg.messageTimestamp) || Math.floor(Date.now() / 1000),
+            timestamp: messageTimestampSeconds(msg),
             type,
             text: cleanText || null,
             media: media ? [media] : [],
@@ -655,6 +692,7 @@ async function handleIncomingMessage(sock, botId, msg) {
             quoted: getQuotedInfo(msg, botId),
             // DEC-17: staff replying from the phone itself, not the bot.
             direction: isFromMe ? 'outgoing' : 'incoming',
+            recovered,
         };
 
         console.log(`📤 Sending to Laravel (${type}):`, cleanText || `[${type}]`);
@@ -801,6 +839,8 @@ async function startSession(botId) {
             }
         }
     });
+
+    sock.ev.on('messaging-history.set', ({ messages, syncType }) => recoverHistory(sock, botId, messages, syncType));
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         try {

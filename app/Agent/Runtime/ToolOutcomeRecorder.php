@@ -78,7 +78,7 @@ class ToolOutcomeRecorder
             return;
         }
 
-        if (($data['not_carried'] ?? false) && ($cc = CustomerInterest::ccIn($name)) !== null) {
+        if (($data['no_spelling_match'] ?? false) && ($cc = CustomerInterest::ccIn($name)) !== null) {
             CustomerInterest::remember($ctx->conversationId, $name, $cc);
         } elseif (count((array) ($data['items'] ?? [])) === 1 && ($machine = Machine::with('brand')->find($data['items'][0]['id'] ?? 0))) {
             CustomerInterest::rememberMachine($ctx->conversationId, $machine);

@@ -98,9 +98,17 @@ class ToolRegistry
             // Every tool that takes a motorcycle takes the one he just named
             // (conversation 639: "هوجان ٤" was quoted and pictured as L250, id 4).
             $conflict = $name === 'search_motorcycles' ? null : $this->mentionedMotorcycleConflict($args, $ctx);
-            $result = $conflict !== null
+            // a write (his application's model) still waits until it is clearly his; a read or a photo never does
+            $result = $conflict !== null && $tool->permission() !== 'READ' && $name !== 'send_motorcycle_images'
                 ? ToolResult::error('NOT_THE_MODEL_HE_NAMED', $conflict)->toArray()
                 : $this->executeWithReconnect($tool, $args, $ctx);
+
+            // Live 2026-11-07..09: 99 lookups refused as NOT_THE_MODEL_HE_NAMED - a spelling test of his
+            // words overruled the agent's reading (photos he asked for, his chosen model's details). What
+            // the test saw is passed on as a note; which model he means stays the agent's call.
+            if ($conflict !== null && ($result['ok'] ?? false) && is_array($result['data'] ?? null)) {
+                $result['data']['check_which_model_he_means'] = $conflict;
+            }
         } catch (\Throwable $e) {
             // submit_application crashed on a null plan and nothing anywhere
             // said why - the exception was swallowed whole. Log where it

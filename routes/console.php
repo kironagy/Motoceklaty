@@ -50,8 +50,13 @@ Schedule::call(fn () => app(\App\Domain\Teaching\TeachingCoach::class)->recoverS
 Schedule::command('attendance:mark-absences')->dailyAt('15:00')->timezone('Africa/Cairo')->withoutOverlapping();
 Schedule::command('attendance:mark-absences')->dailyAt('23:50')->timezone('Africa/Cairo')->withoutOverlapping();
 
+// Owner 2026-11-09: logged-out bot numbers went unnoticed for days - live status + owner alert.
+Schedule::command('whatsapp:watch-sessions')
+    ->everyFiveMinutes()
+    ->withoutOverlapping();
+
 // Owner 2026-11-09: a customer's "؟" or question left without any reply gets one more bot turn
 // (one retry per message - see AnswerWaitingCustomers).
-Schedule::command('whatsapp:answer-waiting --minutes=5 --hours=6 --apply')
+Schedule::command('whatsapp:answer-waiting --minutes=5 --hours=72 --apply')
     ->everyFiveMinutes()
     ->withoutOverlapping();

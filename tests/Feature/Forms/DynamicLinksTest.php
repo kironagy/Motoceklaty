@@ -131,6 +131,14 @@ class DynamicLinksTest extends TestCase
         return app(FormLinkService::class)->linkFor($this->conversation, $prefill);
     }
 
+    /** The link message that really reached him - only such a link is followed up (2026-11-09). */
+    private function linkReachedHim(FormLink $link): void
+    {
+        WhatsappMessage::create(['whatsapp_conversation_id' => $this->conversation->id, 'direction' => 'outgoing', 'sender_type' => 'bot',
+            'type' => 'text', 'text' => 'ده رابط التقديم: '.$link->url(), 'delivery_status' => 'sent']);
+        WhatsappMessage::query()->where('text', 'like', '%'.$link->token.'%')->update(['created_at' => $link->created_at]);
+    }
+
     private function answer(FormLink $link, string $key, mixed $value)
     {
         return $this->postJson('/f/'.$link->token.'/answer', ['key' => $key, 'value' => $value]);
@@ -371,6 +379,7 @@ class DynamicLinksTest extends TestCase
     public function test_follow_up_waits_while_he_is_filling_and_says_what_is_left(): void
     {
         $link = $this->link();
+        $this->linkReachedHim($link);
         $followUps = app(FormLinkFollowUpService::class);
 
         Carbon::setTestNow(now()->addMinutes(10));
@@ -403,6 +412,7 @@ class DynamicLinksTest extends TestCase
     public function test_a_follow_up_whose_send_failed_is_retried_as_the_same_message_never_a_new_one(): void
     {
         $link = $this->link();
+        $this->linkReachedHim($link);
         $clientIds = [];
         $calls = 0;
         Http::swap(new \Illuminate\Http\Client\Factory);

@@ -581,6 +581,16 @@ class ContextBuilder
             $tokens += TokenEstimator::estimate($note);
         }
 
+        // Owner 2026-11-09: customers who wrote while the number was down are answered when it is
+        // back - hours later. The agent sees no clock; how long he has been waiting is a fact it gets.
+        $oldest = $messages->first()?->created_at;
+        if ($contents !== [] && $oldest !== null && $oldest->lt(now()->subMinutes(30))) {
+            $note = '[ملاحظة داخلية، ما تتقالش حرفياً: رسالته دي مستنية رد من '.$oldest->locale('ar')->diffForHumans(now(), \Carbon\CarbonInterface::DIFF_ABSOLUTE)
+                .' ومحدش رد عليه - لو محتاجة رد اعتذر في كلمتين عن التأخير وكمّل معاه من آخر حاجة طلبها؛ لو شكر أو تمام بس ومفيش حاجة مستنية رد سيبها من غير رد]';
+            $contents[count($contents) - 1]['parts'][] = ['type' => 'text', 'text' => $note];
+            $tokens += TokenEstimator::estimate($note);
+        }
+
         // Owner 2026-10-06: "بكام الهوجن 3 وبتقسطوا على كام سنة وفين الفرع؟"
         // got the price only - the rest of his message was dropped.
         if ($contents !== [] && $this->asksSeveralThings($messages)) {

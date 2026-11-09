@@ -728,17 +728,37 @@ class ReplyGuard
                 return true;
             }
         }
+
         // Simulator 688: the hours in the table were changed and the bot
         // repeated the old ones from earlier in the chat. Every time of day
         // it states is in the branches it looked up this turn.
         // (normalized: digits are Latin and the article is gone - "الصبح" is "صبح")
         preg_match_all('/(\d+)\s*(صبح|صباحا|ضهر|ظهر|عصر|مغرب|بالليل|ليل|مساء|مساءا)/u', \App\Support\ArabicTextNormalizer::normalize($replyText), $times, PREG_SET_ORDER);
 
+        // Live 2026-11-09: 233 replies that day were refused as BRANCH_NOT_SOURCED, almost all right after
+        // get_branch_information: "1 الظهر" against the table's "1 ضهرا" was a different spelling, not a
+        // different time, and the repair then cut the hours he asked for. A time is its hour and its part
+        // of the day, whichever word names that part.
+        // "1 بالليل" is the table's "1 صباحا" (1 AM); Friday's "2 بعد صلاه" is "2 الضهر".
+        $partOfDay = fn (int $hour, string $word) => match (true) {
+            in_array($word, ['صبح', 'صباحا'], true) => 'am',
+            in_array($word, ['ضهر', 'ظهر', 'بعد صلاه', 'بعد صلاة'], true) => 'noon',
+            $word === 'عصر' => 'afternoon',
+            in_array($word, ['بالليل', 'ليل'], true) && $hour <= 5 => 'am',
+            default => 'pm',
+        };
+        preg_match_all('/(\d+)\s*(صبح|صباحا|ضهر|ظهر|عصر|مغرب|بالليل|ليل|مساء|مساءا|بعد صلا[هة])/u', $source, $known, PREG_SET_ORDER);
+        $knownTimes = array_map(fn ($t) => (int) $t[1].':'.$partOfDay((int) $t[1], $t[2]), $known);
+
         foreach ($times as [, $hour, $period]) {
-            if (! preg_match('/(?<!\d)'.$hour.'\s*'.preg_quote($period, '/').'/u', $source)) {
+            if (! in_array((int) $hour.':'.$partOfDay((int) $hour, $period), $knownTimes, true)) {
                 return true;
             }
         }
+
+        $lookedUpNow = array_filter($lookups, fn ($o) => ($o['name'] ?? '') === 'get_branch_information') !== [];
+        $lookupNote = \App\Support\ArabicTextNormalizer::normalize(json_encode(array_map(
+            fn ($o) => array_diff_key((array) ($o['data'] ?? []), ['branches' => true]), array_values($lookups)), JSON_UNESCAPED_UNICODE) ?: '');
 
         // "مفيش فرع في المنصورة" is the truthful answer, not a claim.
         $affirmed = preg_replace('/(?:مفيش|مافيش|مفيهاش|معندناش|ماعندناش|ما عندناش|ملناش|مالناش|مش عندنا|للأسف مفيش)\s+[^.،,!؟?\n]*/u', ' ', $replyText);
@@ -755,6 +775,18 @@ class ReplyGuard
             }
 
             $place = $bare;
+
+            // Live 2026-11-09: with the branch rows looked up this turn, "فروع موتوجيت", "أقرب فرع ظاهر",
+            // "أقرب فرع لفيصل" were refused as invented places by this word list. Then a place is
+            // invented only when the lookup itself says it is not ours (its note: "We have NO branch in
+            // المنصورة") - the rows decide, not a list of filler words.
+            if ($lookedUpNow) {
+                if (mb_strlen($place) >= 3 && str_contains($lookupNote, $place) && ! str_contains($source, $place)) {
+                    return true;
+                }
+
+                continue;
+            }
 
             if (mb_strlen($place) >= 3 && ! in_array($place, array_map([\App\Support\ArabicTextNormalizer::class, 'normalize'], self::BRANCH_FILLER), true)
                 && ! str_contains($source, $place)) {
@@ -2211,7 +2243,6 @@ class ReplyGuard
             ->whereHas('installmentSystem', fn ($q) => $q->where('is_active', true))
             ->get(['months', 'interest_percent']);
         $fees = \App\Models\InstallmentSystem::where('is_active', true)->pluck('administrative_fees')->map(fn ($f) => (float) $f)->all();
-        $any = array_merge($plans->pluck('interest_percent')->map(fn ($p) => (float) $p)->all(), $fees);
 
         foreach (preg_split('/(?<=[.!؟?\n،,:])\s*|\s+(?:أو|او|ولا|و)\s+(?=\S*\s*\d)/u', $text) as $part) {
             preg_match_all('/(\d+(?:\.\d+)?)\s*(?:%|في\s?المي[ةه]|بالمي[ةه])/u', $part, $m);
@@ -2222,11 +2253,17 @@ class ReplyGuard
 
             $months = $this->durationsIn($part);
 
+            // Live 2026-11-09: "دايو ٤ ... ٧٥٪ استيراد" and "و75٪ مكونات مستوردة" are the motorcycle's
+            // specs, not a rate - judged against the plan rates they were refused, and after two repairs
+            // the whole answer was replaced by the rate table. A percentage is checked against a
+            // duration's rate only in a sentence that names exactly one duration.
+            if (count($months) !== 1) {
+                continue;
+            }
+
             foreach ($m[1] as $percent) {
                 $percent = (float) $percent;
-                $allowed = count($months) === 1
-                    ? array_merge($plans->where('months', $months[0])->pluck('interest_percent')->map(fn ($p) => (float) $p)->all(), $fees)
-                    : $any;
+                $allowed = array_merge($plans->where('months', $months[0])->pluck('interest_percent')->map(fn ($p) => (float) $p)->all(), $fees);
 
                 if (! in_array($percent, $allowed, true)) {
                     return true;

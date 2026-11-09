@@ -47,6 +47,8 @@ class IngestionService
             'media.*.base64' => ['required_with:media', 'string'],
             'location' => ['nullable', 'array'],
             'quoted' => ['nullable', 'array'],
+            // worker history recovery after a (re)link: a message sent while the number was down
+            'recovered' => ['nullable', 'boolean'],
         ]);
 
         if ($validator->fails()) {
@@ -75,9 +77,25 @@ class IngestionService
             }
 
             $isIncoming = $data['direction'] === 'incoming';
+            $recovered = (bool) ($data['recovered'] ?? false);
+            $sentAt = $recovered ? \Illuminate\Support\Carbon::createFromTimestamp((int) $data['timestamp'])->setTimezone(config('app.timezone')) : null;
 
             $customer = $this->upsertCustomer($bot, $data);
             $conversation = $this->findOrCreateConversation($bot, $customer, $data);
+
+            // A recovered message is stored only when it is newer than everything we already have for him
+            // (a reply that failed to send does not count): older history is already here, and inserting it
+            // later would put it after newer messages in the conversation.
+            if ($recovered) {
+                $newer = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+                    ->where('created_at', '>=', $sentAt)
+                    ->where(fn ($q) => $q->where('direction', 'incoming')->orWhereNull('delivery_status')->orWhere('delivery_status', '!=', 'failed'))
+                    ->exists();
+
+                if ($newer || $sentAt->gt(now())) {
+                    return ['ok' => true, 'ignored' => true, 'reason' => 'older_than_stored'];
+                }
+            }
 
             $sessionGapExceeded = $isIncoming && $this->sessionGapExceeded($conversation);
 
@@ -96,8 +114,14 @@ class IngestionService
                 'metadata' => array_filter([
                     'quoted' => $quotedMeta,
                     'location' => $data['location'] ?? null,
+                    'recovered' => $recovered ?: null,
                 ]),
             ]);
+
+            if ($sentAt !== null) {
+                // created_at is not fillable: the real send time is set explicitly
+                $message->forceFill(['created_at' => $sentAt, 'updated_at' => $sentAt])->saveQuietly();
+            }
 
             $mediaRows = $this->storeMedia($message, $data['media']);
 
@@ -127,14 +151,17 @@ class IngestionService
             }
 
             if ($isIncoming) {
-                $conversation->last_inbound_at = now();
-            } else {
+                $conversation->last_inbound_at = $sentAt ?? now();
+            } elseif (! $recovered || $sentAt->gt(now()->subMinutes((int) config('agent.handoff.staff_pause_minutes', 10)))) {
+                // a colleague's phone reply from yesterday, recovered now, is not a colleague talking now
                 $this->turnScheduler->staffTookOver($conversation);
             }
 
             $conversation->save();
 
-            if ($isIncoming) {
+            // A recovered message gets no instant turn: several arrive at once per chat, and the
+            // waiting-customers sweep (whatsapp:answer-waiting) answers the chat once, after all of them.
+            if ($isIncoming && ! $recovered) {
                 $this->turnScheduler->onMessageIngested($message);
             }
 

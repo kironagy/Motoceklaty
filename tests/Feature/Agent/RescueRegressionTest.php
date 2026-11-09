@@ -353,8 +353,9 @@ class RescueRegressionTest extends TestCase
     }
 
     /** Simulation 2026-11-08: a wrong rate twice ended in an unrelated line - now the live rates. */
-    public function test_a_wrong_rate_twice_is_answered_with_the_live_rates(): void
+    public function test_a_wrong_rate_twice_is_never_sent_and_never_replaced_by_the_rate_table(): void
     {
+        // 2026-11-09: the rate-table replacement answered spec and photo questions with percentages.
         $system = \App\Models\InstallmentSystem::create(['name' => 'امان', 'pricing_mode' => 'standard', 'administrative_fees' => 7, 'is_active' => true,
             'plans' => [['months' => 24, 'interest' => 42]]]);
         \App\Models\InstallmentPlan::updateOrCreate(['installment_system_id' => $system->id, 'months' => 24], ['interest_percent' => 42, 'is_active' => true]);
@@ -362,11 +363,21 @@ class RescueRegressionTest extends TestCase
         $conversation = $this->conversation();
         $fake->queue($this->reply(['messages' => ['على سنتين النسبة 40% مع المصاريف.']]));
         $fake->queue($this->reply(['messages' => ['على سنتين النسبة 40% برضه.']]));
+        $fake->queue($this->reply(['messages' => ['على سنتين النسبة 40% تاني.']]));
 
         $result = app(AgentRunner::class)->run($this->says($conversation, 'الفايدة كام على سنتين؟'));
 
-        $this->assertStringContainsString('24 شهر 42', $result['messages'][0]);
-        $this->assertStringNotContainsString('40', $result['messages'][0]);
+        $this->assertStringNotContainsString('40', implode(' ', $result['messages'] ?? []));
+        $this->assertStringNotContainsString('النسب الحالية', implode(' ', $result['messages'] ?? []));
+    }
+
+    public function test_a_spec_percentage_is_not_a_rate(): void
+    {
+        \App\Models\InstallmentPlan::query()->delete();
+        $conversation = $this->conversation();
+
+        $this->assertNotSame('PERCENT_DURATION_MISMATCH', app(\App\Agent\Runtime\ReplyGuard::class)->check(
+            ['messages' => ['دايو ٤ كاش ٤١٬٠٠٠ جنيه، ٧٥٪ استيراد.']], $conversation, '', [], []));
     }
 
     /** "عايز اقدم عليها" twice answered without the link: the link tool runs, with its rules. */

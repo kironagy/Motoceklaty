@@ -96,17 +96,29 @@ class SearchMotorcyclesTool implements ReadTool
             }
         }
 
-        // A model we do not carry: what he gets instead is the same kind and
-        // size, and that is remembered for a later "ايه الموجود؟".
+        // brand scoping first: a scope that leaves nothing must still end in the full catalog below
+        $conversation = \App\Models\WhatsappConversation::find($ctx->conversationId);
+        if ($conversation) {
+            $customerText = app(\App\Agent\Runtime\ReplyGuard::class)->customerTextSinceLastReply($conversation);
+            $result = $this->scopeToRequestedBrand($result, $customerText);
+        }
+
+        // No spelling matched the name he wrote. That is NOT "we do not carry it": live
+        // 2026-11-06..09 "فيجوري ماكس" (26 Max), "كواي كيت" (Keeway keet), "HXL 150" (HLX 150)
+        // were all told "مش متوفر". The whole catalog goes back and the model decides by
+        // meaning which row he means; only when no row is that model is it not carried.
         if (filled($args['name_query'] ?? null) && $result['items'] === []) {
+            $result['no_spelling_match'] = true;
+            $result['full_catalog'] = $this->catalog->compactCatalog();
+            $result['how_to_read'] = 'No catalog name is spelled like "'.$args['name_query'].'". full_catalog is EVERYTHING we sell. '
+                .'Customers misspell, transliterate (Arabic/English), reorder letters, drop or add the brand, the year or the cc, '
+                .'and use nicknames. Decide by meaning which row(s) he means and continue with that id (get_motorcycle_details). '
+                .'If several rows fit, ask him which one, naming them. Say we do not carry it ONLY if no row is the same model; '
+                .'then offer rows of the same kind and size from full_catalog.';
             $cc = $interest::ccIn((string) $args['name_query']);
 
             if ($cc !== null) {
-                $result['not_carried'] = true;
-                // simulator 2026-10-13: a 200cc scooter not found got 200cc motorcycles as "similar"
-                $kind = in_array($args['kind'] ?? null, \App\Domain\Catalog\CatalogService::KINDS, true) ? $args['kind'] : 'motorcycle';
-                $result['similar_available'] = $this->catalog->similar($cc, $kind, null, 5);
-                $result['similar_cc'] = $cc;
+                $result['size_in_his_words'] = $cc;
             }
         } elseif ($this->isGeneric($args) && ($wanted = $interest::get($ctx->conversationId)) && ($wanted['cc'] ?? null)) {
             // "ايه الموجود حاليا؟" right after asking about a 250cc model
@@ -115,10 +127,24 @@ class SearchMotorcyclesTool implements ReadTool
             $result['closest_to'] = ['label' => $wanted['label'] ?? null, 'cc' => (int) $wanted['cc']];
         }
 
-        $conversation = \App\Models\WhatsappConversation::find($ctx->conversationId);
-        if ($conversation) {
-            $customerText = app(\App\Agent\Runtime\ReplyGuard::class)->customerTextSinceLastReply($conversation);
-            $result = $this->scopeToRequestedBrand($result, $customerText);
+        // Live 2026-11-07..09: spelling hits are often only PART of what he means - "هوجن 250" found
+        // only Tx 250 (L250, f250, H250, Z250, V250 MAX are Hogan 250s too), "دايو ٤ استيراد" missed
+        // "دايو ٤ اصلي", brand="هوجان" found nothing. When he names a model or brand the whole catalog
+        // comes with the hits, so the agent checks every row he could mean before it answers.
+        if ((filled($args['name_query'] ?? null) || filled($args['brand'] ?? null)) && ! isset($result['full_catalog'])) {
+            $result['full_catalog'] = $this->catalog->compactCatalog();
+            $result['how_to_read'] = '`items` are spelling hits only. full_catalog is EVERYTHING we sell: before answering, check by meaning '
+                .'which rows he could mean (other versions, other brands with that name, the same cc). If several fit, name them and ask which; '
+                .'if one fits that is not in items, use it.';
+        }
+
+        // A budget, size or color with nothing inside it ("مكنة في حدود 25 لـ 30"): he still gets
+        // the nearest real options, read from the catalog, instead of a bare "مفيش".
+        if ($result['items'] === [] && ! isset($result['full_catalog'])) {
+            $result['nothing_matches_these_filters'] = true;
+            $result['full_catalog'] = $this->catalog->compactCatalog();
+            $result['how_to_read'] = 'Nothing matches these exact filters. full_catalog is EVERYTHING we sell: tell him plainly what is nearest '
+                .'to what he asked (closest price / size / kind) from it, with real prices; never say we have nothing.';
         }
 
         // "VLR 200" is sold by two brands at different prices; picking one
@@ -148,7 +174,11 @@ class SearchMotorcyclesTool implements ReadTool
         $brands = \App\Models\Brand::whereIn('id', array_unique($ids))
             ->whereNotIn('name', ['Scooters', 'Electric scooters', 'تروسيكلات'])->pluck('name')->all();
         if (count($brands) !== 1) return $result;
-        $result['items'] = array_values(array_filter($result['items'] ?? [], fn ($item) => ($item['brand'] ?? null) === $brands[0]));
+        $scoped = array_values(array_filter($result['items'] ?? [], fn ($item) => ($item['brand'] ?? null) === $brands[0]));
+        // "كيواي اكس رود": the X Road is filed under "Scooters", not Keeway - a brand word that
+        // matches none of the hits narrows nothing, it must not empty the search.
+        if ($scoped === []) return $result;
+        $result['items'] = $scoped;
         $result['total'] = count($result['items']);
         unset($result['ambiguous_names'], $result['versions'], $result['similar_available']);
         return $result;

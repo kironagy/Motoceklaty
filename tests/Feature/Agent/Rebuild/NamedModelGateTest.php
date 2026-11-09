@@ -45,7 +45,10 @@ class NamedModelGateTest extends TestCase
 
         $result = app(\App\Agent\Tools\ToolRegistry::class)->execute('get_motorcycle_details', ['motorcycle_ids' => [$machine->id]], $this->ctx($conversation));
 
-        $this->assertSame('NOT_THE_MODEL_HE_NAMED', $result['error']['code'] ?? null);
+        // 2026-11-09: a lookup is never refused by a spelling test (live it refused "هوجن 3 أو دايو 4",
+        // "ماشي ال vlr 200"...); what the test saw goes to the agent as a note.
+        $this->assertTrue($result['ok']);
+        $this->assertNotEmpty($result['data']['check_which_model_he_means'] ?? null);
     }
 
     public function test_hogan_4_is_never_motorcycle_4(): void
@@ -61,8 +64,10 @@ class NamedModelGateTest extends TestCase
         $refused = $registry->execute('get_installment_offer', ['motorcycle_id' => $l250->id], $this->ctx($conversation));
         $allowed = $registry->execute('get_motorcycle_details', ['motorcycle_ids' => [$hogan4->id]], $this->ctx($conversation));
 
-        $this->assertSame('NOT_THE_MODEL_HE_NAMED', $refused['error']['code'] ?? null);
+        // the offer is not refused by the spelling test (it may still need his work etc.)
+        $this->assertNotSame('NOT_THE_MODEL_HE_NAMED', $refused['error']['code'] ?? null);
         $this->assertTrue($allowed['ok'], json_encode($allowed));
+        $this->assertArrayNotHasKey('check_which_model_he_means', $allowed['data']);
     }
 
     public function test_a_number_he_wrote_is_not_a_catalog_id(): void
@@ -75,7 +80,8 @@ class NamedModelGateTest extends TestCase
 
         $result = app(\App\Agent\Tools\ToolRegistry::class)->execute('get_motorcycle_details', ['motorcycle_ids' => [$apache->id]], $this->ctx($conversation));
 
-        $this->assertSame('NOT_THE_MODEL_HE_NAMED', $result['error']['code'] ?? null);
+        $this->assertTrue($result['ok']);
+        $this->assertNotEmpty($result['data']['check_which_model_he_means'] ?? null);
     }
 
     public function test_engine_size_and_durations_are_not_model_numbers(): void

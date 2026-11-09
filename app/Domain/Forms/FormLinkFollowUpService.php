@@ -57,6 +57,19 @@ class FormLinkFollowUpService
             return false;
         }
 
+        // Live 2026-11-08: while numbers were logged out the reminder was tried again and again and every
+        // copy FAILED; it waits for the number to be connected (whatsapp:watch-sessions keeps this live).
+        if (in_array($conversation->whatsappBot->session_status, ['logged_out', 'qr', 'not_running', 'disconnected'], true)) {
+            return false;
+        }
+
+        // Critic 2026-11-09 (conversation 4064): "الطلب مظهرش، مشكلة في الرابط؟" went to customers whose
+        // link message never reached them. Only a link he actually received is followed up.
+        if (! WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'outgoing')
+            ->where('delivery_status', 'sent')->where('text', 'like', '%'.$link->token.'%')->exists()) {
+            return false;
+        }
+
         $silence = $this->lastActivity($link);
         $after = (int) config('agent.form_links.followup_after_minutes', 15);
 
