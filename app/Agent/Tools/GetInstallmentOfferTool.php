@@ -61,6 +61,43 @@ class GetInstallmentOfferTool implements ReadTool
      */
     public function hisWordsPick(array $args, ToolContext $ctx, Machine $machine): bool
     {
+        // Owner 2026-11-09: 331 of 365 refusals in a day were a missing his_words - every one cost
+        // a model call, slowed the reply, and ended in "مش هقدر أحسبلك قسطها". The model he talks
+        // about is also proven by his recent messages or by the model this chat is focused on.
+        return $this->quotedPick($args, $ctx, $machine) || $this->pickedInChat($ctx, $machine);
+    }
+
+    private function pickedInChat(ToolContext $ctx, Machine $machine): bool
+    {
+        $id = (int) $machine->id;
+        $state = (array) (\App\Models\WhatsappConversation::whereKey($ctx->conversationId)->value('state') ?? []);
+        if (is_string($state)) {
+            $state = (array) json_decode($state, true);
+        }
+
+        if (in_array($id, array_map('intval', (array) ($state['focus_motorcycle_ids'] ?? [])), true)) {
+            return true;
+        }
+
+        $catalog = app(\App\Agent\Runtime\CatalogMentions::class);
+        $texts = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $ctx->conversationId)
+            ->where('direction', 'incoming')->latest('id')->limit(20)->get(['text', 'transcript'])
+            ->map(fn ($m) => trim(($m->text ?? '').' '.($m->transcript ?? '')))->filter();
+
+        foreach ($texts as $text) {
+            if (in_array($id, array_map('intval', $catalog->fullNames($text)), true)) {
+                return true;
+            }
+        }
+
+        return \App\Models\AiTraceStep::where('turn_id', $ctx->turnId)
+            ->whereIn('tool_name', ['search_motorcycles', 'get_motorcycle_details', 'identify_motorcycle_from_image'])
+            ->get(['result_redacted'])
+            ->contains(fn ($step) => preg_match('/"(?:id|motorcycle_id)":'.$id.'[,}]/', json_encode($step->result_redacted) ?: ''));
+    }
+
+    private function quotedPick(array $args, ToolContext $ctx, Machine $machine): bool
+    {
         $quote = trim((string) ($args['his_words'] ?? ''));
         $words = \App\Domain\Conversations\DeliveryService::sameText($quote);
 
@@ -243,7 +280,13 @@ class GetInstallmentOfferTool implements ReadTool
         }
 
         if ($offers === [] && $noUpfront) {
-            return ToolResult::error('NO_ZERO_UPFRONT_PLAN', (string) config('agent.safety.no_zero_upfront_hint', ''));
+            // Owner 2026-11-09: the bot told customers "مفيش أي موتوسيكل من غير مقدم". This refusal is
+            // about THIS model only (above the financing limit for his work, a down payment covers the
+            // difference); a cheaper model goes with nothing at pickup on the no-fees system.
+            return ToolResult::error('NO_ZERO_UPFRONT_PLAN', trim((string) config('agent.safety.no_zero_upfront_hint', ''))
+                .' This is about «'.$this->label($machine).'» only: its price is above what is financed for his work, so it needs a down payment '
+                .'(call again without no_upfront for the amount). Never say that no motorcycle comes without a down payment - '
+                .'a model within the limit goes with nothing at pickup on the no-fees system; offer him one if he wants that.');
         }
 
         if ($offers === [] && $months !== null) {

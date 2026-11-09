@@ -147,8 +147,12 @@ class SendApplicationLinkTool implements WriteTool
             // Not checked this turn: check now instead of costing the model another round trip.
             $result = $check?->result_redacted ?? app(CheckEligibilityTool::class)->execute([], $ctx)->toArray();
             $data = $result['data'] ?? [];
-            if (! ($result['ok'] ?? false)) {
-                return ToolResult::error('ELIGIBILITY_CHECK_REQUIRED', (string) data_get($result, 'error.detail', ''));
+            // Owner 2026-11-09: "يقوله المطلوب بس ويبعتله رابط التقديم وهو هيتعامل". An open
+            // question about his work (sector, insured, exact job) is asked on the form - only a
+            // real refusal holds the link back. 88 links in 3 days waited on such a question.
+            $code = (string) data_get($result, 'error.code', '');
+            if (! ($result['ok'] ?? false) && in_array($code, \App\Domain\Applications\WorkClassification::BLOCKING, true)) {
+                return ToolResult::error($code, (string) data_get($result, 'error.detail', ''));
             }
             if (($data['status'] ?? '') === 'not_eligible' || ! empty($data['occupation_not_accepted'])) {
                 return ToolResult::error('ELIGIBILITY_NOT_CONFIRMED', (string) ($data['reason'] ?? ''));

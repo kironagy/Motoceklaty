@@ -63,15 +63,17 @@ class MentionedMotorcycle
         }
 
         // A matching price or a broad search never overrides an explicit brand.
+        // Live 2026-11-09 (turn 46235): "هوجان L250" and "صور الفيجوري" in one turn refused the
+        // Hogan L250 - every brand he named this turn counts, not only the one in each message.
         $vocabulary = self::vocabulary();
+        $brands = [];
         foreach ($texts as $raw) {
             $text = ArabicTextNormalizer::normalize($raw);
             if (preg_match(self::ASKS_ALTERNATIVE, $text)) continue;
-            $brands = [];
             foreach (preg_split('/[^\p{L}\p{N}]+/u', $text, -1, PREG_SPLIT_NO_EMPTY) as $token) $brands = array_merge($brands, $vocabulary[$token] ?? []);
-            $nameHasBrand = collect(self::letterTokens((string) $machine->name))->contains(fn ($token) => array_intersect($vocabulary[$token] ?? [], $brands) !== []);
-            if ($brands !== [] && ! in_array((int) $machine->brand_id, $brands, true) && ! $nameHasBrand) return 'EXPLICIT_BRAND_MISMATCH: use the brand and model the customer named; a matching price is not a model identity.';
         }
+        $nameHasBrand = collect(self::letterTokens((string) $machine->name))->contains(fn ($token) => array_intersect($vocabulary[$token] ?? [], $brands) !== []);
+        if ($brands !== [] && ! in_array((int) $machine->brand_id, $brands, true) && ! $nameHasBrand) return 'EXPLICIT_BRAND_MISMATCH: use the brand and model the customer named; a matching price is not a model identity.';
 
         if (self::foundBySearchThisTurn($turnId, (int) $machine->id)) {
             return null;
