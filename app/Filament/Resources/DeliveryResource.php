@@ -2154,6 +2154,29 @@ Forms\Components\Section::make('الملاحظات')
                                 return $query->whereDate('created_at', $date);
                             });
                     }),
+
+                // A whole month (YYYY-MM) - the home page widget links here with the current month.
+                Tables\Filters\Filter::make('created_month')
+                    ->label('شهر التقديم')
+                    ->form([
+                        Forms\Components\Select::make('month')
+                            ->label('شهر التقديم')
+                            ->options(fn () => collect(range(0, 11))
+                                ->mapWithKeys(fn ($i) => [now()->startOfMonth()->subMonths($i)->format('Y-m') => now()->startOfMonth()->subMonths($i)->locale('ar')->translatedFormat('F Y')])
+                                ->all()),
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        if (! preg_match('/^\d{4}-\d{2}$/', (string) ($data['month'] ?? ''))) {
+                            return $query;
+                        }
+
+                        $start = Carbon::createFromFormat('Y-m-d', $data['month'].'-01')->startOfMonth();
+
+                        return $query->whereBetween('installment_requests.created_at', [$start, $start->copy()->endOfMonth()]);
+                    })
+                    ->indicateUsing(fn (array $data) => preg_match('/^\d{4}-\d{2}$/', (string) ($data['month'] ?? ''))
+                        ? 'شهر '.Carbon::createFromFormat('Y-m-d', $data['month'].'-01')->locale('ar')->translatedFormat('F Y')
+                        : null),
             ])
 
 
