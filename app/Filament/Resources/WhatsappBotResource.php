@@ -113,77 +113,16 @@ class WhatsappBotResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->contentGrid(['md' => 2, 'xl' => 3])
+            ->recordUrl(fn (WhatsappBot $record) => static::getUrl('activity', ['record' => $record]))
+            ->paginated([12, 24, 48])
+            ->searchPlaceholder('ابحث باسم البوت أو الرقم')
             ->columns([
-                Tables\Columns\TextColumn::make('name')
-                    ->label('اسم البوت')
-                    ->searchable()
-                    ->sortable(),
-
-                Tables\Columns\TextColumn::make('staff.name')
-                    ->label('الموظف المرتبط')
-                    ->searchable()
-                    ->sortable(),
-
-                Tables\Columns\TextColumn::make('whatsapp_phone_number')
-                    ->label('رقم الواتساب')
-                    ->searchable()
-                    ->toggleable(),
-                Tables\Columns\TextColumn::make('mode')
-                    ->label('نوع البوت')
-                    ->badge()
-                    ->formatStateUsing(fn($state) => match ($state) {
-                        'training' => 'تعليمي',
-                        'live' => 'لايف',
-                        default => 'غير محدد',
-                    })
-                    ->color(fn($state) => match ($state) {
-                        'training' => 'warning',
-                        'live' => 'success',
-                        default => 'gray',
-                    }),
-                Tables\Columns\TextColumn::make('session_status')
-                    ->label('حالة الربط')
-                    ->badge()
-                    ->formatStateUsing(fn($state) => match ($state) {
-                        'connected' => 'متصل',
-                        'qr' => 'في انتظار QR',
-                        'starting' => 'جاري التشغيل',
-                        'disconnected' => 'مفصول',
-                        'logged_out' => 'تم تسجيل الخروج',
-                        default => 'غير مربوط',
-                    })
-                    ->color(fn($state) => match ($state) {
-                        'connected' => 'success',
-                        'qr', 'starting' => 'warning',
-                        'disconnected', 'logged_out' => 'danger',
-                        default => 'gray',
-                    }),
-
-                Tables\Columns\TextColumn::make('qr_code')
-                    ->label('QR')
-                    ->html()
-                    ->formatStateUsing(function ($state) {
-                        if (!$state) {
-                            return '—';
-                        }
-
-                        return '<img src="' . e($state) . '" style="width:90px;height:90px;border-radius:12px;border:1px solid #ddd;padding:4px;background:white;" />';
-                    }),
-
-                Tables\Columns\IconColumn::make('is_active')
-                    ->label('نشط')
-                    ->boolean(),
-
-                Tables\Columns\TextColumn::make('connected_at')
-                    ->label('وقت الاتصال')
-                    ->dateTime('d/m/Y h:i A')
-                    ->sortable()
-                    ->toggleable(),
-
-                Tables\Columns\TextColumn::make('created_at')
-                    ->label('تاريخ الإضافة')
-                    ->dateTime('d/m/Y h:i A')
-                    ->sortable(),
+                Tables\Columns\Layout\View::make('filament.resources.whatsapp-bots.card'),
+                // Hidden, only so search and sort keep working with the card layout.
+                Tables\Columns\TextColumn::make('name')->searchable()->sortable()->hidden(),
+                Tables\Columns\TextColumn::make('whatsapp_phone_number')->searchable()->hidden(),
+                Tables\Columns\TextColumn::make('staff.name')->searchable()->hidden(),
             ])
             ->filters([
                 Tables\Filters\TernaryFilter::make('is_active')
@@ -193,6 +132,14 @@ class WhatsappBotResource extends Resource
                     ->native(false),
             ])
             ->actions([
+                Tables\Actions\Action::make('activity')
+                    ->label('التفاصيل والمحادثات')
+                    ->icon('heroicon-o-chart-bar-square')
+                    ->color('primary')
+                    ->button()
+                    ->url(fn (WhatsappBot $record) => static::getUrl('activity', ['record' => $record])),
+
+                Tables\Actions\ActionGroup::make([
                 Tables\Actions\Action::make('generate_qr')
                     ->label('توليد QR')
                     ->icon('heroicon-o-qr-code')
@@ -412,6 +359,7 @@ class WhatsappBotResource extends Resource
                 // cascades to every customer, application and document.
                 Tables\Actions\DeleteAction::make()
                     ->hidden(fn (WhatsappBot $record) => $record->hasCustomerData()),
+                ])->label('إدارة')->icon('heroicon-m-ellipsis-vertical')->color('gray')->button(),
             ])
             ->bulkActions([
                 Tables\Actions\BulkAction::make('delete_empty_bots')
@@ -436,7 +384,7 @@ class WhatsappBotResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with('staff');
+        return parent::getEloquentQuery()->with('staff')->orderByDesc('is_active');
     }
 
     public static function getPages(): array
@@ -445,7 +393,19 @@ class WhatsappBotResource extends Resource
             'index' => Pages\ListWhatsappBots::route('/'),
             'create' => Pages\CreateWhatsappBot::route('/create'),
             'edit' => Pages\EditWhatsappBot::route('/{record}/edit'),
+            'activity' => Pages\BotActivityPage::route('/{record}/activity'),
         ];
+    }
+
+    public static function getWidgets(): array
+    {
+        return [WhatsappBotResource\Widgets\BotsTodayOverview::class];
+    }
+
+    /** Today's chats and messages per bot, computed once per request for all the cards. */
+    public static function todayTotals(): array
+    {
+        return once(fn () => app(\App\Domain\Bots\BotActivity::class)->todayTotals());
     }
 
     public static function canViewAny(): bool
