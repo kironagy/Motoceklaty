@@ -65,6 +65,10 @@ class AgentRunner
         // Attaching one whenever the reply said "رابط" sent it to people who never asked
         // ("أبعتلك رابط التقديم؟" arrived with the link) and again on every later reply.
         if (! $link || ! $link->isOpen()) {
+            $link = $this->linkTheReplyPointsTo($turn, (array) ($result['messages'] ?? []));
+        }
+
+        if (! $link || ! $link->isOpen()) {
             return $result;
         }
 
@@ -78,6 +82,52 @@ class AgentRunner
         unset($result['no_reply']);
 
         return ['messages' => $messages] + $result;
+    }
+
+    /**
+     * Owner 2026-11-09 (conversation 3500): "املأ بياناتك وارفعهم على استمارة التقديم" went out with
+     * no link - he had to ask for it. A reply that sends him to the form carries his link. An offer
+     * ("أبعتلك رابط التقديم؟") is a question, not a pointer, and gets none.
+     */
+    private function linkTheReplyPointsTo(object $turn, array $messages): ?\App\Models\FormLink
+    {
+        if (! \App\Domain\Forms\FormLinkService::formsMode()) {
+            return null;
+        }
+
+        $pointer = '/(?:على|في|ف|من|عبر|تملا|املا|املأ|تملى|كمّل|كمل)\s+(?:ال)?(?:استمار[ةه]|فورم|رابط\s+(?:ال)?تقديم|لينك\s+(?:ال)?تقديم)/u';
+        $points = collect($messages)->contains(function ($message) use ($pointer) {
+            foreach (preg_split('/(?<=[.!؟?\n])/u', (string) $message) as $sentence) {
+                if (preg_match($pointer, $sentence) && ! preg_match('/[؟?]\s*$/u', trim($sentence))) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
+
+        if (! $points) {
+            return null;
+        }
+
+        try {
+            $conversation = WhatsappConversation::find($turn->whatsapp_conversation_id);
+            $tool = app(\App\Agent\Tools\SendApplicationLinkTool::class);
+
+            if (! $conversation || ! $tool->maySendLink($conversation)
+                || app(\App\Domain\Applications\AgeEligibilityGate::class)->for($conversation)) {
+                return null;
+            }
+
+            $link = $tool->linkForChat($conversation);
+            $link->update(['prefill' => array_merge((array) $link->prefill, ['_sent_turn_id' => (int) $turn->id])]);
+
+            return $link;
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Form link for a form-pointing reply failed', ['turn_id' => $turn->id, 'error' => $e->getMessage()]);
+
+            return null;
+        }
     }
 
     /** @return array{messages: string[], quote_wa_message_id?: ?string, media?: array, focus_motorcycle_ids?: array} */
@@ -568,6 +618,7 @@ class AgentRunner
         'HANDOFF_CLAIMED_NOT_DONE' => 'It promises a colleague; handoff_to_human did not succeed.',
         'HANDOFF_TIME_PROMISED' => 'It promises when a colleague will answer; nothing records that.',
         'UNRECORDED_PROMISE' => 'It promises something nothing in the system does (reservation, time, warranty).',
+        'NUMBERS_DISOWNED' => 'The numbers from get_installment_offer are correct: never call them wrong or apologise for them - explain why his sum on the cash price differs.',
         'STOCK_OR_CHECK_CLAIMED' => 'Nothing checks stock per branch or follows up later.',
         'AVAILABILITY_PROMISE' => 'Nothing notifies him when a model arrives.',
         'UNVERIFIED_NUMBER' => 'A number in the reply is in no tool result or earlier verified data; look it up or leave it out.',

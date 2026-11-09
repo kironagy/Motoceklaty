@@ -147,6 +147,16 @@ class ReplyGuard
             $this->detail = $this->realRates();
             return 'PERCENT_DURATION_MISMATCH';
         }
+        // Owner 2026-11-09 (conversation 3500): he worked 21% on the cash price, said "حسبت غلط", and the
+        // bot agreed - "أنا لخبطتك... وده غلط... آسف على اللخبطة" - though 4,840 was right (the rate is on
+        // the installment price, tax and services included). Tool numbers are never disowned.
+        if (self::disownsNumbers($replyText)) {
+            $this->detail = 'The numbers came from get_installment_offer and are correct - never say they were wrong, never apologise for them. '
+                .'Explain calmly why his own sum differs: the rate is worked on the installment price, not the cash price; the installment price '
+                .'includes tax and services. '.(string) config('agent.installments.price_difference_explanation')
+                .' Do not say the installment price itself. Then repeat his monthly payment and admin fee from the tool.';
+            return 'NUMBERS_DISOWNED';
+        }
         if (preg_match('/قسط|تقسيط|مقدم|مصاريف/u',$replyText)
             && $this->hasUnverifiedNumber($replyText,$system,$toolResultsBlob,$contents,true)) {
             return 'UNVERIFIED_NUMBER';
@@ -1643,6 +1653,15 @@ class ReplyGuard
             ' ',
             $text
         );
+    }
+
+    /** "حسبت غلط", "وده غلط", "آسف على اللخبطة" about our own numbers - "مش غلط" is fine. */
+    public static function disownsNumbers(string $text): bool
+    {
+        return (bool) preg_match('/(?:أنا|انا)\s+(?:\S+\s+){0,2}?(?:غلطت|لخبطتك|لخبطت)|حسبت(?:ها|هالك|لك)?\s+غلط|(?<!مش\s)(?<!مش )(?:وده|ودي|كان|كانت)\s+غلط|(?:الحسب[ةه]|الحساب|الأرقام|الارقام)\s+(?:\S+\s+){0,3}?(?<!مش\s)غلط|(?:آسف|اسف|متأسف|معلش)\s+(?:\S+\s+){0,2}?(?:اللخبط[ةه]|الغلط[ةه]?)|بشكل\s+متناقض/u', $text)
+            && ! preg_match('/(?:مش|مفيش|مافيش)\s+(?:\S+\s+){0,2}?غلط/u', $text)
+            // only about money: "أنا غلطت في اسم المكنة" is an honest correction
+            && (bool) preg_match('/حسب|قسط|نسب|٪|%|فايد|فوايد|أرقام|ارقام|مصاريف|مقدم/u', $text);
     }
 
     /** A promise no record backs: a reservation, a time frame, a warranty or a guarantor. */
