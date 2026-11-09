@@ -238,6 +238,13 @@ class SendReplyTool implements WriteTool
             return false;
         }
 
+        // Owner 2026-11-09: "؟", "؟؟", "." or "فين الاستمارة؟" is him waiting for us - 12 customers in two
+        // days were left in silence after one. A question mark or a bare punctuation nudge always gets an answer.
+        if ($messages->contains(fn ($m) => preg_match('/[؟?]/u', (string) $m->text.' '.(string) $m->transcript)
+            || preg_match('/^[\s.!،,؟?…]+$/u', (string) $m->text))) {
+            return false;
+        }
+
         $lastBot = WhatsappMessage::where('whatsapp_conversation_id', $ctx->conversationId)
             ->where('direction', 'outgoing')->where(fn ($q) => $q->whereNull('turn_id')->orWhere('turn_id', '!=', $ctx->turnId))
             ->latest('id')->value('text');

@@ -95,7 +95,8 @@ class AgentRunner
             return null;
         }
 
-        $pointer = '/(?:على|في|ف|من|عبر|تملا|املا|املأ|تملى|كمّل|كمل)\s+(?:ال)?(?:استمار[ةه]|فورم|رابط\s+(?:ال)?تقديم|لينك\s+(?:ال)?تقديم)/u';
+        // any mention of his form in a statement ("دي استمارة التقديم، هتوصلك دلوقتي" went out with no link)
+        $pointer = '/(?:ال)?(?:استمار[ةه]|فورم|form|(?:رابط|لينك)\s+(?:ال)?(?:تقديم|استمار[ةه]))/iu';
         $points = collect($messages)->contains(function ($message) use ($pointer) {
             foreach (preg_split('/(?<=[.!؟?\n])/u', (string) $message) as $sentence) {
                 if (preg_match($pointer, $sentence) && ! preg_match('/[؟?]\s*$/u', trim($sentence))) {
@@ -116,6 +117,15 @@ class AgentRunner
 
             if (! $conversation || ! $tool->maySendLink($conversation)
                 || app(\App\Domain\Applications\AgeEligibilityGate::class)->for($conversation)) {
+                return null;
+            }
+
+            // "كمّل الاستمارة من نفس الرابط" right after the link: it is already above, not sent again
+            $open = \App\Models\FormLink::where('whatsapp_conversation_id', $conversation->id)
+                ->whereIn('status', \App\Models\FormLink::OPEN_STATUSES)->latest('id')->first();
+            if ($open?->isOpen() && \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)
+                ->where('direction', 'outgoing')->latest('id')->limit(4)->pluck('text')
+                ->contains(fn ($t) => str_contains((string) $t, '/f/'.$open->token))) {
                 return null;
             }
 
