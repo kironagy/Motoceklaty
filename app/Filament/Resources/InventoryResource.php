@@ -60,7 +60,8 @@ class InventoryResource extends Resource
     public static function saleAction(): Tables\Actions\Action
     {
         return Tables\Actions\Action::make('sell')->label('بيع')->icon('heroicon-o-shopping-bag')->color('success')->button()
-            ->visible(fn (Machine $record) => static::canEdit($record) && LetterResource::canCreate())
+            // Any employee who sees the inventory may sell from the showrooms open to him; the sale is recorded under his name.
+            ->visible(fn () => static::canSell())
             ->disabled(fn (Machine $record) => (int) $record->available_items_count === 0)
             ->modalHeading(fn (Machine $record) => 'بيع • ' . $record->name)
             ->modalDescription('اختر المعرض والقطعة، ثم أدخل بيانات العميل والحساب. إرسال الجواب يتم عند التأكيد فقط.')
@@ -93,14 +94,21 @@ class InventoryResource extends Resource
                 Forms\Components\Wizard\Step::make('الحساب والتأكيد')->icon('heroicon-o-banknotes')->schema([
                     ...collect(['cash' => 'كاش', 'limit' => 'ليمت', 'admin_fees' => 'المصاريف الإدارية', 'paid' => 'المدفوع', 'remaining' => 'المتبقي'])
                         ->map(fn ($label, $key) => TextInput::make($key)->label($label)->numeric()->minValue(0)->maxValue(99999999)->suffix('جنيه'))->values()->all(),
+                    Forms\Components\Placeholder::make('seller')->label('البيعة هتتسجل باسم')->content(fn () => Access::user()?->name ?? '-')->columnSpanFull(),
                     Forms\Components\Placeholder::make('sale_note')->hiddenLabel()->content('بالتأكيد: تتحول القطعة إلى مباعة ويُنشأ جواب بنفس بياناتها وبيانات العميل، بدون حذف سجل القطعة.')->columnSpanFull(),
                 ])->columns(2),
             ])->action(function (Machine $record, array $data) {
-                abort_unless(static::canEdit($record) && LetterResource::canCreate(), 403);
+                abort_unless(static::canSell(), 403);
                 $letter = app(InventoryStock::class)->sell($record, $data);
-                Notification::make()->success()->title('تم البيع وإنشاء الجواب بنجاح')->send();
+                Notification::make()->success()->title('تم البيع وإنشاء الجواب بنجاح')
+                    ->body('البيعة اتسجلت باسم: ' . (Access::user()?->name ?? '-'))->send();
                 if (LetterResource::canEdit($letter)) return redirect(LetterResource::getUrl('edit', ['record' => $letter]));
             });
+    }
+
+    public static function canSell(): bool
+    {
+        return static::canViewAny();
     }
 
     public static function getPages(): array

@@ -39,6 +39,7 @@ class Letter extends Model
 
         'chassis_number',
         'engine_number',
+        'sold_by',
     ];
 
     protected $casts = [
@@ -60,6 +61,12 @@ class Letter extends Model
     public function inventoryItem()
     {
         return $this->belongsTo(InventoryItem::class);
+    }
+
+    /** The employee who made the sale from the inventory page. */
+    public function seller()
+    {
+        return $this->belongsTo(Staff::class, 'sold_by');
     }
     
     public function scopeNotReturned($query)

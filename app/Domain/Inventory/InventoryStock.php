@@ -105,12 +105,15 @@ class InventoryStock
                 throw ValidationException::withMessages(['inventory_item_id' => 'القطعة غير متاحة أو تم بيعها بالفعل. اختر قطعة أخرى.']);
             }
             $sale = Arr::only($data, self::SALE_FIELDS);
+            $sellerId = Access::user()?->id;
             $letter = Letter::create([
                 'inventory_id' => $item->inventory_id, 'inventory_item_id' => $item->id,
                 'warehouse_id' => $item->inventory->warehouse_id,
                 ...Arr::only($item->toArray(), self::PIECE_FIELDS), ...$sale,
+                'sold_by' => $sellerId,
             ]);
             $item->fill($sale);
+            $item->sold_by = $sellerId;
             $item->sold_at = now();
             $item->save();
             return $letter;

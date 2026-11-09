@@ -96,6 +96,11 @@ class ListDeliveries extends ListRecords
             ),
     ];
 
+    // موظف أمان (موظف شركة) مايشوفش طلبات الفيك خالص
+    if (DeliveryResource::isCompanyEmployee()) {
+        unset($tabs['fake']);
+    }
+
     /*
     |--------------------------------------------------------------------------
     | الطلبات المحذوفة - هتلر فقط
@@ -362,6 +367,24 @@ protected function getDeletedRequestsCount(): int
 
                     /*
                     |--------------------------------------------------------------------------
+                    | BOT - مقدم قبل كده في طلبات البوت = ممنوع أساسي أو فيك
+                    |--------------------------------------------------------------------------
+                    */
+
+                    if ($botRequest = DeliveryResource::botRequestFor($nid)) {
+
+                        Notification::make()
+                            ->title('العميل مقدم قبل كده في طلبات البوت')
+                            ->body(DeliveryResource::botRequestMessage($botRequest))
+                            ->danger()
+                            ->persistent()
+                            ->send();
+
+                        return;
+                    }
+
+                    /*
+                    |--------------------------------------------------------------------------
                     | NORMAL
                     |--------------------------------------------------------------------------
                     */
@@ -454,6 +477,6 @@ $this->redirect(
      */
 protected function isFakeTab(): bool
 {
-    return $this->activeTab === 'fake';
+    return $this->activeTab === 'fake' && ! DeliveryResource::isCompanyEmployee();
 }
 }

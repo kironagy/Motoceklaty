@@ -267,6 +267,14 @@ Tables\Columns\TextColumn::make('inventory.warehouse.name')
                         ->searchable()
                         ->default('-'),
 
+                    Tables\Columns\TextColumn::make('seller.name')
+                        ->label('البائع')
+                        ->formatStateUsing(fn ($state) => 'البيعة باسم: '.$state)
+                        ->icon('heroicon-o-user')
+                        ->color('success')
+                        ->weight(FontWeight::SemiBold)
+                        ->searchable(),
+
                     Tables\Columns\TextColumn::make('phone')
                         ->label('رقم الهاتف')
                         ->icon('heroicon-o-phone')

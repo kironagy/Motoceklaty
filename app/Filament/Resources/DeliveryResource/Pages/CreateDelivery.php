@@ -13,7 +13,7 @@ class CreateDelivery extends CreateRecord
     {
         parent::mount();
 
-        $requestType = request()->query('request_type') === 'fake'
+        $requestType = request()->query('request_type') === 'fake' && ! DeliveryResource::isCompanyEmployee()
             ? 'fake'
             : 'normal';
 
@@ -34,6 +34,22 @@ class CreateDelivery extends CreateRecord
     }
     protected function mutateFormDataBeforeCreate(array $data): array
 {
+    // Only the bot files bot requests, and an Aman employee never files a fake one.
+    $data['request_type'] = ($data['request_type'] ?? null) === 'fake' && ! DeliveryResource::isCompanyEmployee()
+        ? 'fake'
+        : 'normal';
+
+    if ($botRequest = DeliveryResource::botRequestFor($data['applicant_national_id'] ?? null)) {
+        \Filament\Notifications\Notification::make()
+            ->title('العميل مقدم قبل كده في طلبات البوت')
+            ->body(DeliveryResource::botRequestMessage($botRequest))
+            ->danger()
+            ->persistent()
+            ->send();
+
+        $this->halt();
+    }
+
     $fullAddress = DeliveryResource::buildFullAddressFromData($data);
     if ($fullAddress !== '') {
         $data['applicant_address'] = $fullAddress;

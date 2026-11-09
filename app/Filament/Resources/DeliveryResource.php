@@ -111,6 +111,57 @@ public static function canDelete($record): bool
 
     return !static::isLocked($record);
 }
+/**
+ * A bot request (from the WhatsApp bot) already filed with this national id. Such a customer can't be
+ * filed again as a normal or fake request - the bot request is followed instead.
+ */
+public static function botRequestFor(?string $nationalId, ?int $ignoreId = null): ?InstallmentRequest
+{
+    $nationalId = self::normalizeNationalId($nationalId);
+
+    if (blank($nationalId)) {
+        return null;
+    }
+
+    return InstallmentRequest::query()
+        ->where('applicant_national_id', $nationalId)
+        ->where('request_type', 'bot')
+        ->when($ignoreId, fn ($q) => $q->whereKeyNot($ignoreId))
+        ->latest('id')
+        ->first();
+}
+
+public static function botRequestMessage(InstallmentRequest $botRequest): string
+{
+    return "العميل ده مقدم قبل كده في طلبات البوت بالرقم القومي ده برقم طلب #{$botRequest->id}، ومينفعش يتقدمله في الطلبات الأساسية أو الفيك.";
+}
+
+/** Form rule for the national id of a normal / fake request: rejected when a bot request has it. */
+protected static function notInBotRequestsRule(): \Closure
+{
+    return function (?\Illuminate\Database\Eloquent\Model $record, \Filament\Forms\Get $get) {
+        return function (string $attribute, $value, \Closure $fail) use ($record, $get) {
+            if (($get('request_type') ?: $record?->request_type) === 'bot') {
+                return;
+            }
+
+            if ($record && (string) $record->applicant_national_id === (string) self::normalizeNationalId($value)) {
+                return;
+            }
+
+            if ($botRequest = self::botRequestFor($value, $record?->getKey())) {
+                $fail(self::botRequestMessage($botRequest));
+            }
+        };
+    };
+}
+
+/** A company (Aman) employee: sees only his companies' requests, and never the fake ones. */
+public static function isCompanyEmployee(): bool
+{
+    return (bool) (Auth::user()?->is_company_employee ?? false);
+}
+
 public static function isHitler(): bool
 {
     return (bool) (Auth::user()?->is_hitler ?? false);
@@ -141,10 +192,11 @@ public static function isHitler(): bool
                 return $query->whereRaw('1 = 0');
             }
 
+            // Fake requests are internal - never shown to a company (Aman) employee.
             return $query->whereIn(
                 'installment_type',
                 $companyNames
-            );
+            )->where('request_type', '!=', 'fake');
         }
 
         // الأدمن والسوبر أدمن العادي
@@ -647,7 +699,7 @@ public static function buildWorkAddressFromData(array $data): string
     public static function form(Form $form): Form
     {
         $isCreate = $form->getOperation() === 'create';
-$requestType = request()->query('request_type') === 'fake'
+$requestType = request()->query('request_type') === 'fake' && ! static::isCompanyEmployee()
     ? 'fake'
     : 'normal';
 
@@ -1031,6 +1083,7 @@ $complete =
                         ->maxLength(14)
                         ->rule('regex:/^\d{14}$/')
                         ->rule(self::uniqueIfChangedRule('applicant_national_id', 'الرقم القومي دا عليه طلب لسه تحت المراجعة.'))
+                        ->rule(self::notInBotRequestsRule())
                         ->validationMessages([
                             'regex' => 'الرقم القومي يجب أن يكون 14 رقمًا بالضبط.',
                         ]),

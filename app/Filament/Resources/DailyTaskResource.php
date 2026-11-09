@@ -39,10 +39,20 @@ class DailyTaskResource extends Resource
 
     public const UPLOAD_DIR = 'daily-tasks';
 
-    /** Owner or full access: every team. */
+    /** Upload limits: files per task, uploads at once, and the longest side (px) of a photo after resizing. */
+    public const MAX_FILES = 40;
+
+    public const PARALLEL_UPLOADS = 2;
+
+    public const IMAGE_MAX_WIDTH = '1920';
+
+    /**
+     * Only the owner (is_hitler) sees every team. Everyone else - whatever his role - sees the tasks
+     * given to him, and a team leader also sees his own teams' tasks.
+     */
     public static function isManager(): bool
     {
-        return static::fullAccess();
+        return (bool) auth()->user()?->is_hitler;
     }
 
     /** Teams whose tasks the user hands out. */
@@ -95,7 +105,13 @@ class DailyTaskResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        $query = parent::getEloquentQuery()->with(['team', 'assignee', 'creator'])->withCount(['attachments', 'proofs']);
+        return static::visibleTasks(parent::getEloquentQuery())->with(['team', 'assignee', 'creator'])->withCount(['attachments', 'proofs']);
+    }
+
+    /** The owner sees every task; anyone else his own tasks plus the tasks of the teams he leads. */
+    public static function visibleTasks(?Builder $query = null): Builder
+    {
+        $query ??= DailyTask::query();
 
         if (static::isManager()) {
             return $query;
@@ -155,6 +171,13 @@ class DailyTaskResource extends Resource
                         ->directory(static::UPLOAD_DIR)
                         ->storeFileNamesIn('new_attachment_names')
                         ->maxSize(20480)
+                        ->maxFiles(static::MAX_FILES)
+                        ->maxParallelUploads(static::PARALLEL_UPLOADS)
+                        ->imageResizeTargetWidth(static::IMAGE_MAX_WIDTH)
+                        ->imageResizeTargetHeight(static::IMAGE_MAX_WIDTH)
+                        ->imageResizeMode('contain')
+                        ->imageResizeUpscale(false)
+                        ->panelLayout('grid')
                         ->downloadable()
                         ->columnSpanFull(),
                 ])
@@ -240,7 +263,7 @@ class DailyTaskResource extends Resource
                     ->options(fn () => Team::query()->whereKey(static::isManager() ? Team::query()->pluck('id') : Team::of(auth()->id()))->pluck('name', 'id')),
                 Tables\Filters\SelectFilter::make('assigned_to')
                     ->label('الموظف')
-                    ->options(fn () => Staff::query()->whereIn('id', DailyTask::query()->select('assigned_to'))->orderBy('name')->pluck('name', 'id'))
+                    ->options(fn () => Staff::query()->whereIn('id', static::visibleTasks()->select('assigned_to'))->orderBy('name')->pluck('name', 'id'))
                     ->searchable(),
                 Tables\Filters\Filter::make('task_date')
                     ->form([
@@ -324,12 +347,21 @@ class DailyTaskResource extends Resource
         return [
             Forms\Components\FileUpload::make('proofs')
                 ->label('الإثبات')
+                ->helperText('تقدر ترفع لحد '.static::MAX_FILES.' صورة/ملف مرة واحدة، والصور بتتصغر تلقائيًا قبل الرفع.')
                 ->multiple()
                 ->required()
                 ->disk(DailyTaskFile::DISK)
                 ->directory(static::UPLOAD_DIR.'/proofs')
                 ->storeFileNamesIn('proof_names')
-                ->maxSize(20480),
+                ->maxSize(20480)
+                ->maxFiles(static::MAX_FILES)
+                // Few files at a time: many parallel uploads used to tie up every PHP worker and the site stopped answering.
+                ->maxParallelUploads(static::PARALLEL_UPLOADS)
+                ->imageResizeTargetWidth(static::IMAGE_MAX_WIDTH)
+                ->imageResizeTargetHeight(static::IMAGE_MAX_WIDTH)
+                ->imageResizeMode('contain')
+                ->imageResizeUpscale(false)
+                ->panelLayout('grid'),
             Forms\Components\Textarea::make('done_note')
                 ->label('فيدباك / ملاحظة')
                 ->rows(3),
