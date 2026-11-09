@@ -90,6 +90,18 @@ class GetInstallmentOfferTool implements ReadTool
             }
         }
 
+        // Live 2026-11-09 (conversation 3500): "تقصد هوجن ٤ استيراد فرز تاني؟" - "ايواه هوا" was refused
+        // three times because he never typed the name, and he was asked the same question again and
+        // again. The model our last replies named, answered by him since, is his pick.
+        $ours = \App\Models\WhatsappMessage::where('whatsapp_conversation_id', $ctx->conversationId)
+            ->where('direction', 'outgoing')->latest('id')->limit(3)->pluck('text')->filter();
+
+        foreach ($ours as $text) {
+            if (in_array($id, array_map('intval', $catalog->fullNames((string) $text)), true)) {
+                return true;
+            }
+        }
+
         return \App\Models\AiTraceStep::where('turn_id', $ctx->turnId)
             ->whereIn('tool_name', ['search_motorcycles', 'get_motorcycle_details', 'identify_motorcycle_from_image'])
             ->get(['result_redacted'])
@@ -352,6 +364,9 @@ class GetInstallmentOfferTool implements ReadTool
             ], $shown),
             // the one honest sentence for "what is the minimum down payment / what if I pay some now"
             'down_payment_note' => 'المصاريف الإدارية رسوم مش مقدم. أقل مقدم هو minimum_down_payment؛ لو العميل حب يدفع مقدم أكتر القسط بيقل - احسبها بـ down_payment وقوله القسط الجديد والمصاريف الجديدة صراحة.',
+            // Owner 2026-11-09: the quote is the down payment, admin fee and monthly payment - the total
+            // ("= 58,080 جنيه في الآخر") only when he asks for it.
+            'total_rule' => 'Do not say total_paid or the total part of breakdown unless he asked for the total (الإجمالي / هدفع كام في الآخر).',
             // once with the offer, or when he asks (owner's instructions)
             'first_payment' => self::firstPaymentLine(),
             // the owner's wording of why installments cost more than cash
