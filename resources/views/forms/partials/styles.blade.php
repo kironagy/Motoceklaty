@@ -121,6 +121,7 @@
     .brand-pill.on {background:#ff6b00;color:#fff;border-color:#ff6b00;}
     .voice-toggle {display:block;margin:10px auto 18px;background:#fff;border:1px solid #ddd;border-radius:20px;padding:9px 18px;font:inherit;cursor:pointer;}
     .cap-overlay {position:fixed;inset:0;z-index:1000;background:#0009;display:flex;align-items:center;justify-content:center;padding:18px;}
+    .owner-edit {margin-top:10px;}
     .cap-dialog {max-width:480px;max-height:90vh;overflow:auto;box-shadow:0 12px 40px #0004;}
     @media(max-width:600px){.machines{max-height:none}.machine img{height:65px}.cap-dialog .actions{flex-wrap:wrap}}
 </style>

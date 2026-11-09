@@ -31,6 +31,16 @@
                         <span class="ins-track"><span></span></span>
                         <span>العميل لازم يجاوبه</span>
                     </label>
+                    <label class="ins-field" x-show="current().type === 'yes_no'">
+                        <span>تأكيد إن رقم الموبايل باسم العميل <em>اختياري</em></span>
+                        <select class="ins-input" x-model="current().data.confirm_phone" @change="touch()">
+                            <option value="">لأ - سؤال عادي</option>
+                            <template x-for="f in earlierFields().filter(f => f.type === 'phone')" :key="f.key">
+                                <option :value="f.key" x-text="f.label" :selected="current().data.confirm_phone === f.key"></option>
+                            </template>
+                        </select>
+                        <small class="ins-note">لو اخترت رقم: "نعم" تطلع رسالة تأكيد إن الطلب هيترفض لو الرقم مش باسمه، وفيها زرار تعديل الرقم. ولو الرقم اتغيّر، السؤال بيرجع فاضي.</small>
+                    </label>
                 </div>
             </template>
             <template x-if="['note', 'stop'].includes(current().type)">

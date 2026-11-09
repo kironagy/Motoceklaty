@@ -53,6 +53,13 @@ class FormsSeedDefault extends Command
                         ['type' => 'national_id', 'data' => ['key' => 'national_id', 'label' => 'الرقم القومي (14 رقم)', 'required' => true, 'binding' => 'applicant.national_id',
                             'rules' => ['min_age' => 21, 'max_age' => 62], 'error_message' => null]],
                         ['type' => 'phone', 'data' => ['key' => 'phone', 'label' => 'رقم موبايل صاحب الطلب', 'required' => true, 'binding' => 'applicant.phone']],
+                        // the line has to be registered to the applicant: "yes" asks him to confirm, "no" stops the request
+                        ['type' => 'yes_no', 'data' => ['key' => 'phone_owner', 'label' => 'الرقم ده متسجّل باسم صاحب الطلب في شركة الاتصالات؟', 'required' => true, 'confirm_phone' => 'phone',
+                            'help' => 'لازم الخط يكون متسجّل باسم صاحب الطلب في شركته (فودافون / أورنج / اتصالات / WE).',
+                            'conditions' => [['field' => 'phone', 'operator' => 'filled']]]],
+                        ['type' => 'stop', 'data' => ['key' => 'phone_not_owner', 'label' => 'الرقم مش باسم صاحب الطلب',
+                            'message' => 'لازم تكتب رقم موبايل متسجّل باسم صاحب الطلب، لأن ده من شروط قبول الطلب. دوس "تعديل الرقم" واكتب الرقم الصح.',
+                            'conditions' => [['field' => 'phone_owner', 'operator' => 'equals', 'value' => 'no']]]],
                         ['type' => 'phone', 'data' => ['key' => 'phone_2', 'label' => 'رقم موبايل تاني (اختياري)', 'required' => false, 'binding' => 'applicant.phone_2']],
                         ['type' => 'address', 'data' => ['key' => 'home', 'label' => 'عنوان السكن (زي ما هو في البطاقة أو السكن الحالي)', 'required' => true, 'binding' => 'applicant.address',
                             'address_parts' => ['governorate', 'area', 'street', 'branch_street', 'building', 'floor', 'apartment', 'landmark'],

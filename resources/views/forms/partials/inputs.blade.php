@@ -45,9 +45,13 @@
 </template>
 
 <template x-if="item.type === 'yes_no'">
-    <div class="choices">
-        <button type="button" class="choice" :class="{on: answers[item.key] === 'yes'}" @click="answers[item.key] = 'yes'; save(item.key)">نعم</button>
-        <button type="button" class="choice" :class="{on: answers[item.key] === 'no'}" @click="answers[item.key] = 'no'; save(item.key)">لا</button>
+    <div>
+        <div class="choices">
+            <button type="button" class="choice" :class="{on: answers[item.key] === 'yes'}" @click.stop="pickYesNo(item, 'yes')">نعم</button>
+            <button type="button" class="choice" :class="{on: answers[item.key] === 'no'}" @click.stop="pickYesNo(item, 'no')">لا</button>
+        </div>
+        {{-- phone ownership: he may go back and fix the number from here --}}
+        <button type="button" class="btn ghost owner-edit" x-show="item.confirm_phone && answers[item.key] === 'no'" @click.stop="editPhone(item)">تعديل الرقم</button>
     </div>
 </template>
 

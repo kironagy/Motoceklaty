@@ -543,6 +543,20 @@ class DynamicLinksTest extends TestCase
         $this->assertArrayNotHasKey('section:guarantor', $schema->visible(['work' => 'employee']));
     }
 
+    public function test_the_phone_ownership_question_shows_after_the_number_and_no_stops_the_request(): void
+    {
+        $this->artisan('forms:seed-default', ['--publish' => true])->assertSuccessful();
+        $schema = DynamicForm::where('name', 'طلب تقسيط موتوسيكل')->firstOrFail()->publishedVersion->formSchema();
+        $owner = collect($schema->fields())->firstWhere('key', 'phone_owner');
+
+        $this->assertSame('phone', $owner['confirm_phone']);
+        $this->assertArrayNotHasKey('phone_owner', $schema->visible([]));
+        $this->assertArrayHasKey('phone_owner', $schema->visible(['phone' => '01012345678']));
+        $this->assertContains('لازم تكتب رقم موبايل متسجّل باسم صاحب الطلب، لأن ده من شروط قبول الطلب. دوس "تعديل الرقم" واكتب الرقم الصح.',
+            $schema->blockingMessages(['phone' => '01012345678', 'phone_owner' => 'no']));
+        $this->assertSame([], $schema->blockingMessages(['phone' => '01012345678', 'phone_owner' => 'yes']));
+    }
+
     public function test_the_dashboard_pages_render(): void
     {
         $this->actAsAdmin();

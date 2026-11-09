@@ -292,6 +292,38 @@
         },
         {
           "data": {
+            "key": "phone_owner",
+            "label": "الرقم ده متسجّل باسم صاحب الطلب في شركة الاتصالات؟",
+            "help": "لازم الخط يكون متسجّل باسم صاحب الطلب في شركته (فودافون / أورنج / اتصالات / WE).",
+            "required": true,
+            "confirm_phone": "phone",
+            "conditions": [
+              {
+                "field": "phone",
+                "operator": "filled"
+              }
+            ]
+          },
+          "type": "yes_no"
+        },
+        {
+          "data": {
+            "key": "phone_not_owner",
+            "label": "الرقم مش باسم صاحب الطلب",
+            "message": "لازم تكتب رقم موبايل متسجّل باسم صاحب الطلب، لأن ده من شروط قبول الطلب. دوس \"تعديل الرقم\" واكتب الرقم الصح.",
+            "required": false,
+            "conditions": [
+              {
+                "field": "phone_owner",
+                "operator": "equals",
+                "value": "no"
+              }
+            ]
+          },
+          "type": "stop"
+        },
+        {
+          "data": {
             "key": "phone_2",
             "label": "رقم موبايل تاني (اختياري)",
             "binding": "applicant.phone_2",

@@ -39,6 +39,7 @@ function applicationForm() {
         plansRequestId: 0,
         capOffer: null,
         capConsent: null,
+        ownerConfirm: null,
         voiceEnabled: true,
         voiceStarted: false,
         voiceStatus: 'الإرشاد الصوتي يعمل تلقائيًا عند لمس أي حقل.',
@@ -156,6 +157,8 @@ function applicationForm() {
                 this.blocking = [];
                 const machineKey = this.keyOf('request.machine');
                 if (key === this.keyOf('work.status') && this.lastSavedValues[key] !== JSON.stringify(value) && machineKey && this.answers[machineKey]) { this.capConsent = null; await this.loadPlans(this.answers[machineKey]); }
+                // a new number has to be confirmed again
+                if (this.lastSavedValues[key] !== JSON.stringify(value)) for (const it of this.ownerChecksOf(key)) if (this.answers[it.key]) { this.answers[it.key] = ''; this.save(it.key); }
                 this.lastSavedValues[key]=JSON.stringify(value);
                 if (this.sections.some(s => s.items.some(it => it.key === key && it.type === 'national_id')) && this.files.length) this.refreshFiles();
                 return true;
@@ -228,6 +231,31 @@ function applicationForm() {
             this.playVoice([text.includes('حفظ') ? 'save_error' : text.includes('الملف') || text.includes('رفع') ? 'upload_error' : 'check']);
         },
         addressPrompt(part) { this.playVoice(['address_' + part]); },
+
+        // ---- "is this number registered in your name?" (a yes_no item with confirm_phone) ----
+        ownerChecksOf(phoneKey) { return this.sections.flatMap(s => s.items).filter(it => it.type === 'yes_no' && it.confirm_phone === phoneKey); },
+        pickYesNo(item, value) {
+            if (item.confirm_phone && value === 'yes' && this.answers[item.key] !== 'yes') { this.ownerConfirm = item; this.playVoice(['phone_owner_warning']); return; }
+            this.answers[item.key] = value;
+            this.save(item.key);
+            if (item.confirm_phone && value === 'no') this.playVoice(['phone_owner_no']);
+        },
+        confirmOwner() {
+            const item = this.ownerConfirm;
+            this.ownerConfirm = null;
+            if (!item) return;
+            this.answers[item.key] = 'yes';
+            this.save(item.key);
+        },
+        editPhone(item) {
+            this.ownerConfirm = null;
+            if (!item) return;
+            this.answers[item.key] = '';
+            this.save(item.key);
+            const idx = this.shownSections().findIndex(s => s.items.some(it => it.key === item.confirm_phone));
+            if (idx >= 0 && idx !== this.step) this.step = idx;
+            this.$nextTick(() => { const el = document.getElementById('in-' + item.confirm_phone); el?.scrollIntoView({ behavior: 'smooth', block: 'center' }); el?.focus(); el?.select(); });
+        },
         needsCap(plan) { return !!plan?.capped && Number(plan.down_payment) > 0 && !(this.capConsent && this.capConsent.machine_id === Number(this.selectedMachine()?.id) && this.capConsent.plan_id === Number(plan.id) && this.capConsent.amount === Math.round(Number(plan.down_payment))); },
         pickPlan(key, plan) {
             if (this.needsCap(plan)) { this.capOffer = {key, plan}; return; }

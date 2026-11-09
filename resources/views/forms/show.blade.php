@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
     @include('forms.partials.styles')
-    <script>window.__FORM_VOICE__ = {base: @json(asset('audio/form-eg-v1')), clips: @json(array_keys(json_decode(file_get_contents(resource_path('forms/voice-eg.json')), true)['clips']))};</script>
+    <script>window.__FORM_VOICE__ = {base: @json(asset('audio/form-eg-v1')), clips: @json(array_values(array_filter(array_keys(json_decode(file_get_contents(resource_path('forms/voice-eg.json')), true)['clips']), fn ($id) => is_file(public_path("audio/form-eg-v1/{$id}.wav")))))};</script>
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/alpinejs/3.14.1/cdn.min.js"></script>
 </head>
 <body>
@@ -32,6 +32,15 @@
             <p x-text="capOffer ? 'المدة '+capOffer.plan.months+' شهر، والقسط '+money(capOffer.plan.monthly)+' جنيه شهريًا' : ''"></p>
             <p class="muted" x-text="capOffer ? 'إجمالي المطلوب وقت الاستلام: '+money(capOffer.plan.upfront)+' جنيه شامل المصاريف الموضحة بالنظام' : ''"></p>
             <div class="actions"><button type="button" class="btn" @click="acceptCap()">موافق وأكمّل</button><button type="button" class="btn ghost" @click="declineCap()">أختار مكنة أو نظام تاني</button></div>
+        </section>
+    </div>
+
+    <div class="cap-overlay" x-show="ownerConfirm" role="dialog" aria-modal="true" aria-label="تأكيد ملكية رقم الموبايل" @keydown.escape.window="if(ownerConfirm) ownerConfirm = null">
+        <section class="card cap-dialog">
+            <h2>تأكيد ملكية الرقم</h2>
+            <p>الرقم <strong dir="ltr" x-text="ownerConfirm ? answers[ownerConfirm.confirm_phone] : ''"></strong> لازم يكون متسجّل باسم صاحب الطلب في شركة الاتصالات التابع ليها.</p>
+            <p><strong>لو الرقم طلع مش باسم صاحب الطلب، الطلب هيترفض.</strong></p>
+            <div class="actions"><button type="button" class="btn" @click="confirmOwner()">تمام، الرقم باسمه</button><button type="button" class="btn ghost" @click="editPhone(ownerConfirm)">تعديل الرقم</button></div>
         </section>
     </div>
 
