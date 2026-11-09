@@ -36,7 +36,13 @@ class AnswerWaitingCustomers extends Command
             ->when($this->option('bot'), fn ($q, $bot) => $q->where('c.whatsapp_bot_id', (int) $bot))
             ->where('c.status', '!=', 'awaiting_agent')
             ->where('m.direction', 'incoming')->where('m.sender_type', 'customer')
-            ->whereBetween('m.created_at', [now()->subHours((int) $this->option('hours')), now()->subMinutes((int) $this->option('minutes'))])
+            // Owner 2026-11-10: a 10-day window answered leftovers of Oct 31 ("ابعت ايه تاني بقى" got "ولا حاجة،
+            // كان عطل" ten days later). The long window is only for messages recovered from a logged-out
+            // week (worker history); everything else stays within 72 h.
+            ->where('m.created_at', '<=', now()->subMinutes((int) $this->option('minutes')))
+            ->where(fn ($q) => $q->where('m.created_at', '>=', now()->subHours(min(72, (int) $this->option('hours'))))
+                ->orWhere(fn ($r) => $r->where('m.created_at', '>=', now()->subHours((int) $this->option('hours')))
+                    ->where('m.metadata', 'like', '%"recovered":true%')))
             ->whereNotExists(fn ($q) => $q->from('whatsapp_message_jobs as j')->whereColumn('j.whatsapp_conversation_id', 'c.id')
                 ->whereIn('j.status', ['pending', 'processing', 'generated']))
             // one retry per message: a turn made after his message already tried (no loop on a failing number)

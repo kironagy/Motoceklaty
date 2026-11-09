@@ -585,8 +585,9 @@ class ContextBuilder
         // back - hours later. The agent sees no clock; how long he has been waiting is a fact it gets.
         $oldest = $messages->first()?->created_at;
         if ($contents !== [] && $oldest !== null && $oldest->lt(now()->subMinutes(30))) {
-            $note = '[ملاحظة داخلية، ما تتقالش حرفياً: رسالته دي مستنية رد من '.$oldest->locale('ar')->diffForHumans(now(), \Carbon\CarbonInterface::DIFF_ABSOLUTE)
-                .' ومحدش رد عليه - لو محتاجة رد اعتذر في كلمتين عن التأخير وكمّل معاه من آخر حاجة طلبها؛ لو شكر أو تمام بس ومفيش حاجة مستنية رد سيبها من غير رد]';
+            $note = '[ملاحظة من النظام، مش من العميل ومش من موظف - ما تردش عليها ولا تذكرها: رسالة العميل اللي فوق اتبعتت من '
+                .$oldest->locale('ar')->diffForHumans(now(), \Carbon\CarbonInterface::DIFF_ABSOLUTE)
+                .' وما اترادش عليها بسبب عطل عندنا. رد على العميل نفسه على اللي قاله هو في المحادثة: لو محتاجة رد ابدأ باعتذار قصير عن التأخير وكمّل من آخر حاجة طلبها؛ لو شكر أو تمام أو علامة بس ومفيش حاجة مستنية رد، ما تبعتش حاجة]';
             $contents[count($contents) - 1]['parts'][] = ['type' => 'text', 'text' => $note];
             $tokens += TokenEstimator::estimate($note);
         }
