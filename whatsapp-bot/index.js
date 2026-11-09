@@ -766,6 +766,10 @@ async function startSession(botId) {
         // linked sessions are unaffected until they re-link.
         browser: Browsers.macOS('Chrome'),
         syncFullHistory: false,
+        // Baileys drops EVERY history notification unless this says yes (its default follows
+        // syncFullHistory): the relink history of 11-09 and on-demand recoveries never arrived.
+        // recoverHistory keeps only the recent window, so accepting them costs little.
+        shouldSyncHistoryMessage: () => true,
         markOnlineOnConnect: false,
     });
 
