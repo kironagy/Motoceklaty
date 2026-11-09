@@ -57,6 +57,7 @@ Schedule::command('whatsapp:watch-sessions')
 
 // Owner 2026-11-09: a customer's "؟" or question left without any reply gets one more bot turn
 // (one retry per message - see AnswerWaitingCustomers).
-Schedule::command('whatsapp:answer-waiting --minutes=5 --hours=72 --apply')
+// 240 h: a week a number was logged out comes back through the relink history (only messages no turn handled)
+Schedule::command('whatsapp:answer-waiting --minutes=5 --hours=240 --apply')
     ->everyFiveMinutes()
     ->withoutOverlapping();

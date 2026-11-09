@@ -614,8 +614,17 @@ function messageTimestampSeconds(msg) {
  * (only when newer than anything it already has) and lets the waiting-customers sweep answer it.
  */
 const HISTORY_RECOVER_HOURS = Number(process.env.HISTORY_RECOVER_HOURS || 72);
-// set by POST /sessions/:botId/recover-history: a wider window for one bot (unix seconds)
-const historyRecoverSince = {};
+// set by POST /sessions/:botId/recover-history: a wider window for one bot (unix seconds). Kept on
+// disk: the history WhatsApp sends on a new link (QR) may come after a restart.
+const RECOVER_SINCE_FILE = path.join(__dirname, 'sessions', 'recover-since.json');
+const historyRecoverSince = (() => {
+    try { return JSON.parse(fs.readFileSync(RECOVER_SINCE_FILE, 'utf8')) || {}; } catch { return {}; }
+})();
+function saveRecoverSince() {
+    try { fs.writeFileSync(RECOVER_SINCE_FILE, JSON.stringify(historyRecoverSince), { mode: 0o600 }); } catch (error) {
+        console.error('recover-since save error:', error?.message || error);
+    }
+}
 
 function recoverHistory(sock, botId, messages, syncType) {
     try {
@@ -887,6 +896,7 @@ app.post('/sessions/:botId/recover-history', checkToken, async (req, res) => {
     if (!Number.isFinite(since) || since <= 0) return res.status(422).json({ ok: false, error: 'since (unix seconds) required' });
 
     historyRecoverSince[botId] = since;
+    saveRecoverSince();
     const days = Math.min(30, Math.ceil((Date.now() / 1000 - since) / 86400) + 1);
 
     try {
@@ -913,7 +923,7 @@ app.post('/sessions/:botId/fetch-chat-history', checkToken, async (req, res) => 
 
     if (!sock || statuses[botId] !== 'connected') return res.status(409).json({ ok: false, error: 'session not connected' });
     if (!jid || !id || !timestamp) return res.status(422).json({ ok: false, error: 'jid, id, timestamp required' });
-    if (Number(since) > 0) historyRecoverSince[botId] = Math.min(historyRecoverSince[botId] || Infinity, Number(since));
+    if (Number(since) > 0) { historyRecoverSince[botId] = Math.min(historyRecoverSince[botId] || Infinity, Number(since)); saveRecoverSince(); }
 
     try {
         const ms = Number(timestamp) < 1e12 ? Number(timestamp) * 1000 : Number(timestamp);
