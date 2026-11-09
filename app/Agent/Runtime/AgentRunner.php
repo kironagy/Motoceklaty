@@ -159,6 +159,12 @@ class AgentRunner
         $conversation = WhatsappConversation::with('customer')->findOrFail($turn->whatsapp_conversation_id);
         if ($conversation->status === 'awaiting_agent' && ! \App\Domain\Handoff\HandoffService::botKeepsAnswering($conversation)) return ['messages'=>[], 'no_reply'=>true];
 
+        // A re-answer turn (whatsapp:answer-waiting) for messages an earlier turn already handled - it
+        // ran, chose silence, nothing failed - is not answered again hours later.
+        if ($this->alreadyHandled($turn, $conversation)) {
+            return ['messages' => [], 'no_reply' => true];
+        }
+
         $customer = $conversation->customer;
         $activeApplication = $customer
             ? Application::where('customer_id', $customer->id)->whereIn('status', Application::agentActiveStatuses())->latest('id')->first()
@@ -1004,6 +1010,25 @@ class AgentRunner
      *
      * @return array{messages: string[]}
      */
+    private function alreadyHandled(object $turn, WhatsappConversation $conversation): bool
+    {
+        $first = WhatsappMessage::where('turn_id', $turn->id)->where('direction', 'incoming')->orderBy('id')->first();
+
+        // only a turn made well after his message (a sweep turn, not his live turn)
+        if (! $first || ! $turn->created_at || \Illuminate\Support\Carbon::parse($turn->created_at)->lt($first->created_at->copy()->addMinutes(5))) {
+            return false;
+        }
+
+        $earlier = AiTrace::where('conversation_id', $conversation->id)->where('turn_id', '!=', $turn->id)
+            ->where('created_at', '>=', $first->created_at)->where('created_at', '<', $turn->created_at)
+            ->where('status', 'done')->where(fn ($q) => $q->whereNull('guard_events')->orWhere('guard_events', 'not like', '%PUNCTUATION_OR_ACK_ONLY%'))
+            ->exists();
+        $failed = WhatsappMessage::where('whatsapp_conversation_id', $conversation->id)->where('direction', 'outgoing')
+            ->where('id', '>', $first->id)->where('delivery_status', 'failed')->exists();
+
+        return $earlier && ! $failed;
+    }
+
     private function unverifiedReply(WhatsappConversation $conversation, AiTrace $trace, array $guardEvents, string $reason): array
     {
         $waiting = config('agent.handoff.waiting_message');
