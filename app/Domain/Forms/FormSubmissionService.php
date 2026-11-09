@@ -339,8 +339,11 @@ class FormSubmissionService
         // the months he picked, on the best system for his final answers (his work decides
         // which systems take him) - the owner's auto-picked offer, never a company he chose
         if ($machine && $plan) {
+            // a no-fees plan he picked stays no-fees (owner 2026-11-09) - re-picking by months alone
+            // would turn it into the normal plan with admin fees
+            $noUpfront = (bool) ($plan->installmentSystem?->no_upfront_only ?? false);
             $offer = app(\App\Domain\Installments\BestOfferService::class)
-                ->offers($machine, $schema->customerTypeId($answers), $this->governorate($schema, $answers), (int) $plan->months, $deposit !== null ? $schema->number($deposit) : null)[0] ?? null;
+                ->offers($machine, $schema->customerTypeId($answers), $this->governorate($schema, $answers), (int) $plan->months, $noUpfront ? null : ($deposit !== null ? $schema->number($deposit) : null), $noUpfront)[0] ?? null;
 
             if ($offer) {
                 $plan = InstallmentPlan::with('installmentSystem')->find($offer['plan_id']);

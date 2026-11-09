@@ -100,8 +100,10 @@
         <div class="cap-note" x-show="plansMeta.capped">
             المكنة دي أعلى من المبلغ اللي جهة التمويل بتموله لشغلك، فجزء من تمنها بيتدفع كاش وقت الاستلام (المقدم اللي تحت)، والباقي بيتقسط.
         </div>
+        {{-- owner 2026-11-09: a customer read another model's plans as L250's - say whose plans these are --}}
+        <p class="plans-for" x-show="plans.length && selectedMachine()" x-text="selectedMachine() ? `أقساط ${selectedMachine().name}` : ''"></p>
         <div class="plans">
-            <template x-for="p in plans" :key="p.id">
+            <template x-for="p in plans.filter(p => !p.no_fees)" :key="p.id">
                 <button type="button" class="plan" :class="{on: String(answers[item.key]) === String(p.id)}" @click="pickPlan(item.key, p)">
                     <strong x-text="`${p.months} شهر`"></strong>
                     <span x-show="p.monthly" x-text="`القسط ${money(p.monthly)} ج في الشهر`"></span>
@@ -110,6 +112,20 @@
                 </button>
             </template>
         </div>
+        <template x-if="plans.some(p => p.no_fees)">
+            <div>
+                <p class="plans-for">من غير مقدم ولا مصاريف (مفيش أي مبلغ وقت الاستلام، والفايدة أعلى)</p>
+                <div class="plans">
+                    <template x-for="p in plans.filter(p => p.no_fees)" :key="p.id">
+                        <button type="button" class="plan" :class="{on: String(answers[item.key]) === String(p.id)}" @click="pickPlan(item.key, p)">
+                            <strong x-text="`${p.months} شهر`"></strong>
+                            <span x-show="p.monthly" x-text="`القسط ${money(p.monthly)} ج في الشهر`"></span>
+                            <small class="muted">مفيش مقدم ولا مصاريف</small>
+                        </button>
+                    </template>
+                </div>
+            </div>
+        </template>
     </div>
 </template>
 

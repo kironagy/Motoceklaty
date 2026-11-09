@@ -38,6 +38,7 @@
     .machines { display:flex; gap:8px; margin-top:8px; overflow-x:auto; overflow-y:hidden; padding-bottom:8px; scroll-snap-type:x mandatory; }
     .machine { flex:0 0 140px; scroll-snap-align:start; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; font: inherit; font-size: 13px; cursor: pointer; }
     .machine img { width: 100%; height: 70px; object-fit: contain; }
+    .plans-for { margin: 12px 0 6px; font-weight: 700; }
     .plans { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
     .plan { display: flex; flex-direction: column; gap: 2px; padding: 10px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; font: inherit; cursor: pointer; text-align: right; }
     .link-btn { border: 0; background: none; color: var(--brand); font: inherit; font-weight: 700; padding: 0; cursor: pointer; text-decoration: underline; }

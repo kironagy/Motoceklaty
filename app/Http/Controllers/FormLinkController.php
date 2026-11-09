@@ -209,14 +209,22 @@ class FormLinkController extends Controller
 
         // above what finance companies fund for his job, the difference is paid cash up front
         // (owner 2026-10-19: shown on the form) - the cap figure and his type stay internal
-        $plans = array_map(fn (array $offer) => [
+        $plan = fn (array $offer, bool $noFees) => [
             'id' => (int) $offer['plan_id'],
             'months' => (int) $offer['months'],
             'monthly' => round($offer['monthly_payment']),
             'down_payment' => round($offer['down_payment']),
             'upfront' => round($offer['cash_due_upfront']),
             'capped' => $offer['cap'] !== null,
-        ], app(BestOfferService::class)->offers($machine, $customerTypeId));
+            'no_fees' => $noFees,
+        ];
+        $offers = app(BestOfferService::class);
+        // Owner 2026-11-09: the bot quotes "أمان بدون مصاريف" to a customer who wants nothing paid at
+        // pickup; the form offered only the normal plans, so his numbers never matched the bot's.
+        $plans = array_merge(
+            array_map(fn (array $offer) => $plan($offer, false), $offers->offers($machine, $customerTypeId)),
+            array_map(fn (array $offer) => $plan($offer, true), $offers->offers($machine, $customerTypeId, null, null, null, true)),
+        );
 
         return response()->json([
             'plans' => $plans,
