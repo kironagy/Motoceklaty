@@ -19,6 +19,11 @@ class WhatsappBot extends Model
     'notes',
 ];
 
+    // The bots page calls ->locale()->diffForHumans() on it; uncast it was a string and the page crashed.
+    protected $casts = [
+        'connected_at' => 'datetime',
+    ];
+
     // علاقة البوت بالموظف
     public function staff()
     {
