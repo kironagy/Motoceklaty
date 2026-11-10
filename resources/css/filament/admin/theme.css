@@ -168,31 +168,10 @@ select,
 }
 
 .fi-sidebar-header {
-    height: auto !important;
-    padding: 1rem !important;
     background: transparent !important;
     border-bottom: 1px solid var(--mg-side-border) !important;
     box-shadow: none !important;
     --tw-ring-shadow: 0 0 #0000 !important;
-}
-
-/* the full logo on a light tile: its dark teal and the rider stay readable on navy */
-.fi-sidebar-header > div,
-.fi-sidebar-header a {
-    width: 100%;
-}
-
-.fi-sidebar-header .fi-logo {
-    display: block;
-    box-sizing: content-box;
-    width: auto;
-    max-width: calc(100% - 1.75rem);
-    margin-inline: auto;
-    padding: .625rem .875rem;
-    border-radius: var(--mg-r-lg);
-    background: rgba(255, 255, 255, .96);
-    box-shadow: 0 8px 22px -10px rgba(0, 0, 0, .55);
-    object-fit: contain;
 }
 
 /* floating sidebar: a rounded card with space around it */

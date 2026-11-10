@@ -36,7 +36,7 @@ class AdminPanelProvider extends PanelProvider
             ->login()
             ->authGuard('filament')
             ->brandLogo(asset('images/logolog.png'))
-            ->brandLogoHeight('2.75rem')
+            ->brandLogoHeight('3.5rem')
             ->colors([
                 'primary' => Color::Teal,
                 'warning' => Color::Amber,
