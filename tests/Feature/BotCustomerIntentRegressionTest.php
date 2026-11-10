@@ -108,10 +108,10 @@ class BotCustomerIntentRegressionTest extends TestCase
         $models = ['gemini-3.1-flash-lite','bormaa:gpt-5.6-luna','bormaa:gpt-5.6-sol'];
         foreach (['reply','simulator',null] as $purpose) {
             $request = new \App\Agent\Providers\AiRequest(purpose:$purpose,label:'main');
-            $this->assertSame(array_slice($models,1),\App\Agent\Providers\RoutingAiProvider::allowedModels($request,$models));
+            $this->assertSame(array_slice($models,1),\App\Agent\Providers\RoutingAiProvider::allowedModels($request,$models,bormaaLive:true));
         }
-        foreach (['image','document'] as $purpose) $this->assertSame($models,\App\Agent\Providers\RoutingAiProvider::allowedModels(new \App\Agent\Providers\AiRequest(purpose:$purpose),$models));
+        foreach (['image','document'] as $purpose) $this->assertSame($models,\App\Agent\Providers\RoutingAiProvider::allowedModels(new \App\Agent\Providers\AiRequest(purpose:$purpose),$models,bormaaLive:true));
         $voice = new \App\Agent\Providers\AiRequest(purpose:'voice',label:'voice',toolMode:'none');
-        $this->assertSame($models,\App\Agent\Providers\RoutingAiProvider::allowedModels($voice,$models));
+        $this->assertSame($models,\App\Agent\Providers\RoutingAiProvider::allowedModels($voice,$models,bormaaLive:true));
     }
 }

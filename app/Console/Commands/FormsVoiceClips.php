@@ -36,7 +36,7 @@ class FormsVoiceClips extends Command
             return self::SUCCESS;
         }
 
-        $key = env('GEMINI_TTS_API_KEY') ?: GeminiApiKey::where('is_active', true)->where('provider', 'gemini')->orderByDesc('is_paid')->value('api_key');
+        $key = config('services.gemini_tts.api_key') ?: GeminiApiKey::where('is_active', true)->where('provider', 'gemini')->orderByDesc('is_paid')->value('api_key');
 
         if (! $key) {
             $this->error('No Gemini key: set GEMINI_TTS_API_KEY or add an active Gemini key.');

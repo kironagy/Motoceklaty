@@ -47,6 +47,11 @@ class RoutingAiProvider implements AiProvider
         $fallbacks = array_values(array_filter(array_map('trim', explode(',', (string) config('agent.fallback_models')))));
         $models = array_values(array_unique(array_merge([$modelCode], $fallbacks)));
 
+        // Server 2026-11-10: the dashboard named Bormaa models only; when the one Bormaa key died,
+        // seven healthy Gemini keys sat idle and 125 customers got the outage line in a day. The
+        // .env models stand behind whatever the dashboard picked, as the last line of defence.
+        $models = array_values(array_unique(array_merge($models, self::envModels())));
+
         // Documents have their own reader; the conversation models stay behind it.
         if ($request->purpose === 'document' && filled($documentModel = config('agent.document_model'))) {
             $models = array_values(array_unique(array_merge([trim((string) $documentModel)], $models)));
@@ -103,16 +108,39 @@ class RoutingAiProvider implements AiProvider
      * the configured models answer - the restriction used to leave no model
      * at all, so every customer reply failed with "No permitted model".
      */
-    public static function allowedModels(AiRequest $request, array $models): array
+    public static function allowedModels(AiRequest $request, array $models, ?bool $bormaaLive = null): array
     {
         $mediaReading = in_array($request->purpose, ['image','document'], true)
             || ($request->purpose === 'voice' && $request->toolMode === 'none');
         $bormaaConfigured = collect($models)->contains(fn ($model) => self::providerFor($model) === 'bormaa');
 
-        if ($mediaReading || ! $bormaaConfigured) {
+        if (! $bormaaConfigured) {
+            return array_values($models);
+        }
+
+        // Bormaa with no usable key (disabled, revoked, parked) answers no one: its models are
+        // dropped so the next provider gets the turn at once instead of the outage line.
+        $bormaaLive ??= app(GeminiKeyManager::class)->hasLiveKey('bormaa');
+
+        if (! $bormaaLive) {
+            return array_values(array_filter($models, fn ($model) => self::providerFor($model) !== 'bormaa'));
+        }
+
+        if ($mediaReading) {
             return array_values($models);
         }
 
         return array_values(array_filter($models, fn ($model) => self::providerFor($model) === 'bormaa'));
+    }
+
+    /** The models from .env, ignoring the dashboard override. */
+    private static function envModels(): array
+    {
+        $models = array_merge(
+            [(string) \App\Domain\Settings\AgentSettings::envDefault('model')],
+            explode(',', (string) \App\Domain\Settings\AgentSettings::envDefault('fallback_models')),
+        );
+
+        return array_values(array_filter(array_map('trim', $models)));
     }
 }

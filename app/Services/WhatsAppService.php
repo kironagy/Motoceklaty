@@ -8,9 +8,9 @@ class WhatsAppService
 {
     public function sendText(string $to, string $message, ?string $phoneNumberId = null): array
     {
-        $phoneNumberId = $phoneNumberId ?: env('WHATSAPP_PHONE_NUMBER_ID');
-        $accessToken = env('WHATSAPP_ACCESS_TOKEN');
-        $version = env('WHATSAPP_API_VERSION', 'v23.0');
+        $phoneNumberId = $phoneNumberId ?: config('services.whatsapp.phone_number_id');
+        $accessToken = config('services.whatsapp.access_token');
+        $version = config('services.whatsapp.api_version', 'v23.0');
 
         $url = "https://graph.facebook.com/{$version}/{$phoneNumberId}/messages";
 

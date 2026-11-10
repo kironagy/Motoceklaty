@@ -107,7 +107,7 @@ Route::get('/test-vision', function () {
 
     // إنشاء الكلينت باستخدام المفتاح
     $client = new ImageAnnotatorClient([
-        'credentials' => base_path(env('GOOGLE_CLOUD_KEY_PATH')),
+        'credentials' => base_path((string) config('services.google.cloud_key_path')),
     ]);
 
     // قراءة الصورة كباينري
@@ -129,7 +129,7 @@ Route::get('/test-vision', function () {
 Route::get('/ocr-test', function () {
     $path = storage_path('app/public/ids/3YD6JQ6NEzcSYuVbWLpWdBIcoJPrg8sWnzvGuM7i.jpg');
     $client = new ImageAnnotatorClient([
-        'credentials' => base_path(env('GOOGLE_CLOUD_KEY_PATH')),
+        'credentials' => base_path((string) config('services.google.cloud_key_path')),
     ]);
     $image = file_get_contents($path);
     $response = $client->documentTextDetection($image);

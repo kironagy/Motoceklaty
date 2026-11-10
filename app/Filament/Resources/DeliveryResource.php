@@ -434,10 +434,7 @@ public static function isHitler(): bool
         if ($value === null)
             return null;
 
-        // يمنع أ/إ/آ بتحويلهم لـ ا
-        $value = str_replace(['أ', 'إ', 'آ'], 'ا', $value);
-
-        return $value;
+        return \App\Support\ArabicName::normalize($value);
     }
 
 
@@ -1014,15 +1011,16 @@ $complete =
                         ->label('اسم العميل')
                         ->required()
                         ->reactive()
+                        // Owner 2026-11-10: a name saved with a hamza (the bot's form keeps the
+                        // customer's spelling) blocked every save on the request with a validation
+                        // error. The hamza is folded on load and on save instead of refused.
+                        ->afterStateHydrated(function ($state, callable $set) {
+                            $set('applicant_name', self::normalizeApplicantName($state));
+                        })
                         ->afterStateUpdated(function ($state, callable $set) {
                             $set('applicant_name', self::normalizeApplicantName($state));
                         })
-                        ->dehydrateStateUsing(fn($state) => self::normalizeApplicantName($state))
-                        // تأكيد بالـ validation (لو حد لصق نص قبل التحويل)
-                        ->rule('not_regex:/[أإآ]/u')
-                        ->validationMessages([
-                            'not_regex' => 'اسم العميل لا يجب أن يحتوي على (أ، إ، آ).',
-                        ]),
+                        ->dehydrateStateUsing(fn($state) => self::normalizeApplicantName($state)),
 
 
                     Forms\Components\TextInput::make('applicant_phone')

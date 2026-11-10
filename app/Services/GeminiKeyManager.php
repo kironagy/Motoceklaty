@@ -76,6 +76,23 @@ class GeminiKeyManager
      * Counters are incremented before the external request is sent. This keeps
      * concurrent workers from selecting the same apparently-unused allowance.
      */
+    /**
+     * A provider with no usable key cannot answer anyone: disabled keys and
+     * keys parked by a cooldown both count as dead (server 2026-11-10: the only
+     * Bormaa key was revoked and every customer got the outage line).
+     */
+    public function hasLiveKey(string $provider): bool
+    {
+        $now = now();
+
+        return GeminiApiKey::query()
+            ->where('provider', $provider)
+            ->where('is_active', true)
+            ->where(fn ($q) => $q->whereNull('cooldown_until')->orWhere('cooldown_until', '<=', $now))
+            ->whereHas('models', fn ($q) => $q->where('provider', $provider)->where('is_active', true))
+            ->exists();
+    }
+
     public function reserveAvailableModel(
         ?string $preferredModelCode = null,
         int $estimatedTokens = 0,

@@ -93,7 +93,7 @@ class LegacyRequestProjector
 
         $attributes = [
             'request_type' => self::REQUEST_TYPE,
-            'applicant_name' => $applicant['full_name'] ?? '',
+            'applicant_name' => \App\Support\ArabicName::normalize($applicant['full_name'] ?? '') ?? '',
             'applicant_phone' => $application->customer?->phone ?: ($applicant['phone'] ?? ''),
             // owner 2026-10-07: the second number he gave, else the typed one when it is not his WhatsApp number
             'applicant_phone_2' => $this->secondPhone($application, $applicant['phone_2'] ?? null) ?? $this->secondPhone($application, $applicant['phone'] ?? null),
@@ -114,7 +114,7 @@ class LegacyRequestProjector
                 isset($applicant['address_landmark']) ? "بجوار {$applicant['address_landmark']}" : null,
             ]),
 
-            'guarantor_name' => $guarantor['guarantor_name'] ?? null,
+            'guarantor_name' => \App\Support\ArabicName::normalize($guarantor['guarantor_name'] ?? null),
             'guarantor_phone' => $guarantor['guarantor_phone'] ?? null,
             'guarantor_national_id' => $guarantorNationalId,
             'guarantor_birthdate' => $this->birthdateFromNationalId($guarantorNationalId)?->toDateString(),

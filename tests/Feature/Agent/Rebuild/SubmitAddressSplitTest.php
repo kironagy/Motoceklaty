@@ -43,7 +43,7 @@ class SubmitAddressSplitTest extends TestCase
         $application = Application::create(['customer_id' => $conversation->customer_id, 'origin_conversation_id' => $conversation->id, 'customer_type_id' => $type->id,
             'machine_id' => $machine->id, 'installment_plan_id' => InstallmentPlan::where('installment_system_id', $system->id)->value('id'), 'down_payment' => 5000, 'status' => 'collecting']);
 
-        foreach (['full_name' => 'Mohamed Ali', 'address' => '34 شارع الشرفاء العشرين فيصل', 'address_building_no' => '34'] as $key => $value) {
+        foreach (['full_name' => 'أحمد علي', 'address' => '34 شارع الشرفاء العشرين فيصل', 'address_building_no' => '34'] as $key => $value) {
             ApplicationData::create(['application_id' => $application->id, 'party' => 'applicant', 'field_key' => $key, 'value' => $value, 'source' => 'customer_stated', 'status' => 'valid']);
         }
 
@@ -70,6 +70,8 @@ class SubmitAddressSplitTest extends TestCase
 
         $request = $this->submitted();
 
+        // the bot's form keeps the hamza; the legacy row never does (dashboard rule, owner 2026-11-10)
+        $this->assertSame('احمد علي', $request->applicant_name);
         $this->assertSame('الجيزة', $request->applicant_governorate);
         $this->assertSame('فيصل', $request->applicant_area);
         $this->assertSame('الشرفاء العشرين', $request->applicant_street);

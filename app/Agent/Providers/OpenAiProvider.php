@@ -107,8 +107,12 @@ class OpenAiProvider
             $type = (string) data_get($response->json(), 'error.type');
 
             if ($status === 401) {
-                $modelRow->apiKey?->update(['is_active' => false, 'last_error' => mb_substr($body, 0, 2000)]);
-                Log::warning('OpenAI API key disabled because invalid', ['key_id' => $modelRow->gemini_api_key_id]);
+                // Server 2026-11-10: a 401 right after four minutes of timeouts switched the only
+                // Bormaa key off for good. The key is parked instead; a revoked one keeps failing
+                // one cheap call per window, and the dashboard shows last_error either way.
+                $cooldown = max(60, (int) config('gemini.rate_limits.invalid_key_cooldown_seconds', 900));
+                $modelRow->apiKey?->update(['cooldown_until' => now()->addSeconds($cooldown), 'last_error' => mb_substr($body, 0, 2000)]);
+                Log::warning('OpenAI API key rejected (401) - parked', ['key_id' => $modelRow->gemini_api_key_id, 'provider' => $provider, 'cooldown_seconds' => $cooldown]);
 
                 continue;
             }

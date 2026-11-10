@@ -413,6 +413,19 @@ class ProcessWhatsappMessageJobs extends Command
      * out of order. Claiming takes milliseconds, processing takes seconds, so
      * holding this lock only around the claim costs nothing in throughput.
      */
+    private function anythingClaimable(): bool
+    {
+        $staleBefore = now()->subMinutes(10);
+
+        return DB::table('whatsapp_message_jobs')
+            ->where(function ($q) use ($staleBefore) {
+                $q->where(fn ($q) => $q->whereIn('status', ['pending', 'generated'])
+                        ->where(fn ($q) => $q->whereNull('process_after')->orWhere('process_after', '<=', now())))
+                    ->orWhere(fn ($q) => $q->where('status', 'processing')->whereNotNull('locked_at')->where('locked_at', '<', $staleBefore));
+            })
+            ->exists();
+    }
+
     private function withClaimLock(callable $callback)
     {
         $handle = fopen(storage_path('app/whatsapp-process-jobs.claim.lock'), 'c');
@@ -433,6 +446,12 @@ class ProcessWhatsappMessageJobs extends Command
 
     private function claimNextJob(): ?object
     {
+        // Server 2026-11-10: three workers ran the full claim (six queries, a file lock and a
+        // row lock) every second with nothing to take. One indexed existence check first.
+        if (! $this->anythingClaimable()) {
+            return null;
+        }
+
         return $this->withClaimLock(fn () => DB::transaction(function () {
             $staleBefore = now()->subMinutes(10);
 
