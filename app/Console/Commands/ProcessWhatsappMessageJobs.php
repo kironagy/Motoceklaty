@@ -468,7 +468,19 @@ class ProcessWhatsappMessageJobs extends Command
             $busyConversationIds = $busy->pluck('whatsapp_conversation_id')->filter()->unique()->values()->all();
             $busySenders = $busy->pluck('from')->filter()->unique()->values()->all();
 
+            // Owner 2026-11-10: bot 93 was restricted and logged out by late re-answers sent every
+            // ~5 s (three workers at once, the backlog piled up behind live turns). One re-answer per
+            // bot at a time, and the next one 15-30 s after the last was taken.
+            $backlogBlocked = DB::table('whatsapp_message_jobs')
+                ->where('status', 'processing')->where('locked_at', '>=', $staleBefore)
+                ->where('payload', 'like', '%"answer_waiting%')
+                ->distinct()->pluck('whatsapp_bot_id')
+                ->merge(\App\Models\WhatsappBot::pluck('id')->filter(fn ($id) => \Illuminate\Support\Facades\Cache::has('answer_waiting_gap_'.$id)))
+                ->unique()->values()->all();
+
             $job = DB::table('whatsapp_message_jobs')
+                ->when($backlogBlocked !== [], fn ($q) => $q->where(fn ($q) => $q->whereNotIn('whatsapp_bot_id', $backlogBlocked)
+                    ->orWhereNull('payload')->orWhere('payload', 'not like', '%"answer_waiting%')))
                 // Paused bots keep their jobs and generated replies, but do
                 // not consume model calls or block newly connected bots.
                 ->whereIn('whatsapp_bot_id', \App\Models\WhatsappBot::where('is_active', true)->select('id'))
@@ -528,6 +540,10 @@ class ProcessWhatsappMessageJobs extends Command
                 ]);
 
             $job->attempts = ((int) $job->attempts) + 1;
+
+            if (str_contains((string) ($job->payload ?? ''), 'answer_waiting')) {
+                \Illuminate\Support\Facades\Cache::put('answer_waiting_gap_'.$job->whatsapp_bot_id, true, now()->addSeconds(random_int(15, 30)));
+            }
 
             return $job;
         }));
