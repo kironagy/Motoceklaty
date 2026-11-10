@@ -476,6 +476,8 @@ class ProcessWhatsappMessageJobs extends Command
                 ->where('payload', 'like', '%"answer_waiting%')
                 ->distinct()->pluck('whatsapp_bot_id')
                 ->merge(\App\Models\WhatsappBot::pluck('id')->filter(fn ($id) => \Illuminate\Support\Facades\Cache::has('answer_waiting_gap_'.$id)))
+                // a number waiting for its QR would fail every re-answer, and a failed one is never retried
+                ->merge(\App\Models\WhatsappBot::where('session_status', '!=', 'connected')->pluck('id'))
                 ->unique()->values()->all();
 
             $job = DB::table('whatsapp_message_jobs')
