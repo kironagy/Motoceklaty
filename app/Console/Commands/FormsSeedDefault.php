@@ -117,7 +117,7 @@ class FormsSeedDefault extends Command
                             'accept' => 'images', 'conditions' => $is('work', 'delivery')]],
                         ['type' => 'document', 'data' => ['key' => 'place', 'label' => 'صور مكان النشاط (اليافطة من بره واضحة + من جوا)', 'required' => true,
                             'binding' => 'work.place_media', 'max_files' => 4, 'accept' => 'video', 'conditions' => $is('work', 'business')]],
-                        ['type' => 'document', 'data' => ['key' => 'tax_card', 'label' => 'البطاقة الضريبية أو السجل التجاري', 'required' => true,
+                        ['type' => 'document', 'data' => ['key' => 'tax_card', 'label' => 'البطاقة الضريبية أو السجل التجاري (لو موجودين)', 'required' => false,
                             'binding' => 'work.tax_card', 'max_files' => 2, 'conditions' => $is('work', 'business')]],
                     ]],
                 ],

@@ -111,8 +111,9 @@ public function store(Request $request)
 
         case 'self_employed':
             $request->validate([
-                'commercial_reg_file' => ['required', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:15360'],
-                'tax_card_file'       => ['required', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:15360'],
+                // owner 2026-11-10: a business owner applies with his ID and the shop; these are optional
+                'commercial_reg_file' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:15360'],
+                'tax_card_file'       => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:15360'],
                 'place_video'         => ['required', 'file', 'mimetypes:video/mp4,video/quicktime', 'max:51200'],
             ]);
             break;

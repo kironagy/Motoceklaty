@@ -959,7 +959,10 @@ $requestType = request()->query('request_type') === 'fake' && ! static::isCompan
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
                         ->preserveFilenames()
                         ->getUploadedFileNameForStorageUsing(fn($file) => $file->getClientOriginalName())
                         ->dehydrated(true)
@@ -1120,7 +1123,10 @@ $complete =
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
     ->required()
                             ->directory('installments/applicants')
                             ->visibility('public')
@@ -1151,7 +1157,10 @@ $complete =
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
     ->required()
                             ->directory('installments/applicants')
                             ->visibility('public')
@@ -1277,10 +1286,9 @@ Forms\Components\Textarea::make('applicant_address')
 
         } elseif ($workStatus === 'self_employed') {
 
+            // owner 2026-11-10: the commercial register and tax card are optional
             $complete =
                 filled($get('work_address')) &&
-                filled($get('commercial_reg_file')) &&
-                filled($get('tax_card_file')) &&
                 filled($get('place_video'));
 
         } elseif ($workStatus === 'pension') {
@@ -1476,7 +1484,10 @@ Forms\Components\TextInput::make('work_apartment')
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
                             ->disk('public')
                             ->directory('installments/free_income_proofs')
                             ->visibility('public')
@@ -1519,7 +1530,10 @@ Forms\Components\TextInput::make('work_apartment')
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
                             ->image()
                             ->nullable()
                             ->visible(fn($get) => $get('work_status') === 'employee'),
@@ -1552,7 +1566,10 @@ Forms\Components\TextInput::make('work_apartment')
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
                             ->directory('installments/business')
                             ->visibility('public')
                             ->image()
@@ -1590,7 +1607,10 @@ Forms\Components\TextInput::make('work_apartment')
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
                             ->nullable()
                             ->visible(fn($get) => $get('work_status') === 'self_employed'),
                     ]),
@@ -1685,7 +1705,10 @@ Forms\Components\TextInput::make('work_apartment')
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
                             ->image()
                             ->nullable()
                             ->visible(fn($get) => $get('work_status') === 'pension'),
@@ -1772,7 +1795,10 @@ if ($complete) {
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
                                 ->directory('installments/guarantors')
                                 ->visibility('public')
                                 ->image()
@@ -1788,7 +1814,10 @@ if ($complete) {
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
                                 ->directory('installments/guarantors')
                                 ->visibility('public')
                                 ->image()
@@ -1834,7 +1863,10 @@ if ($complete) {
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
                         ->directory('installments/guarantors')
                         ->visibility('public')
                         ->image()
@@ -1866,7 +1898,10 @@ if ($complete) {
         '3:4',
         '4:5',
     ])
-    ->maxSize(1024)
+    ->maxSize(15360)
+    ->imageResizeTargetWidth('1600')
+    ->imageResizeMode('contain')
+    ->imageResizeUpscale(false)
                         ->visibility('public')
                         ->image()
                         ->nullable()

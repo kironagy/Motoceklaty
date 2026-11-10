@@ -78,6 +78,10 @@ class AdminPanelProvider extends PanelProvider
             'panels::topbar.start',
             fn () => view('filament.components.notifications-bell')
         )
+        ->renderHook(
+            'panels::body.end',
+            fn () => view('filament.components.form-submit-guard')
+        )
                     ->authMiddleware([
                 Authenticate::class,
             ]);
