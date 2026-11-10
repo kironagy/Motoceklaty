@@ -30,7 +30,7 @@ class IdentifyMotorcycleFromImageTool implements ReadTool
         return 'Map a customer photo to catalog candidates. Use when the customer sends a motorcycle photo '
             .'(shown as "[صورة مرفقة - media_id: N]") and asks about it. band=match: you may name the model. '
             .'band=similar: say it looks like / resembles the candidates and ask or offer them - never state it IS that model or quote its price as the photo\'s price. '
-            .'band=unknown: say you could not tell and ask for the name. '
+            .'band=unknown: say you could not tell the exact model from the photo and ask him its name - never name a model yourself. '
             .'band=not_in_catalog: the photo is observed.model, which we do NOT carry - say plainly what it is and "للأسف مش متوفرة عندنا حاليا", '
             .'never call it one of our models and never guess when it will be available; alternatives are similar_available (same kind and size), not the look-alike candidates. '
             .'Do not use for documents (use process_document).';
@@ -177,7 +177,19 @@ class IdentifyMotorcycleFromImageTool implements ReadTool
         // The model it recognised is not one we carry: never "this is our X".
         $observedModel = trim((string) ($parsed['observed']['model'] ?? ''));
 
-        if (($parsed['in_catalog'] ?? true) === false && $observedModel !== '' && $identifiedBy !== 'not_a_motorcycle') {
+        // Owner 2026-11-10: a Honda RS 250 photo with no name on it and no
+        // caption was told "دي هوجي DR 160" - a guess by shape stated as fact.
+        // A model we do not carry is only named from a readable name or his caption.
+        $notOurs = ($parsed['in_catalog'] ?? true) === false && $observedModel !== '' && $identifiedBy !== 'not_a_motorcycle';
+
+        if ($notOurs && $identifiedBy !== 'visible_name_or_logo' && $caption === '') {
+            $band = 'unknown';
+            $candidates = collect();
+            $parsed['observed'] = array_diff_key((array) ($parsed['observed'] ?? []), ['model' => true, 'brand' => true]);
+            $notOurs = false;
+        }
+
+        if ($notOurs) {
             $band = 'not_in_catalog';
             $candidates = $candidates->map(fn ($c) => ['confidence' => min($c['confidence'], 0.4)] + $c);
         }

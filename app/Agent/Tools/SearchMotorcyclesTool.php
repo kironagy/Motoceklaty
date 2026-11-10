@@ -28,7 +28,7 @@ class SearchMotorcyclesTool implements ReadTool
     private function isGeneric(array $args): bool
     {
         return array_intersect_key(array_filter($args, fn ($v) => $v !== null && $v !== '' && $v !== false),
-            array_flip(['name_query', 'brand', 'kind', 'cc_min', 'cc_max', 'max_cash_price', 'min_cash_price', 'max_installment_price', 'offers_only', 'color', 'sort'])) === [];
+            array_flip(['name_query', 'brand', 'kind', 'style', 'cc_min', 'cc_max', 'max_cash_price', 'min_cash_price', 'max_installment_price', 'offers_only', 'color', 'sort'])) === [];
     }
 
     public function inputSchema(): array
@@ -39,7 +39,9 @@ class SearchMotorcyclesTool implements ReadTool
                 'name_query' => ['type' => 'string', 'maxLength' => 60],
                 'brand' => ['type' => 'string'],
                 'kind' => ['type' => 'string', 'enum' => \App\Domain\Catalog\CatalogService::KINDS,
-                    'description' => 'The kind he asked for: scooter (سكوتر/اسكوتر), electric (سكوتر كهربا), motorcycle (مكنة/موتوسيكل/دليفري - in Egypt مكنة is a motorcycle), tricycle (تروسيكل). Leave it out when he did not say a kind.'],
+                    'description' => 'The kind he asked for: scooter (سكوتر/اسكوتر), electric (سكوتر كهربا), motorcycle (مكنة/موتوسيكل/دليفري - in Egypt مكنة is a motorcycle), tricycle (تروسيكل/تروسكل only). "تريلا/تريل/مكنة عالية" is a trail MOTORCYCLE, never a tricycle. Leave it out when he did not say a kind.'],
+                'style' => ['type' => 'string', 'enum' => array_keys(\App\Domain\Catalog\CatalogService::STYLE_CATEGORIES),
+                    'description' => 'Motorcycle style he asked for: trail (تريلا/تريل/مكنة عالية/أوف رود/كروس - tall trail bikes like KTX 250, F16), sport (سبورت/رياضي), naked, cruiser (كروزر/شوبر), commuter (عادي/شغل). Leave it out when he did not say a style.'],
                 'cc_min' => ['type' => 'integer', 'minimum' => 0],
                 'cc_max' => ['type' => 'integer', 'minimum' => 0],
                 'max_cash_price' => ['type' => 'number', 'minimum' => 0, 'description' => 'His budget ("في حدود 60" = 60000; "60 او 65" = 65000). Results come nearest the budget first.'],

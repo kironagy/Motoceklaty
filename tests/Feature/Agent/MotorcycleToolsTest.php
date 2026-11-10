@@ -121,6 +121,47 @@ class MotorcycleToolsTest extends TestCase
         $this->assertSame('UNKNOWN_COLOR', $result->error['code']);
     }
 
+    public function test_trail_style_finds_the_tall_bikes_not_tricycles(): void
+    {
+        // Owner 2026-11-10: "عايز مكن تريلا" got "قصدك التروسيكلات؟".
+        $this->machine(['name' => 'KTX 250', 'category' => 'off_road']);
+        Machine::create(['name' => 'F16', 'brand_id' => Brand::first()->id, 'category' => 'touring', 'cash_price' => 80000, 'installment_price' => 90000, 'is_active' => true, 'availability' => 'in_stock', 'type' => 'normal']);
+        Machine::create(['name' => 'Rk200 R', 'brand_id' => Brand::first()->id, 'category' => 'naked', 'cash_price' => 55000, 'installment_price' => 60000, 'is_active' => true, 'availability' => 'in_stock', 'type' => 'normal']);
+        $tricycles = Brand::create(['name' => 'تروسيكلات', 'image' => 't.jpg']);
+        Machine::create(['name' => 'Cmg tiger', 'brand_id' => $tricycles->id, 'cash_price' => 66000, 'installment_price' => 70000, 'is_active' => true, 'availability' => 'in_stock', 'type' => 'normal']);
+
+        $result = app(SearchMotorcyclesTool::class)->execute(['style' => 'trail'], $this->ctx());
+
+        $names = collect($result->data['items'])->pluck('name')->map(fn ($n) => trim((string) $n))->sort()->values()->all();
+        $this->assertSame(['F16', 'KTX 250'], array_values(array_filter($names, fn ($n) => ! str_contains($n, 'Rk') && ! str_contains($n, 'Cmg'))));
+        $this->assertCount(2, $result->data['items']);
+    }
+
+    public function test_a_model_we_do_not_carry_is_not_named_from_shape_alone(): void
+    {
+        // Owner 2026-11-10: a Honda RS 250 photo was told "دي هوجي DR 160".
+        config(['agent.recognition.match_threshold' => 0.8, 'agent.recognition.similar_threshold' => 0.5]);
+        Storage::fake('local');
+        $machine = $this->machine();
+        $ctx = $this->ctx();
+        $message = WhatsappMessage::create(['whatsapp_conversation_id' => $ctx->conversationId, 'direction' => 'incoming', 'sender_type' => 'customer', 'type' => 'image']);
+        Storage::disk('local')->put('photo.jpg', 'fake-bytes');
+        $media = MessageMedia::create(['message_id' => $message->id, 'media_type' => 'image', 'mime' => 'image/jpeg', 'disk' => 'local', 'path' => 'photo.jpg', 'size' => 10]);
+
+        $fake = new FakeAiProvider();
+        $fake->queue(new AiResponse(
+            textParts: [json_encode(['candidates' => [['motorcycle_id' => $machine->id, 'confidence' => 0.4]], 'identified_by' => 'shape_only', 'in_catalog' => false, 'observed' => ['brand' => 'Haojue', 'model' => 'Haojue DR160', 'style' => 'naked']])],
+            toolCalls: [], finishReason: 'STOP', usage: [], model: 'gemini-test', keyId: null, latencyMs: 1,
+        ));
+        $this->app->instance(AiProvider::class, $fake);
+
+        $result = app(IdentifyMotorcycleFromImageTool::class)->execute(['media_id' => $media->id], $ctx);
+
+        $this->assertSame('unknown', $result->data['band']);
+        $this->assertArrayNotHasKey('model', $result->data['observed']);
+        $this->assertSame([], $result->data['candidates']);
+    }
+
     public function test_a_confident_guess_from_shape_alone_is_only_similar(): void
     {
         // The official H250 photo came back as "VLM 200 0.95 match".

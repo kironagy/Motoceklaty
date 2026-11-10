@@ -80,6 +80,14 @@ class CatalogService
             $machines = $machines->filter(fn (Machine $m) => self::kind($m) === $filters['kind'])->values();
         }
 
+        // Owner 2026-11-10: "عايز مكن تريلا" (the tall trail bikes: KTX, F16)
+        // was answered "قصدك التروسيكلات؟" - search had no way to ask for a style.
+        if (! empty($filters['style']) && isset(self::STYLE_CATEGORIES[$filters['style']])) {
+            $categories = self::STYLE_CATEGORIES[$filters['style']];
+            $machines = $machines->filter(fn (Machine $m) => self::kind($m) === 'motorcycle'
+                && in_array($m->category, $categories, true))->values();
+        }
+
         // "عايز المكنة الحمرا" had no model name and search had no way to
         // ask by color, so the agent could only ask back.
         if (! empty($filters['color'])) {
@@ -134,6 +142,15 @@ class CatalogService
     }
 
     public const KINDS = ['motorcycle', 'scooter', 'electric', 'tricycle'];
+
+    /** Style he asked for -> catalog categories. "trail" = تريلا / مكنة عالية: off-road and touring (KTX, F16). */
+    public const STYLE_CATEGORIES = [
+        'trail' => ['off_road', 'touring'],
+        'sport' => ['sport'],
+        'naked' => ['naked'],
+        'cruiser' => ['cruiser'],
+        'commuter' => ['commuter'],
+    ];
 
     private const CATEGORY_LABELS = [
         'commuter' => 'عادي', 'naked' => 'نيكد', 'sport' => 'سبورت', 'cruiser' => 'كروزر',
