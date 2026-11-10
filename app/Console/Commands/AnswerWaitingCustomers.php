@@ -19,8 +19,8 @@ class AnswerWaitingCustomers extends Command
         {--hours=48 : only messages at most this old}
         {--all : kept for compatibility; every unanswered message is looked at}
         {--bot= : only this bot}
-        {--gap-min=15 : seconds at least between two re-answers (anti-ban pacing)}
-        {--gap-max=30 : seconds at most between two re-answers}
+        {--gap-min=60 : seconds at least between two re-answers (anti-ban pacing)}
+        {--gap-max=75 : seconds at most between two re-answers}
         {--apply : queue the turns; without it only lists them}';
 
     protected $description = 'Queue a bot turn for customers whose last message got no reply';
@@ -58,7 +58,7 @@ class AnswerWaitingCustomers extends Command
         // A customer who writes again meanwhile is answered at once: TurnScheduler::attachToTurn
         // pulls the turn to now+debounce and makes it a live turn.
         // Owner 2026-11-10: every number works around the clock - no night hold. Re-answers are
-        // paced 15-30 s apart per bot, newest first; a customer writing live is claimed before
+        // paced 60-75 s apart per bot (at most 60 an hour), newest first; a customer writing live is claimed before
         // them (ProcessWhatsappMessageJobs::claimNextJob), then the backlog carries on.
         $slots = [];
         $nextSlot = function (int $botId) use (&$slots) {
