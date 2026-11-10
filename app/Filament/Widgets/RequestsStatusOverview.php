@@ -6,6 +6,7 @@ use App\Models\InstallmentRequest;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Filament\Support\Facades\FilamentView;
 
 class RequestsStatusOverview extends BaseWidget
@@ -14,7 +15,7 @@ class RequestsStatusOverview extends BaseWidget
 
     protected int | string | array $columnSpan = 'full';
 
-    protected static ?string $pollingInterval = '30s';
+    protected static ?string $pollingInterval = '120s';
 
     protected function getColumns(): int
     {
@@ -196,21 +197,35 @@ class RequestsStatusOverview extends BaseWidget
 HTML
         );
 
-        $total = InstallmentRequest::query()->count();
+        // One grouped query (was 11 full-table counts), shared by every viewer for a minute.
+        $counts = Cache::remember('dashboard:requests-status-counts', now()->addMinute(), function (): array {
+            $byStatus = InstallmentRequest::query()
+                ->selectRaw('status, COUNT(*) as aggregate')
+                ->groupBy('status')
+                ->pluck('aggregate', 'status')
+                ->map(fn ($count) => (int) $count)
+                ->all();
 
-$new = InstallmentRequest::query()
-    ->where('status', 'new')
-    ->where('request_type', 'normal')
-    ->count();
-        $newRequest = InstallmentRequest::query()->where('status', 'new_request')->count();
-        $pending = InstallmentRequest::query()->where('status', 'pending')->count();
-        $workCheck = InstallmentRequest::query()->where('status', 'work_check')->count();
-        $approved = InstallmentRequest::query()->where('status', 'approved')->count();
-        $rejected = InstallmentRequest::query()->where('status', 'rejected')->count();
-        $paused = InstallmentRequest::query()->where('status', 'paused')->count();
-        $transferred = InstallmentRequest::query()->where('status', 'transferred')->count();
-        $delivered = InstallmentRequest::query()->where('status', 'delivered')->count();
-        $canceled = InstallmentRequest::query()->where('status', 'canceled')->count();
+            $byStatus['__total'] = array_sum($byStatus);
+            $byStatus['__new_normal'] = InstallmentRequest::query()
+                ->where('status', 'new')
+                ->where('request_type', 'normal')
+                ->count();
+
+            return $byStatus;
+        });
+
+        $total = $counts['__total'] ?? 0;
+        $new = $counts['__new_normal'] ?? 0;
+        $newRequest = $counts['new_request'] ?? 0;
+        $pending = $counts['pending'] ?? 0;
+        $workCheck = $counts['work_check'] ?? 0;
+        $approved = $counts['approved'] ?? 0;
+        $rejected = $counts['rejected'] ?? 0;
+        $paused = $counts['paused'] ?? 0;
+        $transferred = $counts['transferred'] ?? 0;
+        $delivered = $counts['delivered'] ?? 0;
+        $canceled = $counts['canceled'] ?? 0;
 
         return [
             $this->card('إجمالي الطلبات', $total, 'كل الطلبات المسجلة على السيستم', 'heroicon-o-clipboard-document-list', 'total', [2, 5, 8, 6, 12, 10, 15]),

@@ -10,6 +10,7 @@ use App\Models\WhatsappMessage;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Plan task 4.2: the numbers that tell you the bot is degrading before a
@@ -29,7 +30,7 @@ class AiHealthOverview extends BaseWidget
 
     protected int | string | array $columnSpan = 'full';
 
-    protected static ?string $pollingInterval = '60s';
+    protected static ?string $pollingInterval = '120s';
 
     protected function getColumns(): int
     {
@@ -49,6 +50,12 @@ class AiHealthOverview extends BaseWidget
             $this->escalationsStat(),
             $this->trafficStat(),
         ];
+    }
+
+    /** Today as a [start, end] range: whereBetween can use an index, whereDate() cannot. */
+    private function today(): array
+    {
+        return [now()->startOfDay(), now()->endOfDay()];
     }
 
     /**
@@ -145,7 +152,7 @@ class AiHealthOverview extends BaseWidget
     private function escalationsStat(): Stat
     {
         $waiting = WhatsappConversation::query()->where('status', 'awaiting_agent')->count();
-        $openToday = WhatsappConversation::query()->whereDate('updated_at', today())->count();
+        $openToday = Cache::remember('dashboard:ai-health:open-today', now()->addMinute(), fn () => WhatsappConversation::query()->whereBetween('updated_at', $this->today())->count());
 
         return Stat::make('محوّل لموظف', (string) $waiting)
             ->description("من {$openToday} محادثة اتحركت النهاردة")
@@ -155,9 +162,20 @@ class AiHealthOverview extends BaseWidget
 
     private function trafficStat(): Stat
     {
-        $incoming = WhatsappMessage::query()->where('direction', 'incoming')->whereDate('created_at', today())->count();
-        $outgoing = WhatsappMessage::query()->where('direction', 'outgoing')->whereDate('created_at', today())->count();
-        $requests = InstallmentRequest::query()->whereDate('created_at', today())->count();
+        // One grouped query over today's messages, shared by every viewer for a minute.
+        [$incoming, $outgoing, $requests] = Cache::remember('dashboard:ai-health:traffic', now()->addMinute(), function (): array {
+            $byDirection = WhatsappMessage::query()
+                ->whereBetween('created_at', $this->today())
+                ->selectRaw('direction, COUNT(*) as aggregate')
+                ->groupBy('direction')
+                ->pluck('aggregate', 'direction');
+
+            return [
+                (int) ($byDirection['incoming'] ?? 0),
+                (int) ($byDirection['outgoing'] ?? 0),
+                InstallmentRequest::query()->whereBetween('created_at', $this->today())->count(),
+            ];
+        });
 
         return Stat::make('رسايل النهاردة', "{$incoming} داخلة / {$outgoing} خارجة")
             ->description("{$requests} طلب تقسيط اتسجل النهاردة")

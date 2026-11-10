@@ -10,7 +10,7 @@ class TargetStatsWidget extends StatsOverviewWidget
 {
     protected static ?int $sort = 1;
 
-    protected static ?string $pollingInterval = '30s';
+    protected static ?string $pollingInterval = '120s';
 
     protected function getColumns(): int
     {

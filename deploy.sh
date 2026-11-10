@@ -28,6 +28,16 @@ fi
 echo "== Checking for pending migrations (run manually if any) =="
 php artisan migrate:status | grep -i pending || echo "No pending migrations."
 
+# Admin speed: without these caches every page rebuilds the route list, compiles
+# Blade views and re-discovers Filament components and icons on each request.
+# config:cache is left out on purpose: WhatsAppService, FormsVoiceClips and
+# routes/web.php still call env() directly, which returns null once config is cached.
+echo "== Caching routes, views, events, Filament components and icons =="
+php artisan route:cache
+php artisan view:cache
+php artisan event:cache
+php artisan filament:optimize
+
 echo "== Restarting queue workers (graceful, picks up new code) =="
 php artisan queue:restart
 

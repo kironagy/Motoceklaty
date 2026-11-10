@@ -8,16 +8,30 @@ use App\Models\InstallmentRequest;
 use Filament\Widgets\Widget;
 use Filament\Facades\Filament;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 
 class StaffRequestsOverview extends Widget
 {
     protected static string $view = 'filament.widgets.staff-requests-overview';
 
-    protected static ?string $pollingInterval = '30s';
+    protected static ?string $pollingInterval = '120s';
 
     protected int | string | array $columnSpan = 'full';
 
     public function getViewData(): array
+    {
+        $isHitler = Filament::auth()->check()
+            && (int) Filament::auth()->user()->is_hitler === 1;
+
+        // The ranking is the same for every viewer of one kind; build it once a minute.
+        return Cache::remember(
+            'dashboard:staff-requests-overview:'.($isHitler ? 'owner' : 'staff'),
+            now()->addMinute(),
+            fn (): array => $this->buildViewData(),
+        );
+    }
+
+    protected function buildViewData(): array
     {
         /*
         |--------------------------------------------------------------------------

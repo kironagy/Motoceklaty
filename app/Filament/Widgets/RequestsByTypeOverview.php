@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use Illuminate\Support\Facades\Cache;
 use App\Filament\Resources\DeliveryResource;
 use App\Models\InstallmentRequest;
 use Carbon\CarbonInterface;
@@ -21,7 +22,7 @@ class RequestsByTypeOverview extends Widget
 
     protected int|string|array $columnSpan = 'full';
 
-    protected static ?string $pollingInterval = '60s';
+    protected static ?string $pollingInterval = '120s';
 
     /** key => label, statuses counted together, the status the link filters on, colour, icon. */
     public const ROWS = [
@@ -53,7 +54,9 @@ class RequestsByTypeOverview extends Widget
     /** [type => [status => count]] for requests filed between the two dates. */
     protected function counts(CarbonInterface $from, CarbonInterface $to): array
     {
-        return InstallmentRequest::query()
+        $key = 'dashboard:requests-by-type:'.$from->format('YmdHi').'-'.$to->format('YmdHi');
+
+        return Cache::remember($key, now()->addMinute(), fn (): array => InstallmentRequest::query()
             ->whereIn('request_type', array_keys(self::TYPES))
             ->whereBetween('created_at', [$from, $to])
             ->selectRaw('request_type, status, COUNT(*) as total')
@@ -61,7 +64,7 @@ class RequestsByTypeOverview extends Widget
             ->get()
             ->groupBy('request_type')
             ->map(fn ($rows) => $rows->pluck('total', 'status')->map(fn ($n) => (int) $n)->all())
-            ->all();
+            ->all());
     }
 
     protected function getViewData(): array

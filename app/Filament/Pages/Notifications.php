@@ -48,6 +48,7 @@ class Notifications extends Page
             ->update(['is_read' => true]);
 
         $this->resetPage();
+        \Illuminate\Support\Facades\Cache::forget('notifications:unread:'.Auth::id());
         $this->dispatch('refresh-bell');
     }
 
@@ -57,6 +58,7 @@ class Notifications extends Page
             ->where('user_id', Auth::id())
             ->update(['is_read' => true]);
 
+        \Illuminate\Support\Facades\Cache::forget('notifications:unread:'.Auth::id());
         $this->dispatch('refresh-bell');
     }
 
@@ -105,7 +107,8 @@ class Notifications extends Page
 
             $notification->update(['is_read' => true]);
 
-            $this->dispatch('refresh-bell');
+            \Illuminate\Support\Facades\Cache::forget('notifications:unread:'.Auth::id());
+        $this->dispatch('refresh-bell');
 
             \Filament\Notifications\Notification::make()
                 ->title('تمت الموافقة على التحويل')
@@ -149,6 +152,7 @@ class Notifications extends Page
 
         $notification->update(['is_read' => true]);
 
+        \Illuminate\Support\Facades\Cache::forget('notifications:unread:'.Auth::id());
         $this->dispatch('refresh-bell');
 
         \Filament\Notifications\Notification::make()
