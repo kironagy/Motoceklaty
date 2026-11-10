@@ -31,7 +31,8 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
-            ->theme(asset('css/filament/admin/theme.css'))
+            // ?v= changes with every build, so browsers never keep an old theme
+            ->theme(asset('css/filament/admin/theme.css').'?v='.@filemtime(public_path('css/filament/admin/theme.css')))
             ->login()
             ->authGuard('filament')
             ->brandLogo(asset('images/logolog.png'))
