@@ -2052,6 +2052,8 @@ Forms\Components\Section::make('الملاحظات')
                     ->where('installment_requests.id', $search)
                     ->orWhere('applicant_name', 'like', "%{$search}%")
                     ->orWhere('applicant_phone', 'like', "%{$search}%")
+                    // owner 2026-11-10: search by national ID too (Arabic digits work)
+                    ->orWhere('applicant_national_id', 'like', '%'.(self::normalizeNationalId($search) ?: $search).'%')
                     ->orWhereHas('staff', fn ($s) => $s->where('name', 'like', "%{$search}%")))),
         ])];
     }
@@ -2078,6 +2080,13 @@ Forms\Components\Section::make('الملاحظات')
                 Tables\Columns\TextColumn::make('applicant_phone')
                     ->label('رقم الهاتف')
                     ->searchable(), // ✅ البحث بالهاتف
+
+                // owner 2026-11-10: search by national ID too (Arabic digits work); hidden until shown
+                Tables\Columns\TextColumn::make('applicant_national_id')
+                    ->label('الرقم القومي')
+                    ->searchable(query: fn (Builder $query, string $search) => $query
+                        ->orWhere('applicant_national_id', 'like', '%'.(self::normalizeNationalId($search) ?: $search).'%'))
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 Tables\Columns\TextColumn::make('installment_type')
                     ->label('شركة التقسيط')
