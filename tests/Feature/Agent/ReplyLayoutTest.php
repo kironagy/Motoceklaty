@@ -41,6 +41,24 @@ class ReplyLayoutTest extends TestCase
         $this->assertDoesNotMatchRegularExpression('#https://maps\.(?:\s|$)#', $out);
     }
 
+    public function test_full_links_and_hours_leave_no_fragments_after_the_list(): void
+    {
+        // Live 2026-11-10: "app. goo. gl/5b2Y... السبت للخميس..." trailed the clean list.
+        $branches = [
+            ['name' => 'فرع العمرانية', 'city' => 'الجيزة', 'address' => '٢٨ ش ترعة الزمر', 'map_url' => 'https://maps.app.goo.gl/5b2YaAbzdf8mam48', 'working_hours' => ['السبت - الخميس' => 'من 1 ضهرا - الي 1 صباحا']],
+            ['name' => 'فرع عين شمس', 'city' => 'القاهرة', 'address' => 'ش الزهراء', 'map_url' => 'https://maps.app.goo.gl/hyyoCboo2ccQfDBz7', 'working_hours' => []],
+        ];
+        $reply = 'مفيش فرع في المنيا يا باشا. فرع العمرانية https://maps.app.goo.gl/5b2YaAbzdf8mam48 السبت للخميس ١ ضهرا لـ١ صباحا، والجمعة من ٢ بعد الصلاة لـ١ صباحا. '
+            .'فرع عين شمس https://maps.app.goo.gl/hyyoCboo2ccQfDBz7 السبت للخميس ١ ضهرا لـ١ صباحا. تحب تيجي أنهي فرع؟';
+
+        $out = BranchListReply::repair($reply, true, $branches);
+
+        $this->assertStringStartsWith("مفيش فرع في المنيا يا باشا.\n\nعندنا 2 فروع:", $out);
+        $this->assertStringEndsWith("\n\nتحب تيجي أنهي فرع؟", $out);
+        $this->assertStringNotContainsString('goo. ', $out);
+        $this->assertSame(1, substr_count($out, 'السبت'));
+    }
+
     public function test_a_branch_named_without_a_lookup_is_left_alone(): void
     {
         $this->branches();

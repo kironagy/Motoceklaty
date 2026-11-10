@@ -37,14 +37,26 @@ final class BranchListReply
             return $text;
         }
 
-        $kept = [];
+        $before = [];
+        $after = [];
 
-        foreach (preg_split('/(?<=[.!؟?\n])/u', $text) as $sentence) {
+        // Live 2026-11-10: splitting on every "." cut "https://maps.app.goo.gl/x" into
+        // "https://maps." (dropped) and "app." "goo." "gl/x السبت للخميس..." (kept), and
+        // the fragments reached the customer after the clean list. Links go first, then
+        // a sentence ends only at a stop followed by a space or a line break.
+        $plain = preg_replace('#(?:(?:https?://|www\.)|\b(?:maps\.)?(?:app\.)?goo\.gl/)\S*?(?=[.,،!؟?]*(?:\s|$))#iu', ' ', $text);
+
+        foreach (preg_split('/(?<=[.!؟?])\s+|\n+/u', $plain) as $sentence) {
             $s = trim($sentence);
 
             // the model's own branch text goes; a question to him ("تحب تيجي أنهي فرع؟") stays
-            if ($s === '' || preg_match('#https?://#i', $s)
-                || (! preg_match('/[؟?]$/u', $s) && preg_match('/(?:فروع|عنوان|عناوين|لوكيشن|مكان)/u', $s))) {
+            if ($s === '' || ! preg_match('/\p{L}{2}/u', $s)) {
+                continue;
+            }
+
+            $question = (bool) preg_match('/[؟?]$/u', $s);
+
+            if (! $question && preg_match('/(?:فروع|عنوان|عناوين|لوكيشن|مكان|مواعيد|السبت|الخميس|الجمع[هة]|صباح|ضهر|ظهر|الساع[هة])/u', $s)) {
                 continue;
             }
 
@@ -52,13 +64,16 @@ final class BranchListReply
                 continue;
             }
 
-            $kept[] = $s;
+            $question ? $after[] = $s : $before[] = $s;
         }
 
         $blocks = array_map([self::class, 'block'], $branches);
         $intro = count($branches) > 1 ? 'عندنا '.count($branches).' فروع:' : 'فرعنا:';
 
-        return trim($intro."\n\n".implode("\n\n", $blocks).($kept !== [] ? "\n\n".implode(' ', $kept) : ''));
+        // "مفيش فرع في المنيا" answers him first; a question to him closes the message
+        return trim(($before !== [] ? implode(' ', $before)."\n\n" : '')
+            .$intro."\n\n".implode("\n\n", $blocks)
+            .($after !== [] ? "\n\n".implode(' ', $after) : ''));
     }
 
     public static function block(array $branch): string
