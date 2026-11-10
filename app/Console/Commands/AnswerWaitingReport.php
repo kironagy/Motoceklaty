@@ -24,7 +24,7 @@ class AnswerWaitingReport extends Command
         $jobs = DB::table('whatsapp_message_jobs as j')
             ->join('whatsapp_conversations as c', 'c.id', '=', 'j.whatsapp_conversation_id')
             ->leftJoin('customers as cu', 'cu.id', '=', 'c.customer_id')
-            ->where('j.payload', 'like', '%"answer_waiting"%')
+            ->where('j.payload', 'like', '%"answer_waiting%')
             ->where('j.created_at', '>=', now()->subHours((int) $this->option('hours')))
             ->when($this->option('bot'), fn ($q, $bot) => $q->where('j.whatsapp_bot_id', (int) $bot))
             ->orderBy('j.process_after')
