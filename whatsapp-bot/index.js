@@ -540,7 +540,36 @@ function enqueueChat(chatKey, job) {
 const LARAVEL_RETRY_ATTEMPTS = Number(process.env.LARAVEL_RETRY_ATTEMPTS || 3);
 const LARAVEL_RETRY_BASE_MS = Number(process.env.LARAVEL_RETRY_BASE_MS || 1000);
 
+/*
+ * Owner 2026-11-10: a history recovery posted thousands of messages at once, filled every
+ * php-fpm worker (8) and took the whole site down; the 504s then came back as retries.
+ * At most LARAVEL_MAX_CONCURRENT posts are in flight, the rest wait their turn here.
+ */
+const LARAVEL_MAX_CONCURRENT = Math.max(1, Number(process.env.LARAVEL_MAX_CONCURRENT || 3));
+let laravelInFlight = 0;
+const laravelWaiting = [];
+
+async function withLaravelSlot(fn) {
+    if (laravelInFlight >= LARAVEL_MAX_CONCURRENT) {
+        await new Promise(resolve => laravelWaiting.push(resolve));
+    }
+
+    laravelInFlight++;
+
+    try {
+        return await fn();
+    } finally {
+        laravelInFlight--;
+        const next = laravelWaiting.shift();
+        if (next) next();
+    }
+}
+
 async function postToLaravel(payload) {
+    return withLaravelSlot(() => postToLaravelNow(payload));
+}
+
+async function postToLaravelNow(payload) {
     return axios.post(
         process.env.LARAVEL_WEBHOOK_URL,
         payload,
