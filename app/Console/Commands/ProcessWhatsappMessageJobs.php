@@ -507,6 +507,9 @@ class ProcessWhatsappMessageJobs extends Command
                             ->orWhereNotIn('from', $busySenders);
                     });
                 })
+                // Owner 2026-11-10: a customer writing now is answered before the late re-answer
+                // backlog (whatsapp:answer-waiting); the backlog carries on when no one is waiting.
+                ->orderByRaw("coalesce(payload, '') like '%\"answer_waiting%'")
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->first();

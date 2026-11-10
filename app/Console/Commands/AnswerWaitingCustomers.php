@@ -19,9 +19,8 @@ class AnswerWaitingCustomers extends Command
         {--hours=48 : only messages at most this old}
         {--all : kept for compatibility; every unanswered message is looked at}
         {--bot= : only this bot}
-        {--gap-min=25 : seconds at least between two re-answers (anti-ban pacing)}
-        {--gap-max=50 : seconds at most between two re-answers}
-        {--recent-hours=6 : messages newer than this are answered first, night or not}
+        {--gap-min=10 : seconds at least between two re-answers (anti-ban pacing)}
+        {--gap-max=15 : seconds at most between two re-answers}
         {--apply : queue the turns; without it only lists them}';
 
     protected $description = 'Queue a bot turn for customers whose last message got no reply';
@@ -55,26 +54,19 @@ class AnswerWaitingCustomers extends Command
         $queued = 0;
 
         // Owner 2026-11-10: thousands of re-answers at once would get the number banned and push live
-        // customers behind them. Each re-answer gets its own slot, a random 25-50 s after the previous
-        // one (per bot), never at night. A customer who writes again meanwhile is answered at once:
-        // first_message_at is the slot, so TurnScheduler::attachToTurn pulls the turn to now+debounce.
-        // Two lanes per bot: a message from the last --recent-hours is answered now (the live bot
-        // answers at night too), ahead of the backlog; older ones wait their turn and the night.
+        // customers behind them. Each re-answer gets its own slot after the previous one (per bot).
+        // A customer who writes again meanwhile is answered at once: TurnScheduler::attachToTurn
+        // pulls the turn to now+debounce and makes it a live turn.
+        // Owner 2026-11-10: every number works around the clock - no night hold. Re-answers are
+        // paced 10-15 s apart per bot, newest first; a customer writing live is claimed before
+        // them (ProcessWhatsappMessageJobs::claimNextJob), then the backlog carries on.
         $slots = [];
-        $recentSince = now()->subHours((int) $this->option('recent-hours'));
-        $nextSlot = function (int $botId, bool $recent) use (&$slots) {
-            $lane = $botId.($recent ? '_recent' : '');
-            $slots[$lane] ??= max(now(), \Illuminate\Support\Carbon::parse(DB::table('whatsapp_message_jobs')
-                ->where('whatsapp_bot_id', $botId)->where('status', 'pending')
-                ->where('payload', 'like', $recent ? '%"answer_waiting_recent"%' : '%"answer_waiting"%')
+        $nextSlot = function (int $botId) use (&$slots) {
+            $slots[$botId] ??= max(now(), \Illuminate\Support\Carbon::parse(DB::table('whatsapp_message_jobs')
+                ->where('whatsapp_bot_id', $botId)->where('status', 'pending')->where('payload', 'like', '%"answer_waiting%')
                 ->max('process_after') ?? now()));
-            $slot = $slots[$lane]->copy()->addSeconds(random_int((int) $this->option('gap-min'), max((int) $this->option('gap-min'), (int) $this->option('gap-max'))));
-            $cairo = $slot->copy()->timezone('Africa/Cairo');
-            if (! $recent && $cairo->hour >= 1 && $cairo->hour < 9) {
-                $slot = $cairo->setTime(9, 0)->addSeconds(random_int(0, 120))->timezone(config('app.timezone'));
-            }
 
-            return $slots[$lane] = $slot;
+            return $slots[$botId] = $slots[$botId]->copy()->addSeconds(random_int((int) $this->option('gap-min'), max((int) $this->option('gap-min'), (int) $this->option('gap-max'))));
         };
 
         foreach ($waiting as $row) {
@@ -113,15 +105,14 @@ class AnswerWaitingCustomers extends Command
             }
 
             $jid = $conversation->customer?->jid ?? $conversation->phone;
-            $recent = \Illuminate\Support\Carbon::parse($row->created_at)->gte($recentSince);
-            $slot = $nextSlot((int) $conversation->whatsapp_bot_id, $recent);
+            $slot = $nextSlot((int) $conversation->whatsapp_bot_id);
             $jobId = DB::table('whatsapp_message_jobs')->insertGetId([
                 'whatsapp_bot_id' => $conversation->whatsapp_bot_id,
                 'whatsapp_conversation_id' => $conversation->id,
                 'from' => $jid,
                 'reply_jid' => $jid,
                 'message' => (string) ($unanswered->last()?->text ?: '[media]'),
-                'payload' => json_encode(['source' => $recent ? 'answer_waiting_recent' : 'answer_waiting']),
+                'payload' => json_encode(['source' => 'answer_waiting']),
                 'status' => 'pending',
                 'attempts' => 0,
                 'first_message_at' => $slot,

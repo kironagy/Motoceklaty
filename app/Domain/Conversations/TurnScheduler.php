@@ -174,7 +174,9 @@ class TurnScheduler implements TurnSchedulerHook
 
         DB::table('whatsapp_message_jobs')
             ->where('id', $turn->id)
-            ->update(['process_after' => $processAfter, 'updated_at' => now()]);
+            // a queued late re-answer he writes into is a live turn now: claimed ahead of the backlog
+            ->update(['process_after' => $processAfter, 'updated_at' => now()]
+                + (str_contains((string) ($turn->payload ?? ''), 'answer_waiting') ? ['payload' => null] : []));
 
         $message->update(['turn_id' => $turn->id]);
     }
