@@ -2,15 +2,26 @@
 
 namespace App\Models;
 
+use Filament\Models\Contracts\FilamentUser;
+use Filament\Panel;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
-class Staff extends Authenticatable
+class Staff extends Authenticatable implements FilamentUser
 {
     use HasFactory, Notifiable;
+
+    /**
+     * Filament refuses every user with 403 outside APP_ENV=local unless the model says so here.
+     * Every staff row is a dashboard account; the roles matrix (Access) decides what each one sees.
+     */
+    public function canAccessPanel(Panel $panel): bool
+    {
+        return true;
+    }
 
     protected $table = 'staff';
 
