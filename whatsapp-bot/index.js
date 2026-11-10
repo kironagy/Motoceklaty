@@ -60,7 +60,8 @@ const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
  * waits its turn behind a randomised gap and a per-minute cap, and the
  * typing time follows the length of the reply.
  */
-const SEND_MAX_PER_MINUTE = Number(process.env.SEND_MAX_PER_MINUTE || 20);
+// Owner 2026-11-10: 20 a minute let a number send 300-600 an hour and WhatsApp unlinked it.
+const SEND_MAX_PER_MINUTE = Number(process.env.SEND_MAX_PER_MINUTE || 8);
 const SEND_MIN_GAP_MS = Number(process.env.SEND_MIN_GAP_MS || 1500);
 const SEND_MAX_GAP_MS = Number(process.env.SEND_MAX_GAP_MS || 4000);
 /*

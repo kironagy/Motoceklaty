@@ -243,6 +243,7 @@ class FormLinkController extends Controller
             $result = app(FormSubmissionService::class)->submit($link, (array)$request->input('cap_confirmation', []));
         } catch (\Illuminate\Validation\ValidationException $e) {
             if (!isset($e->errors()['applicant_national_id'])) throw $e;
+            app(FormSubmissionService::class)->sendDuplicateNotice($link);
             return response()->json(['ok'=>false,'code'=>'DUPLICATE','message'=>'أنت مقدم عندنا قبل كده بالفعل. راجع الطلب الموجود بدل إنشاء طلب جديد.'],422);
         }
 

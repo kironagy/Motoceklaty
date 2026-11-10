@@ -470,7 +470,27 @@ class ProcessWhatsappMessageJobs extends Command
 
             // Owner 2026-11-10: bot 93 was restricted and logged out by late re-answers sent every
             // ~5 s (three workers at once, the backlog piled up behind live turns). One re-answer per
-            // bot at a time, and the next one 60-75 s after the last was taken: at most 60 an hour (owner).
+            // bot at a time, and the next one about a minute after the last was taken (owner).
+            // Owner 2026-11-10 (anti-ban): a number that sent its hourly or daily cap of messages
+            // takes no turn at all until the window frees - live ones wait too.
+            $capped = \Illuminate\Support\Facades\Cache::remember('send_capped_bots', 30, function () {
+                $hour = (int) config('agent.delivery.max_sends_per_hour', 150);
+                $day = (int) config('agent.delivery.max_sends_per_day', 1500);
+                $sent = fn ($since) => DB::table('whatsapp_messages')->where('direction', 'outgoing')
+                    ->where('delivery_status', 'sent')->where('created_at', '>=', $since)
+                    ->groupBy('whatsapp_bot_id')->selectRaw('whatsapp_bot_id, count(*) n')->pluck('n', 'whatsapp_bot_id');
+
+                $capped = $sent(now()->subHour())->filter(fn ($n) => $hour > 0 && $n >= $hour)->keys()
+                    ->merge($sent(now()->subDay())->filter(fn ($n) => $day > 0 && $n >= $day)->keys())
+                    ->unique()->values()->all();
+
+                if ($capped !== []) {
+                    Log::warning('WhatsApp send cap reached - turns wait', ['bot_ids' => $capped]);
+                }
+
+                return $capped;
+            });
+
             $backlogBlocked = DB::table('whatsapp_message_jobs')
                 ->where('status', 'processing')->where('locked_at', '>=', $staleBefore)
                 ->where('payload', 'like', '%"answer_waiting%')
@@ -481,6 +501,7 @@ class ProcessWhatsappMessageJobs extends Command
                 ->unique()->values()->all();
 
             $job = DB::table('whatsapp_message_jobs')
+                ->when($capped !== [], fn ($q) => $q->whereNotIn('whatsapp_bot_id', $capped))
                 ->when($backlogBlocked !== [], fn ($q) => $q->where(fn ($q) => $q->whereNotIn('whatsapp_bot_id', $backlogBlocked)
                     ->orWhereNull('payload')->orWhere('payload', 'not like', '%"answer_waiting%')))
                 // Paused bots keep their jobs and generated replies, but do
@@ -544,7 +565,7 @@ class ProcessWhatsappMessageJobs extends Command
             $job->attempts = ((int) $job->attempts) + 1;
 
             if (str_contains((string) ($job->payload ?? ''), 'answer_waiting')) {
-                \Illuminate\Support\Facades\Cache::put('answer_waiting_gap_'.$job->whatsapp_bot_id, true, now()->addSeconds(random_int(60, 75)));
+                \Illuminate\Support\Facades\Cache::put('answer_waiting_gap_'.$job->whatsapp_bot_id, true, now()->addSeconds(random_int(60, 65)));
             }
 
             return $job;

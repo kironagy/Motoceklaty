@@ -57,6 +57,14 @@ class DeliveryService
         }
 
         $messages = $result['messages'] ?? [];
+
+        // Owner 2026-11-10 (anti-ban): a reply split into 2-3 WhatsApp messages doubled what each
+        // number sent. The texts of one reply go out as ONE message, paragraphs kept.
+        $texts = array_values(array_filter(array_map(fn ($m) => trim((string) $m), $messages), fn ($m) => $m !== ''));
+        if (count($texts) > 1) {
+            $messages = [implode("\n\n", $texts)];
+        }
+
         $quoteWaMessageId = $result['quote_wa_message_id'] ?? null;
         $mediaItems = $result['media'] ?? [];
         $focusMotorcycleIds = $result['focus_motorcycle_ids'] ?? [];

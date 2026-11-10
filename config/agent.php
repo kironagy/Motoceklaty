@@ -84,6 +84,10 @@ return [
     'delivery' => [
         // Not decision-gated (an engineering limit).
         'max_attempts' => env('AGENT_DELIVERY_MAX_ATTEMPTS', 3),
+        // Owner 2026-11-10 (anti-ban): bot 93 was unlinked by WhatsApp after 300-600 sends an hour.
+        // A number that reached either cap takes no turn until the window frees (0 = no cap).
+        'max_sends_per_hour' => env('AGENT_MAX_SENDS_PER_HOUR', 150),
+        'max_sends_per_day' => env('AGENT_MAX_SENDS_PER_DAY', 1500),
     ],
 
     'reply' => [

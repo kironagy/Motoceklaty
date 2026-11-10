@@ -44,7 +44,9 @@ class FormSubmissionService
      */
     public function submit(FormLink $link, array $capConfirmation = []): array
     {
-        $result = DB::transaction(function () use ($link, $capConfirmation) {
+        $duplicateOf = null;
+
+        $result = DB::transaction(function () use ($link, $capConfirmation, &$duplicateOf) {
             $link = FormLink::whereKey($link->id)->lockForUpdate()->firstOrFail();
 
             // a double tap, or the page sent twice: the first one counts
@@ -90,6 +92,8 @@ class FormSubmissionService
             $columns = $this->columns($schema, $answers, $visible);
 
             if ($duplicate = $this->undecidedRequest($link, $columns)) {
+                $duplicateOf = $duplicate;
+
                 return ['ok' => false, 'code' => 'DUPLICATE', 'message' => "أنت مقدم عندنا قبل كده بالفعل. هنراجع معاك الطلب الموجود بدل إنشاء طلب جديد."];
             }
 
@@ -100,6 +104,10 @@ class FormSubmissionService
 
         if (($result['ok'] ?? false) && ! ($result['already'] ?? false)) {
             $this->sendReceipt($link->fresh());
+        }
+
+        if ($duplicateOf !== null) {
+            $this->sendDuplicateNotice($link->fresh());
         }
 
         unset($result['already']);
@@ -493,6 +501,27 @@ class FormSubmissionService
         $digits = $this->nationalIds->normalizeDigits($phone);
 
         return str_starts_with($digits, '20') && strlen($digits) === 12 ? substr($digits, 1) : $digits;
+    }
+
+    /**
+     * Owner 2026-11-10: someone who already applied, writing from another number and filling the
+     * form again, is told on the page AND by the bot on WhatsApp that he applied before. Once per link.
+     */
+    public function sendDuplicateNotice(FormLink $link): void
+    {
+        $conversation = $link->conversation;
+
+        if (! $conversation) {
+            return;
+        }
+
+        try {
+            $this->delivery->deliverForConversation($conversation, ['messages' => [
+                'حضرتك مقدم معانا قبل كده بالفعل بنفس البيانات، فمينفعش نفتح طلب جديد. طلبك القديم موجود عندنا، ولو عايز تعرف حالته قولّي.',
+            ]], 'bot', null, false, 'form_duplicate:'.$link->id);
+        } catch (\Throwable $e) {
+            Log::warning('Duplicate notice not delivered', ['form_link_id' => $link->id, 'error' => $e->getMessage()]);
+        }
     }
 
     private function sendReceipt(FormLink $link): void
