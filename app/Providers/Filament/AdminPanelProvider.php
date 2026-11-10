@@ -35,9 +35,10 @@ class AdminPanelProvider extends PanelProvider
             ->login()
             ->authGuard('filament')
             ->brandLogo(asset('images/logolog.png'))
-            ->brandLogoHeight('3.5rem')
+            ->brandLogoHeight('2.75rem')
             ->colors([
-                'primary' => Color::Amber,
+                'primary' => Color::Teal,
+                'warning' => Color::Amber,
             ])
             // Sidebar order: daily work first, settings last.
             ->navigationGroups([
