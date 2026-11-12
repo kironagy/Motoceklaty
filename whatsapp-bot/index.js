@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const { createSpool } = require('./spool');
 const { createSentRegistry } = require('./sent-registry');
+const { createHumanPacing, createAttention, cairoHour } = require('./human-pacing');
 
 require('dotenv').config();
 
@@ -73,11 +74,6 @@ const SEND_MAX_GAP_MS = Number(process.env.SEND_MAX_GAP_MS || 4000);
  * nothing. A turn that never gets a reply (handoff, a closing "تمام") is
  * marked read after READ_FALLBACK_MS.
  */
-const TYPING_MS_PER_CHAR = Number(process.env.TYPING_MS_PER_CHAR || 25);
-const TYPING_MIN_MS = Number(process.env.TYPING_MIN_MS || 1000);
-const TYPING_MAX_MS = Number(process.env.TYPING_MAX_MS || 3500);
-const READ_TO_TYPING_MIN_MS = Number(process.env.READ_TO_TYPING_MIN_MS || 500);
-const READ_TO_TYPING_MAX_MS = Number(process.env.READ_TO_TYPING_MAX_MS || 1200);
 const READ_FALLBACK_MS = Number(process.env.READ_FALLBACK_MS || 120000);
 
 /** botId|jid -> { keys: [], timer } - customer messages not marked read yet. */
@@ -87,11 +83,12 @@ function readKeys(botId, jids) {
     return [...new Set(jids.filter(Boolean).flatMap(jid => [`${botId}|${jid}`, `${botId}|${String(jid).split('@')[0].split(':')[0]}`]))];
 }
 
-function queueRead(sock, botId, jids, key) {
+function queueRead(sock, botId, jids, key, chars = 0) {
     const keys = readKeys(botId, jids);
-    const entry = keys.map(k => pendingReads.get(k)).find(Boolean) || { keys: [], timer: null, mapKeys: [] };
+    const entry = keys.map(k => pendingReads.get(k)).find(Boolean) || { keys: [], timer: null, mapKeys: [], firstAt: Date.now(), chars: 0, held: false };
 
     entry.keys.push(key);
+    entry.chars += chars;
     entry.mapKeys = [...new Set([...entry.mapKeys, ...keys])];
     keys.forEach(k => pendingReads.set(k, entry));
 
@@ -99,7 +96,7 @@ function queueRead(sock, botId, jids, key) {
     entry.timer = setTimeout(() => flushReads(sock, botId, jids), READ_FALLBACK_MS);
 }
 
-/** Marks the customer's waiting messages read; true when there were any. */
+/** Marks the customer's waiting messages read; the waiting entry when there were any, else false. */
 async function flushReads(sock, botId, jids) {
     const entry = readKeys(botId, jids).map(k => pendingReads.get(k)).find(Boolean);
 
@@ -112,17 +109,78 @@ async function flushReads(sock, botId, jids) {
         await sock.readMessages(entry.keys);
     } catch {}
 
-    return true;
+    return entry;
 }
 
-/** Right before the first thing we send: seen, a beat, then typing/send. */
+/*
+ * Human pacing (see human-pacing.js). A reply is: wait like a person who is not staring at this
+ * chat (humanWait) -> take this number's attention (one chat at a time) -> seen -> read -> type ->
+ * send. Only the first bubble of a turn has unread customer messages, so only it waits.
+ */
+const pacing = createHumanPacing();
+const attention = createAttention();
+/** botId|jid -> when we last sent there; botId -> jid of the chat this number is in. */
+const lastSentAt = new Map();
+const openChat = {};
+
+function noteSent(botId, jid) {
+    lastSentAt.set(`${botId}|${jid}`, Date.now());
+
+    if (lastSentAt.size > 5000) {
+        lastSentAt.delete(lastSentAt.keys().next().value);
+    }
+}
+
+/** Before the chat is opened: the customer's message stays unread for a human amount of time. */
+async function humanWait(botId, jid) {
+    const entry = readKeys(botId, [jid]).map(k => pendingReads.get(k)).find(Boolean);
+
+    if (!entry || entry.held) return;
+
+    entry.held = true;
+
+    const delay = pacing.replyDelayMs({
+        waitedMs: Date.now() - entry.firstAt,
+        hot: Date.now() - (lastSentAt.get(`${botId}|${jid}`) || 0) < Number(process.env.HUMAN_HOT_CHAT_MS || 120000),
+        cairoHour: cairoHour(),
+    });
+
+    if (delay > 0) {
+        console.log(`⏳ human pacing: bot ${botId} opens ${jid} in ${Math.round(delay / 1000)}s`);
+        await sleep(delay);
+    }
+}
+
+/** Runs one reply with this number's attention: no typing in two chats at once. */
+function withAttention(botId, jid, job) {
+    return attention.run(botId, async () => {
+        if (openChat[botId] && openChat[botId] !== jid) {
+            await sleep(pacing.switchChatMs());
+        }
+
+        openChat[botId] = jid;
+
+        try {
+            return await job();
+        } finally {
+            noteSent(botId, jid);
+        }
+    });
+}
+
+/** Right before the first thing we send: seen, read what he wrote, then typing/send. */
 async function seenBeforeReply(sock, botId, jid) {
-    if (await flushReads(sock, botId, [jid])) {
-        await sleep(randomBetween(READ_TO_TYPING_MIN_MS, READ_TO_TYPING_MAX_MS));
+    const entry = await flushReads(sock, botId, [jid]);
+
+    if (entry) {
+        await sleep(pacing.readingMs(entry.chars));
     }
 }
 
 const sendLimiters = {};
+/** botId -> reconnects in a row since the last open connection. */
+const reconnectAttempts = {};
+const reconnectTimers = {};
 
 async function fetchLatestActiveBotId() {
     try {
@@ -446,18 +504,19 @@ async function extractMediaBase64(msg) {
     }
 }
 
-function typingMs(text) {
-    const base = Math.min(TYPING_MAX_MS, Math.max(TYPING_MIN_MS, text.length * TYPING_MS_PER_CHAR));
-
-    return base * randomBetween(0.8, 1.2);
-}
-
-// No 'paused' afterwards: the message itself ends the typing indicator,
-// and the send may still wait in the pacing queue.
-async function showTyping(sock, jid, ms) {
+// Typing in bursts (human-pacing.js typingPlan). No 'paused' after the last burst: the message
+// itself ends the typing indicator, and the send may still wait in the pacing queue.
+async function showTyping(sock, jid, text, pressure = 0) {
     try {
-        await sock.sendPresenceUpdate('composing', jid);
-        await sleep(ms);
+        for (const burst of pacing.typingPlan(text, { pressure })) {
+            await sock.sendPresenceUpdate('composing', jid);
+            await sleep(burst.composeMs);
+
+            if (burst.pauseMs) {
+                await sock.sendPresenceUpdate('paused', jid);
+                await sleep(burst.pauseMs);
+            }
+        }
     } catch {}
 }
 
@@ -471,7 +530,7 @@ function cleanReplyText(text) {
  * Returns the sent Baileys message (so callers can read its WhatsApp id
  * and cache it for later quoting), or null on failure.
  */
-async function sendTextSafely(sock, jid, text, quotedMsg = null, isCancelled = () => false) {
+async function sendTextSafely(sock, jid, text, quotedMsg = null, isCancelled = () => false, pressure = 0) {
     try {
         const cleanText = cleanReplyText(text);
 
@@ -479,7 +538,9 @@ async function sendTextSafely(sock, jid, text, quotedMsg = null, isCancelled = (
 
         console.log(`📨 Sending WhatsApp reply to ${jid}: ${cleanText}`);
 
-        await showTyping(sock, jid, typingMs(cleanText));
+        await showTyping(sock, jid, cleanText, pressure);
+
+        if (isCancelled()) return null;
 
         try {
             const sent = await sock.sendMessage(
@@ -722,7 +783,7 @@ async function handleIncomingMessage(sock, botId, msg, { recovered = false } = {
 
         // seen waits for the reply (see pendingReads)
         if (!isFromMe && !recovered) {
-            queueRead(sock, botId, [originalFrom, customerJid], msg.key);
+            queueRead(sock, botId, [originalFrom, customerJid], msg.key, getMessageText(msg).length);
         }
 
         const payload = {
@@ -793,6 +854,7 @@ async function startSession(botId) {
 
     starting[botId] = true;
     statuses[botId] = 'starting';
+    clearTimeout(reconnectTimers[botId]);
 
     const { state, saveCreds } = await useMultiFileAuthState(`./sessions/${botId}`);
     const { version } = await fetchLatestBaileysVersion();
@@ -851,6 +913,7 @@ async function startSession(botId) {
             latestQr[botId] = null;
             statuses[botId] = 'connected';
             starting[botId] = false;
+            reconnectAttempts[botId] = 0;
 
             console.log(`✅ Bot ${botId} connected`);
         }
@@ -859,34 +922,50 @@ async function startSession(botId) {
             starting[botId] = false;
 
             const statusCode = lastDisconnect?.error?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+            const attempt = reconnectAttempts[botId] || 0;
+            // Back off, and stop when WhatsApp said no (403) or nobody scans the QR - see reconnectPlan.
+            const plan = pacing.reconnectPlan({
+                statusCode,
+                message: lastDisconnect?.error?.message || '',
+                attempt,
+                linked: isLinkedSession(botId),
+            });
+            const shouldReconnect = plan.reconnect;
 
             console.error('WhatsApp connection closed', {
                 botId,
                 statusCode,
                 shouldReconnect,
+                attempt,
+                retryInMs: plan.delayMs,
                 error: lastDisconnect?.error?.message || lastDisconnect?.error || null,
             });
 
             delete sessions[botId];
 
-            statuses[botId] = shouldReconnect ? 'disconnected' : 'logged_out';
+            statuses[botId] = plan.status;
+            reconnectAttempts[botId] = shouldReconnect ? attempt + 1 : 0;
+
+            if (!shouldReconnect) {
+                latestQr[botId] = null;
+            }
 
             // Logged out = these credentials are dead. Kept as they were,
             // every restart reused them, was logged out again and never
             // showed a QR - the only visible way out was deleting the bot,
             // which cascades to every customer and application. Move them
             // aside (never deleted) so the next start asks for a new QR.
-            if (!shouldReconnect) {
+            if (plan.archive) {
                 archiveLoggedOutSession(botId);
             }
 
             if (shouldReconnect) {
-                setTimeout(() => {
+                clearTimeout(reconnectTimers[botId]);
+                reconnectTimers[botId] = setTimeout(() => {
                     startSession(botId).catch(error => {
                         console.error(`restart session error ${botId}:`, error?.message || error);
                     });
-                }, 3000);
+                }, plan.delayMs);
             }
         }
     });
@@ -1030,6 +1109,8 @@ app.post('/sessions/:botId/logout', checkToken, async (req, res) => {
             }
         }
 
+        clearTimeout(reconnectTimers[botId]);
+        reconnectAttempts[botId] = 0;
         delete sessions[botId];
         delete latestQr[botId];
         statuses[botId] = 'logged_out';
@@ -1103,17 +1184,27 @@ app.post('/send-message', checkToken, async (req, res) => {
             : null;
 
         // ERR-003: the same reply item (client_id) is never sent twice
+        const isCancelled = callerGone(res);
+
         const outcome = await sentRegistry.once(req.body.client_id, async () => {
-            await seenBeforeReply(sock, botId, jid);
+            await humanWait(botId, jid);
 
-            const sent = await sendTextSafely(sock, jid, text, quotedMsg, callerGone(res));
-            const waMessageId = sent?.key?.id ? `${botId}_${sent.key.id}` : null;
+            return withAttention(botId, jid, async () => {
+                if (isCancelled()) {
+                    return { status: 200, body: { ok: false, bot_id: botId, jid, wa_message_id: null } };
+                }
 
-            if (sent && waMessageId) {
-                recentRawMessages.set(waMessageId, sent);
-            }
+                await seenBeforeReply(sock, botId, jid);
 
-            return { status: 200, body: { ok: Boolean(sent), bot_id: botId, jid, wa_message_id: waMessageId } };
+                const sent = await sendTextSafely(sock, jid, text, quotedMsg, isCancelled, attention.pressure(botId));
+                const waMessageId = sent?.key?.id ? `${botId}_${sent.key.id}` : null;
+
+                if (sent && waMessageId) {
+                    recentRawMessages.set(waMessageId, sent);
+                }
+
+                return { status: 200, body: { ok: Boolean(sent), bot_id: botId, jid, wa_message_id: waMessageId } };
+            });
         });
 
         return res.status(outcome.status).json(outcome.body);
@@ -1146,6 +1237,9 @@ app.post('/send-media-items', checkToken, async (req, res) => {
 
         // ERR-003: the same reply item (client_id) is never sent twice
         const outcome = await sentRegistry.once(req.body.client_id, async () => {
+        await humanWait(botId, jid);
+
+        return withAttention(botId, jid, async () => {
         const results = [];
 
         await seenBeforeReply(sock, botId, jid);
@@ -1202,6 +1296,7 @@ app.post('/send-media-items', checkToken, async (req, res) => {
             wa_message_ids: results.filter(r => r.ok).map(r => r.wa_message_id),
             results,
         } };
+        });
         });
 
         return res.status(outcome.status).json(outcome.body);
