@@ -178,12 +178,18 @@ class StaffDecisionService
                 default => 'تصحيح البيانات',
             };
 
+            $before = $request->getAttributes();
+
             $request->forceFill($columns + [
                 'status' => $staffRequest['previous_status'] ?: 'pending',
                 'status_updated_at' => now(),
                 'customer_action' => null,
-                'notes' => trim((string) $request->notes."\n".'العميل بعت المطلوب ('.$what.') على الواتساب - '.now()->format('Y-m-d H:i')),
             ])->saveQuietly();
+
+            // Owner 2026-11-13: staff see exactly what he changed, not just "he sent it".
+            $changed = \App\Domain\Requests\CustomerEditLog::record($request, $before, 'customer_chat', $application->customer);
+            $request->forceFill(['notes' => trim((string) $request->notes."\n".'العميل بعت المطلوب ('.$what.') على الواتساب'
+                .($changed ? ' - عدّل ('.count($changed).'): '.implode('، ', $changed) : '').' - '.now()->format('Y-m-d H:i'))])->saveQuietly();
 
             if ($type !== 'document') {
                 \App\Jobs\SplitRequestAddresses::dispatch($request->id)->afterCommit();

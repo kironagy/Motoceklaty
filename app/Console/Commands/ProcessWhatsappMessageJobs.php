@@ -482,10 +482,13 @@ class ProcessWhatsappMessageJobs extends Command
             $busy = DB::table('whatsapp_message_jobs')
                 ->where('status', 'processing')
                 ->where('locked_at', '>=', $staleBefore)
-                ->get(['whatsapp_conversation_id', 'from']);
+                ->get(['whatsapp_conversation_id', 'from', 'whatsapp_bot_id']);
 
             $busyConversationIds = $busy->pluck('whatsapp_conversation_id')->filter()->unique()->values()->all();
             $busySenders = $busy->pluck('from')->filter()->unique()->values()->all();
+            // Owner 2026-11-13: a number sends one message every 1-2 minutes, so a second turn of
+            // the same number would only hold a slot waiting - other numbers' customers go first.
+            $busyBotIds = $busy->pluck('whatsapp_bot_id')->filter()->unique()->values()->all();
 
             // Owner 2026-11-10: bot 93 was restricted and logged out by late re-answers sent every
             // ~5 s (three workers at once, the backlog piled up behind live turns). One re-answer per
@@ -521,6 +524,7 @@ class ProcessWhatsappMessageJobs extends Command
 
             $job = DB::table('whatsapp_message_jobs')
                 ->when($capped !== [], fn ($q) => $q->whereNotIn('whatsapp_bot_id', $capped))
+                ->when($busyBotIds !== [], fn ($q) => $q->whereNotIn('whatsapp_bot_id', $busyBotIds))
                 ->when($backlogBlocked !== [], fn ($q) => $q->where(fn ($q) => $q->whereNotIn('whatsapp_bot_id', $backlogBlocked)
                     ->orWhereNull('payload')->orWhere('payload', 'not like', '%"answer_waiting%')))
                 // Paused bots keep their jobs and generated replies, but do

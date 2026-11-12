@@ -159,7 +159,7 @@ protected static function notInBotRequestsRule(): \Closure
 /** A company (Aman) employee: sees only his companies' requests, and never the fake ones. */
 public static function isCompanyEmployee(): bool
 {
-    return (bool) (Auth::user()?->is_company_employee ?? false);
+    return (bool) Auth::user()?->isAmaanRestricted();
 }
 
 public static function isHitler(): bool
@@ -178,10 +178,10 @@ public static function isHitler(): bool
 
         /*
         |--------------------------------------------------------------------------
-        | موظف شركة - أعلى أولوية حتى لو Admin / Super Admin
+        | موظف شركة (أمان) - إلا لو سوبر أدمن: السوبر أدمن يشوف كل حاجة (owner 2026-11-13)
         |--------------------------------------------------------------------------
         */
-        if ($user->is_company_employee ?? false) {
+        if ($user->isAmaanRestricted()) {
 
             $companyNames = $user->installmentSystems()
                 ->pluck('installment_systems.name')
@@ -735,7 +735,7 @@ $requestType = request()->query('request_type') === 'fake' && ! static::isCompan
 
                                 if (
                                     $user &&
-                                    ($user->is_company_employee ?? false) &&
+                                    $user->isAmaanRestricted() &&
                                     $user->installment_system_id
                                 ) {
                                     return InstallmentSystem::query()
@@ -753,7 +753,7 @@ $requestType = request()->query('request_type') === 'fake' && ! static::isCompan
 
                                 if (
                                     $user &&
-                                    ($user->is_company_employee ?? false) &&
+                                    $user->isAmaanRestricted() &&
                                     $user->installment_system_id
                                 ) {
                                     return InstallmentSystem::whereKey(
@@ -765,7 +765,7 @@ $requestType = request()->query('request_type') === 'fake' && ! static::isCompan
                             })
                             ->disabled(
                                 fn() =>
-                                (bool) (Auth::user()?->is_company_employee ?? false)
+                                (bool) Auth::user()?->isAmaanRestricted()
                             )
                             ->dehydrated(true)
                             ->searchable()
@@ -2138,7 +2138,7 @@ Forms\Components\Section::make('الملاحظات')
 
                         if (
                             $user &&
-                            ($user->is_company_employee ?? false)
+                            $user->isAmaanRestricted()
                         ) {
                             return $user->installmentSystems()
                                 ->pluck(

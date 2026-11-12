@@ -12,7 +12,7 @@ use Filament\Widgets\Widget;
  * Home page: this month's main (normal) and bot requests by status - new, rejected, approved, under
  * inquiry, paused, canceled, delivered. Counts only requests filed since the 1st of the current month,
  * so the counters start again from zero every month. Admin, super admin and the owner (is_hitler)
- * only; a company (Aman) employee never sees it even with the admin flag.
+ * only; a company (Aman) employee never sees it even with the admin flag - unless he is a super admin.
  */
 class RequestsByTypeOverview extends Widget
 {
@@ -44,7 +44,7 @@ class RequestsByTypeOverview extends Widget
     {
         $user = auth()->user();
 
-        if (! $user || ($user->is_company_employee ?? false)) {
+        if (! $user || $user->isAmaanRestricted()) {
             return false;
         }
 

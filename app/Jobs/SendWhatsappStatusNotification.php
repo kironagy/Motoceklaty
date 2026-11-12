@@ -15,6 +15,15 @@ class SendWhatsappStatusNotification implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    // 2026-11-13: a number sends one message every 1-2 minutes, so the send can wait in the
+    // worker's queue for minutes. A re-run joins the same send (dedupe key + worker client_id).
+    public int $timeout = 600;
+
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addHours(2);
+    }
+
     public function __construct(
         public int $installmentRequestId,
         public string $status,
@@ -40,8 +49,12 @@ class SendWhatsappStatusNotification implements ShouldQueue
             || ($this->customerAction !== null && (string) $request->customer_action !== $this->customerAction)) {
             return;
         }
-        // His chat's number may be logged out: send from a connected one.
-        $conversation = app(\App\Domain\Conversations\BotSessions::class)->liveConversation($request->whatsappConversation);
+        // From the number of the employee who owns the request; otherwise his chat's number,
+        // or a connected one when that is logged out.
+        $conversation = app(\App\Domain\Conversations\BotSessions::class)->liveConversation(
+            $request->whatsappConversation,
+            $request->staff_id ? (int) $request->staff_id : null,
+        );
 
         if (! $conversation) {
             Log::warning('SendWhatsappStatusNotification: no WhatsApp number connected', ['installment_request_id' => $request->id]);

@@ -40,7 +40,7 @@
         'applicant_name'            => 'اسم العميل',
         'applicant_phone'           => 'رقم الهاتف',
         'notes'                     => 'الملاحظات',
-    ];
+    ] + \App\Domain\Requests\CustomerEditLog::LABELS;
 
 
     /*
@@ -100,8 +100,13 @@
 
     $formatValue = function ($field, $value) use ($statusLabels) {
 
-        if ($value === null || $value === '') {
+        if ($value === null || $value === '' || $value === '[]') {
             return '—';
+        }
+
+        // customer edits: a document is shown as "file changed", not a storage path
+        if (\App\Domain\Requests\CustomerEditLog::isFile($field)) {
+            return 'ملف مرفوع';
         }
 
         if ($field === 'status') {
@@ -997,7 +1002,10 @@
                         $changes = $item['changes'];
                         $old = $item['old'];
 
-                        $causerName = $activity->causer?->name ?? 'غير معروف';
+                        $causerName = $activity->causer?->name
+                            ?? (in_array($activity->properties['source'] ?? null, ['customer_form', 'customer_chat'], true)
+                                ? 'العميل ('.(($activity->properties['source'] ?? '') === 'customer_form' ? 'من الفورم' : 'من الواتساب').')'
+                                : 'غير معروف');
 
                         $initial = mb_substr(
                             $causerName,

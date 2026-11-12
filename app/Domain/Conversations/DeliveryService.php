@@ -184,7 +184,7 @@ class DeliveryService
             // ERR-003: a resend of an item the worker already sent is not sent again
             'client_id' => 'out_'.$outbound->id,
             // 2026-11-12: the worker also holds a too-fast reply up to 90 s (human pacing).
-        ], 300);
+        ], 540); // 2026-11-13: one send per number every 1-2 min; under the 10-min stale-lock reclaim
 
         $this->finalizeDelivery($outbound, $response);
     }
@@ -221,7 +221,7 @@ class DeliveryService
             'jid' => $turn->reply_jid ?: $turn->from,
             'media_items' => [$item],
             'client_id' => 'out_'.$outbound->id,
-        ], 360);
+        ], 540);
 
         $this->finalizeDelivery($outbound, $response);
         $this->rememberMediaSent($turn, $item);

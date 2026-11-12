@@ -62,9 +62,13 @@ const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
  * typing time follows the length of the reply.
  */
 // Owner 2026-11-10: 20 a minute let a number send 300-600 an hour and WhatsApp unlinked it.
-const SEND_MAX_PER_MINUTE = Number(process.env.SEND_MAX_PER_MINUTE || 8);
-const SEND_MIN_GAP_MS = Number(process.env.SEND_MIN_GAP_MS || 1500);
-const SEND_MAX_GAP_MS = Number(process.env.SEND_MAX_GAP_MS || 4000);
+// Owner 2026-11-13: still 5+ a minute - ONE message per number, then a random 1-2 minutes before
+// the next one. These are floors: an env value can only make a number slower, never faster.
+const HARD_MIN_GAP_MS = 60000;
+const HARD_MAX_GAP_MS = 120000;
+const SEND_MAX_PER_MINUTE = 1;
+const SEND_MIN_GAP_MS = Math.max(HARD_MIN_GAP_MS, Number(process.env.SEND_MIN_GAP_MS) || 0);
+const SEND_MAX_GAP_MS = Math.max(HARD_MAX_GAP_MS, SEND_MIN_GAP_MS, Number(process.env.SEND_MAX_GAP_MS) || 0);
 /*
  * Owner 2026-10-04: the wait belongs before the "seen", not after it. A
  * message is NOT marked read when it lands - Laravel starts on it at once,
@@ -158,6 +162,8 @@ function withAttention(botId, jid, job) {
             await sleep(pacing.switchChatMs());
         }
 
+        await waitForTurn(botId);
+
         openChat[botId] = jid;
 
         try {
@@ -227,7 +233,8 @@ function randomBetween(min, max) {
 }
 
 async function waitForSendSlot(limiter) {
-    const gap = randomBetween(SEND_MIN_GAP_MS, SEND_MAX_GAP_MS);
+    // drawn once per gap, so waitForTurn (before seen/typing) and this agree on it
+    const gap = limiter.nextGap ??= randomBetween(SEND_MIN_GAP_MS, SEND_MAX_GAP_MS);
     const sinceLast = Date.now() - limiter.lastAt;
 
     if (sinceLast < gap) {
@@ -259,12 +266,32 @@ function throttleSend(botId, send) {
         } finally {
             limiter.lastAt = Date.now();
             limiter.sentAt.push(limiter.lastAt);
+            limiter.nextGap = null;
         }
     });
 
     limiter.chain = run.catch(() => {});
 
     return run;
+}
+
+/**
+ * Before seen/typing: wait until this number may send again, keeping a few seconds for the typing.
+ * Otherwise the customer saw "typing..." and then nothing for up to two minutes.
+ */
+async function waitForTurn(botId) {
+    const limiter = sendLimiters[botId];
+
+    if (!limiter || !limiter.lastAt) return;
+
+    limiter.nextGap ??= randomBetween(SEND_MIN_GAP_MS, SEND_MAX_GAP_MS);
+
+    const wait = limiter.lastAt + limiter.nextGap - Date.now() - 8000;
+
+    if (wait > 0) {
+        console.log(`⏳ anti-ban: bot ${botId} next send in ${Math.round((wait + 8000) / 1000)}s`);
+        await sleep(wait);
+    }
 }
 
 /**

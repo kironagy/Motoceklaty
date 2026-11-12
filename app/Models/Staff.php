@@ -98,6 +98,15 @@ public function installmentSystems()
         return (bool) ($this->is_super_admin ?? false);
     }
 
+    /**
+     * A company (Aman) employee whose view is cut to his companies' requests. Owner 2026-11-13:
+     * a super admin (or the owner) who is also an Aman employee sees everything a super admin sees.
+     */
+    public function isAmaanRestricted(): bool
+    {
+        return (bool) ($this->is_company_employee ?? false) && ! $this->isSuperAdmin() && ! (bool) ($this->is_hitler ?? false);
+    }
+
     public function isAdmin(): bool
     {
         // السوبر أدمن يعتبر أدمن ضمنيًا

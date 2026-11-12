@@ -47,9 +47,17 @@ class BotSessions
      * a chat on that number, that chat is used instead. Null when no number
      * is connected at all.
      */
-    public function liveConversation(WhatsappConversation $conversation): ?WhatsappConversation
+    public function liveConversation(WhatsappConversation $conversation, ?int $staffId = null): ?WhatsappConversation
     {
         $connected = $this->connected();
+
+        // Owner 2026-11-13: the decision on a request reaches the customer from the number of the
+        // employee who owns the request - not from whichever colleague's number his chat sits on.
+        if ($staffId && ($staffBotId = $this->staffBot($staffId, $connected))) {
+            return (int) $conversation->whatsapp_bot_id === $staffBotId
+                ? $conversation
+                : $this->moveTo($conversation, $staffBotId);
+        }
 
         // Worker status unknown: send as before and let delivery report it.
         if ($connected === null) {
@@ -66,6 +74,24 @@ class BotSessions
             return null;
         }
 
+        return $this->moveTo($conversation, $botId);
+    }
+
+    /** The staff member's own active number - a connected one when the worker can say. */
+    private function staffBot(int $staffId, ?array $connected): ?int
+    {
+        $botIds = \App\Models\WhatsappBot::where('staff_id', $staffId)->where('is_active', true)
+            ->orderByDesc('connected_at')->pluck('id')->map(fn ($id) => (int) $id);
+
+        if ($connected === null) {
+            return $botIds->first();
+        }
+
+        return $botIds->first(fn ($id) => in_array($id, $connected, true));
+    }
+
+    private function moveTo(WhatsappConversation $conversation, int $botId): WhatsappConversation
+    {
         $existing = WhatsappConversation::where('whatsapp_bot_id', $botId)->where('phone', $conversation->phone)->first();
 
         if ($existing) {

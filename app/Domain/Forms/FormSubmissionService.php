@@ -213,22 +213,12 @@ class FormSubmissionService
                 'status' => ($staffRequest['previous_status'] ?? null) ?: 'pending',
                 'status_updated_at' => now(),
                 'customer_action' => null,
-                'notes' => trim((string) $request->notes."\n".'العميل عدّل البيانات من رابط الفورم - '.now()->format('Y-m-d H:i')),
             ],
         ))->saveQuietly();
 
-        $after = $request->getAttributes();
-        $old = [];
-        $new = [];
-        foreach (array_keys($columns) as $field) {
-            if (($before[$field] ?? null) != ($after[$field] ?? null)) {
-                $old[$field]=$before[$field]??null;$new[$field]=$after[$field]??null;
-            }
-        }
-        if ($new !== []) {
-            activity('installment_requests')->performedOn($request)->causedBy($application->customer)
-                ->withProperties(['old'=>$old,'attributes'=>$new,'source'=>'customer_form'])->log('العميل عدّل بيانات الطلب من الفورم');
-        }
+        // every field he changed, documents too, old -> new in the request's activity log
+        $changed = \App\Domain\Requests\CustomerEditLog::record($request, $before, 'customer_form', $application->customer);
+        $request->forceFill(['notes' => trim((string) $request->notes."\n".\App\Domain\Requests\CustomerEditLog::noteLine($changed, 'رابط الفورم'))])->saveQuietly();
 
         $machine = app(\App\Domain\Applications\ApplicationStateMachine::class);
 
