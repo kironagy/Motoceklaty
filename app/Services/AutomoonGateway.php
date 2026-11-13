@@ -92,7 +92,99 @@ class AutomoonGateway
             return (bool) $device['connected'];
         }
 
-        return in_array(strtolower((string) ($device['status'] ?? $device['state'] ?? '')), ['connected', 'open', 'online', 'active', 'ready'], true);
+        // Automoon devices carry currentState (not_initialized, qr_generated, ready, disconnected...);
+        // its dashboard shows "ready" as online. status is a different field (struct, qrcode...).
+        $state = $device['currentState'] ?? $device['status'] ?? $device['state'] ?? '';
+
+        return in_array(strtolower((string) $state), ['connected', 'open', 'online', 'ready', 'authenticated'], true);
+    }
+
+    public static function configured(): bool
+    {
+        return (string) config('services.automoon.api_key') !== '';
+    }
+
+    /** @return array<int, array>|null every device on the Automoon account, null when Automoon can't say */
+    public function devices(): ?array
+    {
+        try {
+            $response = $this->client(15)->get('/whatsapp/devices');
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        $data = $response->successful() ? $response->json('data') : null;
+
+        return is_array($data) && array_is_list($data) ? $data : null;
+    }
+
+    public function device(string $deviceId): ?array
+    {
+        return collect($this->devices() ?? [])->first(fn ($d) => ($d['_id'] ?? $d['id'] ?? null) === $deviceId);
+    }
+
+    /**
+     * Owner 2026-11-14: numbers are linked from our bots page, not Automoon's. The bot's Automoon device
+     * (made on the first link, named after the bot) is started so Automoon makes a QR for it.
+     */
+    public function startLink(WhatsappBot $bot): array
+    {
+        if (! $bot->automoon_device_id || ! $this->device($bot->automoon_device_id)) {
+            $created = $this->client(20)->post('/whatsapp/devices', ['name' => $bot->name, 'platform' => 'unofficial', 'type' => 'whatsapp']);
+            $id = $created->json('data._id') ?? $created->json('data.id') ?? $created->json('_id') ?? $created->json('device._id');
+
+            if (! $created->successful() || ! is_string($id) || $id === '') {
+                return ['ok' => false, 'error' => 'Automoon '.$created->status().': '.Str::limit($created->body(), 300)];
+            }
+
+            $bot->update(['automoon_device_id' => $id]);
+        }
+
+        $device = $this->device($bot->automoon_device_id);
+
+        if ($device && self::deviceConnected($device)) {
+            return ['ok' => true, 'connected' => true];
+        }
+
+        $init = $this->client(30)->post('/whatsapp/initialize', ['deviceId' => $bot->automoon_device_id]);
+
+        return $init->successful() && $init->json('success') !== false
+            ? ['ok' => true, 'connected' => false]
+            : ['ok' => false, 'error' => 'Automoon '.$init->status().': '.Str::limit($init->body(), 300)];
+    }
+
+    /** What the bots page shows while linking: connected, or the QR to scan. */
+    public function linkState(WhatsappBot $bot): array
+    {
+        $device = $bot->automoon_device_id ? $this->device($bot->automoon_device_id) : null;
+
+        if (! $device) {
+            return ['connected' => false, 'qr' => null, 'state' => 'unknown'];
+        }
+
+        $connected = self::deviceConnected($device);
+
+        if ($connected && $bot->session_status !== 'connected') {
+            $bot->forceFill(['session_status' => 'connected', 'connected_at' => now(), 'qr_code' => null])->save();
+        }
+
+        return [
+            'connected' => $connected,
+            'qr' => $connected ? null : ($device['qrDataUrl'] ?? null),
+            'state' => (string) ($device['currentState'] ?? $device['status'] ?? ''),
+            'phone' => $device['phoneNumber'] ?? null,
+        ];
+    }
+
+    public function logout(WhatsappBot $bot): bool
+    {
+        if (! $bot->automoon_device_id) {
+            return true;
+        }
+
+        $response = $this->client(20)->post('/whatsapp/logout', ['deviceId' => $bot->automoon_device_id]);
+
+        return $response->successful() && $response->json('success') !== false;
     }
 
     private function sendText(string $deviceId, string $to, string $body, int $timeout): Response

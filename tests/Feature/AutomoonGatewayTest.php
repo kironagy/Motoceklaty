@@ -105,8 +105,9 @@ class AutomoonGatewayTest extends TestCase
     public function test_connected_numbers_come_from_automoon_devices(): void
     {
         Http::fake(['automoon.test/*' => Http::response(['success' => true, 'data' => [
-            ['id' => 'dev_1', 'status' => 'connected'],
-            ['id' => 'dev_2', 'status' => 'disconnected'],
+            // the real shape: _id + currentState, status is something else
+            ['_id' => 'dev_1', 'status' => 'struct', 'currentState' => 'ready'],
+            ['_id' => 'dev_2', 'status' => 'qrcode', 'currentState' => 'qr_generated'],
         ]])]);
 
         $this->assertSame([$this->bot->id], app(BotSessions::class)->connected());
