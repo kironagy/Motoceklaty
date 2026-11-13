@@ -12,6 +12,7 @@ class WhatsappBot extends Model
     'mode',
     'whatsapp_phone_number',
     'whatsapp_phone_number_id',
+    'automoon_device_id',
     'qr_code',
     'session_status',
     'connected_at',

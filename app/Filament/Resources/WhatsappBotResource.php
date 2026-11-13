@@ -78,6 +78,14 @@ class WhatsappBotResource extends Resource
                         ->maxLength(255)
                         ->helperText('اكتب أي كود مميز للبوت، مثال: bot_1 أو sales_1'),
 
+                    // Owner 2026-11-14: the bot's device on Automoon (WHATSAPP_GATEWAY=automoon)
+                    Forms\Components\TextInput::make('automoon_device_id')
+                        ->label('رقم جهاز اوتومون (Device ID)')
+                        ->nullable()
+                        ->unique(ignoreRecord: true)
+                        ->maxLength(255)
+                        ->helperText('من لوحة اوتومون بعد ربط الرقم - البوت بيبعت ويستقبل من خلاله لما تكون البوابة اوتومون'),
+
                     Forms\Components\Toggle::make('is_active')
                         ->label('نشط')
                         ->default(true),

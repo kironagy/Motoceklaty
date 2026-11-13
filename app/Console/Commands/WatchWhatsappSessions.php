@@ -23,6 +23,10 @@ class WatchWhatsappSessions extends Command
 
     public function handle(): int
     {
+        if (\App\Services\AutomoonGateway::enabled()) {
+            return $this->handleAutomoon();
+        }
+
         try {
             $response = Http::connectTimeout(5)->timeout(10)
                 ->withHeaders(['X-BOT-TOKEN' => config('services.whatsapp.bot_token'), 'Accept' => 'application/json'])
@@ -77,6 +81,51 @@ class WatchWhatsappSessions extends Command
         return self::SUCCESS;
     }
 
+    /**
+     * Owner 2026-11-14 (WHATSAPP_GATEWAY=automoon): the numbers live on Automoon, our worker is off.
+     * A bot is connected when its Automoon device is; a bot without a device id is not linked yet.
+     */
+    private function handleAutomoon(): int
+    {
+        $connectedIds = app(\App\Services\AutomoonGateway::class)->connectedBotIds();
+
+        if ($connectedIds === null) {
+            $this->alertOnce('automoon', 'بوابة اوتومون مش بترد (أو المفتاح غلط) - الرسايل مش بتتبعت.', null);
+
+            return self::FAILURE;
+        }
+
+        $down = [];
+
+        foreach (WhatsappBot::where('is_active', true)->get() as $bot) {
+            $connected = in_array((int) $bot->id, $connectedIds, true);
+            $changes = ['session_status' => $connected ? 'connected' : ($bot->automoon_device_id ? 'automoon_disconnected' : 'automoon_not_linked')];
+
+            if ($connected && $bot->session_status !== 'connected') {
+                $changes['connected_at'] = now();
+            }
+            $bot->forceFill($changes)->save();
+
+            if (! $connected) {
+                $down[] = $bot;
+            }
+        }
+
+        $this->line('automoon connected: '.implode(',', $connectedIds).' | down: '.collect($down)->map(fn ($b) => "{$b->id}({$b->session_status})")->implode(','));
+
+        if ($down !== [] && ! $this->option('quiet-alerts')) {
+            $lines = collect($down)->map(fn (WhatsappBot $b) => "• {$b->name} (#{$b->id}) - ".($b->session_status === 'automoon_not_linked'
+                ? 'مالوش رقم جهاز اوتومون في صفحة البوتات'
+                : 'الجهاز مش متصل على اوتومون، امسح الـ QR من لوحة اوتومون'))->implode("\n");
+
+            $this->alertOnce('automoon-bots:'.collect($down)->pluck('id')->sort()->implode(','),
+                "⚠️ أرقام واتساب واقفة على اوتومون والعملاء اللي بيكلموها مش بيوصلهم رد:\n{$lines}",
+                $connectedIds[0] ?? null);
+        }
+
+        return self::SUCCESS;
+    }
+
     /** Same problem = one alert per hour, never a message every 5 minutes. */
     private function alertOnce(string $key, string $message, ?int $viaBotId): void
     {
@@ -92,14 +141,22 @@ class WatchWhatsappSessions extends Command
             return;
         }
 
+        $payload = [
+            'bot_id' => (string) $viaBotId,
+            'jid' => str_contains($number, '@') ? $number : $number.'@s.whatsapp.net',
+            'message' => $message,
+        ];
+
         try {
+            if (\App\Services\AutomoonGateway::enabled()) {
+                app(\App\Services\AutomoonGateway::class)->send('/send-message', $payload, 30);
+
+                return;
+            }
+
             Http::connectTimeout(5)->timeout(30)
                 ->withHeaders(['X-BOT-TOKEN' => config('services.whatsapp.bot_token'), 'Accept' => 'application/json'])
-                ->post(config('services.whatsapp.worker_url').'/send-message', [
-                    'bot_id' => (string) $viaBotId,
-                    'jid' => str_contains($number, '@') ? $number : $number.'@s.whatsapp.net',
-                    'message' => $message,
-                ]);
+                ->post(config('services.whatsapp.worker_url').'/send-message', $payload);
         } catch (\Throwable $e) {
             Log::error('WhatsApp session alert failed', ['error' => $e->getMessage()]);
         }

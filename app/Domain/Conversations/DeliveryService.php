@@ -42,6 +42,11 @@ class DeliveryService
             ])));
         }
 
+        // Owner 2026-11-14: WHATSAPP_GATEWAY=automoon sends through Automoon; the worker path below stays as the fallback.
+        if (\App\Services\AutomoonGateway::enabled()) {
+            return app(\App\Services\AutomoonGateway::class)->send($endpoint, $payload, min($timeout, 120));
+        }
+
         return Http::connectTimeout(10)->timeout($timeout)
             ->withHeaders(['X-BOT-TOKEN' => config('services.whatsapp.bot_token'), 'Accept' => 'application/json'])
             ->post(config('services.whatsapp.worker_url').$endpoint, $payload);

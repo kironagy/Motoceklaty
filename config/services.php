@@ -48,6 +48,19 @@ return [
         'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
         'access_token' => env('WHATSAPP_ACCESS_TOKEN'),
         'api_version' => env('WHATSAPP_API_VERSION', 'v23.0'),
+        // Owner 2026-11-14: 'worker' = our own Node worker (whatsapp-bot/, kept as the fallback),
+        // 'automoon' = Automoon gateway (AutomoonGateway). Switch back by setting it to 'worker'.
+        'gateway' => env('WHATSAPP_GATEWAY', 'worker'),
+    ],
+
+    'automoon' => [
+        'base_url' => rtrim((string) env('AUTOMOON_BASE_URL', 'https://api.automooncrm.com/api'), '/'),
+        'api_key' => env('AUTOMOON_API_KEY'),
+        // Compared with the NBG-WEBHOOK-SECRET header Automoon sends with every webhook.
+        'webhook_secret' => env('AUTOMOON_WEBHOOK_SECRET'),
+        // Owner 2026-11-14: reply fast - seconds between two late re-answers on one number.
+        'answer_gap_min' => (int) env('AUTOMOON_ANSWER_GAP_MIN', 3),
+        'answer_gap_max' => (int) env('AUTOMOON_ANSWER_GAP_MAX', 8),
     ],
 
     'google' => [
