@@ -319,6 +319,7 @@
                         <th>وقت زيادة</th>
                         <th>خصومات التأخير</th>
                         <th>السلف</th>
+                        <th>الخصومات</th>
                         <th>البونص</th>
                         <th>الصافي</th>
                         <th>إجراء</th>
@@ -388,6 +389,12 @@
                             </td>
 
                             <td>
+                                <span class="salary-pill salary-deduction">
+                                    {{ number_format($row['manual_deductions'], 2) }} ج
+                                </span>
+                            </td>
+
+                            <td>
                                 <span class="salary-pill salary-bonus">
                                     {{ number_format($row['bonuses'], 2) }} ج
                                 </span>
@@ -411,7 +418,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="11">
+                            <td colspan="14">
                                 <div class="salary-empty">
                                     لا يوجد بيانات مرتبات لهذا الشهر.
                                 </div>

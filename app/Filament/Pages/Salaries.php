@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Models\Attendance;
 use App\Models\EmployeeAdvanceRequest;
 use App\Models\EmployeeBonus;
+use App\Models\EmployeeDeduction;
 use App\Models\Staff;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
@@ -114,6 +115,11 @@ class Salaries extends Page
                     ->whereBetween('bonus_date', [$start->toDateString(), $end->toDateString()])
                     ->sum('amount');
 
+                $manualDeductions = EmployeeDeduction::query()
+                    ->where('staff_id', $user->id)
+                    ->whereBetween('deduction_date', [$start->toDateString(), $end->toDateString()])
+                    ->sum('amount');
+
                 $presentDays = $attendances->whereNotNull('check_in_at')->count();
                 $lateDays = $attendances->where('late_minutes', '>', 0)->count();
                 $lateMinutes = $attendances->sum('late_minutes');
@@ -128,7 +134,7 @@ class Salaries extends Page
                 $attendanceDeductions = $legacyDeductions + $points['deductions'];
                 $overtimeMinutes = (int) $attendances->sum('overtime_minutes');
 
-                $netSalary = $monthlySalary - $attendanceDeductions - (float) $approvedAdvances + (float) $bonuses;
+                $netSalary = $monthlySalary - $attendanceDeductions - (float) $approvedAdvances - (float) $manualDeductions + (float) $bonuses;
 
                 return [
                     'user' => $user,
@@ -142,6 +148,7 @@ class Salaries extends Page
                     'overtime' => $overtimeMinutes > 0 ? \App\Filament\Widgets\AttendanceCheckWidget::hoursText($overtimeMinutes) : '—',
                     'attendance_deductions' => round($attendanceDeductions, 2),
                     'approved_advances' => round((float) $approvedAdvances, 2),
+                    'manual_deductions' => round((float) $manualDeductions, 2),
                     'bonuses' => round((float) $bonuses, 2),
                     'net_salary' => round($netSalary, 2),
                 ];
