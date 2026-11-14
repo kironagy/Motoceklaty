@@ -99,7 +99,9 @@ class AutomoonWebhookController extends Controller
             'wa_message_id' => is_scalar($id) && (string) $id !== ''
                 ? (string) $id
                 : 'am-'.sha1($bot->automoon_device_id.'|'.$from.'|'.$timestamp.'|'.$text),
-            'chat_jid' => $from.'@s.whatsapp.net',
+            // Owner 2026-11-14: keep the real jid - an @lid customer is the same customer the worker
+            // stored as "<lid>@lid" (Automoon's "phone" for them is only the lid digits).
+            'chat_jid' => preg_match('/^\d+@(lid|s\.whatsapp\.net)$/', $jid) ? $jid : $from.'@s.whatsapp.net',
             'push_name' => $sender['name'] ?? $data['pushName'] ?? $data['name'] ?? null,
             'timestamp' => $timestamp,
             'type' => $type,
