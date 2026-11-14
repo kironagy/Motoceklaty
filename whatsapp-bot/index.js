@@ -967,7 +967,9 @@ async function startSession(botId) {
 
         if (update.reachoutTimeLock) {
             (restrictions[botId] ||= {}).timelock = update.reachoutTimeLock;
-            console.warn(`🚫 bot ${botId} reachout timelock`, update.reachoutTimeLock);
+            if (update.reachoutTimeLock.isActive) {
+                console.warn(`🚫 bot ${botId} reachout timelock`, update.reachoutTimeLock);
+            }
         }
 
         if (qr) {
