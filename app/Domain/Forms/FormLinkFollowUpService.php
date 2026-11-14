@@ -59,7 +59,7 @@ class FormLinkFollowUpService
 
         // Live 2026-11-08: while numbers were logged out the reminder was tried again and again and every
         // copy FAILED; it waits for the number to be connected (whatsapp:watch-sessions keeps this live).
-        if (in_array($conversation->whatsappBot->session_status, ['logged_out', 'qr', 'not_running', 'disconnected'], true)) {
+        if (in_array($conversation->whatsappBot->session_status, ['logged_out', 'qr', 'not_running', 'disconnected', 'restricted'], true)) {
             return false;
         }
 

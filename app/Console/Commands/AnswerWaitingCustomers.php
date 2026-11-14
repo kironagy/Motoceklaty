@@ -16,7 +16,7 @@ class AnswerWaitingCustomers extends Command
 {
     protected $signature = 'whatsapp:answer-waiting
         {--minutes=5 : only messages at least this old}
-        {--hours=48 : only messages at most this old}
+        {--hours=24 : only messages at most this old (never more than 24)}
         {--all : kept for compatibility; every unanswered message is looked at}
         {--bot= : only this bot}
         {--gap-min=75 : seconds at least between two re-answers (anti-ban pacing)}
@@ -27,6 +27,11 @@ class AnswerWaitingCustomers extends Command
 
     public function handle(): int
     {
+        // Owner 2026-11-15 (anti-ban): only a customer who wrote in the last 24 hours is answered by
+        // the bot; older ones are listed for staff (AwaitingAgentConversationResource::staleUnanswered).
+        // bot 93 was banned while re-answering chats days old - that looks like opening cold chats.
+        $hours = min(24, max(1, (int) $this->option('hours')));
+
         $waiting = DB::table('whatsapp_conversations as c')
             ->join('whatsapp_bots as b', 'b.id', '=', 'c.whatsapp_bot_id')
             // a bot reply that never reached him (delivery failed: number logged out, worker down) is no reply
@@ -37,7 +42,7 @@ class AnswerWaitingCustomers extends Command
             ->where('c.status', '!=', 'awaiting_agent')
             ->where('m.direction', 'incoming')->where('m.sender_type', 'customer')
             // Owner 2026-11-10: the whole --hours window (10 days on the schedule) is answered, recovered or not.
-            ->whereBetween('m.created_at', [now()->subHours((int) $this->option('hours')), now()->subMinutes((int) $this->option('minutes'))])
+            ->whereBetween('m.created_at', [now()->subHours($hours), now()->subMinutes((int) $this->option('minutes'))])
             ->whereNotExists(fn ($q) => $q->from('whatsapp_message_jobs as j')->whereColumn('j.whatsapp_conversation_id', 'c.id')
                 ->whereIn('j.status', ['pending', 'processing', 'generated']))
             // one retry per message: a turn made after his message already tried (no loop on a failing number)
@@ -63,18 +68,13 @@ class AnswerWaitingCustomers extends Command
         // Owner 2026-11-10: every number works around the clock - no night hold. Re-answers are
         // paced about a minute apart per bot, newest first; a customer writing live is claimed before
         // them (ProcessWhatsappMessageJobs::claimNextJob), then the backlog carries on.
-        // Owner 2026-11-14: on Automoon the owner wants the backlog answered fast - a few seconds apart.
         $slots = [];
         $nextSlot = function (int $botId) use (&$slots) {
-            [$gapMin, $gapMax] = \App\Services\AutomoonGateway::forBot($botId)
-                ? [(int) config('services.automoon.answer_gap_min', 3), (int) config('services.automoon.answer_gap_max', 8)]
-                : [(int) $this->option('gap-min'), (int) $this->option('gap-max')];
-
             $slots[$botId] ??= max(now(), \Illuminate\Support\Carbon::parse(DB::table('whatsapp_message_jobs')
                 ->where('whatsapp_bot_id', $botId)->where('status', 'pending')->where('payload', 'like', '%"answer_waiting%')
                 ->max('process_after') ?? now()));
 
-            return $slots[$botId] = $slots[$botId]->copy()->addSeconds(random_int($gapMin, max($gapMin, $gapMax)));
+            return $slots[$botId] = $slots[$botId]->copy()->addSeconds(random_int((int) $this->option('gap-min'), max((int) $this->option('gap-min'), (int) $this->option('gap-max'))));
         };
 
         foreach ($waiting as $row) {

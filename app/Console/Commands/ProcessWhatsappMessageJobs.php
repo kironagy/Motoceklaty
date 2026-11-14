@@ -496,11 +496,12 @@ class ProcessWhatsappMessageJobs extends Command
             // Owner 2026-11-10 (anti-ban): a number that sent its hourly or daily cap of messages
             // takes no turn at all until the window frees - live ones wait too.
             $capped = \Illuminate\Support\Facades\Cache::remember('send_capped_bots', 30, function () {
-                $hour = (int) config('agent.delivery.max_sends_per_hour', 150);
-                $day = (int) config('agent.delivery.max_sends_per_day', 1500);
+                // Owner 2026-11-15: different customers answered per number, not messages.
+                $hour = (int) config('agent.delivery.max_customers_per_hour', 150);
+                $day = (int) config('agent.delivery.max_customers_per_day', 1500);
                 $sent = fn ($since) => DB::table('whatsapp_messages')->where('direction', 'outgoing')
                     ->where('delivery_status', 'sent')->where('created_at', '>=', $since)
-                    ->groupBy('whatsapp_bot_id')->selectRaw('whatsapp_bot_id, count(*) n')->pluck('n', 'whatsapp_bot_id');
+                    ->groupBy('whatsapp_bot_id')->selectRaw('whatsapp_bot_id, count(distinct whatsapp_conversation_id) n')->pluck('n', 'whatsapp_bot_id');
 
                 $capped = $sent(now()->subHour())->filter(fn ($n) => $hour > 0 && $n >= $hour)->keys()
                     ->merge($sent(now()->subDay())->filter(fn ($n) => $day > 0 && $n >= $day)->keys())
@@ -512,8 +513,10 @@ class ProcessWhatsappMessageJobs extends Command
 
                 return $capped;
             });
-            // Owner 2026-11-14: no hourly/daily cap for a bot on Automoon.
-            $capped = array_values(array_diff($capped, \App\Services\AutomoonGateway::botIds()));
+            // Owner 2026-11-15 (Baileys rc14): a number WhatsApp itself restricted (reachout timelock or
+            // new-chat cap reached, see whatsapp:watch-sessions) takes no turn until it is lifted.
+            $capped = array_values(array_unique(array_merge($capped,
+                \App\Models\WhatsappBot::where('session_status', 'restricted')->pluck('id')->map(fn ($id) => (int) $id)->all())));
 
             $backlogBlocked = DB::table('whatsapp_message_jobs')
                 ->where('status', 'processing')->where('locked_at', '>=', $staleBefore)
@@ -590,10 +593,7 @@ class ProcessWhatsappMessageJobs extends Command
             $job->attempts = ((int) $job->attempts) + 1;
 
             if (str_contains((string) ($job->payload ?? ''), 'answer_waiting')) {
-                // Owner 2026-11-14: a few seconds on Automoon instead of a minute.
-                $gap = \App\Services\AutomoonGateway::forBot($job->whatsapp_bot_id)
-                    ? random_int((int) config('services.automoon.answer_gap_min', 3), max((int) config('services.automoon.answer_gap_min', 3), (int) config('services.automoon.answer_gap_max', 8)))
-                    : random_int(60, 65);
+                $gap = random_int(60, 65);
                 \Illuminate\Support\Facades\Cache::put('answer_waiting_gap_'.$job->whatsapp_bot_id, true, now()->addSeconds($gap));
             }
 

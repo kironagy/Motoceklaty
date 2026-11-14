@@ -78,14 +78,6 @@ class WhatsappBotResource extends Resource
                         ->maxLength(255)
                         ->helperText('اكتب أي كود مميز للبوت، مثال: bot_1 أو sales_1'),
 
-                    // Owner 2026-11-14: the bot's device on Automoon (WHATSAPP_GATEWAY=automoon)
-                    Forms\Components\TextInput::make('automoon_device_id')
-                        ->label('رقم جهاز اوتومون (Device ID)')
-                        ->nullable()
-                        ->unique(ignoreRecord: true)
-                        ->maxLength(255)
-                        ->helperText('من لوحة اوتومون بعد ربط الرقم - البوت بيبعت ويستقبل من خلاله لما تكون البوابة اوتومون'),
-
                     Forms\Components\Toggle::make('is_active')
                         ->label('نشط')
                         ->default(true),
@@ -148,43 +140,7 @@ class WhatsappBotResource extends Resource
                     ->url(fn (WhatsappBot $record) => static::getUrl('activity', ['record' => $record])),
 
                 Tables\Actions\ActionGroup::make([
-                // Owner 2026-11-14: link the number to Automoon from here - the QR refreshes by itself
-                // until the phone scans it.
-                Tables\Actions\Action::make('automoon_link')
-                    ->label('ربط واتساب (اوتومون)')
-                    ->icon('heroicon-o-qr-code')
-                    ->color('success')
-                    ->visible(fn () => \App\Services\AutomoonGateway::configured())
-                    ->modalHeading('ربط رقم الواتساب')
-                    ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('إغلاق')
-                    ->mountUsing(function (WhatsappBot $record) {
-                        $result = app(\App\Services\AutomoonGateway::class)->startLink($record);
-
-                        if (! $result['ok']) {
-                            Notification::make()->title('تعذر بدء الربط مع اوتومون')->body($result['error'] ?? '')->danger()->send();
-                        }
-                    })
-                    ->modalContent(fn (WhatsappBot $record) => view('filament.automoon-link', [
-                        'link' => app(\App\Services\AutomoonGateway::class)->linkState($record->refresh()),
-                    ])),
-
-                Tables\Actions\Action::make('automoon_logout')
-                    ->label('فصل واتساب (اوتومون)')
-                    ->icon('heroicon-o-x-circle')
-                    ->color('danger')
-                    ->visible(fn (WhatsappBot $record) => \App\Services\AutomoonGateway::configured() && filled($record->automoon_device_id))
-                    ->requiresConfirmation()
-                    ->action(function (WhatsappBot $record) {
-                        $ok = app(\App\Services\AutomoonGateway::class)->logout($record);
-                        $record->update(['session_status' => 'logged_out', 'connected_at' => null, 'qr_code' => null]);
-
-                        Notification::make()->title($ok ? 'تم فصل الواتساب من اوتومون' : 'اوتومون مردش - اتأكد من لوحة اوتومون')
-                            ->{$ok ? 'success' : 'warning'}()->send();
-                    }),
-
                 Tables\Actions\Action::make('generate_qr')
-                    ->hidden(fn ($record) => \App\Services\AutomoonGateway::forBot($record?->id))
                     ->label('توليد QR')
                     ->icon('heroicon-o-qr-code')
                     ->color('warning')
@@ -275,7 +231,6 @@ class WhatsappBotResource extends Resource
                             ->send();
                     }),
                 Tables\Actions\Action::make('show_qr')
-                    ->hidden(fn ($record) => \App\Services\AutomoonGateway::forBot($record?->id))
                     ->label('عرض QR')
                     ->icon('heroicon-o-eye')
                     ->color('info')
@@ -317,7 +272,6 @@ class WhatsappBotResource extends Resource
                         }
                     }),
                 Tables\Actions\Action::make('check_status')
-                    ->hidden(fn ($record) => \App\Services\AutomoonGateway::forBot($record?->id))
                     ->label('فحص الحالة')
                     ->icon('heroicon-o-arrow-path')
                     ->color('gray')
@@ -361,7 +315,6 @@ class WhatsappBotResource extends Resource
                     }),
 
                 Tables\Actions\Action::make('logout')
-                    ->hidden(fn ($record) => \App\Services\AutomoonGateway::forBot($record?->id))
                     ->label('فصل الواتساب')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')

@@ -18,6 +18,7 @@ const path = require('path');
 const { createSpool } = require('./spool');
 const { createSentRegistry } = require('./sent-registry');
 const { createHumanPacing, createAttention, cairoHour } = require('./human-pacing');
+const { createContactBook } = require('./contact-book');
 
 require('dotenv').config();
 
@@ -122,6 +123,33 @@ async function flushReads(sock, botId, jids) {
  * send. Only the first bubble of a turn has unread customer messages, so only it waits.
  */
 const pacing = createHumanPacing();
+const contactBook = createContactBook({ file: process.env.CONTACT_BOOK_FILE || path.join(__dirname, 'sent-items', 'saved-contacts.json') });
+
+/*
+ * Owner 2026-11-15 (Baileys rc14): WhatsApp tells a number when it may not message new chats
+ * (reachout timelock) and how much of its new-chat quota is used (message capping). Kept per bot
+ * and shown on /status, so Laravel holds the number's turns instead of sending into a restriction.
+ */
+const restrictions = {};
+
+function restrictionOf(botId) {
+    const r = restrictions[botId] || {};
+    const lockedUntil = r.timelock?.isActive ? new Date(r.timelock.timeEnforcementEnds || Date.now() + 60000).getTime() : 0;
+    const locked = lockedUntil > Date.now();
+    const capped = String(r.capping?.capping_status || '') === 'CAPPED'
+        && (!r.capping?.cycle_end_timestamp || Number(r.capping.cycle_end_timestamp) * 1000 > Date.now());
+
+    return {
+        restricted: locked || capped,
+        reachout_timelock: locked ? { until: new Date(lockedUntil).toISOString(), type: r.timelock.enforcementType || null } : null,
+        new_chat_cap: r.capping ? {
+            status: r.capping.capping_status || null,
+            used: r.capping.used_quota ?? null,
+            total: r.capping.total_quota ?? null,
+            cycle_end: r.capping.cycle_end_timestamp ? new Date(Number(r.capping.cycle_end_timestamp) * 1000).toISOString() : null,
+        } : null,
+    };
+}
 const attention = createAttention();
 /** botId|jid -> when we last sent there; botId -> jid of the chat this number is in. */
 const lastSentAt = new Map();
@@ -136,7 +164,7 @@ function noteSent(botId, jid) {
 }
 
 /** Before the chat is opened: the customer's message stays unread for a human amount of time. */
-async function humanWait(botId, jid) {
+async function humanWait(botId, jid, replyText = null) {
     const entry = readKeys(botId, [jid]).map(k => pendingReads.get(k)).find(Boolean);
 
     if (!entry || entry.held) return;
@@ -147,6 +175,8 @@ async function humanWait(botId, jid) {
         waitedMs: Date.now() - entry.firstAt,
         hot: Date.now() - (lastSentAt.get(`${botId}|${jid}`) || 0) < Number(process.env.HUMAN_HOT_CHAT_MS || 120000),
         cairoHour: cairoHour(),
+        // Owner 2026-11-15: the wait follows the reply's length (20-90 s from the customer's message).
+        replyChars: replyText === null ? null : cleanReplyText(replyText).length,
     });
 
     if (delay > 0) {
@@ -813,6 +843,10 @@ async function handleIncomingMessage(sock, botId, msg, { recovered = false } = {
             queueRead(sock, botId, [originalFrom, customerJid], msg.key, getMessageText(msg).length);
         }
 
+        if (!isFromMe) {
+            contactBook.noteName(botId, [originalFrom, customerJid], msg.pushName);
+        }
+
         const payload = {
             bot_id: botId,
             wa_message_id: messageId,
@@ -931,6 +965,11 @@ async function startSession(botId) {
     sock.ev.on('connection.update', async update => {
         const { connection, lastDisconnect, qr } = update;
 
+        if (update.reachoutTimeLock) {
+            (restrictions[botId] ||= {}).timelock = update.reachoutTimeLock;
+            console.warn(`🚫 bot ${botId} reachout timelock`, update.reachoutTimeLock);
+        }
+
         if (qr) {
             latestQr[botId] = await QRCode.toDataURL(qr);
             statuses[botId] = 'qr';
@@ -943,6 +982,13 @@ async function startSession(botId) {
             reconnectAttempts[botId] = 0;
 
             console.log(`✅ Bot ${botId} connected`);
+
+            // where this number stands with WhatsApp right after connecting (rc14)
+            sock.fetchAccountReachoutTimelock?.().catch(() => {});
+            sock.fetchNewChatMessageCap?.().then(info => {
+                const cap = info?.xwa2_message_capping_info || info;
+                if (cap && typeof cap === 'object') (restrictions[botId] ||= {}).capping = cap;
+            }).catch(() => {});
         }
 
         if (connection === 'close') {
@@ -995,6 +1041,11 @@ async function startSession(botId) {
                 }, plan.delayMs);
             }
         }
+    });
+
+    sock.ev.on('message-capping.update', info => {
+        (restrictions[botId] ||= {}).capping = info;
+        console.warn(`📉 bot ${botId} new-chat message cap`, info);
     });
 
     sock.ev.on('messaging-history.set', ({ messages, syncType }) => recoverHistory(sock, botId, messages, syncType));
@@ -1098,6 +1149,7 @@ app.get('/status', checkToken, (req, res) => {
             status: statuses[botId],
             has_qr: !!latestQr[botId],
             connected: statuses[botId] === 'connected',
+            ...restrictionOf(botId),
         })),
     });
 });
@@ -1206,6 +1258,11 @@ app.post('/send-message', checkToken, async (req, res) => {
             });
         }
 
+        // Owner 2026-11-15: WhatsApp put this number on a reachout timelock - sending now only adds strikes.
+        if (restrictionOf(botId).reachout_timelock) {
+            return res.status(429).json({ ok: false, error: 'reachout_timelock', bot_id: botId, ...restrictionOf(botId) });
+        }
+
         const quotedMsg = req.body.quoted_message
             ? recentRawMessages.get(req.body.quoted_message) || null
             : null;
@@ -1214,13 +1271,14 @@ app.post('/send-message', checkToken, async (req, res) => {
         const isCancelled = callerGone(res);
 
         const outcome = await sentRegistry.once(req.body.client_id, async () => {
-            await humanWait(botId, jid);
+            await humanWait(botId, jid, text);
 
             return withAttention(botId, jid, async () => {
                 if (isCancelled()) {
                     return { status: 200, body: { ok: false, bot_id: botId, jid, wa_message_id: null } };
                 }
 
+                await contactBook.ensureSaved(sock, botId, jid);
                 await seenBeforeReply(sock, botId, jid);
 
                 const sent = await sendTextSafely(sock, jid, text, quotedMsg, isCancelled, attention.pressure(botId));
@@ -1260,15 +1318,20 @@ app.post('/send-media-items', checkToken, async (req, res) => {
             return res.status(404).json({ ok: false, error: 'session not found', bot_id: botId });
         }
 
+        if (restrictionOf(botId).reachout_timelock) {
+            return res.status(429).json({ ok: false, error: 'reachout_timelock', bot_id: botId, ...restrictionOf(botId) });
+        }
+
         const isCancelled = callerGone(res);
 
         // ERR-003: the same reply item (client_id) is never sent twice
         const outcome = await sentRegistry.once(req.body.client_id, async () => {
-        await humanWait(botId, jid);
+        await humanWait(botId, jid, String(mediaItems[0]?.caption || ''));
 
         return withAttention(botId, jid, async () => {
         const results = [];
 
+        await contactBook.ensureSaved(sock, botId, jid);
         await seenBeforeReply(sock, botId, jid);
 
         for (const item of mediaItems) {

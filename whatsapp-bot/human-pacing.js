@@ -29,6 +29,12 @@ const DEFAULTS = {
     HUMAN_NIGHT_FROM: 1,
     HUMAN_NIGHT_TO: 8,
     HUMAN_NIGHT_FACTOR: 1.4,
+    // Owner 2026-11-15: from the customer's message to the reply, 20 s for a short answer up to
+    // 90 s for a long one (a person reads, thinks and types longer for a longer answer).
+    HUMAN_REPLY_MIN_MS: 20000,
+    HUMAN_REPLY_MAX_MS: 90000,
+    // The reply length at which the wait reaches its maximum.
+    HUMAN_REPLY_FULL_CHARS: 350,
 };
 
 /** [share, minMs, maxMs] - picked by share, then uniform inside the band. */
@@ -77,14 +83,29 @@ function createHumanPacing({ random = Math.random, env = process.env } = {}) {
      * waitedMs: how long the customer's message has already been waiting (the reply took that long).
      * hot: we sent to this chat a moment ago (live conversation).
      */
-    function replyDelayMs({ waitedMs = 0, hot = false, cairoHour = 12 } = {}) {
+    function replyDelayMs({ waitedMs = 0, hot = false, cairoHour = 12, replyChars = null } = {}) {
         if (!enabled) return 0;
+
+        if (replyChars !== null) {
+            return Math.round(Math.max(0, replyTargetMs(replyChars) - waitedMs));
+        }
 
         let target = pickBand(hot ? HOT_BANDS : COLD_BANDS);
 
         if (!hot && isNight(cairoHour)) target *= cfg.HUMAN_NIGHT_FACTOR;
 
         return Math.round(Math.min(cfg.HUMAN_MAX_EXTRA_MS, Math.max(0, target - waitedMs)));
+    }
+
+    /**
+     * Owner 2026-11-15: how long the customer waits in all for a reply of this length - 20 s for a
+     * one-liner up to 90 s for a long answer, +-15 % so two replies of the same length differ.
+     */
+    function replyTargetMs(replyChars = 0) {
+        const share = Math.min(1, Math.max(0, replyChars) / Math.max(1, cfg.HUMAN_REPLY_FULL_CHARS));
+        const base = cfg.HUMAN_REPLY_MIN_MS + share * (cfg.HUMAN_REPLY_MAX_MS - cfg.HUMAN_REPLY_MIN_MS);
+
+        return Math.min(cfg.HUMAN_REPLY_MAX_MS, Math.max(cfg.HUMAN_REPLY_MIN_MS, base * between(0.85, 1.15)));
     }
 
     /** Between "seen" and the first keystroke: reading what the customer wrote. */
@@ -157,7 +178,7 @@ function createHumanPacing({ random = Math.random, env = process.env } = {}) {
         return { reconnect: true, delayMs: Math.round(base * between(0.8, 1.3)), status: 'disconnected', archive: false };
     }
 
-    return { enabled, replyDelayMs, readingMs, typingPlan, switchChatMs, reconnectPlan, isNight };
+    return { enabled, replyDelayMs, replyTargetMs, readingMs, typingPlan, switchChatMs, reconnectPlan, isNight };
 }
 
 /**

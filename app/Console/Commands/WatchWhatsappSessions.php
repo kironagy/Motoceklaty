@@ -23,14 +23,6 @@ class WatchWhatsappSessions extends Command
 
     public function handle(): int
     {
-        // Owner 2026-11-14: bots with an Automoon device are watched on Automoon, the rest on the worker.
-        $automoonIds = \App\Services\AutomoonGateway::botIds();
-        $automoonResult = $automoonIds === [] ? self::SUCCESS : $this->handleAutomoon($automoonIds);
-
-        if (! WhatsappBot::where('is_active', true)->whereNotIn('id', $automoonIds)->exists()) {
-            return $automoonResult;
-        }
-
         try {
             $response = Http::connectTimeout(5)->timeout(10)
                 ->withHeaders(['X-BOT-TOKEN' => config('services.whatsapp.bot_token'), 'Accept' => 'application/json'])
@@ -50,13 +42,21 @@ class WatchWhatsappSessions extends Command
         $live = collect($response->json('sessions') ?? [])->keyBy(fn ($s) => (string) ($s['bot_id'] ?? ''));
         $connectedIds = $live->filter(fn ($s) => ($s['connected'] ?? false) === true)->keys()->map(fn ($id) => (int) $id)->all();
         $down = [];
+        $restrictedBots = [];
 
-        foreach (WhatsappBot::where('is_active', true)->whereNotIn('id', $automoonIds)->get() as $bot) {
+        foreach (WhatsappBot::where('is_active', true)->get() as $bot) {
             $session = $live->get((string) $bot->id);
             $status = $session['status'] ?? 'not_running';
             $connected = ($session['connected'] ?? false) === true;
+            // Owner 2026-11-15 (Baileys rc14): connected, but WhatsApp itself restricts the number
+            // (reachout timelock / new-chat cap) - its turns wait (ProcessWhatsappMessageJobs).
+            $restricted = $connected && ($session['restricted'] ?? false) === true;
 
-            $changes = ['session_status' => $connected ? 'connected' : $status];
+            if ($restricted) {
+                $restrictedBots[] = [$bot, $session];
+            }
+
+            $changes = ['session_status' => $restricted ? 'restricted' : ($connected ? 'connected' : $status)];
             if ($connected && $bot->session_status !== 'connected') {
                 $changes['connected_at'] = now();
             }
@@ -69,6 +69,19 @@ class WatchWhatsappSessions extends Command
 
         $this->line('connected: '.implode(',', $connectedIds).' | down: '.collect($down)->map(fn ($b) => "{$b->id}({$b->session_status})")->implode(','));
 
+        if ($restrictedBots !== [] && ! $this->option('quiet-alerts')) {
+            $lines = collect($restrictedBots)->map(fn ($pair) => "• {$pair[0]->name} (#{$pair[0]->id}) - ".(
+                ($pair[1]['reachout_timelock'] ?? null)
+                    ? 'واتساب منعه يكلّم أرقام جديدة لحد '.\Illuminate\Support\Carbon::parse($pair[1]['reachout_timelock']['until'])->timezone('Africa/Cairo')->format('m-d H:i')
+                    : 'وصل للحد اللي واتساب مسموح بيه للمحادثات الجديدة'
+            ))->implode("\n");
+            $healthy = collect($connectedIds)->diff(collect($restrictedBots)->map(fn ($p) => (int) $p[0]->id))->first();
+
+            $this->alertOnce('restricted:'.collect($restrictedBots)->map(fn ($p) => $p[0]->id)->sort()->implode(','),
+                "⛔ واتساب حاط قيد على الأرقام دي، والبوت وقّف الإرسال منها لحد ما القيد يتشال:\n{$lines}",
+                $healthy);
+        }
+
         if ($down !== [] && ! $this->option('quiet-alerts')) {
             $lines = collect($down)->map(fn (WhatsappBot $b) => "• {$b->name} (#{$b->id}) - ".match ($b->session_status) {
                 'logged_out' => 'واتساب عمل تسجيل خروج، محتاج QR جديد',
@@ -79,53 +92,6 @@ class WatchWhatsappSessions extends Command
 
             $this->alertOnce('bots:'.collect($down)->pluck('id')->sort()->implode(','),
                 "⚠️ أرقام واتساب واقفة والعملاء اللي بيكلموها مش بيوصلهم رد:\n{$lines}\nادخل صفحة البوتات وامسح الـ QR. بعد الربط البوت هيرد على الرسايل اللي وصلت وهو واقف.",
-                $connectedIds[0] ?? null);
-        }
-
-        return $automoonResult;
-    }
-
-    /**
-     * Owner 2026-11-14 (WHATSAPP_GATEWAY=automoon): the bots linked on Automoon. A bot is connected
-     * when its Automoon device is.
-     *
-     * @param  int[]  $botIds
-     */
-    private function handleAutomoon(array $botIds): int
-    {
-        $connectedIds = app(\App\Services\AutomoonGateway::class)->connectedBotIds();
-
-        if ($connectedIds === null) {
-            $this->alertOnce('automoon', 'بوابة اوتومون مش بترد (أو المفتاح غلط) - الرسايل مش بتتبعت.', null);
-
-            return self::FAILURE;
-        }
-
-        $down = [];
-
-        foreach (WhatsappBot::where('is_active', true)->whereIn('id', $botIds)->get() as $bot) {
-            $connected = in_array((int) $bot->id, $connectedIds, true);
-            $changes = ['session_status' => $connected ? 'connected' : ($bot->automoon_device_id ? 'automoon_disconnected' : 'automoon_not_linked')];
-
-            if ($connected && $bot->session_status !== 'connected') {
-                $changes['connected_at'] = now();
-            }
-            $bot->forceFill($changes)->save();
-
-            if (! $connected) {
-                $down[] = $bot;
-            }
-        }
-
-        $this->line('automoon connected: '.implode(',', $connectedIds).' | down: '.collect($down)->map(fn ($b) => "{$b->id}({$b->session_status})")->implode(','));
-
-        if ($down !== [] && ! $this->option('quiet-alerts')) {
-            $lines = collect($down)->map(fn (WhatsappBot $b) => "• {$b->name} (#{$b->id}) - ".($b->session_status === 'automoon_not_linked'
-                ? 'مالوش رقم جهاز اوتومون في صفحة البوتات'
-                : 'الجهاز مش متصل على اوتومون، اضغط «ربط واتساب (اوتومون)» في صفحة البوتات وامسح الـ QR'))->implode("\n");
-
-            $this->alertOnce('automoon-bots:'.collect($down)->pluck('id')->sort()->implode(','),
-                "⚠️ أرقام واتساب واقفة على اوتومون والعملاء اللي بيكلموها مش بيوصلهم رد:\n{$lines}",
                 $connectedIds[0] ?? null);
         }
 
@@ -147,22 +113,14 @@ class WatchWhatsappSessions extends Command
             return;
         }
 
-        $payload = [
-            'bot_id' => (string) $viaBotId,
-            'jid' => str_contains($number, '@') ? $number : $number.'@s.whatsapp.net',
-            'message' => $message,
-        ];
-
         try {
-            if (\App\Services\AutomoonGateway::forBot($viaBotId)) {
-                app(\App\Services\AutomoonGateway::class)->send('/send-message', $payload, 30);
-
-                return;
-            }
-
             Http::connectTimeout(5)->timeout(30)
                 ->withHeaders(['X-BOT-TOKEN' => config('services.whatsapp.bot_token'), 'Accept' => 'application/json'])
-                ->post(config('services.whatsapp.worker_url').'/send-message', $payload);
+                ->post(config('services.whatsapp.worker_url').'/send-message', [
+                    'bot_id' => (string) $viaBotId,
+                    'jid' => str_contains($number, '@') ? $number : $number.'@s.whatsapp.net',
+                    'message' => $message,
+                ]);
         } catch (\Throwable $e) {
             Log::error('WhatsApp session alert failed', ['error' => $e->getMessage()]);
         }

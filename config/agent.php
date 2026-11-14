@@ -88,6 +88,10 @@ return [
         // A number that reached either cap takes no turn until the window frees (0 = no cap).
         'max_sends_per_hour' => env('AGENT_MAX_SENDS_PER_HOUR', 150),
         'max_sends_per_day' => env('AGENT_MAX_SENDS_PER_DAY', 1500),
+        // Owner 2026-11-15: the caps count different customers answered, not messages - up to 1,500
+        // customers a day per number (and 150 an hour, so the day is not spent in one burst).
+        'max_customers_per_hour' => env('AGENT_MAX_CUSTOMERS_PER_HOUR', 150),
+        'max_customers_per_day' => env('AGENT_MAX_CUSTOMERS_PER_DAY', 1500),
     ],
 
     'reply' => [

@@ -42,12 +42,6 @@ class DeliveryService
             ])));
         }
 
-        // Owner 2026-11-14: WHATSAPP_GATEWAY=automoon sends a bot that has an Automoon device through
-        // Automoon; the other bots (and every bot when it is 'worker') keep the worker path below.
-        if (\App\Services\AutomoonGateway::forBot($payload['bot_id'] ?? null)) {
-            return app(\App\Services\AutomoonGateway::class)->send($endpoint, $payload, min($timeout, 120));
-        }
-
         return Http::connectTimeout(10)->timeout($timeout)
             ->withHeaders(['X-BOT-TOKEN' => config('services.whatsapp.bot_token'), 'Accept' => 'application/json'])
             ->post(config('services.whatsapp.worker_url').$endpoint, $payload);
@@ -165,6 +159,18 @@ class DeliveryService
 
         if (trim($text) === '' || $this->alreadySent($turn->id, 'text', $index)) {
             return;
+        }
+
+        // Owner 2026-11-15 (anti-ban): no link to a customer who has not written at least twice - a
+        // link in the first messages of a chat is one of the strongest spam signals.
+        if ($senderType !== 'agent' && self::hasLink($text) && $this->customerMessageCount($turn) < 2) {
+            $held = $text;
+            $text = self::withoutLinks($text);
+            Log::info('Link held back until the customer has written twice', ['turn_id' => $turn->id, 'text' => mb_substr($held, 0, 200)]);
+
+            if (trim($text) === '') {
+                return;
+            }
         }
 
         if ($senderType !== 'agent' && $this->repeatsSinceCustomer($turn, $text)) {
@@ -288,6 +294,35 @@ class DeliveryService
     }
 
     /** Text compared without punctuation, spacing, emoji or Arabic letter variants. */
+    public static function hasLink(string $text): bool
+    {
+        return (bool) preg_match('~(https?://|www\.)\S+~iu', $text);
+    }
+
+    /** The text with its links taken out; a line that was only a link goes away with it. */
+    public static function withoutLinks(string $text): string
+    {
+        $lines = array_map(fn ($line) => rtrim(preg_replace('~\s*(https?://|www\.)\S+~iu', '', $line)), preg_split('/\R/u', $text));
+        $kept = [];
+
+        foreach ($lines as $i => $line) {
+            $wasOnlyLink = trim($line) === '' && self::hasLink(preg_split('/\R/u', $text)[$i]);
+            if (! $wasOnlyLink) {
+                $kept[] = $line;
+            }
+        }
+
+        return trim(preg_replace("/\n{3,}/u", "\n\n", implode("\n", $kept)));
+    }
+
+    private function customerMessageCount(object $turn): int
+    {
+        return $turn->whatsapp_conversation_id
+            ? WhatsappMessage::where('whatsapp_conversation_id', $turn->whatsapp_conversation_id)
+                ->where('direction', 'incoming')->where('sender_type', 'customer')->count()
+            : 0;
+    }
+
     public static function sameText(string $text): string
     {
         $text = \App\Support\ArabicTextNormalizer::normalize($text);

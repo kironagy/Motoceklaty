@@ -53,14 +53,6 @@ if command -v pm2 >/dev/null 2>&1 && pm2 describe whatsapp-queue >/dev/null 2>&1
     # whatsapp:process-jobs is a custom "while (true)" loop and does NOT
     # check Laravel's queue:restart signal - it must be restarted directly
     # via pm2, or it silently keeps running the old code forever.
-    # Owner 2026-11-14: with WHATSAPP_GATEWAY=automoon only the bots linked on Automoon leave the
-    # worker; the others still run on it, so it keeps being restarted.
-    # Set SKIP_WHATSAPP_WORKER=1 in .env once every number is on Automoon and the worker is stopped.
-    if grep -qE '^SKIP_WHATSAPP_WORKER="?1' .env 2>/dev/null; then
-        SERVER_PROC_NAMES="${SERVER_PROC_NAMES/ whatsapp-worker/}"
-        echo "== SKIP_WHATSAPP_WORKER=1: whatsapp-worker left as it is =="
-    fi
-
     for proc in $SERVER_PROC_NAMES; do
         echo "== Restarting $proc =="
         pm2 restart "$proc"

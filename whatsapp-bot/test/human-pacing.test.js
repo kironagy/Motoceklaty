@@ -160,3 +160,14 @@ test('attention: a failed job does not block the next one', async () => {
 test('cairoHour reads the hour in Cairo', () => {
     assert.strictEqual(cairoHour(new Date('2026-11-12T23:30:00Z')), 1);
 });
+
+test('owner 2026-11-15: the reply waits 20 s for a short answer up to 90 s for a long one', () => {
+    const pacing = createHumanPacing({ random: seeded(7), env: {} });
+    const short = sample(500, () => pacing.replyDelayMs({ waitedMs: 0, replyChars: 20 }));
+    const long = sample(500, () => pacing.replyDelayMs({ waitedMs: 0, replyChars: 600 }));
+
+    assert.ok(Math.min(...short) >= 20000 && Math.max(...short) < 35000);
+    assert.ok(Math.min(...long) >= 76000 && Math.max(...long) <= 90000);
+    // the time the reply already took counts
+    assert.strictEqual(pacing.replyDelayMs({ waitedMs: 120000, replyChars: 600 }), 0);
+});
