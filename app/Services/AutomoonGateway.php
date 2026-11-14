@@ -168,7 +168,8 @@ class AutomoonGateway
             return ['ok' => true, 'connected' => true];
         }
 
-        $init = $this->client(30)->post('/whatsapp/initialize', ['deviceId' => $bot->automoon_device_id]);
+        $this->restart($bot->automoon_device_id, $device);
+        $init = $this->lastInit;
 
         return $init->successful() && $init->json('success') !== false
             ? ['ok' => true, 'connected' => false]
@@ -186,6 +187,13 @@ class AutomoonGateway
 
         $connected = self::deviceConnected($device);
 
+        // A device stuck "disconnected" makes no QR on its own; it is logged out and started again
+        // (at most every 30 s, the modal polls every 4 s). A QR that expired unscanned ends there too.
+        if (! $connected && empty($device['qrDataUrl']) && ! in_array($device['currentState'] ?? '', ['initializing', 'qr_generated'], true)
+            && \Illuminate\Support\Facades\Cache::add('automoon_restart_'.$bot->automoon_device_id, true, 30)) {
+            $this->restart($bot->automoon_device_id, $device);
+        }
+
         if ($connected && $bot->session_status !== 'connected') {
             $bot->forceFill(['session_status' => 'connected', 'connected_at' => now(), 'qr_code' => null])->save();
         }
@@ -196,6 +204,18 @@ class AutomoonGateway
             'state' => (string) ($device['currentState'] ?? $device['status'] ?? ''),
             'phone' => $device['phoneNumber'] ?? null,
         ];
+    }
+
+    private ?Response $lastInit = null;
+
+    /** Owner 2026-11-14: a "disconnected" device answers initialize but never makes a QR until it is logged out first. */
+    private function restart(string $deviceId, ?array $device): void
+    {
+        if ($device && ! in_array($device['currentState'] ?? '', ['not_initialized', 'initializing', 'qr_generated'], true)) {
+            $this->client(30)->post('/whatsapp/logout', ['deviceId' => $deviceId]);
+        }
+
+        $this->lastInit = $this->client(30)->post('/whatsapp/initialize', ['deviceId' => $deviceId]);
     }
 
     public function logout(WhatsappBot $bot): bool
