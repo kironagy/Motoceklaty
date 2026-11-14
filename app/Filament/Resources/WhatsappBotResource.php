@@ -184,7 +184,7 @@ class WhatsappBotResource extends Resource
                     }),
 
                 Tables\Actions\Action::make('generate_qr')
-                    ->hidden(fn () => \App\Services\AutomoonGateway::enabled())
+                    ->hidden(fn ($record) => \App\Services\AutomoonGateway::forBot($record?->id))
                     ->label('توليد QR')
                     ->icon('heroicon-o-qr-code')
                     ->color('warning')
@@ -275,7 +275,7 @@ class WhatsappBotResource extends Resource
                             ->send();
                     }),
                 Tables\Actions\Action::make('show_qr')
-                    ->hidden(fn () => \App\Services\AutomoonGateway::enabled())
+                    ->hidden(fn ($record) => \App\Services\AutomoonGateway::forBot($record?->id))
                     ->label('عرض QR')
                     ->icon('heroicon-o-eye')
                     ->color('info')
@@ -317,7 +317,7 @@ class WhatsappBotResource extends Resource
                         }
                     }),
                 Tables\Actions\Action::make('check_status')
-                    ->hidden(fn () => \App\Services\AutomoonGateway::enabled())
+                    ->hidden(fn ($record) => \App\Services\AutomoonGateway::forBot($record?->id))
                     ->label('فحص الحالة')
                     ->icon('heroicon-o-arrow-path')
                     ->color('gray')
@@ -361,7 +361,7 @@ class WhatsappBotResource extends Resource
                     }),
 
                 Tables\Actions\Action::make('logout')
-                    ->hidden(fn () => \App\Services\AutomoonGateway::enabled())
+                    ->hidden(fn ($record) => \App\Services\AutomoonGateway::forBot($record?->id))
                     ->label('فصل الواتساب')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')

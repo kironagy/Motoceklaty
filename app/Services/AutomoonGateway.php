@@ -30,6 +30,27 @@ class AutomoonGateway
         return config('services.whatsapp.gateway') === 'automoon';
     }
 
+    /**
+     * Owner 2026-11-14: numbers move to Automoon one by one - a bot with an Automoon device goes
+     * through Automoon, the others stay on our worker until they are linked there too.
+     *
+     * @return int[]
+     */
+    public static function botIds(): array
+    {
+        if (! self::enabled()) {
+            return [];
+        }
+
+        return \Illuminate\Support\Facades\Cache::remember('automoon_bot_ids', 30, fn () => WhatsappBot::whereNotNull('automoon_device_id')
+            ->where('automoon_device_id', '!=', '')->pluck('id')->map(fn ($id) => (int) $id)->all());
+    }
+
+    public static function forBot(int|string|null $botId): bool
+    {
+        return $botId !== null && $botId !== '' && in_array((int) $botId, self::botIds(), true);
+    }
+
     public function send(string $endpoint, array $payload, int $timeout = 60): Response
     {
         $bot = WhatsappBot::find($payload['bot_id'] ?? null);
@@ -138,6 +159,7 @@ class AutomoonGateway
             }
 
             $bot->update(['automoon_device_id' => $id]);
+            \Illuminate\Support\Facades\Cache::forget('automoon_bot_ids');
         }
 
         $device = $this->device($bot->automoon_device_id);

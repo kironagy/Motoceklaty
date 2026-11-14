@@ -23,8 +23,12 @@ class WatchWhatsappSessions extends Command
 
     public function handle(): int
     {
-        if (\App\Services\AutomoonGateway::enabled()) {
-            return $this->handleAutomoon();
+        // Owner 2026-11-14: bots with an Automoon device are watched on Automoon, the rest on the worker.
+        $automoonIds = \App\Services\AutomoonGateway::botIds();
+        $automoonResult = $automoonIds === [] ? self::SUCCESS : $this->handleAutomoon($automoonIds);
+
+        if (! WhatsappBot::where('is_active', true)->whereNotIn('id', $automoonIds)->exists()) {
+            return $automoonResult;
         }
 
         try {
@@ -47,7 +51,7 @@ class WatchWhatsappSessions extends Command
         $connectedIds = $live->filter(fn ($s) => ($s['connected'] ?? false) === true)->keys()->map(fn ($id) => (int) $id)->all();
         $down = [];
 
-        foreach (WhatsappBot::where('is_active', true)->get() as $bot) {
+        foreach (WhatsappBot::where('is_active', true)->whereNotIn('id', $automoonIds)->get() as $bot) {
             $session = $live->get((string) $bot->id);
             $status = $session['status'] ?? 'not_running';
             $connected = ($session['connected'] ?? false) === true;
@@ -78,14 +82,16 @@ class WatchWhatsappSessions extends Command
                 $connectedIds[0] ?? null);
         }
 
-        return self::SUCCESS;
+        return $automoonResult;
     }
 
     /**
-     * Owner 2026-11-14 (WHATSAPP_GATEWAY=automoon): the numbers live on Automoon, our worker is off.
-     * A bot is connected when its Automoon device is; a bot without a device id is not linked yet.
+     * Owner 2026-11-14 (WHATSAPP_GATEWAY=automoon): the bots linked on Automoon. A bot is connected
+     * when its Automoon device is.
+     *
+     * @param  int[]  $botIds
      */
-    private function handleAutomoon(): int
+    private function handleAutomoon(array $botIds): int
     {
         $connectedIds = app(\App\Services\AutomoonGateway::class)->connectedBotIds();
 
@@ -97,7 +103,7 @@ class WatchWhatsappSessions extends Command
 
         $down = [];
 
-        foreach (WhatsappBot::where('is_active', true)->get() as $bot) {
+        foreach (WhatsappBot::where('is_active', true)->whereIn('id', $botIds)->get() as $bot) {
             $connected = in_array((int) $bot->id, $connectedIds, true);
             $changes = ['session_status' => $connected ? 'connected' : ($bot->automoon_device_id ? 'automoon_disconnected' : 'automoon_not_linked')];
 
@@ -116,7 +122,7 @@ class WatchWhatsappSessions extends Command
         if ($down !== [] && ! $this->option('quiet-alerts')) {
             $lines = collect($down)->map(fn (WhatsappBot $b) => "• {$b->name} (#{$b->id}) - ".($b->session_status === 'automoon_not_linked'
                 ? 'مالوش رقم جهاز اوتومون في صفحة البوتات'
-                : 'الجهاز مش متصل على اوتومون، امسح الـ QR من لوحة اوتومون'))->implode("\n");
+                : 'الجهاز مش متصل على اوتومون، اضغط «ربط واتساب (اوتومون)» في صفحة البوتات وامسح الـ QR'))->implode("\n");
 
             $this->alertOnce('automoon-bots:'.collect($down)->pluck('id')->sort()->implode(','),
                 "⚠️ أرقام واتساب واقفة على اوتومون والعملاء اللي بيكلموها مش بيوصلهم رد:\n{$lines}",
@@ -148,7 +154,7 @@ class WatchWhatsappSessions extends Command
         ];
 
         try {
-            if (\App\Services\AutomoonGateway::enabled()) {
+            if (\App\Services\AutomoonGateway::forBot($viaBotId)) {
                 app(\App\Services\AutomoonGateway::class)->send('/send-message', $payload, 30);
 
                 return;

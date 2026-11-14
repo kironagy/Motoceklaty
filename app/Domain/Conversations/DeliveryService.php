@@ -42,8 +42,9 @@ class DeliveryService
             ])));
         }
 
-        // Owner 2026-11-14: WHATSAPP_GATEWAY=automoon sends through Automoon; the worker path below stays as the fallback.
-        if (\App\Services\AutomoonGateway::enabled()) {
+        // Owner 2026-11-14: WHATSAPP_GATEWAY=automoon sends a bot that has an Automoon device through
+        // Automoon; the other bots (and every bot when it is 'worker') keep the worker path below.
+        if (\App\Services\AutomoonGateway::forBot($payload['bot_id'] ?? null)) {
             return app(\App\Services\AutomoonGateway::class)->send($endpoint, $payload, min($timeout, 120));
         }
 

@@ -33,7 +33,9 @@ class AutomoonGatewayTest extends TestCase
             'services.automoon.base_url' => 'https://automoon.test/api',
             'services.automoon.api_key' => 'key-1',
             'services.automoon.webhook_secret' => 'sec-1',
+            'services.whatsapp.worker_url' => 'http://worker.test',
         ]);
+        \Illuminate\Support\Facades\Cache::forget('automoon_bot_ids');
 
         $staff = Staff::create(['name' => 'S', 'email' => uniqid().'@x.com', 'password' => 'secret', 'is_bot' => true]);
         $this->bot = WhatsappBot::create(['name' => 'wahwah', 'staff_id' => $staff->id, 'whatsapp_phone_number_id' => 'b1', 'automoon_device_id' => 'dev_1', 'is_active' => true, 'session_status' => 'connected']);
@@ -104,13 +106,29 @@ class AutomoonGatewayTest extends TestCase
 
     public function test_connected_numbers_come_from_automoon_devices(): void
     {
-        Http::fake(['automoon.test/*' => Http::response(['success' => true, 'data' => [
-            // the real shape: _id + currentState, status is something else
-            ['_id' => 'dev_1', 'status' => 'struct', 'currentState' => 'ready'],
-            ['_id' => 'dev_2', 'status' => 'qrcode', 'currentState' => 'qr_generated'],
-        ]])]);
+        $workerBot = WhatsappBot::create(['name' => 'old', 'staff_id' => $this->bot->staff_id, 'whatsapp_phone_number_id' => 'b2', 'is_active' => true]);
+        Http::fake([
+            'automoon.test/*' => Http::response(['success' => true, 'data' => [
+                // the real shape: _id + currentState, status is something else
+                ['_id' => 'dev_1', 'status' => 'struct', 'currentState' => 'ready'],
+                ['_id' => 'dev_2', 'status' => 'qrcode', 'currentState' => 'qr_generated'],
+            ]]),
+            // the worker still holds an old session of the Automoon bot - Automoon decides for it
+            'worker.test/*' => Http::response(['sessions' => [['bot_id' => $workerBot->id, 'connected' => true], ['bot_id' => $this->bot->id, 'connected' => false]]]),
+        ]);
 
-        $this->assertSame([$this->bot->id], app(BotSessions::class)->connected());
+        $connected = app(BotSessions::class)->connected();
+        sort($connected);
+
+        $this->assertSame([$this->bot->id, $workerBot->id], $connected);
+    }
+
+    public function test_a_bot_not_linked_on_automoon_keeps_sending_through_the_worker(): void
+    {
+        $workerBot = WhatsappBot::create(['name' => 'old', 'staff_id' => $this->bot->staff_id, 'whatsapp_phone_number_id' => 'b2', 'is_active' => true]);
+
+        $this->assertTrue(AutomoonGateway::forBot($this->bot->id));
+        $this->assertFalse(AutomoonGateway::forBot($workerBot->id));
     }
 
     public function test_a_customer_message_from_the_webhook_is_stored_on_the_devices_bot(): void
@@ -124,6 +142,23 @@ class AutomoonGatewayTest extends TestCase
         $message = WhatsappMessage::where('direction', 'incoming')->sole();
         $this->assertSame('عايز هوجان', $message->text);
         $this->assertSame($this->bot->id, (int) $message->whatsapp_bot_id);
+    }
+
+    public function test_a_signed_webhook_in_the_current_shape_is_stored(): void
+    {
+        $raw = json_encode(['event' => 'message.received', 'delivery_id' => 'd1', 'payload' => [
+            'direction' => 'inbound', 'deviceId' => 'dev_1', 'messageId' => '3EB0C8F2A1',
+            'from' => ['jid' => '1234@lid', 'phone' => '201001234567', 'name' => 'أحمد'],
+            'text' => 'عايز أعرف الأسعار', 'hasMedia' => false, 'mediaUrl' => null, 'timestamp' => '2026-11-14T09:12:40.000Z',
+        ]]);
+        $headers = ['CONTENT_TYPE' => 'application/json', 'HTTP_X_AUTOMOON_SIGNATURE' => 'sha256='.hash_hmac('sha256', $raw, 'sec-1')];
+
+        $this->call('POST', '/api/automoon/webhook', [], [], [], $headers, $raw)->assertOk()->assertJson(['ok' => true]);
+        $this->call('POST', '/api/automoon/webhook', [], [], [], ['HTTP_X_AUTOMOON_SIGNATURE' => 'sha256=bad'] + $headers, $raw)->assertUnauthorized();
+
+        $message = WhatsappMessage::where('direction', 'incoming')->sole();
+        $this->assertSame('3EB0C8F2A1', $message->wa_message_id);
+        $this->assertSame('عايز أعرف الأسعار', $message->text);
     }
 
     public function test_the_webhook_refuses_a_wrong_secret(): void

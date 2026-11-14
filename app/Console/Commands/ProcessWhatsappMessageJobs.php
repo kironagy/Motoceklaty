@@ -495,8 +495,7 @@ class ProcessWhatsappMessageJobs extends Command
             // bot at a time, and the next one about a minute after the last was taken (owner).
             // Owner 2026-11-10 (anti-ban): a number that sent its hourly or daily cap of messages
             // takes no turn at all until the window frees - live ones wait too.
-            // Owner 2026-11-14: no hourly/daily cap on Automoon - the owner wants every reply sent at once.
-            $capped = \App\Services\AutomoonGateway::enabled() ? [] : \Illuminate\Support\Facades\Cache::remember('send_capped_bots', 30, function () {
+            $capped = \Illuminate\Support\Facades\Cache::remember('send_capped_bots', 30, function () {
                 $hour = (int) config('agent.delivery.max_sends_per_hour', 150);
                 $day = (int) config('agent.delivery.max_sends_per_day', 1500);
                 $sent = fn ($since) => DB::table('whatsapp_messages')->where('direction', 'outgoing')
@@ -513,6 +512,8 @@ class ProcessWhatsappMessageJobs extends Command
 
                 return $capped;
             });
+            // Owner 2026-11-14: no hourly/daily cap for a bot on Automoon.
+            $capped = array_values(array_diff($capped, \App\Services\AutomoonGateway::botIds()));
 
             $backlogBlocked = DB::table('whatsapp_message_jobs')
                 ->where('status', 'processing')->where('locked_at', '>=', $staleBefore)
@@ -590,7 +591,7 @@ class ProcessWhatsappMessageJobs extends Command
 
             if (str_contains((string) ($job->payload ?? ''), 'answer_waiting')) {
                 // Owner 2026-11-14: a few seconds on Automoon instead of a minute.
-                $gap = \App\Services\AutomoonGateway::enabled()
+                $gap = \App\Services\AutomoonGateway::forBot($job->whatsapp_bot_id)
                     ? random_int((int) config('services.automoon.answer_gap_min', 3), max((int) config('services.automoon.answer_gap_min', 3), (int) config('services.automoon.answer_gap_max', 8)))
                     : random_int(60, 65);
                 \Illuminate\Support\Facades\Cache::put('answer_waiting_gap_'.$job->whatsapp_bot_id, true, now()->addSeconds($gap));

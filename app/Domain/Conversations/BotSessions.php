@@ -18,10 +18,27 @@ class BotSessions
     /** @return int[]|null bot ids the WhatsApp worker reports as connected, null when it can't say */
     public function connected(): ?array
     {
-        if (\App\Services\AutomoonGateway::enabled()) {
-            return app(\App\Services\AutomoonGateway::class)->connectedBotIds();
+        $worker = $this->workerConnected();
+
+        // Owner 2026-11-14: bots on Automoon are live when their Automoon device is; the rest when the worker says so.
+        if (\App\Services\AutomoonGateway::botIds() === []) {
+            return $worker;
         }
 
+        $automoon = app(\App\Services\AutomoonGateway::class)->connectedBotIds();
+
+        if ($worker === null && $automoon === null) {
+            return null;
+        }
+
+        $worker = array_values(array_diff($worker ?? [], \App\Services\AutomoonGateway::botIds()));
+
+        return array_values(array_unique(array_merge($worker, $automoon ?? [])));
+    }
+
+    /** @return int[]|null */
+    private function workerConnected(): ?array
+    {
         try {
             $response = Http::connectTimeout(5)->timeout(10)
                 ->withHeaders(['X-BOT-TOKEN' => config('services.whatsapp.bot_token'), 'Accept' => 'application/json'])

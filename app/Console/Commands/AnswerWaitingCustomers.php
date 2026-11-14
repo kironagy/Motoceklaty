@@ -64,12 +64,12 @@ class AnswerWaitingCustomers extends Command
         // paced about a minute apart per bot, newest first; a customer writing live is claimed before
         // them (ProcessWhatsappMessageJobs::claimNextJob), then the backlog carries on.
         // Owner 2026-11-14: on Automoon the owner wants the backlog answered fast - a few seconds apart.
-        [$gapMin, $gapMax] = \App\Services\AutomoonGateway::enabled()
-            ? [(int) config('services.automoon.answer_gap_min', 3), (int) config('services.automoon.answer_gap_max', 8)]
-            : [(int) $this->option('gap-min'), (int) $this->option('gap-max')];
-
         $slots = [];
-        $nextSlot = function (int $botId) use (&$slots, $gapMin, $gapMax) {
+        $nextSlot = function (int $botId) use (&$slots) {
+            [$gapMin, $gapMax] = \App\Services\AutomoonGateway::forBot($botId)
+                ? [(int) config('services.automoon.answer_gap_min', 3), (int) config('services.automoon.answer_gap_max', 8)]
+                : [(int) $this->option('gap-min'), (int) $this->option('gap-max')];
+
             $slots[$botId] ??= max(now(), \Illuminate\Support\Carbon::parse(DB::table('whatsapp_message_jobs')
                 ->where('whatsapp_bot_id', $botId)->where('status', 'pending')->where('payload', 'like', '%"answer_waiting%')
                 ->max('process_after') ?? now()));
