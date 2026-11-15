@@ -10,6 +10,14 @@ class EditWhatsappBot extends EditRecord
 {
     protected static string $resource = WhatsappBotResource::class;
 
+    /** Owner 2026-11-15: a changed proxy goes to the worker right away (it reconnects through it). */
+    protected function afterSave(): void
+    {
+        if ($this->record->wasChanged('proxy_url')) {
+            WhatsappBotResource::pushProxy($this->record);
+        }
+    }
+
     protected function getHeaderActions(): array
     {
         return [

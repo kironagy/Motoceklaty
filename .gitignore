@@ -60,3 +60,4 @@ yarn-error.log
 /whatsapp-bot/whatsapp-bot.lock
 /whatsapp-bot/spool/
 /whatsapp-bot/sent-items/
+/whatsapp-bot/proxies/

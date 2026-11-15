@@ -19,6 +19,8 @@ const { createSpool } = require('./spool');
 const { createSentRegistry } = require('./sent-registry');
 const { createHumanPacing, createAttention, cairoHour } = require('./human-pacing');
 const { createContactBook } = require('./contact-book');
+const { buildProxy, createProxyStore } = require('./proxy-store');
+const https = require('https');
 
 require('dotenv').config();
 
@@ -123,6 +125,33 @@ async function flushReads(sock, botId, jids) {
  * send. Only the first bubble of a turn has unread customer messages, so only it waits.
  */
 const pacing = createHumanPacing();
+// Owner 2026-11-15: each number's own proxy (proxy-store.js); botId -> { agent, dispatcher, label }
+const proxyStore = createProxyStore({ dir: process.env.PROXY_DIR || path.join(__dirname, 'proxies') });
+const proxies = {};
+
+function loadProxy(botId) {
+    try {
+        proxies[botId] = buildProxy(proxyStore.get(botId));
+    } catch (error) {
+        console.error(`🌐 bot ${botId} proxy ignored:`, error?.message || error);
+        proxies[botId] = null;
+    }
+
+    return proxies[botId];
+}
+
+/** The address WhatsApp sees for this proxy (null without one); throws when it does not work. */
+function publicIpThrough(proxy, timeoutMs = 15000) {
+    return new Promise((resolve, reject) => {
+        const req = https.get('https://api.ipify.org', { agent: proxy?.agent, timeout: timeoutMs }, res => {
+            let body = '';
+            res.on('data', c => (body += c));
+            res.on('end', () => (res.statusCode === 200 ? resolve(body.trim()) : reject(new Error(`ipify ${res.statusCode}`))));
+        });
+        req.on('timeout', () => req.destroy(new Error('proxy timed out')));
+        req.on('error', reject);
+    });
+}
 const contactBook = createContactBook({ file: process.env.CONTACT_BOOK_FILE || path.join(__dirname, 'sent-items', 'saved-contacts.json') });
 
 /*
@@ -546,7 +575,7 @@ function getQuotedInfo(msg, botId) {
     };
 }
 
-async function extractMediaBase64(msg) {
+async function extractMediaBase64(msg, botId = null) {
     const mediaInfo = getMediaInfo(msg);
 
     if (!mediaInfo) return null;
@@ -555,7 +584,8 @@ async function extractMediaBase64(msg) {
         const buffer = await downloadMediaMessage(
             msg,
             'buffer',
-            {},
+            // incoming media downloads through the number's http proxy too
+            proxies[botId]?.dispatcher ? { options: { dispatcher: proxies[botId].dispatcher } } : {},
             { logger: pino({ level: 'silent' }) }
         );
 
@@ -824,7 +854,7 @@ async function handleIncomingMessage(sock, botId, msg, { recovered = false } = {
     if (isFromMe && botSentIds.has(msg.key.id)) return;
     const cleanText = getMessageText(msg);
     // an old history photo may no longer download - the text still counts
-    const media = await extractMediaBase64(msg).catch(() => null);
+    const media = await extractMediaBase64(msg, botId).catch(() => null);
     const type = getMessageType(msg);
     const location = getLocationInfo(msg);
 
@@ -932,6 +962,9 @@ async function startSession(botId) {
 
     const { state, saveCreds } = await useMultiFileAuthState(`./sessions/${botId}`);
     const { version } = await fetchLatestBaileysVersion();
+    const proxy = loadProxy(botId);
+
+    if (proxy) console.log(`🌐 bot ${botId} connects through ${proxy.label}`);
 
     const sock = makeWASocket({
         version,
@@ -948,6 +981,8 @@ async function startSession(botId) {
         // recoverHistory keeps only the recent window, so accepting them costs little.
         shouldSyncHistoryMessage: () => true,
         markOnlineOnConnect: false,
+        // Owner 2026-11-15: the number's own proxy - the socket and media uploads go through it
+        ...(proxy ? { agent: proxy.agent, fetchAgent: proxy.agent } : {}),
     });
 
     const rawSendMessage = sock.sendMessage.bind(sock);
@@ -1137,9 +1172,52 @@ app.post('/sessions/:botId/fetch-chat-history', checkToken, async (req, res) => 
     }
 });
 
+/*
+ * Owner 2026-11-15: set (or with an empty proxy_url remove) a number's proxy from the bots page.
+ * The proxy is tried first; a live session reconnects through it.
+ */
+app.post('/sessions/:botId/proxy', checkToken, async (req, res) => {
+    const botId = normalizeBotId(req.params.botId);
+    const raw = String(req.body?.proxy_url || '').trim();
+
+    try {
+        const proxy = raw ? buildProxy(raw) : null;
+        const ip = proxy ? await publicIpThrough(proxy) : null;
+
+        proxyStore.set(botId, raw);
+        loadProxy(botId);
+
+        const reconnecting = Boolean(sessions[botId]);
+        if (reconnecting) {
+            sessions[botId].end(new Error('proxy changed'));
+        }
+
+        return res.json({ ok: true, bot_id: botId, proxy: proxies[botId]?.label || null, public_ip: ip, reconnecting });
+    } catch (error) {
+        return res.status(422).json({ ok: false, bot_id: botId, error: error?.message || 'proxy failed' });
+    }
+});
+
+app.get('/sessions/:botId/proxy-test', checkToken, async (req, res) => {
+    const botId = normalizeBotId(req.params.botId);
+
+    try {
+        const proxy = proxies[botId] ?? loadProxy(botId);
+
+        return res.json({ ok: true, bot_id: botId, proxy: proxy?.label || null, public_ip: await publicIpThrough(proxy) });
+    } catch (error) {
+        return res.status(422).json({ ok: false, bot_id: botId, error: error?.message || 'proxy failed' });
+    }
+});
+
 app.post('/sessions/start', checkToken, async (req, res) => {
     try {
         const botId = normalizeBotId(req.body.bot_id);
+
+        // Owner 2026-11-15: Laravel sends the bot's proxy with every start
+        if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'proxy_url')) {
+            proxyStore.set(botId, req.body.proxy_url);
+        }
 
         await startSession(botId);
 
@@ -1164,6 +1242,7 @@ app.get('/status', checkToken, (req, res) => {
             status: statuses[botId],
             has_qr: !!latestQr[botId],
             connected: statuses[botId] === 'connected',
+            proxy: proxies[botId]?.label || null,
             ...restrictionOf(botId),
         })),
     });

@@ -30,6 +30,33 @@ class WhatsappBotResource extends Resource
     protected static ?string $modelLabel = 'بوت واتساب';
     protected static ?string $pluralModelLabel = 'بوتات واتساب';
 
+    /**
+     * Owner 2026-11-15: hands the bot's proxy to the worker, which tries it and reconnects the number
+     * through it. Shows the address WhatsApp now sees, or why the proxy did not work.
+     */
+    public static function pushProxy(WhatsappBot $bot): void
+    {
+        try {
+            $response = Http::timeout(30)->withHeaders(['X-BOT-TOKEN' => config('services.whatsapp.bot_token'), 'Accept' => 'application/json'])
+                ->post(static::getNodeUrl().'/sessions/'.$bot->id.'/proxy', ['proxy_url' => (string) $bot->proxy_url]);
+        } catch (\Throwable $e) {
+            \Filament\Notifications\Notification::make()->title('سيرفر الواتساب مش بيرد، البروكسي هيتطبق مع أول تشغيل للرقم')->warning()->send();
+
+            return;
+        }
+
+        if (! $response->json('ok')) {
+            \Filament\Notifications\Notification::make()->title('البروكسي مش شغال')->body((string) $response->json('error'))->danger()->persistent()->send();
+
+            return;
+        }
+
+        \Filament\Notifications\Notification::make()
+            ->title($response->json('proxy') ? 'البروكسي اشتغل' : 'البروكسي اتشال، الرقم بيطلع من السيرفر مباشرة')
+            ->body($response->json('public_ip') ? 'العنوان اللي واتساب شايفه دلوقتي: '.$response->json('public_ip') : null)
+            ->success()->send();
+    }
+
     protected static function getNodeUrl(): string
     {
         return (string) config('services.whatsapp.worker_url');
@@ -100,6 +127,18 @@ class WhatsappBotResource extends Resource
                         ->required()
                         ->helperText('التعليمي يتعلم ويخزن الردود فقط، اللايف يرد على العملاء باستخدام الذاكرة.'),
 
+                    // Owner 2026-11-15: the number reaches WhatsApp through its own proxy (one per number)
+                    Forms\Components\TextInput::make('proxy_url')
+                        ->label('البروكسي')
+                        ->password()
+                        ->revealable()
+                        ->nullable()
+                        ->placeholder('http://user:pass@host:port')
+                        ->rule('regex:~^(https?|socks5h?)://([^:@/\s]+(:[^@/\s]*)?@)?[A-Za-z0-9.\-]+:\d{2,5}/?$~')
+                        ->validationMessages(['regex' => 'الصيغة: http://اسم_المستخدم:الباسورد@العنوان:البورت'])
+                        ->helperText('عنوان مصري ثابت مخصص للرقم ده. الأفضل صيغة http. بعد الحفظ الرقم بيعيد الاتصال من خلاله، وسيبه فاضي عشان يطلع من السيرفر مباشرة.')
+                        ->columnSpanFull(),
+
                     Forms\Components\Textarea::make('notes')
                         ->label('ملاحظات')
                         ->rows(4)
@@ -140,6 +179,25 @@ class WhatsappBotResource extends Resource
                     ->url(fn (WhatsappBot $record) => static::getUrl('activity', ['record' => $record])),
 
                 Tables\Actions\ActionGroup::make([
+                Tables\Actions\Action::make('proxy_test')
+                    ->label('اختبار البروكسي')
+                    ->icon('heroicon-o-globe-alt')
+                    ->visible(fn (WhatsappBot $record) => filled($record->proxy_url))
+                    ->action(function (WhatsappBot $record) {
+                        try {
+                            $response = Http::timeout(30)->withHeaders(['X-BOT-TOKEN' => config('services.whatsapp.bot_token'), 'Accept' => 'application/json'])
+                                ->get(static::getNodeUrl().'/sessions/'.$record->id.'/proxy-test');
+                        } catch (\Throwable $e) {
+                            Notification::make()->title('سيرفر الواتساب مش بيرد')->danger()->send();
+
+                            return;
+                        }
+
+                        $response->json('ok')
+                            ? Notification::make()->title('البروكسي شغال')->body('العنوان اللي واتساب شايفه: '.$response->json('public_ip').' ('.$response->json('proxy').')')->success()->send()
+                            : Notification::make()->title('البروكسي مش شغال')->body((string) $response->json('error'))->danger()->persistent()->send();
+                    }),
+
                 Tables\Actions\Action::make('generate_qr')
                     ->label('توليد QR')
                     ->icon('heroicon-o-qr-code')
@@ -155,6 +213,8 @@ class WhatsappBotResource extends Resource
                                 ])
                                 ->post(static::getNodeUrl() . '/sessions/start', [
                                     'bot_id' => $botId,
+                                    // Owner 2026-11-15: the number connects through its own proxy
+                                    'proxy_url' => (string) $record->proxy_url,
                                 ]);
 
                             $data = null;

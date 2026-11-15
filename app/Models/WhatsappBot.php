@@ -12,6 +12,7 @@ class WhatsappBot extends Model
     'mode',
     'whatsapp_phone_number',
     'whatsapp_phone_number_id',
+    'proxy_url',
     'qr_code',
     'session_status',
     'wa_limit_level',
@@ -29,7 +30,10 @@ class WhatsappBot extends Model
         'wa_limit_until' => 'datetime',
         'wa_limit_since' => 'datetime',
         'wa_limit_detail' => 'array',
+        'proxy_url' => 'encrypted',
     ];
+
+    protected $hidden = ['proxy_url'];
 
     /** Owner 2026-11-15: WhatsApp's warning/restriction on this number while it lasts, else null. */
     public function activeLimit(): ?string
