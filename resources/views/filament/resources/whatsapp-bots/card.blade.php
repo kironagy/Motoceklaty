@@ -63,13 +63,24 @@
         @endif
     </div>
 
-    @if (! $limit && in_array($status, ['connected', 'restricted'], true))
-        {{-- Owner 2026-11-15: the WhatsApp check is visible even when there is nothing to report --}}
-        <div class="wb-limit wb-limit-ok" style="--c: #16a34a">
-            <div class="wb-limit-head">✅ مفيش تحذيرات من واتساب</div>
-            @if (isset($bot->wa_limit_detail['used'], $bot->wa_limit_detail['total']) && $bot->wa_limit_detail['total'])
-                <div class="wb-limit-times"><span>المحادثات الجديدة: {{ $bot->wa_limit_detail['used'] }} من {{ $bot->wa_limit_detail['total'] }}</span></div>
-            @endif
+    @if (in_array($status, ['connected', 'restricted'], true))
+        @php
+            // Owner 2026-11-15: our send caps used (different customers answered), shrunk on a warning
+            $usage = \App\Filament\Resources\WhatsappBotResource::capUsage()[$bot->id] ?? ['hour' => 0, 'day' => 0];
+            $factor = \App\Models\WhatsappBot::limitFactor($limit);
+            $capHour = (int) floor(config('agent.delivery.max_customers_per_hour', 150) * $factor);
+            $capDay = (int) floor(config('agent.delivery.max_customers_per_day', 1500) * $factor);
+            $pct = fn ($used, $cap) => $cap > 0 ? min(100, (int) round($used * 100 / $cap)) : 100;
+        @endphp
+        <div class="wb-cap">
+            @foreach ([['الساعة دي', $usage['hour'], $capHour], ['آخر 24 ساعة', $usage['day'], $capDay]] as [$label, $used, $cap])
+                @php $p = $pct($used, $cap); $c = $p >= 90 ? '#e11d48' : ($p >= 70 ? '#d97706' : '#16a34a'); @endphp
+                <div class="wb-cap-row">
+                    <span class="wb-cap-label">عملاء {{ $label }}</span>
+                    <span class="wb-cap-num">{{ number_format($used) }} من {{ number_format($cap) }} ({{ $p }}%)</span>
+                </div>
+                <div class="wb-cap-bar"><i style="width: {{ $p }}%; background: {{ $c }}"></i></div>
+            @endforeach
         </div>
     @endif
 

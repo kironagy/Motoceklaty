@@ -408,6 +408,27 @@ class WhatsappBotResource extends Resource
         return once(fn () => app(\App\Domain\Bots\BotActivity::class)->todayTotals());
     }
 
+    /**
+     * Owner 2026-11-15: how much of its send caps each number used - different customers answered in
+     * the last hour / 24 hours, the same count ProcessWhatsappMessageJobs holds a number back on.
+     *
+     * @return array<int, array{hour:int, day:int}>
+     */
+    public static function capUsage(): array
+    {
+        return once(function () {
+            $count = fn ($since) => \Illuminate\Support\Facades\DB::table('whatsapp_messages')->where('direction', 'outgoing')
+                ->where('delivery_status', 'sent')->where('created_at', '>=', $since)
+                ->groupBy('whatsapp_bot_id')->selectRaw('whatsapp_bot_id, count(distinct whatsapp_conversation_id) n')
+                ->pluck('n', 'whatsapp_bot_id');
+            $hour = $count(now()->subHour());
+            $day = $count(now()->subDay());
+
+            return $day->keys()->merge($hour->keys())->unique()
+                ->mapWithKeys(fn ($id) => [(int) $id => ['hour' => (int) ($hour[$id] ?? 0), 'day' => (int) ($day[$id] ?? 0)]])->all();
+        });
+    }
+
     public static function canViewAny(): bool
     {
         if (($allowed = static::roleAllows('view')) !== null) {
