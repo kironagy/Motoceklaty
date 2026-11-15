@@ -41,7 +41,7 @@ class CustomerNumbersExport
     }
 
     /**
-     * @param  Collection<int, array{phone:string, name:?string, reason:string, last:?string}>  $rows
+     * @param  Collection<int, array{phone:?string, name:?string, lid:?string, reason:string, last:?string}>  $rows
      * @return string path of the .xlsx (one file) or .zip (several), in a temp dir
      */
     public static function build(Collection $rows, int $files): string
@@ -84,11 +84,17 @@ class CustomerNumbersExport
         $sheet->setName('الأرقام');
         $sheet->setSheetView((new SheetView)->setRightToLeft(true));
 
-        $writer->addRow(Row::fromValues(['رقم العميل', 'الاسم', 'السبب', 'آخر رسالة منه'], (new Style)->setFontBold()));
+        $writer->addRow(Row::fromValues(['رقم العميل', 'الاسم على واتساب', 'المعرّف على واتساب (لو الرقم مخفي)', 'السبب', 'آخر رسالة منه'], (new Style)->setFontBold()));
 
         foreach ($rows as $row) {
-            // the number stays text, so Excel keeps all its digits
-            $writer->addRow(Row::fromValues([(string) $row['phone'], (string) ($row['name'] ?? ''), $row['reason'], (string) ($row['last'] ?? '')]));
+            // numbers stay text, so Excel keeps all their digits
+            $writer->addRow(Row::fromValues([
+                (string) ($row['phone'] ?? 'مخفي'),
+                (string) ($row['name'] ?? ''),
+                (string) ($row['lid'] ?? ''),
+                $row['reason'],
+                (string) ($row['last'] ?? ''),
+            ]));
         }
 
         $writer->close();

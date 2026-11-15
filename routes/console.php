@@ -51,6 +51,9 @@ Schedule::command('attendance:mark-absences')->dailyAt('15:00')->timezone('Afric
 Schedule::command('attendance:mark-absences')->dailyAt('23:50')->timezone('Africa/Cairo')->withoutOverlapping();
 
 // Owner 2026-11-09: logged-out bot numbers went unnoticed for days - live status + owner alert.
+// Owner 2026-11-15: real phones of @lid customers from the worker's lid mappings
+Schedule::command('whatsapp:resolve-lids')->hourly()->withoutOverlapping();
+
 Schedule::command('whatsapp:watch-sessions')
     ->everyFiveMinutes()
     ->withoutOverlapping();
