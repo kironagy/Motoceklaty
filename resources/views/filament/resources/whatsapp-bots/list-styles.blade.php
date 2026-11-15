@@ -31,6 +31,8 @@
     .wb-qr img { width: 72px; height: 72px; border-radius: 10px; background: #fff; padding: 3px; }
     .wb-limit { margin-top: 12px; padding: 10px 12px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--c) 35%, transparent); background: color-mix(in srgb, var(--c) 9%, #fff); }
     .dark .wb-limit { background: color-mix(in srgb, var(--c) 14%, transparent); }
+    .wb-limit-ok { padding: 6px 12px; }
+    .wb-limit-ok .wb-limit-head { font-size: 12px; }
     .wb-limit-head { font-size: 13px; font-weight: 800; color: var(--c); }
     .wb-limit-note { margin-top: 3px; font-size: 12px; font-weight: 600; }
     .wb-limit-times { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 11px; font-weight: 700; color: var(--muted); }

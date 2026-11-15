@@ -63,6 +63,16 @@
         @endif
     </div>
 
+    @if (! $limit && in_array($status, ['connected', 'restricted'], true))
+        {{-- Owner 2026-11-15: the WhatsApp check is visible even when there is nothing to report --}}
+        <div class="wb-limit wb-limit-ok" style="--c: #16a34a">
+            <div class="wb-limit-head">✅ مفيش تحذيرات من واتساب</div>
+            @if (isset($bot->wa_limit_detail['used'], $bot->wa_limit_detail['total']) && $bot->wa_limit_detail['total'])
+                <div class="wb-limit-times"><span>المحادثات الجديدة: {{ $bot->wa_limit_detail['used'] }} من {{ $bot->wa_limit_detail['total'] }}</span></div>
+            @endif
+        </div>
+    @endif
+
     @if ($limit)
         <div class="wb-limit" style="--c: {{ $limitColor }}">
             <div class="wb-limit-head">⚠️ {{ $limitLabel }}</div>
