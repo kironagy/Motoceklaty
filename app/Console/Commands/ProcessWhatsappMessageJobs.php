@@ -503,8 +503,13 @@ class ProcessWhatsappMessageJobs extends Command
                     ->where('delivery_status', 'sent')->where('created_at', '>=', $since)
                     ->groupBy('whatsapp_bot_id')->selectRaw('whatsapp_bot_id, count(distinct whatsapp_conversation_id) n')->pluck('n', 'whatsapp_bot_id');
 
-                $capped = $sent(now()->subHour())->filter(fn ($n) => $hour > 0 && $n >= $hour)->keys()
-                    ->merge($sent(now()->subDay())->filter(fn ($n) => $day > 0 && $n >= $day)->keys())
+                // Owner 2026-11-15: a number WhatsApp warned uses half (first warning) or a quarter
+                // (second warning) of its caps until the warning ends.
+                $factor = \App\Models\WhatsappBot::whereNotNull('wa_limit_level')->get()
+                    ->mapWithKeys(fn ($b) => [$b->id => \App\Models\WhatsappBot::limitFactor($b->activeLimit())]);
+                $over = fn ($limit) => fn ($n, $botId) => $limit > 0 && $n >= max(1, (int) floor($limit * ($factor[$botId] ?? 1.0)));
+                $capped = $sent(now()->subHour())->filter($over($hour))->keys()
+                    ->merge($sent(now()->subDay())->filter($over($day))->keys())
                     ->unique()->values()->all();
 
                 if ($capped !== []) {
@@ -516,7 +521,9 @@ class ProcessWhatsappMessageJobs extends Command
             // Owner 2026-11-15 (Baileys rc14): a number WhatsApp itself restricted (reachout timelock or
             // new-chat cap reached, see whatsapp:watch-sessions) takes no turn until it is lifted.
             $capped = array_values(array_unique(array_merge($capped,
-                \App\Models\WhatsappBot::where('session_status', 'restricted')->pluck('id')->map(fn ($id) => (int) $id)->all())));
+                \App\Models\WhatsappBot::where('session_status', 'restricted')->pluck('id')->map(fn ($id) => (int) $id)->all(),
+                \App\Models\WhatsappBot::whereIn('wa_limit_level', ['capped', 'timelock'])->get()
+                    ->filter(fn ($b) => $b->activeLimit() !== null)->pluck('id')->map(fn ($id) => (int) $id)->all())));
 
             $backlogBlocked = DB::table('whatsapp_message_jobs')
                 ->where('status', 'processing')->where('locked_at', '>=', $staleBefore)
@@ -525,6 +532,9 @@ class ProcessWhatsappMessageJobs extends Command
                 ->merge(\App\Models\WhatsappBot::pluck('id')->filter(fn ($id) => \Illuminate\Support\Facades\Cache::has('answer_waiting_gap_'.$id)))
                 // a number waiting for its QR would fail every re-answer, and a failed one is never retried
                 ->merge(\App\Models\WhatsappBot::where('session_status', '!=', 'connected')->pluck('id'))
+                // Owner 2026-11-15: after WhatsApp's second warning only live customers are answered
+                ->merge(\App\Models\WhatsappBot::where('wa_limit_level', 'second_warning')->get()
+                    ->filter(fn ($b) => $b->activeLimit() !== null)->pluck('id'))
                 ->unique()->values()->all();
 
             $job = DB::table('whatsapp_message_jobs')

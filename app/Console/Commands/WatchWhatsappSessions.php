@@ -43,6 +43,7 @@ class WatchWhatsappSessions extends Command
         $connectedIds = $live->filter(fn ($s) => ($s['connected'] ?? false) === true)->keys()->map(fn ($id) => (int) $id)->all();
         $down = [];
         $restrictedBots = [];
+        $warned = [];
 
         foreach (WhatsappBot::where('is_active', true)->get() as $bot) {
             $session = $live->get((string) $bot->id);
@@ -57,6 +58,26 @@ class WatchWhatsappSessions extends Command
             }
 
             $changes = ['session_status' => $restricted ? 'restricted' : ($connected ? 'connected' : $status)];
+
+            // Owner 2026-11-15: WhatsApp's warning / temporary restriction and when it ends. Kept while
+            // the number is offline (the worker forgets it on a restart until WhatsApp tells it again).
+            if ($connected) {
+                $level = $session['limit_level'] ?? null;
+                $changes += [
+                    'wa_limit_level' => $level,
+                    'wa_limit_until' => $level && ! empty($session['limit_until']) ? \Illuminate\Support\Carbon::parse($session['limit_until']) : null,
+                    'wa_limit_since' => $level ? ($bot->wa_limit_level === $level ? ($bot->wa_limit_since ?? now()) : now()) : null,
+                    'wa_limit_detail' => $level ? array_filter([
+                        'reason' => $session['reachout_timelock']['type'] ?? null,
+                        'used' => $session['new_chat_cap']['used'] ?? null,
+                        'total' => $session['new_chat_cap']['total'] ?? null,
+                    ], fn ($v) => $v !== null) : null,
+                ];
+
+                if ($level && in_array($level, ['first_warning', 'second_warning'], true)) {
+                    $warned[] = [$bot, $level, $changes['wa_limit_until']];
+                }
+            }
             if ($connected && $bot->session_status !== 'connected') {
                 $changes['connected_at'] = now();
             }
@@ -80,6 +101,16 @@ class WatchWhatsappSessions extends Command
             $this->alertOnce('restricted:'.collect($restrictedBots)->map(fn ($p) => $p[0]->id)->sort()->implode(','),
                 "⛔ واتساب حاط قيد على الأرقام دي، والبوت وقّف الإرسال منها لحد ما القيد يتشال:\n{$lines}",
                 $healthy);
+        }
+
+        if ($warned !== [] && ! $this->option('quiet-alerts')) {
+            $lines = collect($warned)->map(fn ($w) => "• {$w[0]->name} (#{$w[0]->id}) - ".($w[1] === 'first_warning'
+                ? 'تحذير أول: البوت هيرد بنص السرعة'
+                : 'تحذير تاني: البوت هيرد بربع السرعة ومش هيرد على الرسايل القديمة')
+                .($w[2] ? ' لحد '.$w[2]->timezone('Africa/Cairo')->format('m-d H:i') : ''))->implode("\n");
+
+            $this->alertOnce('warned:'.collect($warned)->map(fn ($w) => $w[0]->id.$w[1])->sort()->implode(','),
+                "⚠️ واتساب بعت تحذير للأرقام دي:\n{$lines}", $connectedIds[0] ?? null);
         }
 
         if ($down !== [] && ! $this->option('quiet-alerts')) {

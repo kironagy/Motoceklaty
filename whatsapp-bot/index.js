@@ -139,7 +139,20 @@ function restrictionOf(botId) {
     const capped = String(r.capping?.capping_status || '') === 'CAPPED'
         && (!r.capping?.cycle_end_timestamp || Number(r.capping.cycle_end_timestamp) * 1000 > Date.now());
 
+    // Owner 2026-11-15: how hard WhatsApp is leaning on this number, worst first. Laravel slows the
+    // number down on a warning and stops it on a lock or a reached cap, until "until".
+    const cycleEnd = r.capping?.cycle_end_timestamp ? Number(r.capping.cycle_end_timestamp) * 1000 : 0;
+    const capStatus = cycleEnd && cycleEnd < Date.now() ? 'NONE' : String(r.capping?.capping_status || 'NONE');
+    const level = locked ? 'timelock'
+        : capped ? 'capped'
+        : capStatus === 'SECOND_WARNING' ? 'second_warning'
+        : capStatus === 'FIRST_WARNING' ? 'first_warning'
+        : null;
+    const until = locked ? new Date(lockedUntil).toISOString() : (level && cycleEnd ? new Date(cycleEnd).toISOString() : null);
+
     return {
+        limit_level: level,
+        limit_until: until,
         restricted: locked || capped,
         reachout_timelock: locked ? { until: new Date(lockedUntil).toISOString(), type: r.timelock.enforcementType || null } : null,
         new_chat_cap: r.capping ? {

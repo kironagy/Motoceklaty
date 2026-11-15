@@ -14,6 +14,10 @@ class WhatsappBot extends Model
     'whatsapp_phone_number_id',
     'qr_code',
     'session_status',
+    'wa_limit_level',
+    'wa_limit_until',
+    'wa_limit_since',
+    'wa_limit_detail',
     'connected_at',
     'is_active',
     'notes',
@@ -22,7 +26,31 @@ class WhatsappBot extends Model
     // The bots page calls ->locale()->diffForHumans() on it; uncast it was a string and the page crashed.
     protected $casts = [
         'connected_at' => 'datetime',
+        'wa_limit_until' => 'datetime',
+        'wa_limit_since' => 'datetime',
+        'wa_limit_detail' => 'array',
     ];
+
+    /** Owner 2026-11-15: WhatsApp's warning/restriction on this number while it lasts, else null. */
+    public function activeLimit(): ?string
+    {
+        if (! $this->wa_limit_level || ($this->wa_limit_until && $this->wa_limit_until->isPast())) {
+            return null;
+        }
+
+        return $this->wa_limit_level;
+    }
+
+    /** Share of the normal send caps this number may use now (1 = no limit, 0 = stopped). */
+    public static function limitFactor(?string $level): float
+    {
+        return match ($level) {
+            'first_warning' => 0.5,
+            'second_warning' => 0.25,
+            'capped', 'timelock' => 0.0,
+            default => 1.0,
+        };
+    }
 
     // علاقة البوت بالموظف
     public function staff()
