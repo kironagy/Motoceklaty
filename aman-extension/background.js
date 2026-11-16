@@ -65,7 +65,8 @@ chrome.storage.onChanged.addListener(async (ch, area) => {
   reported.add(key);
 
   const status = run.status === 'resolved' ? run.resolution : RESULT[run.status];
-  const message = run.status === 'resolved' ? run.blockMessage : run.status === 'error' ? run.error : run.status === 'stopped' ? (run.stopReason || 'الموظف وقف الرفع') : null;
+  const message = run.status === 'resolved' ? run.blockMessage : run.status === 'error' ? run.error : run.status === 'stopped' ? (run.stopReason || 'الموظف وقف الرفع')
+    : run.status === 'done' ? (run.amanMessage || null) : null;
   try {
     await api('POST', '/uploads/' + run.uploadId + '/result', {
       status, message, aman_ref: run.amanRef || null, recipe_version: run.recipe?.version || null,

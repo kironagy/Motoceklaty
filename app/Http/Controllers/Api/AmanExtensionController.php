@@ -263,13 +263,20 @@ class AmanExtensionController extends Controller
 
         $upload->update($data + ['finished_at' => now()]);
 
-        // Aman refused the customer before: the request is rejected in motobot too (owner 2026-11-16),
-        // like staff rejecting it by hand. Only a request that is still new is touched.
-        if ($data['status'] === 'rejected_before') {
-            $req = InstallmentRequest::find($upload->installment_request_id);
-            if ($req && in_array($req->status, config('aman_extension.new_statuses'), true)) {
+        // Like staff doing it by hand (owner 2026-11-16), and only on a request that is still new:
+        // - refused before at Aman: the request is rejected;
+        // - uploaded with Aman's number: the request goes under inquiry, the number and Aman's message
+        //   become its reason.
+        $req = InstallmentRequest::find($upload->installment_request_id);
+        if ($req && in_array($req->status, config('aman_extension.new_statuses'), true)) {
+            if ($data['status'] === 'rejected_before') {
                 $req->checks_report = array_merge((array) $req->checks_report, ['aman' => 'العميل عنده طلب مرفوض قبل كده عند أمان']);
                 $req->status = 'rejected';
+                $req->save();
+            } elseif ($data['status'] === 'uploaded' && filled($data['aman_ref'] ?? null)) {
+                $note = 'رقم طلب أمان: '.$data['aman_ref'].(filled($data['message'] ?? null) ? ' — '.$data['message'] : '');
+                $req->checks_report = array_merge((array) $req->checks_report, ['aman' => $note]);
+                $req->status = 'pending';
                 $req->save();
             }
         }

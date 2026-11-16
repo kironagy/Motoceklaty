@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "رافع طلبات أمان",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "يعلّم خطوات رفع كل نوع طلب على أمان، ويسحب الطلبات الجديدة من السيستم ويرفعها، ويقف قبل الحفظ لموافقة الموظف.",
   "permissions": ["storage", "sidePanel", "tabs"],
   "host_permissions": ["<all_urls>"],

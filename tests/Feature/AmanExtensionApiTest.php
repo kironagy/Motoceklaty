@@ -119,6 +119,20 @@ class AmanExtensionApiTest extends TestCase
         $this->api()->postJson('/api/aman/requests/'.$req->id.'/claim')->assertStatus(409);
     }
 
+    public function test_uploaded_with_aman_number_goes_under_inquiry(): void
+    {
+        AmanRecipe::create(['type' => 'no_income_proof', 'steps' => [['kind' => 'click', 'gate' => true]]]);
+        $req = $this->request();
+        $id = $this->api()->postJson('/api/aman/requests/'.$req->id.'/claim')->json('upload.id');
+
+        $this->api()->postJson('/api/aman/uploads/'.$id.'/result', [
+            'status' => 'uploaded', 'aman_ref' => '26116832162', 'message' => 'تم تقديم الحد الائتمانى بنجاح و رقم العملية : 26116832162',
+        ])->assertOk();
+
+        $this->assertSame('pending', $req->fresh()->status);
+        $this->assertSame('رقم طلب أمان: 26116832162 — تم تقديم الحد الائتمانى بنجاح و رقم العملية : 26116832162', $req->fresh()->checks_report['aman']);
+    }
+
     public function test_queue_skips_other_statuses_and_non_aman_companies(): void
     {
         $this->request(['status' => 'pending']);

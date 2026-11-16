@@ -609,7 +609,7 @@
       const ref = await waitFor(() => refFrom(textOf(findEl(step.target) || el)), 8000) || '';
       mark(el, '#2563eb');
       if (!ref) return fail('مالقتش رقم الطلب في رسالة أمان: "' + textOf(el) + '"');
-      return advance({ label: 'رقم الطلب عند أمان', source: 'من الصفحة', expected: '', actual: ref, ok: true }, { amanRef: ref });
+      return advance({ label: 'رقم الطلب عند أمان', source: 'من الصفحة', expected: '', actual: ref, ok: true }, { amanRef: ref, amanMessage: textOf(findEl(step.target) || el) });
     }
 
     if (step.kind === 'click') {
@@ -718,12 +718,22 @@
     return all ? all.sort((a, b) => b.length - a.length)[0] : '';
   }
   /** After saving, when no step reads the number: look for Aman's success message anywhere on the page. */
+  // Returns { ref, msg }: Aman's number and its whole success message ("تم تقديم الحد الائتمانى بنجاح و
+  // رقم العملية : 26116832162"), or null when Aman shows none.
   async function autoRef() {
+    const RE = /رقم\s*(?:ال)?(?:عمليه|عملية|طلب)\s*[:：]?\s*(\d{5,})/;
+    const digits = (t) => t.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
     return waitFor(() => {
-      const t = document.body?.innerText || '';
-      const m = t.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).match(/رقم\s*(?:ال)?(?:عمليه|عملية|طلب)\s*[:：]?\s*(\d{5,})/);
-      return m ? m[1] : null;
-    }, 10000);
+      const m = digits(document.body?.innerText || '').match(RE);
+      if (!m) return null;
+      let msg = '';
+      for (const el of document.querySelectorAll('span, font, label, td, p, b, div')) {
+        if (host && host.contains(el)) continue;
+        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (t.length <= 400 && RE.test(digits(t)) && ![...el.children].some((c) => RE.test(digits(c.textContent || '')))) { msg = t; break; }
+      }
+      return { ref: m[1], msg: msg || m[0] };
+    }, 20000);
   }
 
   let again = false;
@@ -768,9 +778,16 @@
         if (rejection) { await rejectedBefore(rejection); break; }
         const step = run.recipe.steps[run.i];
         if (!step) {
-          let ref = run.amanRef;
-          if (!ref && run.approvedAt) ref = await autoRef();
-          await update('run', (r) => ({ ...r, ...(ref ? { amanRef: ref } : {}), status: 'done', finishedAt: new Date().toISOString() }));
+          let ref = run.amanRef, msg = run.amanMessage || '';
+          if (!ref && run.approvedAt) { const got = await autoRef(); if (got) ({ ref, msg } = got); }
+          if (run.approvedAt && !ref) {
+            // Saved, but Aman showed no request number: not uploaded. The employee looks at the page,
+            // fixes what Aman complains about and saves by hand, then "كمّل" looks for the number again.
+            await update('run', (r) => ({ ...r, status: 'blocked', problem: true, problemRow: null,
+              blockMessage: 'دوست حفظ بس أمان ماطلّعش رقم طلب، يعني الطلب مااترفعش. شوف صفحة أمان: لو فيه غلط صلّحه واحفظ بإيدك' }));
+            break;
+          }
+          await update('run', (r) => ({ ...r, ...(ref ? { amanRef: ref, amanMessage: msg } : {}), status: 'done', finishedAt: new Date().toISOString() }));
           break;
         }
         try {
