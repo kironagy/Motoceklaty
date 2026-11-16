@@ -32,6 +32,14 @@ php artisan migrate:status | grep -i pending || echo "No pending migrations."
 # Blade views and re-discovers Filament components and icons on each request.
 # config:cache is left out on purpose: WhatsAppService, FormsVoiceClips and
 # routes/web.php still call env() directly, which returns null once config is cached.
+# The production server does keep a config cache (bootstrap/cache/config.php). A stale one
+# hides any new config file: config/aman_extension.php read as null and /api/aman/queue
+# returned 500 (2026-11-16). Rebuild it only where it already exists.
+if [ -f bootstrap/cache/config.php ]; then
+    echo "== Rebuilding the existing config cache =="
+    php artisan config:cache
+fi
+
 echo "== Caching routes, views, events, Filament components and icons =="
 php artisan route:cache
 php artisan view:cache
