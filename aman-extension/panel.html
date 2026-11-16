@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>رافع طلبات أمان</title>
+<style>
+  :root { --bg:#f8fafc; --card:#fff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --brand:#7c3aed; --ok:#16a34a; --bad:#dc2626; --warn:#b45309; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:12px; background:var(--bg); color:var(--ink); font:13px Tahoma, Arial, sans-serif; }
+  h2 { font-size:14px; margin:0 0 8px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:10px; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  select, textarea, button { font:inherit; }
+  select { padding:4px; border:1px solid var(--line); border-radius:6px; }
+  textarea { width:100%; min-height:130px; direction:ltr; font:12px monospace; border:1px solid var(--line); border-radius:6px; padding:6px; }
+  button { border:0; border-radius:6px; padding:6px 10px; cursor:pointer; background:#e2e8f0; }
+  button.primary { background:var(--brand); color:#fff; }
+  button.ok { background:var(--ok); color:#fff; }
+  button.bad { background:var(--bad); color:#fff; }
+  button:disabled { opacity:.5; cursor:default; }
+  .muted { color:var(--muted); font-size:12px; }
+  ol { margin:6px 0 0; padding-inline-start:20px; }
+  li { margin:3px 0; }
+  li .x { background:none; color:var(--bad); padding:0 4px; }
+  .pill { display:inline-block; border-radius:4px; padding:0 5px; font-size:11px; color:#fff; background:var(--muted); }
+  .pill.fill { background:var(--ok); } .pill.click { background:#1d4ed8; } .pill.page { background:#475569; } .pill.gate { background:var(--bad); }
+  table { width:100%; border-collapse:collapse; margin-top:6px; font-size:12px; }
+  td, th { border-bottom:1px solid var(--line); padding:3px; text-align:start; vertical-align:top; }
+  .status { padding:6px; border-radius:6px; margin-top:6px; }
+  .status.error { background:#fee2e2; color:var(--bad); } .status.review { background:#fef3c7; color:var(--warn); }
+  .status.done { background:#dcfce7; color:var(--ok); } .status.running { background:#ede9fe; color:var(--brand); }
+</style>
+</head>
+<body>
+  <section>
+    <h2>وضع التعليم</h2>
+    <div class="row">
+      <select id="teachType"></select>
+      <button id="teachStart" class="primary">ابدأ التعليم</button>
+      <button id="teachSave" class="ok" hidden>احفظ الوصفة</button>
+      <button id="teachCancel" hidden>إلغاء</button>
+    </div>
+    <p class="muted" id="teachHint">اختار نوع الطلب، وافتح صفحة أمان، وبعدين دوس ابدأ.</p>
+    <ol id="teachSteps"></ol>
+  </section>
+
+  <section>
+    <h2>الوصفات المحفوظة</h2>
+    <div id="recipes" class="muted">لسه مافيش.</div>
+  </section>
+
+  <section>
+    <h2>تشغيل تجريبي</h2>
+    <div class="row">
+      <select id="runType"></select>
+      <button id="runStart" class="primary">شغّل على الصفحة دي</button>
+      <button id="runStop">إيقاف</button>
+    </div>
+    <p class="muted">بيانات الطلب (مؤقتًا لحد ما نربط بالسيستم):</p>
+    <textarea id="order"></textarea>
+    <div id="runStatus"></div>
+    <table id="review" hidden><thead><tr><th>الخانة</th><th>المصدر</th><th>المفروض</th><th>اتكتب</th><th></th></tr></thead><tbody></tbody></table>
+    <div class="row" id="gateRow" hidden style="margin-top:8px">
+      <button id="approve" class="ok">راجعت — احفظ عند أمان</button>
+      <button id="reject" class="bad">مش موافق</button>
+    </div>
+  </section>
+
+  <script src="shared.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

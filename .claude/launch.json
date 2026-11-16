@@ -28,6 +28,20 @@
         "--port=8002"
       ],
       "port": 8002
+    },
+    {
+      "name": "aman-extension-dev",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8765",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "aman-extension"
+      ],
+      "port": 8765
     }
   ]
 }
