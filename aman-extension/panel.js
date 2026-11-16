@@ -242,13 +242,7 @@ async function processNext() {
       const recipe = recipes[data.upload.type];
       const base = { batchItemId: item.id, uploadId: data.upload.id, requestId: data.request_id, type: data.upload.type, typeLabel: data.upload.type_label,
         order: data.order, card: data.card || {}, recipe, tabId: tab?.id, i: 0, log: [], dialogs: [], startedAt: new Date().toISOString() };
-      const cardErrors = data.card?.errors || [];
       if (!recipe) { await store.set({ run: { ...base, status: 'error', error: 'مافيش وصفة لنوع "' + data.upload.type_label + '"' } }); return; }
-      if (cardErrors.some((e) => e.includes('غير اللي'))) {
-        // Stops here until the employee checks it: go on anyway, or leave it as a problem.
-        await store.set({ run: { ...base, status: 'blocked', problem: true, beforeStart: true, blockMessage: cardErrors.join(' — ') } });
-        return;
-      }
       await launch(base);
       return; // the run's end (onRunChange) calls processNext again
     }
@@ -393,7 +387,7 @@ function renderRun(run) {
   const name = run.card?.full_name || run.order?.applicant_name || '';
   $('curTitle').textContent = `طلب #${run.requestId} — ${run.typeLabel || AMAN.typeLabel(run.type)}`;
   const info = $('curInfo'); info.innerHTML = '';
-  for (const [k, v] of [['العميل', name], ['الرقم القومي', run.card?.national_id || run.order?.applicant_national_id], ['النوع', run.card?.gender], ['الاسم من', run.card?.name_source === 'card' ? 'البطاقة' : 'السيستم (البطاقة ماتقريتش)']]) {
+  for (const [k, v] of [['العميل', name], ['الرقم القومي', run.order?.applicant_national_id || run.card?.national_id], ['النوع', run.card?.gender], ['الاسم من', run.card?.name_source === 'card' ? 'البطاقة' : 'السيستم (البطاقة ماتقريتش)']]) {
     if (!v) continue;
     const b = document.createElement('b'); b.textContent = k; const s = document.createElement('span'); s.textContent = v; info.append(b, s);
   }

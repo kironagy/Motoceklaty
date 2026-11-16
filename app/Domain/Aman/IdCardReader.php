@@ -33,7 +33,7 @@ class IdCardReader
         $front = $request->applicant_id_image;
         $back = $request->applicant_id_back_image;
         // "v3": cards read before the address fixes are read again.
-        $key = 'aman-card:v4:'.$request->id.':'.md5($front.'|'.$back.'|'.$request->applicant_name.'|'.$request->applicant_national_id);
+        $key = 'aman-card:v5:'.$request->id.':'.md5($front.'|'.$back.'|'.$request->applicant_name.'|'.$request->applicant_national_id);
 
         return Cache::remember($key, now()->addDays(30), fn () => $this->readFresh($request, $front, $back));
     }
@@ -46,24 +46,18 @@ class IdCardReader
 
         $out = $this->parseFront($frontText) + $this->parseBack($backText);
 
-        // The number: the card's (owner 2026-11-16: Aman gets the card's number, not the system's).
-        // The system's stands in only when OCR missed it or read an invalid number.
+        // The number: the card's OCR read, kept as "البطاقة: الرقم القومي" for recipes that want it. A
+        // mismatch with motobot's is only a warning (owner 2026-11-17: OCR misreads a digit, Aman gets
+        // motobot's number through the recipe). Birthdate / gender come from motobot's number when valid.
         $systemNid = $this->nid->normalizeDigits((string) $request->applicant_national_id);
-        $cardValid = ! empty($out['national_id']) && $this->nid->parse($out['national_id'])['valid'];
-        if (! $cardValid && strlen($systemNid) === 14 && $this->nid->parse($systemNid)['valid']) {
-            if (! empty($out['national_id'])) {
-                $errors[] = 'الرقم القومي في البطاقة اتقرا غلط ('.$out['national_id'].')، اتكتب اللي في السيستم ('.$systemNid.')';
-            }
+        $systemValid = strlen($systemNid) === 14 && $this->nid->parse($systemNid)['valid'];
+        if (empty($out['national_id']) && $systemValid) {
             $out['national_id'] = $systemNid;
-            $out['national_id_source'] = 'system';
-        } elseif ($cardValid) {
-            $out['national_id_source'] = 'card';
-            if (strlen($systemNid) === 14 && $out['national_id'] !== $systemNid) {
-                $errors[] = 'الرقم القومي في البطاقة ('.$out['national_id'].') مختلف عن السيستم ('.$systemNid.')، اتكتب اللي في البطاقة';
-            }
+        } elseif ($systemValid && $out['national_id'] !== $systemNid) {
+            $errors[] = 'تنبيه بس: الرقم القومي اللي اتقرا من البطاقة ('.$out['national_id'].') مختلف عن السيستم ('.$systemNid.')، راجعه';
         }
 
-        $parsed = $this->nid->parse($out['national_id'] ?? null);
+        $parsed = $this->nid->parse($systemValid ? $systemNid : ($out['national_id'] ?? null));
         if ($parsed['valid']) {
             $out['birthdate'] = $parsed['birthdate'];
             $out['governorate'] = $parsed['governorate'];

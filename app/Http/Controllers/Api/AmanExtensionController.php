@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Domain\Aman\IdCardImage;
 use App\Domain\Aman\IdCardReader;
 use App\Domain\Aman\SmartTransport;
 use App\Http\Controllers\Controller;
@@ -170,9 +169,8 @@ class AmanExtensionController extends Controller
         foreach (self::FILE_FIELDS as $field) {
             $value = $req->{$field};
             $paths = is_array($value) ? array_values($value) : (blank($value) ? [] : [$value]);
-            // ID card photos go to Aman upright and cropped (IdCardImage).
-            $clean = in_array($field, self::CARD_FIELDS, true) ? ['clean' => 1] : [];
-            $order[$field] = $paths ? array_map(fn ($i) => route('aman.file', ['upload' => $upload->id, 'field' => $field, 'i' => $i] + $clean), array_keys($paths)) : null;
+            // ID card photos go to Aman as they are: cropping cut cards wrong (owner 2026-11-17).
+            $order[$field] = $paths ? array_map(fn ($i) => route('aman.file', ['upload' => $upload->id, 'field' => $field, 'i' => $i]), array_keys($paths)) : null;
         }
 
         // Smart-transport drivers: income proof photos merged into the two guarantor slots, work address
@@ -187,11 +185,9 @@ class AmanExtensionController extends Controller
         $order['proof_merged_1'] = $proofs >= 1 ? [route('aman.file', ['upload' => $upload->id, 'field' => 'proof_merged_1'])] : $order['applicant_id_image'];
         $order['proof_merged_2'] = $proofs >= 2 ? [route('aman.file', ['upload' => $upload->id, 'field' => 'proof_merged_2'])] : $order['applicant_id_back_image'];
 
-        // Aman gets the national ID read off the card (owner 2026-11-16), not the one typed in motobot.
+        // The recipe picks the number's source: "الرقم القومي" is motobot's, "البطاقة: الرقم القومي" is the
+        // card's OCR read (owner 2026-11-17: OCR misreads a digit, so the recipe uses motobot's).
         $card = $cards->read($req);
-        if (! empty($card['national_id'])) {
-            $order['applicant_national_id'] = $card['national_id'];
-        }
 
         return [
             'upload' => ['id' => $upload->id, 'type' => $upload->type, 'type_label' => config('aman_extension.types')[$upload->type] ?? $upload->type],
@@ -220,7 +216,7 @@ class AmanExtensionController extends Controller
             ])];
     }
 
-    public function file(Request $request, AmanUpload $upload, string $field, IdCardImage $images, SmartTransport $transport)
+    public function file(Request $request, AmanUpload $upload, string $field, SmartTransport $transport)
     {
         abort_unless($upload->staff_id === $this->staff($request)->id, 403);
 
@@ -236,10 +232,6 @@ class AmanExtensionController extends Controller
         $paths = is_array($value) ? array_values($value) : [$value];
         $path = $paths[(int) $request->query('i', 0)] ?? null;
         abort_if(blank($path) || ! Storage::disk('public')->exists($path), 404);
-
-        if ($request->boolean('clean') && in_array($field, self::CARD_FIELDS, true)) {
-            $path = $images->cleaned($path);
-        }
 
         return Storage::disk('public')->response($path);
     }
