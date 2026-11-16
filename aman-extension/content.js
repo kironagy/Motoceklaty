@@ -500,7 +500,7 @@
     const v = s.type === 'card' ? run.card?.[s.key] : run.order?.[s.key];
     const texts = [];
     if (!empty(v)) texts.push(['الخانة', String(v)]);
-    const isWork = /^work_|^free_work/.test(s.key || '');
+    const isWork = /^(aman_)?work_|^free_work/.test(s.key || '');
     const addr = isWork
       ? [run.order?.work_address, run.order?.free_work_address, run.order?.work_area, run.order?.work_street, run.order?.work_governorate]
       : [run.order?.applicant_address, run.order?.applicant_area, run.order?.applicant_street, run.order?.applicant_branch_street, run.order?.applicant_governorate, run.order?.applicant_landmark, run.card?.address];
@@ -720,8 +720,17 @@
     }
 
     if (el.tagName === 'SELECT' && ['field', 'card'].includes(s.type) && s.smart !== false && !s.verify) {
-      const pick = await chooseSmart(el, s, run);
-      if (!pick.option && pick.wanted) {
+      let pick = await chooseSmart(el, s, run);
+      const isWorkKey = /^(aman_)?work_/.test(s.key || '');
+      if (!pick.option && isWorkKey) {
+        // Work area not in the list: the same area as the customer's own, chosen above (owner 2026-11-16).
+        const home = run.recipe.steps.find((x) => x.source?.key === 'applicant_area' && x.target?.tag === 'select');
+        const homeEl = home && findEl(home.target);
+        const homeText = homeEl?.selectedOptions?.[0] && !isPlaceholder(homeEl.selectedOptions[0]) ? homeEl.selectedOptions[0].text : '';
+        const o = homeText && (exactOption(el, homeText) || optionFromText(el, homeText).option);
+        if (o) pick = { option: o, how: 'نفس منطقة العميل' };
+      }
+      if (!pick.option && pick.wanted && !isWorkKey) {
         // Not in this list: Aman may file it one level lower or under another parent. Try every option
         // of the parent list until the value shows up in its child list (owner 2026-11-16).
         const steps = run.recipe.steps;

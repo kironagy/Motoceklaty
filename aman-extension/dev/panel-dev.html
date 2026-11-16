@@ -3,62 +3,90 @@
 <head>
 <meta charset="utf-8">
 <title>رافع طلبات أمان</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
-  /* Motogate orange */
-  :root { --bg:#f8fafc; --card:#fff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0;
-    --brand:#ff6100; --brand-dark:#b84500; --brand-soft:#fff2e9; --bad:#dc2626; --good:#15803d; }
-  * { box-sizing: border-box; }
-  body { margin:0; padding:0 0 12px; background:var(--bg); color:var(--ink); font:13px Tahoma, Arial, sans-serif; }
-  header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; background:var(--brand); color:#fff; }
-  header b { font-size:14px; }
-  header small { opacity:.9; }
-  nav { display:flex; border-bottom:1px solid var(--line); background:#fff; }
-  nav button { flex:1; border:0; border-radius:0; background:none; padding:9px 0; cursor:pointer; font:inherit; color:var(--muted); border-bottom:3px solid transparent; }
-  nav button.on { color:var(--brand-dark); border-color:var(--brand); font-weight:bold; }
-  main { padding:10px 12px; }
-  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:10px; }
-  h2 { font-size:14px; margin:0 0 8px; }
+  /* Motogate: orange + ink, Cairo */
+  :root { --bg:#f7f5f2; --card:#ffffff; --ink:#16130f; --muted:#7a7268; --line:#ece6de;
+    --brand:#ff6100; --brand-2:#ff8a3d; --brand-dark:#b84500; --brand-soft:#fff3ea;
+    --bad:#dc2626; --bad-soft:#fee2e2; --good:#15803d; --good-soft:#dcfce7; --warn:#92400e; --warn-soft:#fef3c7;
+    --shadow:0 1px 2px rgba(22,19,15,.05), 0 6px 18px rgba(22,19,15,.06); --r:14px; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:0 0 16px; color:var(--ink); font:13.5px/1.6 'Cairo', Tahoma, Arial, sans-serif;
+    background: radial-gradient(120% 60% at 100% 0%, #ffe9da 0%, rgba(255,233,218,0) 60%), var(--bg); min-height:100vh; }
+  button, input, select { font-family:inherit; }
+
+  header { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:10px; padding:10px 14px;
+    background:rgba(255,255,255,.88); backdrop-filter:blur(8px); border-bottom:1px solid var(--line); }
+  header img { height:38px; width:auto; display:block; }
+  header .ttl { display:flex; flex-direction:column; line-height:1.25; flex:1; }
+  header .ttl b { font-size:15px; font-weight:800; }
+  header .ttl span { font-size:11px; color:var(--muted); }
+  header::after { content:''; position:absolute; inset:auto 0 -1px 0; height:3px; background:linear-gradient(90deg, var(--brand), var(--brand-2) 60%, transparent); }
+  #who { font-size:11px; font-weight:600; color:var(--brand-dark); background:var(--brand-soft); border:1px solid #ffd9bf; border-radius:999px; padding:2px 10px; white-space:nowrap; }
+
+  nav { display:flex; gap:4px; margin:12px 14px 0; padding:4px; background:#efe9e2; border-radius:12px; }
+  nav button { flex:1; border:0; border-radius:9px; background:none; padding:7px 0; cursor:pointer; color:var(--muted); font-weight:600; transition:.15s; }
+  nav button:hover { color:var(--ink); }
+  nav button.on { background:#fff; color:var(--brand-dark); box-shadow:0 1px 3px rgba(22,19,15,.12); }
+
+  main { padding:12px 14px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:12px; margin-bottom:12px; box-shadow:var(--shadow); }
+  h2 { font-size:14.5px; font-weight:800; margin:0 0 8px; display:flex; align-items:center; gap:8px; }
+  h2::before { content:''; width:4px; height:16px; border-radius:4px; background:linear-gradient(var(--brand), var(--brand-2)); }
   .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-  select, input[type=text], input[type=email], input[type=password], button { font:inherit; }
-  select, input[type=text], input[type=email], input[type=password] { padding:6px; border:1px solid var(--line); border-radius:6px; }
+  select, input[type=text], input[type=email], input[type=password] { padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:#fffdfb; transition:.15s; }
+  select:focus, input:focus { outline:none; border-color:var(--brand-2); box-shadow:0 0 0 3px rgba(255,97,0,.15); }
   input.wide { width:100%; }
   input.ltr { direction:ltr; }
-  label.f { display:block; margin:8px 0 3px; color:var(--muted); font-size:12px; }
-  button { border:0; border-radius:6px; padding:6px 12px; cursor:pointer; background:#e2e8f0; color:var(--ink); }
-  button.primary, button.ok { background:var(--brand); color:#fff; }
-  button.primary:hover, button.ok:hover { background:var(--brand-dark); }
-  button.big { width:100%; padding:10px; font-size:14px; font-weight:bold; }
-  button.bad { background:var(--bad); color:#fff; }
+  label.f { display:block; margin:10px 0 4px; color:var(--muted); font-size:12px; font-weight:600; }
+
+  button { border:1px solid var(--line); border-radius:10px; padding:7px 14px; cursor:pointer; background:#fff; color:var(--ink); font-weight:600; transition:transform .12s, box-shadow .12s, background .12s; }
+  button:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 4px 10px rgba(22,19,15,.08); }
+  button.primary, button.ok { border-color:transparent; color:#fff; background:linear-gradient(135deg, var(--brand), var(--brand-2)); box-shadow:0 4px 12px rgba(255,97,0,.28); }
+  button.primary:hover:not(:disabled), button.ok:hover:not(:disabled) { box-shadow:0 6px 16px rgba(255,97,0,.38); }
+  button.big { width:100%; padding:12px; font-size:15px; font-weight:800; border-radius:12px; }
+  button.bad { border-color:transparent; background:var(--bad); color:#fff; }
   button:disabled { opacity:.5; cursor:default; }
   .muted { color:var(--muted); font-size:12px; }
+
   ol { margin:6px 0 0; padding-inline-start:20px; }
   li { margin:4px 0; }
-  li .x { background:none; color:var(--bad); padding:0 4px; }
-  .pill { display:inline-block; border-radius:4px; padding:0 5px; font-size:11px; color:#fff; background:var(--muted); }
-  .pill.fill { background:var(--brand); } .pill.click { background:#475569; } .pill.page { background:#94a3b8; }
+  li .x { background:none; border:0; color:var(--bad); padding:0 4px; box-shadow:none; }
+  .pill { display:inline-block; border-radius:6px; padding:0 6px; font-size:11px; font-weight:600; color:#fff; background:var(--muted); }
+  .pill.fill { background:var(--brand); } .pill.click { background:#475569; } .pill.page { background:#a8a29e; }
   .pill.gate { background:var(--bad); } .pill.expect { background:var(--brand-dark); } .pill.capture { background:#0f766e; }
-  table { width:100%; border-collapse:collapse; margin-top:6px; font-size:12px; }
-  td, th { border-bottom:1px solid var(--line); padding:4px 3px; text-align:start; vertical-align:top; }
-  .status { padding:8px; border-radius:6px; margin-top:8px; }
-  .status.error, .status.blocked { background:#fee2e2; color:var(--bad); }
-  .status.review, .status.running, .status.starting, .status.approved { background:var(--brand-soft); color:var(--brand-dark); }
-  .status.done { background:#dcfce7; color:var(--good); }
-  .now { background:var(--brand-soft); border:1px solid #ffd2b3; color:var(--brand-dark); border-radius:8px; padding:8px; margin-top:8px; font-weight:bold; }
-  .bar { height:8px; background:#f1f5f9; border-radius:4px; overflow:hidden; margin-top:6px; }
-  .bar > div { height:100%; background:var(--brand); width:0; transition:width .3s; }
-  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 8px; font-size:12px; margin-top:6px; }
-  .kv b { color:var(--muted); font-weight:normal; }
+
+  table { width:100%; border-collapse:separate; border-spacing:0; margin-top:8px; font-size:12px; }
+  th { color:var(--muted); font-weight:700; font-size:11.5px; text-align:start; padding:6px 4px; border-bottom:1px solid var(--line); }
+  td { padding:7px 4px; text-align:start; vertical-align:top; border-bottom:1px solid #f4efe9; }
+  tbody tr:hover td { background:#fffaf6; }
+
+  .status { padding:10px 12px; border-radius:12px; margin-top:10px; font-weight:600; }
+  .status.error, .status.blocked { background:var(--bad-soft); color:var(--bad); border:1px solid #fecaca; }
+  .status.review, .status.running, .status.starting, .status.approved { background:var(--brand-soft); color:var(--brand-dark); border:1px solid #ffd9bf; }
+  .status.done { background:var(--good-soft); color:var(--good); border:1px solid #bbf7d0; }
+  .now { background:linear-gradient(135deg, #fff3ea, #fff); border:1px solid #ffd2b3; color:var(--brand-dark); border-radius:12px; padding:10px 12px; margin-top:10px; font-weight:700; }
+  .bar { height:8px; background:#f1ebe4; border-radius:99px; overflow:hidden; margin-top:6px; }
+  .bar > div { height:100%; background:linear-gradient(90deg, var(--brand), var(--brand-2)); width:0; transition:width .4s; border-radius:99px; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 10px; font-size:12.5px; margin-top:6px; }
+  .kv b { color:var(--muted); font-weight:600; }
   .warn { color:var(--bad); font-size:12px; margin-top:4px; }
-  .st { white-space:nowrap; font-size:11px; border-radius:4px; padding:1px 5px; }
-  .st.waiting { background:#f1f5f9; color:var(--muted); } .st.working { background:var(--brand); color:#fff; }
-  .st.uploaded { background:#dcfce7; color:var(--good); } .st.rejected_before { background:#fee2e2; color:var(--bad); }
-  .st.error, .st.stopped, .st.skipped { background:#fef3c7; color:#92400e; }
-  .why { color:var(--muted); font-size:11px; margin-top:2px; max-width:220px; }
+  .st { white-space:nowrap; font-size:11px; font-weight:700; border-radius:999px; padding:1px 9px; }
+  .st.waiting { background:#f1ebe4; color:var(--muted); } .st.working { background:var(--brand); color:#fff; }
+  .st.uploaded { background:var(--good-soft); color:var(--good); } .st.rejected_before { background:var(--bad-soft); color:var(--bad); }
+  .st.error, .st.stopped, .st.skipped, .st.released { background:var(--warn-soft); color:var(--warn); }
+  .why { color:var(--muted); font-size:11px; margin-top:3px; max-width:220px; }
   [hidden] { display:none !important; }
 </style>
 </head>
 <body>
-  <header><b>رافع طلبات أمان</b><small id="who">مش داخل</small></header>
+  <header>
+    <img src="../icons/logo.png" alt="موتوجيت">
+    <div class="ttl"><b>رافع طلبات أمان</b><span>موتوجيت</span></div>
+    <small id="who">مش داخل</small>
+  </header>
   <nav>
     <button data-tab="run" class="on">تنفيذ</button>
     <button data-tab="teach">تعليم</button>
