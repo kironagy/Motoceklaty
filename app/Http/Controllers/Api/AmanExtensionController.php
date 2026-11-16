@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Domain\Aman\IdCardImage;
 use App\Domain\Aman\IdCardReader;
 use App\Http\Controllers\Controller;
 use App\Models\AmanRecipe;
@@ -32,6 +33,8 @@ class AmanExtensionController extends Controller
         'selfie_image', 'medical_card_image', 'price_offer_image', 'free_income_proof_images',
         'salary_slip_file', 'pension_statement_file', 'commercial_reg_file', 'tax_card_file',
     ];
+
+    private const CARD_FIELDS = ['applicant_id_image', 'applicant_id_back_image', 'guarantor_id_image', 'guarantor_id_back_image'];
 
     private function staff(Request $request): Staff
     {
@@ -166,7 +169,9 @@ class AmanExtensionController extends Controller
         foreach (self::FILE_FIELDS as $field) {
             $value = $req->{$field};
             $paths = is_array($value) ? array_values($value) : (blank($value) ? [] : [$value]);
-            $order[$field] = $paths ? array_map(fn ($i) => route('aman.file', ['upload' => $upload->id, 'field' => $field, 'i' => $i]), array_keys($paths)) : null;
+            // ID card photos go to Aman upright and cropped (IdCardImage).
+            $clean = in_array($field, self::CARD_FIELDS, true) ? ['clean' => 1] : [];
+            $order[$field] = $paths ? array_map(fn ($i) => route('aman.file', ['upload' => $upload->id, 'field' => $field, 'i' => $i] + $clean), array_keys($paths)) : null;
         }
 
         return [
@@ -196,7 +201,7 @@ class AmanExtensionController extends Controller
             ])];
     }
 
-    public function file(Request $request, AmanUpload $upload, string $field)
+    public function file(Request $request, AmanUpload $upload, string $field, IdCardImage $images)
     {
         abort_unless($upload->staff_id === $this->staff($request)->id, 403);
         abort_unless(in_array($field, self::FILE_FIELDS, true), 404);
@@ -205,6 +210,10 @@ class AmanExtensionController extends Controller
         $paths = is_array($value) ? array_values($value) : [$value];
         $path = $paths[(int) $request->query('i', 0)] ?? null;
         abort_if(blank($path) || ! Storage::disk('public')->exists($path), 404);
+
+        if ($request->boolean('clean') && in_array($field, self::CARD_FIELDS, true)) {
+            $path = $images->cleaned($path);
+        }
 
         return Storage::disk('public')->response($path);
     }

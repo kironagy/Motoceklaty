@@ -33,6 +33,15 @@ class GoogleVisionOcr implements OcrProvider
 
         $annotation = $response->json('responses.0.fullTextAnnotation.text');
 
-        return new OcrResult($annotation ?? '');
+        // Word positions (all text annotations after the first, which is the whole text).
+        $words = [];
+        foreach (array_slice($response->json('responses.0.textAnnotations') ?? [], 1) as $a) {
+            $v = array_map(fn ($p) => [(int) ($p['x'] ?? 0), (int) ($p['y'] ?? 0)], $a['boundingPoly']['vertices'] ?? []);
+            if (count($v) === 4) {
+                $words[] = ['text' => (string) ($a['description'] ?? ''), 'v' => $v];
+            }
+        }
+
+        return new OcrResult($annotation ?? '', $words);
     }
 }

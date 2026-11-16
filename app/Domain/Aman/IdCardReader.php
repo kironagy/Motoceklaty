@@ -72,6 +72,7 @@ class IdCardReader
             $out['name_source'] = 'system';
         } else {
             $out['name_source'] = 'card';
+            $out = $this->fixNameFromSystem($out, (string) $request->applicant_name, $errors);
         }
         $out['full_name'] = trim(implode(' ', array_filter([$out['name_1'] ?? '', $out['name_2'] ?? '', $out['name_3'] ?? '', $out['name_4'] ?? ''])));
 
@@ -91,7 +92,12 @@ class IdCardReader
         try {
             $mime = Storage::disk('public')->mimeType($path) ?: 'image/jpeg';
 
-            return $this->ocr->extractText(base64_encode(Storage::disk('public')->get($path)), $mime)->text;
+            $bytes = Storage::disk('public')->get($path);
+            $result = $this->ocr->extractText(base64_encode($bytes), $mime);
+            // IdCardImage straightens the same photo for Aman with these word positions.
+            Cache::put('aman-words:'.md5($bytes), $result->words, now()->addDays(30));
+
+            return $result->text;
         } catch (OcrException $e) {
             Log::warning('Aman card OCR failed', ['side' => $side, 'error' => $e->getMessage()]);
             $errors[] = 'قراءة '.($side === 'front' ? 'وش' : 'ضهر').' البطاقة فشلت';
@@ -176,6 +182,45 @@ class IdCardReader
         }
 
         return $out;
+    }
+
+    /**
+     * The card reader sometimes drops letters ("مد" for "محمد"). A card name that is the system
+     * name with two or more letters missing is taken from the system; any other difference is
+     * only reported, because the card is the legal spelling ("حسن" vs "حسين").
+     */
+    public function fixNameFromSystem(array $out, string $systemName, array &$errors): array
+    {
+        $system = preg_split('/\s+/u', trim($systemName)) ?: [];
+        foreach (['name_1', 'name_2', 'name_3'] as $i => $key) {
+            $card = trim($out[$key] ?? '');
+            $sys = $system[$i] ?? '';
+            if ($card === '' || $sys === '' || $this->norm($card) === $this->norm($sys)) {
+                continue;
+            }
+            $c = mb_str_split($this->norm($card));
+            $t = mb_str_split($this->norm($sys));
+            if (count($t) - count($c) >= 2 && $this->isSubsequence($c, $t)) {
+                $errors[] = 'الاسم في البطاقة اتقرا "'.$card.'" واتصلح من السيستم "'.$sys.'"';
+                $out[$key] = $sys;
+            } else {
+                $errors[] = 'الاسم في البطاقة "'.$card.'" والسيستم "'.$sys.'"، راجعه';
+            }
+        }
+
+        return $out;
+    }
+
+    private function isSubsequence(array $short, array $long): bool
+    {
+        $j = 0;
+        foreach ($long as $ch) {
+            if ($j < count($short) && $short[$j] === $ch) {
+                $j++;
+            }
+        }
+
+        return $j === count($short);
     }
 
     public function splitName(string $name): array
