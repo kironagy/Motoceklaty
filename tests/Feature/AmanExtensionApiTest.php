@@ -111,6 +111,7 @@ class AmanExtensionApiTest extends TestCase
     {
         $this->request(['status' => 'pending']);
         $this->request(['installment_type' => 'ڤاليو']);
+        $this->request(['request_type' => 'fake']);
         $this->api()->getJson('/api/aman/queue')->assertJsonCount(0, 'items');
     }
 }

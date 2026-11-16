@@ -101,6 +101,7 @@ class AmanExtensionController extends Controller
         return InstallmentRequest::query()
             ->visibleTo($staff)
             ->whereIn('status', config('aman_extension.new_statuses'))
+            ->whereIn('request_type', config('aman_extension.request_types', ['normal', 'bot']))
             ->where('installment_type', 'like', config('aman_extension.installment_type_like', 'امان%'))
             ->whereNotExists(fn ($q) => $q->from('aman_uploads')->whereColumn('aman_uploads.installment_request_id', 'installment_requests.id')
                 ->where(fn ($w) => $w->whereIn('status', AmanUpload::DONE)

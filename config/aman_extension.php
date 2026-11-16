@@ -13,6 +13,10 @@ return [
     // the employee may see (InstallmentRequest::scopeVisibleTo).
     'installment_type_like' => 'امان%',
 
+    // Which request tabs go to Aman (installment_requests.request_type): the main ones and the
+    // bot ones - never the fake ones (owner 2026-11-16).
+    'request_types' => ['normal', 'bot'],
+
     // installment_requests.status values that count as "new".
     'new_statuses' => ['new_request'],
 
