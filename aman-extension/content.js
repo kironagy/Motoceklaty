@@ -1,6 +1,7 @@
-// Runs inside every page of the Aman portal.
-// Teach mode: puts a "what is this field?" select next to every input and records clicks/pages.
-// Run mode: replays a saved recipe with an order's data, and stops at the save button for approval.
+// Runs inside the Aman portal pages.
+// Teach mode: a small badge on every field; clicking it opens a picker ("what is this field?").
+//   Clicks and pages are recorded; status messages and the Aman reference number are picked from the panel.
+// Run mode: replays the recipe with the order and card data, and stops at the save button for approval.
 (() => {
   if (window.__amanUploader) return;
   window.__amanUploader = true;
@@ -9,32 +10,42 @@
   let myTab = null;
 
   // ---------- element helpers ----------
-  const FIELD_SEL = 'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]):not([type=checkbox]):not([type=radio]), select, textarea';
-  const CLICK_SEL = 'button, a[href], [role=button], input[type=submit], input[type=button], input[type=checkbox], input[type=radio]';
+  const FIELD_SEL = 'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]), select, textarea';
+  const CLICK_SEL = 'button, a[href], a[onclick], [role=button], input[type=submit], input[type=button], input[type=image]';
+  const isCheck = (el) => el.type === 'checkbox' || el.type === 'radio';
 
   const visible = (el) => {
     if (!el || !el.isConnected) return false;
-    if (el.type === 'file') return true; // file inputs are often styled invisible
+    if (el.type === 'file') return !!el.offsetParent || el.getClientRects().length > 0 || el.parentElement?.offsetParent;
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
   };
   const clean = (s, n = 80) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
-  const textOf = (el) => clean(el.innerText || el.value || el.getAttribute('aria-label') || el.title, 60);
+  const textOf = (el) => clean(el.innerText || el.value || el.getAttribute('aria-label') || el.title || el.alt, 60);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function labelOf(el) {
     if (el.labels && el.labels[0]) return clean(el.labels[0].innerText);
     const by = el.getAttribute('aria-labelledby');
     if (by) { const t = by.split(/\s+/).map((id) => document.getElementById(id)?.innerText || '').join(' '); if (clean(t)) return clean(t); }
     const wrap = el.closest('label');
-    if (wrap) return clean(wrap.innerText);
+    if (wrap && clean(wrap.innerText)) return clean(wrap.innerText);
+    // Table layouts (ASP.NET): the label sits in the previous cell.
+    const cell = el.closest('td, th');
+    if (cell) {
+      let prev = cell.previousElementSibling;
+      while (prev && !clean(prev.innerText)) prev = prev.previousElementSibling;
+      if (prev) return clean(prev.innerText);
+    }
     let prev = el.previousElementSibling;
+    while (prev && !clean(prev.innerText) && prev.tagName !== 'INPUT') prev = prev.previousElementSibling;
     if (prev && clean(prev.innerText)) return clean(prev.innerText);
     prev = el.parentElement?.previousElementSibling;
     if (prev && clean(prev.innerText)) return clean(prev.innerText);
     return '';
   }
 
-  const stableId = (id) => /^[A-Za-z][\w-]*$/.test(id) && !/\d{4,}/.test(id);
+  const stableId = (id) => /^[A-Za-z][\w$-]*$/.test(id) && !/\d{5,}/.test(id);
 
   function cssPath(el) {
     const parts = [];
@@ -49,24 +60,24 @@
     return parts.join(' > ');
   }
 
-  function locate(el, withText) {
+  function locate(el, mode) {
     const t = {
       tag: el.tagName.toLowerCase(),
       type: el.type || '',
       id: el.id && stableId(el.id) ? el.id : '',
       name: el.getAttribute('name') || '',
-      label: labelOf(el),
+      label: mode ? '' : labelOf(el),
       aria: el.getAttribute('aria-label') || '',
       placeholder: el.getAttribute('placeholder') || '',
       css: cssPath(el),
     };
-    if (el.type === 'radio' || el.type === 'checkbox') t.value = el.value;
-    if (withText) { t.text = textOf(el); t.label = ''; } // a button's "label" is just neighbouring text
+    if (isCheck(el)) t.value = el.value;
+    if (mode === 'click') t.text = textOf(el);
     return t;
   }
 
-  const pagePath = () => location.pathname + location.hash;
-  const locKey = (page, t) => page + '|' + (t.id || (t.name && t.tag + '[' + t.name + ']') || t.css);
+  const pagePath = () => location.pathname;
+  const locKey = (page, t) => page + '|' + (t.id || (t.name && t.tag + '[' + t.name + ']') || t.css) + (t.value !== undefined ? '=' + t.value : '');
 
   function findEl(t) {
     const c = [];
@@ -88,7 +99,6 @@
     while (Date.now() < end) { const v = fn(); if (v) return v; await sleep(250); }
     return null;
   }
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // Serialised read-modify-write on one storage key.
   let chain = Promise.resolve();
@@ -97,115 +107,244 @@
     return chain;
   }
 
+  // ---------- dialogs (alert/confirm) seen by page-hook.js ----------
+  window.addEventListener('message', (e) => {
+    if (e.source !== window || !e.data?.__amanDialog) return;
+    update('run', (r) => {
+      if (!r || r.tabId !== myTab || !['running', 'approved'].includes(r.status)) return;
+      return { ...r, dialogs: [...(r.dialogs || []), { kind: e.data.kind, msg: e.data.msg, at: e.data.at }] };
+    });
+  });
+
   // ---------- teach mode ----------
   let teach = null;
-  let host = null, root = null;
-  const tags = new Map(); // element -> tag element
+  let host = null, root = null, pop = null, popFor = null;
+  const badges = new Map(); // element -> badge
   let lastPage = null;
 
   const isTeaching = () => teach && teach.active && teach.tabId === myTab;
+
+  const CSS_TEXT = `
+    :host{all:initial}
+    [hidden]{display:none!important}
+    .badge{position:absolute;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+      font:bold 12px/1 Tahoma,Arial,sans-serif;color:#fff;background:#9ca3af;cursor:pointer;box-shadow:0 0 0 2px #fff,0 1px 4px rgba(0,0,0,.35);
+      pointer-events:auto;user-select:none;opacity:.85}
+    .badge:hover{opacity:1;transform:scale(1.15)}
+    .badge.field,.badge.card,.badge.file,.badge.check{background:#ff6100}.badge.const{background:#b84500}.badge.ask{background:#f59e0b}
+    .badge.verify{background:#0f766e}
+    .banner{position:fixed;top:6px;left:50%;transform:translateX(-50%);background:#ff6100;color:#fff;direction:rtl;pointer-events:none;
+      font:bold 12px Tahoma,Arial,sans-serif;padding:5px 12px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.3);white-space:nowrap}
+    .banner.pick{background:#b84500}
+    .pop{position:fixed;width:280px;max-height:420px;display:flex;flex-direction:column;background:#fff;color:#0f172a;direction:rtl;
+      font:13px Tahoma,Arial,sans-serif;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.3);pointer-events:auto;overflow:hidden}
+    .pop-h{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:8px 10px;background:#f1f5f9;font-weight:bold}
+    .pop-h small{font-weight:normal;color:#64748b;display:block}
+    .x{border:0;background:none;font-size:16px;cursor:pointer;color:#64748b}
+    .search{margin:6px 8px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;font:inherit}
+    .list{overflow:auto;padding:0 4px 6px}
+    .grp{font-size:11px;color:#64748b;padding:6px 6px 2px}
+    .opt{padding:5px 8px;border-radius:6px;cursor:pointer}
+    .opt:hover{background:#fff2e9}.opt.on{background:#ff6100;color:#fff}
+    .extra{border-top:1px solid #e2e8f0;padding:6px 10px;display:flex;flex-direction:column;gap:5px;font-size:12px}
+    .extra select,.extra input[type=text]{font:inherit;padding:3px;border:1px solid #cbd5e1;border-radius:5px}
+    .row{display:flex;gap:5px;align-items:center}
+    .btn{border:0;border-radius:6px;padding:4px 10px;background:#ff6100;color:#fff;cursor:pointer;font:inherit}
+  `;
 
   function ensureOverlay() {
     if (host) return;
     host = document.createElement('div');
     host.id = 'aman-uploader-overlay';
-    host.style.cssText = 'position:absolute;top:0;left:0;width:0;height:0;z-index:2147483647;';
+    host.style.cssText = 'position:absolute;top:0;left:0;width:0;height:0;z-index:2147483647;pointer-events:none;';
     root = host.attachShadow({ mode: 'open' });
-    root.innerHTML = `<style>
-      .tag{position:absolute;display:flex;gap:4px;align-items:center;direction:rtl;font:12px Tahoma,Arial,sans-serif;
-        background:#6b7280;color:#fff;border-radius:6px;padding:2px 4px;box-shadow:0 1px 4px rgba(0,0,0,.3)}
-      .tag.mapped{background:#15803d}.tag.const{background:#1d4ed8}.tag.ask{background:#b45309}
-      select{font:12px Tahoma,Arial,sans-serif;max-width:190px;border:0;border-radius:4px;padding:1px}
-      .banner{position:fixed;top:8px;left:50%;transform:translateX(-50%);background:#7c3aed;color:#fff;direction:rtl;
-        font:bold 13px Tahoma,Arial,sans-serif;padding:6px 14px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.3)}
-    </style><div class="banner"></div>`;
+    root.innerHTML = `<style>${CSS_TEXT}</style><div class="banner"></div>`;
     document.documentElement.appendChild(host);
   }
 
-  function removeOverlay() {
-    host?.remove(); host = root = null; tags.clear();
-  }
+  function removeOverlay() { host?.remove(); host = root = pop = popFor = null; badges.clear(); }
 
-  function stepFor(el) {
+  const stepFor = (el) => {
     const key = locKey(pagePath(), locate(el));
-    return teach.steps.find((s) => s.kind === 'fill' && s.key === key);
-  }
+    return teach?.steps.find((s) => s.kind === 'fill' && s.key === key);
+  };
 
-  function buildSelect(el) {
-    const s = document.createElement('select');
-    const opt = (v, l) => { const o = document.createElement('option'); o.value = v; o.textContent = l; return o; };
-    s.append(opt('', '— تبع إيه في السيستم؟ —'));
-    if (el.type === 'file') {
-      const g = document.createElement('optgroup'); g.label = 'ملف من الطلب';
-      for (const [k, l] of AMAN.FILE_FIELDS) g.append(opt('file:' + k, l));
-      s.append(g);
-    } else {
-      for (const grp of AMAN.FIELD_GROUPS) {
-        const g = document.createElement('optgroup'); g.label = grp.label;
-        for (const [k, l] of grp.fields) g.append(opt('field:' + k, l));
-        s.append(g);
-      }
-      s.append(opt('const', 'قيمة ثابتة لكل طلبات النوع ده…'));
-    }
-    s.append(opt('ask', 'الموظف يكتبها وقت المراجعة'));
-    s.append(opt('ignore', 'تجاهل الخانة'));
-    s.addEventListener('mousedown', (e) => e.stopPropagation(), true);
-    s.addEventListener('change', () => onPick(el, s.value));
-    return s;
-  }
-
-  function onPick(el, v) {
+  function saveStep(el, source) {
     const page = pagePath();
     const target = locate(el);
     const key = locKey(page, target);
-    let source = null;
-    if (v.startsWith('field:')) source = { type: 'field', key: v.slice(6) };
-    else if (v.startsWith('file:')) source = { type: 'file', key: v.slice(5) };
-    else if (v === 'const') {
-      const cur = el.tagName === 'SELECT' ? el.options[el.selectedIndex]?.text : el.value;
-      const val = prompt('القيمة الثابتة اللي تتكتب في كل طلبات "' + AMAN.typeLabel(teach.type) + '":', cur || '');
-      if (val === null) { renderTags(); return; }
-      source = { type: 'const', value: val };
-    } else if (v === 'ask') {
-      source = { type: 'ask', label: target.label || target.placeholder || 'خانة' };
-    }
-    update('teach', (t) => {
+    return update('teach', (t) => {
       if (!t) return;
       const i = t.steps.findIndex((s) => s.kind === 'fill' && s.key === key);
-      if (!source || v === 'ignore') { if (i >= 0) t.steps.splice(i, 1); return t; }
+      if (!source) { if (i >= 0) t.steps.splice(i, 1); return t; }
       const step = { kind: 'fill', key, page, target, source };
       if (i >= 0) t.steps[i] = step; else t.steps.push(step);
       return t;
     });
   }
 
-  function renderTags() {
+  const badgeClass = (s) => !s ? '' : s.source.verify ? 'verify' : s.source.type;
+  const badgeText = (s) => !s ? '+' : ({ field: '✓', card: '✓', const: '=', ask: '✎', file: '⇪', check: '☑' })[s.source.type] || '✓';
+
+  function closePop() { pop?.remove(); pop = popFor = null; }
+
+  function openPop(el, badge) {
+    closePop();
+    popFor = el;
+    const step = stepFor(el);
+    const cur = step?.source || {};
+    pop = document.createElement('div');
+    pop.className = 'pop';
+    const title = labelOf(el) || el.getAttribute('placeholder') || el.name || 'خانة';
+    pop.innerHTML = `<div class="pop-h"><div>${esc(title)}<small>الخانة دي تبع إيه؟</small></div><button class="x" title="اقفل">✕</button></div>`;
+    pop.querySelector('.x').onclick = closePop;
+
+    const choose = async (source) => { await saveStep(el, source); closePop(); };
+
+    if (isCheck(el)) {
+      const list = div('list');
+      list.append(opt('دايمًا متعلّم', cur.mode === 'always', () => choose({ type: 'check', mode: 'always' })));
+      list.append(opt('دايمًا مش متعلّم', cur.mode === 'never', () => choose({ type: 'check', mode: 'never' })));
+      list.append(opt('تجاهل', !step, () => choose(null)));
+      const ex = div('extra');
+      ex.innerHTML = '<b>متعلّم بشرط:</b>';
+      const src = sourceSelect(cur.mode === 'when' ? (cur.from || 'field') + ':' + cur.key : '');
+      const val = input(cur.mode === 'when' ? cur.equals : '', 'القيمة، مثلًا: ذكر');
+      const ok = btn('احفظ الشرط', () => {
+        if (!src.value || !val.value.trim()) return;
+        const [from, key] = src.value.split(':');
+        choose({ type: 'check', mode: 'when', from, key, equals: val.value.trim() });
+      });
+      ex.append(src, val, ok);
+      pop.append(list, ex);
+    } else {
+      const search = document.createElement('input');
+      search.className = 'search'; search.placeholder = 'دوّر…';
+      const list = div('list');
+      const extra = div('extra');
+      const verify = document.createElement('input'); verify.type = 'checkbox'; verify.checked = !!cur.verify;
+      const fmt = document.createElement('select');
+      for (const [k, l] of AMAN.DATE_FORMATS) fmt.append(new Option(l, k));
+      fmt.value = cur.format || (el.type === 'date' ? 'iso' : 'dmy');
+      const extras = () => ({ ...(verify.checked ? { verify: true } : {}), format: fmt.value });
+      const items = [];
+      const add = (grp, label, on, fn) => items.push({ grp, label, on, fn });
+
+      if (el.type === 'file') {
+        for (const [k, l] of AMAN.FILE_FIELDS) add('ملف من الطلب', l, cur.type === 'file' && cur.key === k, () => choose({ type: 'file', key: k }));
+      } else {
+        for (const [k, l] of AMAN.CARD_FIELDS) add('من البطاقة (قراءة آلية)', l, cur.type === 'card' && cur.key === k, () => choose({ type: 'card', key: k, ...extras() }));
+        for (const g of AMAN.FIELD_GROUPS) for (const [k, l] of g.fields) add(g.label, l, cur.type === 'field' && cur.key === k, () => choose({ type: 'field', key: k, ...extras() }));
+        add('تانيين', 'قيمة ثابتة (اكتب أي حاجة)…', cur.type === 'const', () => {
+          const now = el.tagName === 'SELECT' ? el.options[el.selectedIndex]?.text : el.value;
+          constRow.hidden = false; constIn.value = cur.type === 'const' ? cur.value : (now || ''); constIn.focus();
+        });
+      }
+      add('تانيين', 'الموظف يكتبها وقت المراجعة', cur.type === 'ask', () => choose({ type: 'ask', label: title }));
+      add('تانيين', 'تجاهل الخانة', !step, () => choose(null));
+
+      const draw = () => {
+        list.innerHTML = '';
+        const q = norm(search.value);
+        let g = null;
+        for (const it of items) {
+          if (q && !norm(it.label).includes(q) && !norm(it.grp).includes(q)) continue;
+          if (it.grp !== g) { g = it.grp; const h = div('grp'); h.textContent = g; list.append(h); }
+          list.append(opt(it.label, it.on, it.fn));
+        }
+      };
+      search.oninput = draw;
+      draw();
+
+      const constIn = input('', 'القيمة اللي تتكتب في كل طلب من النوع ده');
+      const constRow = div('row'); constRow.hidden = cur.type !== 'const';
+      constRow.append(constIn, btn('حفظ', () => choose({ type: 'const', value: constIn.value })));
+      if (cur.type === 'const') constIn.value = cur.value;
+
+      if (el.type !== 'file') {
+        const vRow = div('row'); vRow.append(verify, txt('اتأكد بس ماتكتبش (لو أمان بيملاها لوحده)'));
+        const fRow = div('row'); fRow.append(txt('شكل التاريخ:'), fmt);
+        fRow.hidden = !(el.type === 'date' || /تاريخ|ميلاد/.test(title) || AMAN.isDateKey(cur.key));
+        extra.append(constRow, vRow, fRow);
+        const resave = () => { if (step && ['field', 'card'].includes(cur.type)) saveStep(el, { ...cur, ...extras(), ...(verify.checked ? {} : { verify: undefined }) }); };
+        verify.onchange = resave; fmt.onchange = resave;
+      }
+      pop.append(search, list, extra);
+      setTimeout(() => search.focus(), 0);
+    }
+
+    root.append(pop);
+    const b = badge.getBoundingClientRect();
+    const w = 280, h = Math.min(420, pop.offsetHeight || 420);
+    pop.style.left = Math.max(8, Math.min(innerWidth - w - 8, b.left - w / 2)) + 'px';
+    pop.style.top = (b.bottom + h + 8 < innerHeight ? b.bottom + 6 : Math.max(8, b.top - h - 6)) + 'px';
+  }
+
+  // tiny DOM builders for the picker
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const div = (cls) => { const d = document.createElement('div'); d.className = cls; return d; };
+  const txt = (s) => { const d = document.createElement('span'); d.textContent = s; return d; };
+  const opt = (label, on, fn) => { const d = div('opt' + (on ? ' on' : '')); d.textContent = label; d.onclick = fn; return d; };
+  const btn = (label, fn) => { const b = document.createElement('button'); b.className = 'btn'; b.textContent = label; b.onclick = fn; return b; };
+  const input = (v, ph) => { const i = document.createElement('input'); i.type = 'text'; i.value = v || ''; i.placeholder = ph; return i; };
+  function sourceSelect(value) {
+    const s = document.createElement('select');
+    s.append(new Option('— الخانة اللي بنقارن بيها —', ''));
+    const g1 = document.createElement('optgroup'); g1.label = 'من البطاقة';
+    for (const [k, l] of AMAN.CARD_FIELDS) g1.append(new Option(l, 'card:' + k));
+    s.append(g1);
+    for (const g of AMAN.FIELD_GROUPS) {
+      const og = document.createElement('optgroup'); og.label = g.label;
+      for (const [k, l] of g.fields) og.append(new Option(l, 'field:' + k));
+      s.append(og);
+    }
+    s.value = value;
+    return s;
+  }
+
+  function renderBadges() {
     if (!isTeaching()) { if (host) removeOverlay(); return; }
     ensureOverlay();
-    root.querySelector('.banner').textContent = 'وضع التعليم: ' + AMAN.typeLabel(teach.type) + ' — حدد كل خانة تبع إيه، وكمّل الرفع عادي';
-    const els = [...document.querySelectorAll(FIELD_SEL)].filter(visible);
-    for (const [el, tag] of tags) if (!els.includes(el)) { tag.remove(); tags.delete(el); }
+    const banner = root.querySelector('.banner');
+    const els = [...document.querySelectorAll(FIELD_SEL)].filter((e) => visible(e) && !host.contains(e));
+    const done = els.filter((e) => stepFor(e)).length;
+    if (teach.pick) {
+      banner.className = 'banner pick';
+      banner.textContent = teach.pick === 'expect' ? 'دوس على رسالة الحالة اللي بتظهر لما الطلب سليم (مثلًا: عميل جديد)' : 'دوس على رقم الطلب اللي أمان بيديهولك بعد الحفظ';
+    } else {
+      banner.className = 'banner';
+      banner.textContent = `تعليم: ${AMAN.typeLabel(teach.type)} — اتحدد ${done} من ${els.length} خانة في الصفحة دي. دوس على الدواير.`;
+    }
+    for (const [el, b] of badges) if (!els.includes(el)) { b.remove(); badges.delete(el); }
     for (const el of els) {
-      let tag = tags.get(el);
-      if (!tag) {
-        tag = document.createElement('div'); tag.className = 'tag';
-        tag.append(buildSelect(el)); root.append(tag); tags.set(el, tag);
+      let b = badges.get(el);
+      if (!b) {
+        b = div('badge');
+        b.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+        b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); popFor === el ? closePop() : openPop(el, b); });
+        b.addEventListener('mouseenter', () => { el.style.outline = '2px dashed #ff6100'; });
+        b.addEventListener('mouseleave', () => { el.style.outline = ''; });
+        root.append(b); badges.set(el, b);
       }
-      const step = stepFor(el);
-      const sel = tag.querySelector('select');
-      const want = !step ? '' : step.source.type === 'field' ? 'field:' + step.source.key
-        : step.source.type === 'file' ? 'file:' + step.source.key : step.source.type;
-      if (document.activeElement !== host || root.activeElement !== sel) sel.value = want;
-      tag.className = 'tag' + (step ? (step.source.type === 'const' ? ' const' : step.source.type === 'ask' ? ' ask' : ' mapped') : '');
-      tag.title = step ? AMAN.describeSource(step.source) : 'لسه ماتحددتش';
-      const r = (el.type === 'file' && el.getBoundingClientRect().width === 0 ? el.parentElement : el).getBoundingClientRect();
-      tag.style.top = Math.max(0, r.top + scrollY - 24) + 'px';
-      tag.style.left = Math.max(0, r.left + scrollX) + 'px';
+      const s = stepFor(el);
+      b.className = 'badge ' + badgeClass(s);
+      b.textContent = badgeText(s);
+      b.title = (labelOf(el) || el.name || '') + ' — ' + (s ? AMAN.describeSource(s.source) : 'لسه ماتحددتش');
+      const anchor = el.type === 'file' && el.getBoundingClientRect().width === 0 ? el.parentElement : el;
+      const r = anchor.getBoundingClientRect();
+      // Inside the field's left edge (RTL text starts on the right); checkboxes get it just outside.
+      const left = isCheck(el) ? r.left - 22 : el.tagName === 'SELECT' ? r.left + 20 : r.left + 3;
+      b.style.left = (left + scrollX) + 'px';
+      b.style.top = (r.top + scrollY + (r.height - 18) / 2) + 'px';
     }
   }
 
   let raf = 0;
-  const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; renderTags(); }); };
+  const schedule = () => {
+    if (raf) return;
+    const go = () => { raf = 0; renderBadges(); };
+    raf = document.hidden ? setTimeout(go, 50) : requestAnimationFrame(go); // no frames in a background tab
+  };
 
   function notePage() {
     if (!isTeaching()) return;
@@ -221,42 +360,97 @@
     });
   }
 
+  // Picking a status message / reference number (panel buttons set teach.pick).
+  let hoverEl = null;
+  document.addEventListener('mouseover', (e) => {
+    if (!isTeaching() || !teach.pick || e.composedPath().includes(host)) return;
+    if (hoverEl) hoverEl.style.outline = '';
+    hoverEl = e.target; hoverEl.style.outline = '2px solid #ff6100';
+  }, true);
+
   let lastClick = { key: '', at: 0 };
   document.addEventListener('click', (e) => {
     if (!isTeaching() || e.composedPath().includes(host)) return;
+    closePop();
+
+    if (teach.pick) {
+      e.preventDefault(); e.stopPropagation();
+      const el = e.target;
+      if (hoverEl) hoverEl.style.outline = '';
+      const kind = teach.pick;
+      update('teach', (t) => {
+        if (!t) return;
+        t.steps.push({ kind, page: pagePath(), target: locate(el, 'text'), sample: textOf(el) });
+        t.pick = null;
+        return t;
+      });
+      return;
+    }
+
+    const field = e.target.closest?.('input[type=checkbox], input[type=radio]');
+    if (field) {
+      setTimeout(() => {
+        const s = stepFor(field);
+        if (s?.source.mode === 'when') return;
+        if (field.type === 'radio') {
+          // one radio of a group: forget the others' fixed choice
+          for (const other of document.getElementsByName(field.name)) if (other !== field && stepFor(other)?.source.mode !== 'when') saveStep(other, null);
+          saveStep(field, { type: 'check', mode: 'always' });
+        } else {
+          saveStep(field, { type: 'check', mode: field.checked ? 'always' : 'never' });
+        }
+      }, 0);
+      return;
+    }
+
     const b = e.target.closest?.(CLICK_SEL);
     if (!b) return;
     const page = pagePath();
-    const target = locate(b, true);
-    const key = locKey(page, target) + '|' + (target.value ?? '');
+    const target = locate(b, 'click');
+    const key = locKey(page, target);
     if (key === lastClick.key && Date.now() - lastClick.at < 800) return;
     lastClick = { key, at: Date.now() };
-    const gate = /حفظ|save|submit|ارسال|إرسال|تأكيد|تاكيد|اعتماد/i.test(target.text);
+    const gate = /حفظ|save|submit|ارسال|إرسال|اعتماد|تقديم الطلب/i.test(target.text);
     update('teach', (t) => { if (!t) return; t.steps.push({ kind: 'click', key, page, target, gate }); return t; });
   }, true);
+
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePop(); }, true);
 
   // ---------- run mode ----------
   let running = false;
 
   function mark(el, color) { el.style.outline = '3px solid ' + color; el.style.outlineOffset = '2px'; }
+  const empty = (v) => v === null || v === undefined || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && !v.length);
+  const stepName = (step) => step.target ? (step.target.label || step.target.placeholder || step.target.text || step.target.name || step.sample || 'خانة') : '';
 
-  function setValue(el, v) {
+  function sourceValue(s, run) {
+    if (s.type === 'const') return s.value;
+    const v = s.type === 'card' ? run.card?.[s.key] : run.order?.[s.key];
+    return AMAN.isDateKey(s.key) ? AMAN.formatDate(v, s.format) : v;
+  }
+  const srcName = (s) => s.type === 'card' ? 'البطاقة: ' + AMAN.cardLabel(s.key) : AMAN.fieldLabel(s.key);
+
+  function shown(el) { return el.tagName === 'SELECT' ? (el.options[el.selectedIndex]?.text ?? '') : el.value; }
+  const same = (el, v) => norm(shown(el)) === norm(v) || (el.tagName === 'SELECT' && norm(el.value) === norm(v));
+
+  // Writes without events, so progress is saved before the portal reacts (ASP.NET postbacks reload the page).
+  async function setRaw(el, v) {
     if (el.tagName === 'SELECT') {
-      const o = [...el.options].find((o) => o.value === String(v)) || [...el.options].find((o) => norm(o.text) === norm(v) || norm(o.value) === norm(v));
-      if (!o) throw new Error('القيمة "' + v + '" مش موجودة في القايمة');
+      const o = await waitFor(() => [...el.options].find((o) => o.value === String(v)) || [...el.options].find((o) => norm(o.text) === norm(v) || norm(o.value) === norm(v)), 8000);
+      if (!o) throw new Error('القيمة "' + v + '" مش موجودة في قايمة "' + (labelOf(el) || el.name) + '"');
       el.value = o.value;
     } else {
       const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      el.focus();
       Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, String(v));
     }
+  }
+  function fire(el) {
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.blur();
-    return el.tagName === 'SELECT' ? el.options[el.selectedIndex]?.text : el.value;
+    el.dispatchEvent(new Event('blur'));
   }
 
-  async function setFiles(el, urls) {
+  async function buildFiles(urls) {
     const dt = new DataTransfer();
     for (const url of urls) {
       const r = await chrome.runtime.sendMessage({ type: 'fetchFile', url });
@@ -265,44 +459,120 @@
       for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
       dt.items.add(new File([buf], r.name, { type: r.mime }));
     }
-    el.files = dt.files;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    return [...el.files].map((f) => f.name).join('، ');
+    return dt.files;
   }
 
-  const empty = (v) => v === null || v === undefined || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && !v.length);
+  const advance = (row, extra = {}) => update('run', (r) => ({ ...r, i: r.i + 1, ...(row ? { log: [...r.log, row] } : {}), ...extra }));
+  const fail = (msg, row) => update('run', (r) => ({ ...r, status: 'error', error: msg, ...(row ? { log: [...r.log, { ...row, ok: false }] } : {}) }));
+  const block = (msg) => update('run', (r) => ({ ...r, status: 'blocked', blockMessage: msg }));
 
-  async function doStep(step, order) {
-    const what = step.target ? (step.target.label || step.target.placeholder || step.target.text || step.target.name || 'خانة') : '';
+  // After a click: did the portal pop up a message?
+  async function dialogAfter(since) {
+    await sleep(900);
+    const { run } = await store.get('run');
+    const d = (run?.dialogs || []).find((x) => x.at >= since);
+    if (d) { await block('أمان قال: ' + d.msg); return true; }
+    return false;
+  }
+
+  async function runStep(step, run) {
+    const what = stepName(step);
+
     if (step.kind === 'page') {
-      const ok = await waitFor(() => pagePath() === step.page, 20000);
-      if (!ok) throw new Error('مستني صفحة ' + (step.title || step.page) + ' ومافتحتش');
-      return null;
+      if (!(await waitFor(() => pagePath() === step.page, 20000))) return fail('مستني صفحة "' + (step.title || step.page) + '" ومافتحتش');
+      return advance();
     }
-    const el = await waitFor(() => findEl(step.target), 10000);
-    if (!el) throw new Error('مش لاقي "' + what + '" في الصفحة. ممكن أمان غيّر الصفحة، علّم الخطوة دي تاني.');
-    if (step.kind === 'click') return { el, what };
+
+    const el = await waitFor(() => findEl(step.target), step.kind === 'expect' ? 15000 : 12000);
+
+    if (step.kind === 'expect') {
+      const got = el ? textOf(el) : '';
+      if (!el || norm(got) !== norm(step.sample)) {
+        if (el) mark(el, '#dc2626');
+        return block(el ? 'أمان كاتب: "' + got + '" بدل "' + step.sample + '"' : 'مالقتش رسالة "' + step.sample + '"، شوف الصفحة');
+      }
+      mark(el, '#16a34a');
+      return advance({ label: 'رسالة الحالة', source: 'المفروض: ' + step.sample, expected: step.sample, actual: got, ok: true });
+    }
+    if (!el) return fail('مش لاقي "' + what + '" في الصفحة. ممكن أمان غيّر الصفحة، علّم الخطوة دي تاني.');
+
+    if (step.kind === 'capture') {
+      const ref = textOf(el);
+      mark(el, '#2563eb');
+      return advance({ label: 'رقم الطلب عند أمان', source: 'من الصفحة', expected: '', actual: ref, ok: !!ref }, { amanRef: ref });
+    }
+
+    if (step.kind === 'click') {
+      if (step.gate) {
+        mark(el, '#dc2626');
+        el.scrollIntoView({ block: 'center' });
+        return update('run', (r) => ({ ...r, status: 'review', gateText: what }));
+      }
+      await advance(); // save progress first: the click may reload the page
+      const t = Date.now();
+      el.click();
+      return dialogAfter(t);
+    }
+
+    // fill
     const s = step.source;
     const row = { label: what, source: AMAN.describeSource(s), expected: '', actual: '', ok: true };
-    if (s.type === 'ask') { mark(el, '#f59e0b'); row.expected = 'الموظف يكتبها'; row.ok = null; return { row }; }
-    if (s.type === 'file') {
-      const v = order[s.key];
-      if (empty(v)) throw new Error('الطلب مافيهوش ملف: ' + AMAN.fieldLabel(s.key));
-      const urls = Array.isArray(v) ? v : [v];
-      row.expected = urls.length + ' ملف';
-      row.actual = await setFiles(el, urls);
-      row.ok = el.files.length === urls.length;
-    } else {
-      const v = s.type === 'const' ? s.value : order[s.key];
-      if (s.type === 'field' && empty(v)) throw new Error('الطلب مافيهوش: ' + AMAN.fieldLabel(s.key));
-      row.expected = String(v);
-      row.actual = setValue(el, v);
-      row.ok = norm(row.actual) === norm(v) || (el.tagName === 'SELECT' && norm(el.value) === norm(v));
+
+    if (s.type === 'ask') {
+      mark(el, '#f59e0b');
+      return advance({ ...row, expected: 'الموظف يكتبها', ok: null });
     }
+
+    if (s.type === 'check') {
+      let want = s.mode === 'always';
+      if (s.mode === 'when') {
+        const v = s.from === 'card' ? run.card?.[s.key] : run.order?.[s.key];
+        if (empty(v)) return fail('مش عارف أحدد "' + what + '": ' + srcName({ type: s.from, key: s.key }) + ' فاضي', row);
+        want = norm(v) === norm(s.equals);
+      }
+      row.expected = want ? 'متعلّم' : 'مش متعلّم';
+      row.actual = row.expected;
+      mark(el, '#16a34a');
+      await advance(row);
+      if (el.checked !== want && (want || el.type !== 'radio')) el.click();
+      return;
+    }
+
+    if (s.type === 'file') {
+      const v = run.order?.[s.key];
+      if (empty(v)) return fail('الطلب مافيهوش ملف: ' + AMAN.fieldLabel(s.key), row);
+      const urls = Array.isArray(v) ? v : [v];
+      let files;
+      try { files = await buildFiles(el.multiple ? urls : urls.slice(0, 1)); } catch (e) { return fail(e.message, row); }
+      el.files = files;
+      row.expected = files.length + ' ملف';
+      row.actual = [...el.files].map((f) => f.name).join('، ');
+      row.ok = el.files.length === files.length;
+      if (!row.ok) return fail('الملف ماترفعش في "' + what + '"', row);
+      mark(el, '#16a34a');
+      await advance(row);
+      fire(el);
+      return;
+    }
+
+    const v = sourceValue(s, run);
+    if (s.type !== 'const' && empty(v)) return fail((s.type === 'card' ? 'البطاقة مافيهاش: ' : 'الطلب مافيهوش: ') + srcName(s), row);
+    row.expected = String(v);
+
+    if (s.verify) {
+      row.actual = shown(el);
+      row.ok = same(el, v);
+      mark(el, row.ok ? '#0891b2' : '#dc2626');
+      return advance(row); // a mismatch is shown red in the review, the employee decides
+    }
+
+    try { await setRaw(el, v); } catch (e) { return fail(e.message, row); }
+    row.actual = shown(el);
+    row.ok = same(el, v);
     mark(el, row.ok ? '#16a34a' : '#dc2626');
-    if (!row.ok) throw Object.assign(new Error('"' + what + '" اتكتب فيها "' + row.actual + '" بدل "' + row.expected + '"'), { row });
-    return { row };
+    if (!row.ok) return fail('"' + what + '" اتكتب فيها "' + row.actual + '" بدل "' + row.expected + '"', row);
+    await advance(row);
+    fire(el);
   }
 
   async function runLoop() {
@@ -315,35 +585,22 @@
         if (run.status === 'approved') {
           const step = run.recipe.steps[run.i];
           const el = findEl(step.target);
-          if (!el) { await update('run', (r) => ({ ...r, status: 'error', error: 'زرار الحفظ اختفى من الصفحة' })); break; }
+          if (!el) { await fail('زرار الحفظ اختفى من الصفحة'); break; }
           await update('run', (r) => ({ ...r, i: r.i + 1, status: 'running', approvedAt: new Date().toISOString() }));
+          const t = Date.now();
           el.click();
-          await sleep(600);
+          if (await dialogAfter(t)) break;
           continue;
         }
         if (run.status !== 'running') break;
         const step = run.recipe.steps[run.i];
         if (!step) { await update('run', (r) => ({ ...r, status: 'done', finishedAt: new Date().toISOString() })); break; }
-        let res;
         try {
-          res = await doStep(step, run.order);
+          await runStep(step, run);
         } catch (e) {
-          await update('run', (r) => ({ ...r, status: 'error', error: e.message, log: e.row ? [...r.log, { ...e.row, ok: false }] : r.log }));
-          break;
+          await fail('حصلت مشكلة: ' + e.message);
         }
-        if (step.kind === 'click') {
-          if (step.gate) {
-            mark(res.el, '#dc2626');
-            res.el.scrollIntoView({ block: 'center' });
-            await update('run', (r) => ({ ...r, status: 'review', gateText: res.what }));
-            break;
-          }
-          await update('run', (r) => ({ ...r, i: r.i + 1 })); // save progress before a click that may reload the page
-          res.el.click();
-          await sleep(600);
-          continue;
-        }
-        await update('run', (r) => ({ ...r, i: r.i + 1, log: res?.row ? [...r.log, res.row] : r.log }));
+        await sleep(150);
       }
     } finally {
       running = false;
@@ -351,24 +608,26 @@
   }
 
   // ---------- wiring ----------
-  async function refresh() {
-    teach = (await store.get('teach')).teach || null;
+  function onTeach() {
     if (isTeaching()) { notePage(); schedule(); } else if (host) removeOverlay();
-    runLoop();
   }
 
   chrome.storage.onChanged.addListener((ch, area) => {
     if (area !== 'local') return;
-    if (ch.teach) { teach = ch.teach.newValue || null; if (isTeaching()) { notePage(); schedule(); } else if (host) removeOverlay(); }
+    if (ch.teach) { teach = ch.teach.newValue || null; onTeach(); }
     if (ch.run) runLoop();
   });
 
-  new MutationObserver((muts) => {
-    if (isTeaching() && muts.some((m) => !host || !host.contains(m.target))) schedule();
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
+  new MutationObserver(() => { if (isTeaching()) schedule(); })
+    .observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
   addEventListener('scroll', schedule, true);
   addEventListener('resize', schedule);
   setInterval(() => { if (isTeaching()) { notePage(); schedule(); } }, 1000);
 
-  chrome.runtime.sendMessage({ type: 'whoami' }, (r) => { myTab = r?.tabId ?? null; refresh(); });
+  chrome.runtime.sendMessage({ type: 'whoami' }, async (r) => {
+    myTab = r?.tabId ?? null;
+    teach = (await store.get('teach')).teach || null;
+    onTeach();
+    runLoop();
+  });
 })();

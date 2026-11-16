@@ -1,17 +1,18 @@
-// Shared between the side panel and the content script.
+// Shared between the side panel, the background worker and the content script.
 // Field keys match motobot's installment_requests columns (app/Models/InstallmentRequest.php).
 var AMAN = (typeof AMAN !== 'undefined') ? AMAN : {};
 
+// Keys are installment_requests.work_status values (config/aman_extension.php). The server's list wins.
 AMAN.REQUEST_TYPES = [
-  { key: 'free_income', label: 'دخل حر' },
-  { key: 'employer', label: 'صاحب عمل' },
+  { key: 'no_income_proof', label: 'دخل حر' },
+  { key: 'employee', label: 'موظف / صاحب عمل' },
   { key: 'pension', label: 'صاحب معاش' },
-  { key: 'business_no_docs', label: 'صاحب نشاط بدون أوراق' },
+  { key: 'self_employed', label: 'صاحب نشاط' },
 ];
 
 AMAN.FIELD_GROUPS = [
-  { label: 'بيانات العميل', fields: [
-    ['applicant_name', 'اسم العميل'],
+  { label: 'بيانات العميل (السيستم)', fields: [
+    ['applicant_name', 'اسم العميل كامل'],
     ['applicant_national_id', 'الرقم القومي'],
     ['applicant_phone', 'الموبايل'],
     ['applicant_phone_2', 'موبايل تاني'],
@@ -53,6 +54,24 @@ AMAN.FIELD_GROUPS = [
   ]},
 ];
 
+// Read off the national ID card on the server (app/Domain/Aman/IdCardReader.php).
+AMAN.CARD_FIELDS = [
+  ['name_1', 'الاسم الأول'],
+  ['name_2', 'اسم الأب'],
+  ['name_3', 'اسم الجد'],
+  ['name_4', 'اسم العائلة (الباقي)'],
+  ['full_name', 'الاسم كامل'],
+  ['national_id', 'الرقم القومي'],
+  ['birthdate', 'تاريخ الميلاد'],
+  ['gender', 'النوع (ذكر / أنثى)'],
+  ['governorate', 'محافظة الميلاد'],
+  ['address', 'العنوان المكتوب في البطاقة'],
+  ['religion', 'الديانة'],
+  ['marital_status', 'الحالة الاجتماعية'],
+  ['issue_date', 'تاريخ إصدار البطاقة'],
+  ['expiry_date', 'البطاقة سارية حتى'],
+];
+
 AMAN.FILE_FIELDS = [
   ['applicant_id_image', 'وش بطاقة العميل'],
   ['applicant_id_back_image', 'ضهر بطاقة العميل'],
@@ -68,27 +87,44 @@ AMAN.FILE_FIELDS = [
   ['tax_card_file', 'البطاقة الضريبية'],
 ];
 
+AMAN.DATE_FORMATS = [
+  ['iso', 'سنة-شهر-يوم (2000-01-31)'],
+  ['dmy', 'يوم/شهر/سنة (31/01/2000)'],
+  ['mdy', 'شهر/يوم/سنة (01/31/2000)'],
+];
+
+const findLabel = (list, key) => (list.find(([k]) => k === key) || [])[1];
+
 AMAN.fieldLabel = function (key) {
-  for (const g of AMAN.FIELD_GROUPS) for (const [k, l] of g.fields) if (k === key) return l;
-  for (const [k, l] of AMAN.FILE_FIELDS) if (k === key) return l;
-  return key;
+  for (const g of AMAN.FIELD_GROUPS) { const l = findLabel(g.fields, key); if (l) return l; }
+  return findLabel(AMAN.FILE_FIELDS, key) || key;
 };
+AMAN.cardLabel = (key) => findLabel(AMAN.CARD_FIELDS, key) || key;
+AMAN.isDateKey = (key) => /date|birth|expiry/.test(key || '');
 
 AMAN.typeLabel = function (key) {
-  const t = AMAN.REQUEST_TYPES.find((x) => x.key === key);
+  const t = (AMAN.types || AMAN.REQUEST_TYPES).find((x) => x.key === key);
   return t ? t.label : key;
 };
 
 AMAN.describeSource = function (s) {
   if (!s) return '—';
-  if (s.type === 'field') return 'من الطلب: ' + AMAN.fieldLabel(s.key);
+  const v = s.verify ? ' (تأكيد بس)' : '';
+  if (s.type === 'field') return 'السيستم: ' + AMAN.fieldLabel(s.key) + v;
+  if (s.type === 'card') return 'البطاقة: ' + AMAN.cardLabel(s.key) + v;
   if (s.type === 'file') return 'ملف: ' + AMAN.fieldLabel(s.key);
   if (s.type === 'const') return 'ثابت: ' + s.value;
   if (s.type === 'ask') return 'الموظف يكتبها';
+  if (s.type === 'check') {
+    if (s.mode === 'always') return 'دايمًا متعلّم';
+    if (s.mode === 'never') return 'دايمًا مش متعلّم';
+    const src = s.from === 'card' ? AMAN.cardLabel(s.key) : AMAN.fieldLabel(s.key);
+    return 'متعلّم لو ' + src + ' = ' + s.equals;
+  }
   return s.type;
 };
 
-// Arabic-tolerant comparison for matching dropdown options and labels.
+// Arabic-tolerant comparison for matching dropdown options, labels and messages.
 AMAN.norm = function (v) {
   return String(v ?? '')
     .replace(/[ً-ْـ]/g, '')
@@ -97,7 +133,20 @@ AMAN.norm = function (v) {
     .replace(/\s+/g, ' ').trim().toLowerCase();
 };
 
+AMAN.formatDate = function (v, fmt) {
+  const m = String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m || !fmt || fmt === 'iso') return v;
+  return fmt === 'dmy' ? `${m[3]}/${m[2]}/${m[1]}` : `${m[2]}/${m[3]}/${m[1]}`;
+};
+
 AMAN.store = {
   get: (keys) => new Promise((r) => chrome.storage.local.get(keys, r)),
   set: (obj) => new Promise((r) => chrome.storage.local.set(obj, r)),
+};
+
+// Calls motobot through the background worker (it holds the key and is not bound by page CORS).
+AMAN.api = async function (method, path, body) {
+  const r = await chrome.runtime.sendMessage({ type: 'api', method, path, body });
+  if (!r?.ok) throw new Error(r?.error || 'السيرفر مش بيرد');
+  return r.data;
 };

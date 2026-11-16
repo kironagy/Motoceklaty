@@ -176,39 +176,8 @@ public static function isHitler(): bool
             return $query->whereRaw('1 = 0');
         }
 
-        /*
-        |--------------------------------------------------------------------------
-        | موظف شركة (أمان) - إلا لو سوبر أدمن: السوبر أدمن يشوف كل حاجة (owner 2026-11-13)
-        |--------------------------------------------------------------------------
-        */
-        if ($user->isAmaanRestricted()) {
-
-            $companyNames = $user->installmentSystems()
-                ->pluck('installment_systems.name')
-                ->toArray();
-
-            // موظف شركة بدون شركات محددة = ممنوع يشوف طلبات
-            if (empty($companyNames)) {
-                return $query->whereRaw('1 = 0');
-            }
-
-            // Fake requests are internal - never shown to a company (Aman) employee.
-            return $query->whereIn(
-                'installment_type',
-                $companyNames
-            )->where('request_type', '!=', 'fake');
-        }
-
-        // الأدمن والسوبر أدمن العادي
-        if (
-            ($user->is_admin ?? false) ||
-            ($user->is_super_admin ?? false)
-        ) {
-            return $query;
-        }
-
-        // الموظف العادي
-        return $query->where('staff_id', $user->id);
+        // موظف شركة (أمان): شركاته بس، والسوبر أدمن يشوف كل حاجة (owner 2026-11-13) - InstallmentRequest::scopeVisibleTo
+        return $query->visibleTo($user);
     }
     // ✅ تحميل بيانات النظام تلقائيًا عند التعديل
     protected static function loadSystemData($state, callable $set): void

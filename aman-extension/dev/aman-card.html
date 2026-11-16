@@ -1,0 +1,26 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>أمان تجريبي - Light Vehicles</title>
+<style>body{font-family:Tahoma;padding:20px;background:#f4f6f9}.box{background:#fff;padding:20px;border-radius:8px;margin-bottom:12px}
+table{width:100%}td{padding:6px}input[type=text],select{width:95%;padding:5px}.hidden{display:none}</style>
+<script src="chrome-shim.js"></script><script src="../page-hook.js"></script></head>
+<body>
+<div class="box"><h2>طلب تقديم حد أئتماني Light Vehicles</h2>
+<table><tr><td>صورة بطاقة العميل الأمامية :</td><td><input type="file" id="ctl00_front"></td>
+<td>صورة بطاقة العميل الخلفية :</td><td><input type="file" id="ctl00_back"></td>
+<td><a href="#" id="ctl00_confirmCard" onclick="document.getElementById('s2').classList.remove('hidden');return false">تأكيد صورة البطاقة</a></td></tr></table></div>
+<div class="box hidden" id="s2"><table><tr><td>برجاء ادخال الرقم القومي للعميل :</td><td><input type="text" id="ctl00_nid"></td>
+<td><input type="button" id="ctl00_start" value="بدأ العملية" onclick="start()"></td><td><span id="ctl00_status" style="color:green"></span></td></tr></table></div>
+<div class="box hidden" id="s3"><h3>بيانات العميل</h3><table>
+<tr><td>الاسم :</td><td><input type="text" id="ctl00_n1"></td><td>اسم الأب :</td><td><input type="text" id="ctl00_n2"></td></tr>
+<tr><td>اسم الجد :</td><td><input type="text" id="ctl00_n3"></td><td>اسم العائلة :</td><td><input type="text" id="ctl00_n4"></td></tr>
+<tr><td>النوع</td><td><select id="ctl00_gender"><option value="0">اختار</option><option value="1">ذكر</option><option value="2">انثى</option></select></td>
+<td>رقم الموبايل :</td><td><input type="text" id="ctl00_mobile"></td></tr>
+<tr><td>تاريخ الميلاد :</td><td><input type="text" id="ctl00_birth"></td><td>جهة البيع :</td><td><input type="text" id="ctl00_channel"></td></tr>
+<tr><td colspan="2"><label><input type="checkbox" id="ctl00_extra"> هل لديه دخل اضافي ؟</label></td></tr>
+</table><input type="button" id="ctl00_save" value="حفظ" onclick="document.getElementById('ctl00_ref').textContent='AMN-'+Math.floor(Math.random()*900000+100000)">
+<p>رقم الطلب: <b id="ctl00_ref"></b></p></div>
+<script>
+function start(){ const v=document.getElementById('ctl00_nid').value;
+  if(v.endsWith('9')){ alert('هذا العميل مرفوض سابقا'); return; }
+  document.getElementById('ctl00_status').textContent='عميل جديد'; document.getElementById('s3').classList.remove('hidden'); }
+</script>
+<script src="../shared.js"></script><script src="../content.js"></script></body></html>

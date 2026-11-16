@@ -183,6 +183,31 @@ public function scopeFake($query)
 {
     return $query->where('request_type', 'fake');
 }
+
+/**
+ * The requests this staff member may see (the requests table and the Aman uploader extension).
+ * A company (Aman) employee: only their companies' requests, never fake ones; an admin: all;
+ * anyone else: the requests assigned to them.
+ */
+public function scopeVisibleTo($query, Staff $user)
+{
+    if ($user->isAmaanRestricted()) {
+        $companyNames = $user->installmentSystems()->pluck('installment_systems.name')->toArray();
+
+        // موظف شركة بدون شركات محددة = ممنوع يشوف طلبات
+        if (empty($companyNames)) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->whereIn('installment_type', $companyNames)->where('request_type', '!=', 'fake');
+    }
+
+    if (($user->is_admin ?? false) || ($user->is_super_admin ?? false)) {
+        return $query;
+    }
+
+    return $query->where('staff_id', $user->id);
+}
 /** Serialize request creation so two staff cannot submit the same identity concurrently. */
 protected function performInsert(\Illuminate\Database\Eloquent\Builder $query)
 {

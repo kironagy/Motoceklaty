@@ -1,58 +1,88 @@
 const { store } = AMAN;
 const $ = (id) => document.getElementById(id);
+let me = null;
 
-const SAMPLE_ORDER = {
-  applicant_name: 'محمد أحمد علي حسن',
-  applicant_national_id: '29001011234567',
-  applicant_phone: '01012345678',
-  applicant_birthdate: '1990-01-01',
-  applicant_governorate: 'القاهرة',
-  applicant_area: 'مدينة نصر',
-  applicant_address: '12 شارع مصطفى النحاس',
-  machine_installment_price: '45000',
-  deposit: '5000',
-  months: '12',
-  free_work_name: 'سواق توك توك',
-  applicant_id_image: 'https://example.com/id-front.jpg',
-  applicant_id_back_image: 'https://example.com/id-back.jpg',
+// ---------- tabs ----------
+document.querySelectorAll('nav button').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
+function showTab(name) {
+  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+  document.querySelectorAll('[data-pane]').forEach((p) => p.hidden = p.dataset.pane !== name);
+}
+
+async function activeTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab || null;
+}
+
+const setTypes = (m) => { AMAN.types = Object.entries(m?.types || {}).map(([key, label]) => ({ key, label })); };
+
+// ---------- account ----------
+async function refreshAccount() {
+  try {
+    me = await AMAN.api('GET', '/me');
+    setTypes(me);
+    const recipes = await AMAN.api('GET', '/recipes');
+    await store.set({ me, recipes: Array.isArray(recipes) ? {} : recipes });
+    return true;
+  } catch (e) {
+    return e.message;
+  }
+}
+
+$('login').onclick = async () => {
+  const server = $('server').value.trim().replace(/\/+$/, '');
+  const email = $('email').value.trim();
+  const password = $('password').value;
+  if (!server || !email || !password) return ($('loginMsg').textContent = 'اكتب العنوان والإيميل والباسورد.');
+  $('loginMsg').textContent = 'بيدخل…';
+  await store.set({ settings: { server, email, token: '' } });
+  try {
+    const res = await AMAN.api('POST', '/login', { email, password, device: 'Chrome ' + (navigator.userAgentData?.platform || navigator.platform || '') });
+    $('password').value = '';
+    await store.set({ settings: { server, email, token: res.token }, me: res.me });
+    me = res.me; setTypes(me);
+    await refreshAccount();
+    $('loginMsg').textContent = '';
+    showTab('run');
+  } catch (e) {
+    $('loginMsg').textContent = 'ماقدرش يدخل: ' + e.message;
+  }
 };
 
-for (const sel of [$('teachType'), $('runType')]) {
-  for (const t of AMAN.REQUEST_TYPES) sel.append(new Option(t.label, t.key));
-}
-$('order').value = JSON.stringify(SAMPLE_ORDER, null, 2);
+$('logout').onclick = async () => {
+  try { await AMAN.api('POST', '/logout'); } catch { /* signed out locally anyway */ }
+  const { settings = {} } = await store.get('settings');
+  await store.set({ settings: { ...settings, token: '' }, me: null, recipes: {} });
+  me = null;
+};
 
-async function activeTabId() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab?.id ?? null;
-}
-
+// ---------- teach ----------
 function stepLine(s) {
   if (s.kind === 'page') return ['page', 'صفحة', s.title || s.page];
-  if (s.kind === 'click') return [s.gate ? 'gate' : 'click', s.gate ? 'وقفة موافقة' : 'ضغطة', s.target.text || s.target.label || s.target.name || 'زرار'];
+  if (s.kind === 'expect') return ['expect', 'رسالة حالة', 'لازم تبقى: ' + s.sample];
+  if (s.kind === 'capture') return ['capture', 'رقم الطلب', 'بيتقرا من: ' + (s.sample || 'الصفحة')];
+  if (s.kind === 'click') return [s.gate ? 'gate' : 'click', s.gate ? 'وقفة موافقة' : 'ضغطة', s.target.text || s.target.name || 'زرار'];
   const t = s.target;
   return ['fill', 'خانة', (t.label || t.placeholder || t.name || 'بدون اسم') + ' ← ' + AMAN.describeSource(s.source)];
 }
 
-function renderSteps(list, steps, editable) {
+function renderSteps(list, steps) {
   list.innerHTML = '';
   steps.forEach((s, i) => {
     const [cls, kind, text] = stepLine(s);
     const li = document.createElement('li');
     li.innerHTML = `<span class="pill ${cls}">${kind}</span> `;
     li.append(document.createTextNode(text));
-    if (editable && s.kind === 'click') {
+    if (s.kind === 'click') {
       const lab = document.createElement('label');
       const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!s.gate;
       cb.onchange = () => editTeach((t) => { t.steps[i].gate = cb.checked; });
       lab.append(' ', cb, ' وقفة موافقة');
       li.append(lab);
     }
-    if (editable) {
-      const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = 'شيل الخطوة';
-      x.onclick = () => editTeach((t) => { t.steps.splice(i, 1); });
-      li.append(x);
-    }
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = 'شيل الخطوة';
+    x.onclick = () => editTeach((t) => { t.steps.splice(i, 1); });
+    li.append(x);
     list.append(li);
   });
 }
@@ -64,122 +94,326 @@ async function editTeach(fn) {
   await store.set({ teach });
 }
 
-async function render() {
-  const { teach, recipes = {}, run } = await store.get(['teach', 'recipes', 'run']);
-
-  const on = !!teach?.active;
-  $('teachStart').hidden = on; $('teachSave').hidden = !on; $('teachCancel').hidden = !on;
-  $('teachType').disabled = on;
-  if (on) $('teachType').value = teach.type;
-  $('teachHint').textContent = on
-    ? 'ارفع الطلب عادي. جنب كل خانة فيه قايمة، حدد منها الخانة تبع إيه. زرار الحفظ بيتعلّم عليه "وقفة موافقة" لوحده.'
-    : 'اختار نوع الطلب، وافتح صفحة أمان، وبعدين دوس ابدأ.';
-  renderSteps($('teachSteps'), on ? teach.steps : [], true);
-
-  const box = $('recipes');
-  const keys = Object.keys(recipes);
-  box.innerHTML = keys.length ? '' : 'لسه مافيش.';
-  for (const k of keys) {
-    const r = recipes[k];
-    const div = document.createElement('div');
-    div.className = 'row';
-    div.style.marginBottom = '6px';
-    const fills = r.steps.filter((s) => s.kind === 'fill').length;
-    const gates = r.steps.filter((s) => s.gate).length;
-    div.append(document.createTextNode(`${AMAN.typeLabel(k)} — نسخة ${r.version}، ${fills} خانة، ${gates} وقفة موافقة`));
-    const exp = document.createElement('button'); exp.textContent = 'تصدير';
-    exp.onclick = () => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' }));
-      a.download = `aman-recipe-${k}-v${r.version}.json`; a.click();
-    };
-    const del = document.createElement('button'); del.textContent = 'حذف'; del.className = 'bad';
-    del.onclick = async () => {
-      if (!confirm('تحذف وصفة ' + AMAN.typeLabel(k) + '؟')) return;
-      const { recipes: all = {} } = await store.get('recipes'); delete all[k]; await store.set({ recipes: all });
-    };
-    div.append(exp, del);
-    box.append(div);
-  }
-
-  const st = $('runStatus');
-  st.innerHTML = '';
-  $('review').hidden = !run; $('gateRow').hidden = run?.status !== 'review';
-  if (run) {
-    const msg = {
-      running: `بيملا… خطوة ${run.i + 1} من ${run.recipe.steps.length}`,
-      review: `وقف عند "${run.gateText}". راجع الجدول وصفحة أمان قبل ما توافق.`,
-      error: 'وقف: ' + run.error,
-      done: 'خلص.',
-      stopped: 'اتوقف.',
-      approved: 'بيحفظ…',
-    }[run.status] || run.status;
-    st.className = 'status ' + run.status;
-    st.textContent = msg;
-    const tb = $('review').querySelector('tbody');
-    tb.innerHTML = '';
-    for (const r of run.log) {
-      const tr = document.createElement('tr');
-      for (const v of [r.label, r.source, r.expected, r.actual, r.ok === null ? '✍' : r.ok ? '✔' : '✘']) {
-        const td = document.createElement('td'); td.textContent = v ?? ''; tr.append(td);
-      }
-      if (r.ok === false) tr.style.color = 'var(--bad)';
-      tb.append(tr);
-    }
-  }
+function fillTypes() {
+  const sel = $('teachType');
+  const v = sel.value;
+  sel.innerHTML = '';
+  for (const t of AMAN.types?.length ? AMAN.types : AMAN.REQUEST_TYPES) sel.append(new Option(t.label, t.key));
+  if (v) sel.value = v;
 }
 
 $('teachStart').onclick = async () => {
-  const tabId = await activeTabId();
+  const tab = await activeTab();
   const type = $('teachType').value;
   const { recipes = {} } = await store.get('recipes');
-  if (recipes[type] && !confirm('فيه وصفة محفوظة لـ ' + AMAN.typeLabel(type) + '. التعليم الجديد هيستبدلها لما تحفظ. تكمل؟')) return;
-  await store.set({ teach: { active: true, type, tabId, steps: [], startedAt: new Date().toISOString() } });
+  if (recipes[type] && !confirm('فيه وصفة لـ "' + AMAN.typeLabel(type) + '". التعليم الجديد هيستبدلها لما تحفظ. تكمل؟')) return;
+  await store.set({ teach: { active: true, type, tabId: tab?.id, startUrl: tab?.url || '', steps: [], startedAt: new Date().toISOString() } });
 };
-
-$('teachCancel').onclick = async () => {
-  if (confirm('تلغي التعليم من غير ما تحفظ؟')) await store.set({ teach: null });
-};
+$('teachCancel').onclick = async () => { if (confirm('تلغي التعليم من غير ما تحفظ؟')) await store.set({ teach: null }); };
+$('pickExpect').onclick = () => editTeach((t) => { t.pick = 'expect'; });
+$('pickCapture').onclick = () => editTeach((t) => { t.pick = 'capture'; });
 
 $('teachSave').onclick = async () => {
   const { teach, recipes = {} } = await store.get(['teach', 'recipes']);
   if (!teach) return;
-  if (!teach.steps.some((s) => s.kind === 'fill')) { alert('مافيش ولا خانة متحددة.'); return; }
-  if (!teach.steps.some((s) => s.gate)) { alert('لازم خطوة واحدة على الأقل تبقى "وقفة موافقة" (زرار الحفظ).'); return; }
-  const prev = recipes[teach.type];
-  recipes[teach.type] = {
-    type: teach.type,
-    version: (prev?.version || 0) + 1,
-    savedAt: new Date().toISOString(),
-    steps: teach.steps,
-  };
-  await store.set({ recipes, teach: null });
+  if (!teach.steps.some((s) => s.kind === 'fill')) return alert('مافيش ولا خانة متحددة.');
+  if (!teach.steps.some((s) => s.gate)) return alert('لازم خطوة واحدة على الأقل تبقى "وقفة موافقة" (زرار الحفظ).');
+  // The run opens the first page itself, so the recipe must start with one.
+  if (teach.steps[0].kind !== 'page') {
+    const page = teach.steps.find((s) => s.page)?.page || '';
+    teach.steps.unshift({ kind: 'page', page, url: teach.startUrl || '', title: 'صفحة البداية' });
+  }
+  try {
+    const res = await AMAN.api('PUT', '/recipes/' + teach.type, { steps: teach.steps });
+    recipes[teach.type] = { type: teach.type, version: res.version, steps: teach.steps, savedAt: new Date().toISOString() };
+    await store.set({ recipes, teach: null });
+  } catch (e) {
+    alert('ماتحفظتش على السيستم: ' + e.message);
+  }
 };
 
-$('runStart').onclick = async () => {
-  const type = $('runType').value;
-  const { recipes = {} } = await store.get('recipes');
-  const recipe = recipes[type];
-  if (!recipe) { alert('مافيش وصفة محفوظة لـ ' + AMAN.typeLabel(type)); return; }
-  let order;
-  try { order = JSON.parse($('order').value); } catch { alert('بيانات الطلب مش JSON سليم'); return; }
-  await store.set({ run: { type, recipe, order, tabId: await activeTabId(), i: 0, status: 'running', log: [], startedAt: new Date().toISOString() } });
+// ---------- batch: pull every new request, then upload them one by one ----------
+const ACTIVE_RUN = ['starting', 'running', 'review', 'approved', 'blocked'];
+const FINAL = ['done', 'stopped', 'resolved', 'error'];
+const STATE_LABEL = { waiting: 'مستني', working: 'شغال عليه', uploaded: 'اترفع', rejected_before: 'مرفوض قبل كده', error: 'مشكلة', stopped: 'اتوقف', skipped: 'اتساب' };
+
+async function getBatch() { return (await store.get('batch')).batch || null; }
+async function editBatch(fn) {
+  const batch = await getBatch();
+  if (!batch) return null;
+  fn(batch);
+  await store.set({ batch });
+  return batch;
+}
+const setItem = (id, patch) => editBatch((b) => { const it = b.items.find((x) => x.id === id); if (it) Object.assign(it, patch, { at: new Date().toISOString() }); });
+
+$('pull').onclick = async () => {
+  const [batch, { run }] = [await getBatch(), await store.get('run')];
+  if (batch?.running || (run && ACTIVE_RUN.includes(run.status))) return ($('pullMsg').textContent = 'فيه رفع شغال، خلّصه أو وقّفه الأول.');
+  $('pullMsg').textContent = 'بيسحب…';
+  try {
+    await refreshAccount();
+    const { items } = await AMAN.api('GET', '/queue');
+    const noRecipe = items.filter((i) => !i.has_recipe).length;
+    await store.set({ run: null, batch: { pulledAt: new Date().toISOString(), running: false, errorsInRow: 0, items: items.map((i) => ({ ...i, state: 'waiting' })) } });
+    $('pullMsg').textContent = items.length
+      ? `تم سحب ${items.length} طلب جديد من موتوجيت.` + (noRecipe ? ` منهم ${noRecipe} مالهمش وصفة وهيتسابوا.` : '')
+      : 'مافيش طلبات جديدة على موتوجيت دلوقتي.';
+  } catch (e) {
+    $('pullMsg').textContent = 'ماقدرش يسحب: ' + e.message;
+  }
 };
 
-$('runStop').onclick = async () => {
+$('startBatch').onclick = async () => { await editBatch((b) => { b.running = true; b.errorsInRow = 0; b.finishedAt = null; }); processNext(); };
+$('stopBatch').onclick = async () => {
+  await editBatch((b) => { b.running = false; });
   const { run } = await store.get('run');
-  if (run) await store.set({ run: { ...run, status: 'stopped' } });
+  if (run && ACTIVE_RUN.includes(run.status)) await store.set({ run: { ...run, status: 'stopped', stopReason: 'الموظف وقف الرفع' } });
+};
+$('sheet').onclick = async () => downloadSheet(await getBatch());
+
+function waitTabLoaded(tabId) {
+  return new Promise((resolve) => {
+    const done = () => { chrome.tabs.onUpdated.removeListener(l); clearTimeout(t); resolve(); };
+    const l = (id, info) => { if (id === tabId && info.status === 'complete') done(); };
+    const t = setTimeout(done, 30000);
+    chrome.tabs.onUpdated.addListener(l);
+  });
+}
+
+let processing = false;
+async function processNext() {
+  if (processing) return;
+  processing = true;
+  try {
+    for (;;) {
+      const batch = await getBatch();
+      if (!batch?.running) return;
+      if (batch.items.some((i) => i.state === 'working')) return; // its run is still going
+      const item = batch.items.find((i) => i.state === 'waiting');
+      if (!item) return finishBatch();
+      if (!item.has_recipe) { await setItem(item.id, { state: 'skipped', message: 'مافيش وصفة لنوع "' + item.type_label + '"' }); continue; }
+
+      await setItem(item.id, { state: 'working' });
+      let data;
+      try {
+        data = await AMAN.api('POST', '/requests/' + item.id + '/claim');
+      } catch (e) {
+        await setItem(item.id, { state: 'skipped', message: e.message });
+        continue;
+      }
+      const tab = await activeTab();
+      const { recipes = {} } = await store.get('recipes');
+      const recipe = recipes[data.upload.type];
+      const base = { batchItemId: item.id, uploadId: data.upload.id, requestId: data.request_id, type: data.upload.type, typeLabel: data.upload.type_label,
+        order: data.order, card: data.card || {}, recipe, tabId: tab?.id, i: 0, log: [], dialogs: [], startedAt: new Date().toISOString() };
+      const cardErrors = data.card?.errors || [];
+      if (!recipe) { await store.set({ run: { ...base, status: 'error', error: 'مافيش وصفة لنوع "' + data.upload.type_label + '"' } }); return; }
+      if (cardErrors.some((e) => e.includes('غير اللي'))) { await store.set({ run: { ...base, status: 'error', error: cardErrors.join(' — ') } }); return; }
+
+      const start = recipe.steps.find((s) => s.kind === 'page');
+      await store.set({ run: { ...base, status: 'starting' } });
+      if (start?.url && tab) {
+        await chrome.tabs.update(tab.id, { url: start.url });
+        await waitTabLoaded(tab.id);
+      }
+      const { run: cur } = await store.get('run');
+      if (cur?.uploadId === base.uploadId && cur.status === 'starting') await store.set({ run: { ...cur, status: 'running' } });
+      return; // the run's end (onRunChange) calls processNext again
+    }
+  } finally {
+    processing = false;
+  }
+}
+
+async function finishBatch() {
+  const batch = await editBatch((b) => { b.running = false; b.finishedAt = new Date().toISOString(); });
+  if (batch?.items.length) downloadSheet(batch);
+}
+
+// A finished run, once recorded on the server, closes its batch item and moves on.
+let handled = '';
+async function onRunChange(run) {
+  if (!run?.batchItemId || !FINAL.includes(run.status) || !(run.reported || run.reportError)) return;
+  const key = run.uploadId + ':' + run.status;
+  if (handled === key) return;
+  handled = key;
+  const batch = await getBatch();
+  const item = batch?.items.find((i) => i.id === run.batchItemId);
+  if (!item || item.state !== 'working') return;
+
+  const state = run.status === 'done' ? 'uploaded' : run.status === 'resolved' ? run.resolution : run.status;
+  const message = run.status === 'error' ? run.error : run.status === 'resolved' ? run.blockMessage : run.status === 'stopped' ? run.stopReason : (run.reportError ? 'ماتسجلش في السيستم: ' + run.reportError : '');
+  await editBatch((b) => {
+    const it = b.items.find((i) => i.id === run.batchItemId);
+    Object.assign(it, { state, amanRef: run.amanRef || '', message: message || '', at: new Date().toISOString() });
+    b.errorsInRow = state === 'error' ? (b.errorsInRow || 0) + 1 : 0;
+    if (b.errorsInRow >= 3) { b.running = false; b.pausedReason = 'وقف بعد 3 مشاكل ورا بعض، شوف الوصفة أو صفحة أمان.'; }
+  });
+  setTimeout(processNext, 1500);
+}
+
+// ---------- results sheet (CSV that Excel opens, Arabic kept) ----------
+function downloadSheet(batch) {
+  if (!batch) return;
+  const cols = ['رقم الطلب في موتوجيت', 'اسم العميل', 'الرقم القومي', 'نوع الطلب', 'النتيجة', 'رقم الطلب في أمان', 'ملاحظات', 'الوقت'];
+  const cell = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const rows = batch.items.map((i) => [i.id, i.name, i.national_id ? '‎' + i.national_id : '', i.type_label, STATE_LABEL[i.state] || i.state, i.amanRef, i.message, i.at ? new Date(i.at).toLocaleString('ar-EG') : '']);
+  const csv = '﻿' + [cols, ...rows].map((r) => r.map(cell).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const d = new Date(); const p = (n) => String(n).padStart(2, '0');
+  a.download = `aman-uploads-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.csv`;
+  a.click();
+}
+
+// ---------- current request controls ----------
+async function setRun(patch) {
+  const { run } = await store.get('run');
+  if (run) await store.set({ run: { ...run, ...patch } });
+}
+$('approve').onclick = async () => { const { run } = await store.get('run'); if (run?.status === 'review') setRun({ status: 'approved' }); };
+$('reject').onclick = () => setRun({ status: 'stopped', stopReason: 'الموظف مش موافق على البيانات' });
+$('asRejected').onclick = () => setRun({ status: 'resolved', resolution: 'rejected_before' });
+$('asError').onclick = () => setRun({ status: 'resolved', resolution: 'error' });
+$('goOn').onclick = async () => { const { run } = await store.get('run'); setRun({ status: 'running', dialogs: [], i: run.recipe.steps[run.i]?.kind === 'expect' ? run.i + 1 : run.i }); };
+
+const STATUS = {
+  starting: () => 'بيفتح صفحة أمان…',
+  running: (r) => `بيملا… خطوة ${r.i + 1} من ${r.recipe.steps.length}`,
+  review: (r) => `وقف عند "${r.gateText}". راجع الجدول وصفحة أمان، وبعدين وافق.`,
+  approved: () => 'بيحفظ…',
+  blocked: (r) => r.blockMessage,
+  error: (r) => 'وقف: ' + r.error,
+  done: (r) => 'اترفع' + (r.amanRef ? ' — رقم الطلب عند أمان: ' + r.amanRef : '') + '.',
+  stopped: (r) => 'اتوقف: ' + (r.stopReason || ''),
+  resolved: (r) => r.resolution === 'rejected_before' ? 'اتسجل إنه مرفوض قبل كده: ' + r.blockMessage : 'اتسجل كمشكلة: ' + r.blockMessage,
 };
 
-$('approve').onclick = async () => {
-  const { run } = await store.get('run');
-  if (run?.status === 'review') await store.set({ run: { ...run, status: 'approved' } });
-};
+function renderRun(run) {
+  $('current').hidden = !run;
+  if (!run) return;
+  const name = run.card?.full_name || run.order?.applicant_name || '';
+  $('curTitle').textContent = `طلب #${run.requestId} — ${run.typeLabel || AMAN.typeLabel(run.type)}`;
+  const info = $('curInfo'); info.innerHTML = '';
+  for (const [k, v] of [['العميل', name], ['الرقم القومي', run.card?.national_id || run.order?.applicant_national_id], ['النوع', run.card?.gender], ['الاسم من', run.card?.name_source === 'card' ? 'البطاقة' : 'السيستم (البطاقة ماتقريتش)']]) {
+    if (!v) continue;
+    const b = document.createElement('b'); b.textContent = k; const s = document.createElement('span'); s.textContent = v; info.append(b, s);
+  }
+  const warn = $('curWarn'); warn.innerHTML = '';
+  for (const e of run.card?.errors || []) { const d = document.createElement('div'); d.className = 'warn'; d.textContent = '⚠ ' + e; warn.append(d); }
 
-$('reject').onclick = async () => {
-  const { run } = await store.get('run');
-  if (run) await store.set({ run: { ...run, status: 'stopped' } });
-};
+  const st = $('runStatus');
+  st.className = 'status ' + run.status;
+  st.textContent = (STATUS[run.status] || (() => run.status))(run)
+    + (FINAL.includes(run.status) && run.uploadId ? (run.reported ? ' (اتسجل في موتوجيت)' : run.reportError ? ' (ماتسجلش: ' + run.reportError + ')' : ' (بيسجل…)') : '');
+  $('gateRow').hidden = run.status !== 'review';
+  $('blockRow').hidden = run.status !== 'blocked';
+
+  $('review').hidden = !run.log.length;
+  const tb = $('review').querySelector('tbody');
+  tb.innerHTML = '';
+  for (const r of run.log) {
+    const tr = document.createElement('tr');
+    for (const v of [r.label, r.source, r.expected, r.actual, r.ok === null ? '✍' : r.ok ? '✔' : '✘']) {
+      const td = document.createElement('td'); td.textContent = v ?? ''; tr.append(td);
+    }
+    if (r.ok === false) tr.style.color = 'var(--bad)';
+    if (r.ok === null) tr.style.color = 'var(--brand-dark)';
+    tb.append(tr);
+  }
+}
+
+function renderBatch(batch, run) {
+  const items = batch?.items || [];
+  const count = (s) => items.filter((i) => i.state === s).length;
+  const left = count('waiting') + count('working');
+  const handledCount = items.length - left;
+
+  $('startBatch').hidden = !items.length || batch.running || !count('waiting');
+  $('startBatch').textContent = handledCount ? 'كمّل الرفع' : 'ابدأ الرفع';
+  $('stopBatch').hidden = !batch?.running;
+  $('sheet').hidden = !handledCount;
+  $('listBox').hidden = !items.length;
+  $('progress').hidden = !items.length || !handledCount && !batch?.running;
+
+  const working = items.find((i) => i.state === 'working');
+  const now = $('now');
+  now.hidden = !(batch?.running || working || batch?.finishedAt || batch?.pausedReason);
+  if (working) now.textContent = `جاري العمل على طلب باسم ${working.name || '—'} رقم #${working.id} على سيستم موتوجيت`;
+  else if (batch?.running) now.textContent = 'بيجهّز الطلب اللي بعده…';
+  else if (batch?.pausedReason) now.textContent = batch.pausedReason;
+  else if (batch?.finishedAt) now.textContent = `خلصت: تم تنفيذ ${count('uploaded')} طلب من ${items.length}. الشيت اتحمّل.`;
+
+  $('progressText').textContent = `تم تنفيذ ${count('uploaded')} من ${items.length}`
+    + ` — مرفوض قبل كده ${count('rejected_before')}، مشاكل ${count('error') + count('stopped')}، اتساب ${count('skipped')}، فاضل ${left}`;
+  $('barFill').style.width = (items.length ? Math.round((handledCount / items.length) * 100) : 0) + '%';
+
+  const list = $('list'); list.innerHTML = '';
+  for (const i of items) {
+    const tr = document.createElement('tr');
+    const cells = [i.id, i.name, i.type_label, null, i.amanRef || ''];
+    cells.forEach((v, n) => {
+      const td = document.createElement('td');
+      if (n === 3) { const s = document.createElement('span'); s.className = 'st ' + i.state; s.textContent = STATE_LABEL[i.state] || i.state; s.title = i.message || ''; td.append(s); }
+      else td.textContent = v ?? '';
+      tr.append(td);
+    });
+    list.append(tr);
+  }
+}
+
+// ---------- render ----------
+async function render() {
+  const { teach, recipes = {}, run, settings = {}, me: cachedMe, batch } = await store.get(['teach', 'recipes', 'run', 'settings', 'me', 'batch']);
+  if (cachedMe !== undefined) me = cachedMe;
+  if (me && !AMAN.types?.length) setTypes(me);
+  const signedIn = !!(settings.token && me);
+
+  $('who').textContent = signedIn ? me.name : 'مش داخل';
+  $('loginBox').hidden = signedIn; $('accountBox').hidden = !signedIn;
+  if (signedIn) $('accountInfo').textContent = `داخل باسم ${me.name} (${settings.email || ''}) على ${settings.server}`;
+  if (document.activeElement !== $('server')) $('server').value = settings.server || '';
+  if (document.activeElement !== $('email')) $('email').value = settings.email || '';
+  $('pull').disabled = !signedIn;
+  fillTypes();
+
+  const on = !!teach?.active;
+  $('teachStart').hidden = on; $('teachSave').hidden = !on; $('teachCancel').hidden = !on; $('pickRow').hidden = !on;
+  $('teachType').disabled = on;
+  if (on) $('teachType').value = teach.type;
+  $('teachStart').disabled = !signedIn || !me.can_teach;
+  $('teachHint').textContent = signedIn && !me.can_teach ? 'التعليم للمسؤول بس.'
+    : on ? (teach.pick ? 'دوس على الكلام في صفحة أمان…' : 'ارفع الطلب عادي. دوس على الدايرة اللي جوه كل خانة واختار هي تبع إيه. ارفع البطاقة ودوس تأكيد زي ما بتعمل. لما رسالة الحالة تظهر (عميل جديد) دوس "علّم رسالة الحالة". وبعد الحفظ دوس "علّم رقم الطلب".')
+      : 'اختار نوع الطلب، وافتح صفحة طلب جديد على أمان، وبعدين دوس ابدأ.';
+  renderSteps($('teachSteps'), on ? teach.steps : []);
+
+  const box = $('recipes');
+  const keys = Object.keys(recipes || {});
+  box.innerHTML = keys.length ? '' : 'لسه مافيش.';
+  for (const k of keys) {
+    const r = recipes[k];
+    const d = document.createElement('div');
+    d.style.marginBottom = '4px';
+    d.textContent = `${AMAN.typeLabel(k)} — نسخة ${r.version}، ${r.steps.filter((s) => s.kind === 'fill').length} خانة`;
+    box.append(d);
+  }
+
+  renderRun(run);
+  renderBatch(batch, run);
+  onRunChange(run);
+}
 
 chrome.storage.onChanged.addListener((_c, area) => { if (area === 'local') render(); });
-render();
+(async () => {
+  await render();
+  const { settings = {}, batch } = await store.get(['settings', 'batch']);
+  if (settings.token) {
+    const ok = await refreshAccount();
+    if (ok !== true) $('loginMsg').textContent = ok;
+    render();
+    if (batch?.running) processNext();
+  } else {
+    showTab('settings');
+  }
+})();

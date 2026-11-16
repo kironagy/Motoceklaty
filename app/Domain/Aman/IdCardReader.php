@@ -1,0 +1,215 @@
+<?php
+
+namespace App\Domain\Aman;
+
+use App\Domain\Documents\OcrException;
+use App\Domain\Documents\OcrProvider;
+use App\Models\InstallmentRequest;
+use App\Support\EgyptianNationalId;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+
+/**
+ * Reads the applicant's national ID card (front + back) for the Aman uploader:
+ * Google Vision text, then fixed rules for an Egyptian card. Values that the
+ * national ID number itself encodes (birthdate, gender, governorate) come from
+ * the number, never from OCR guesses. OCR text is never logged.
+ *
+ * Result keys: name_1..name_4, full_name, national_id, birthdate, gender,
+ * governorate, address, religion, marital_status, issue_date, expiry_date,
+ * plus `name_source` (card|system) and `errors`.
+ */
+class IdCardReader
+{
+    private const HEADER = ['جمهوريه مصر العربيه', 'بطاقه تحقيق الشخصيه', 'جمهوريه مصر العربيه بطاقه تحقيق الشخصيه'];
+
+    public function __construct(private OcrProvider $ocr, private EgyptianNationalId $nid)
+    {
+    }
+
+    public function read(InstallmentRequest $request): array
+    {
+        $front = $request->applicant_id_image;
+        $back = $request->applicant_id_back_image;
+        $key = 'aman-card:'.$request->id.':'.md5($front.'|'.$back.'|'.$request->applicant_name.'|'.$request->applicant_national_id);
+
+        return Cache::remember($key, now()->addDays(30), fn () => $this->readFresh($request, $front, $back));
+    }
+
+    private function readFresh(InstallmentRequest $request, ?string $front, ?string $back): array
+    {
+        $errors = [];
+        $frontText = $this->text($front, 'front', $errors);
+        $backText = $this->text($back, 'back', $errors);
+
+        $out = $this->parseFront($frontText) + $this->parseBack($backText);
+
+        // The number: the card's, unless OCR missed it; it must match the system's when both exist.
+        $systemNid = $this->nid->normalizeDigits((string) $request->applicant_national_id);
+        if (empty($out['national_id']) && strlen($systemNid) === 14) {
+            $out['national_id'] = $systemNid;
+        } elseif (! empty($out['national_id']) && strlen($systemNid) === 14 && $out['national_id'] !== $systemNid) {
+            $errors[] = 'الرقم القومي في البطاقة ('.$out['national_id'].') غير اللي في السيستم ('.$systemNid.')';
+        }
+
+        $parsed = $this->nid->parse($out['national_id'] ?? null);
+        if ($parsed['valid']) {
+            $out['birthdate'] = $parsed['birthdate'];
+            $out['governorate'] = $parsed['governorate'];
+            $cardGender = $out['gender'] ?? null;
+            $out['gender'] = $parsed['gender'] === 'male' ? 'ذكر' : 'أنثى';
+            if ($cardGender && $cardGender !== $out['gender']) {
+                $errors[] = 'النوع المكتوب في البطاقة غير اللي في الرقم القومي';
+            }
+        } elseif (! empty($out['national_id'])) {
+            $errors[] = 'الرقم القومي مش سليم';
+        }
+
+        // Name: the card's two name lines; else the system's single name split into 4.
+        if (empty($out['name_1'])) {
+            $out = array_merge($out, $this->splitName((string) $request->applicant_name));
+            $out['name_source'] = 'system';
+        } else {
+            $out['name_source'] = 'card';
+        }
+        $out['full_name'] = trim(implode(' ', array_filter([$out['name_1'] ?? '', $out['name_2'] ?? '', $out['name_3'] ?? '', $out['name_4'] ?? ''])));
+
+        $out['errors'] = $errors;
+
+        return $out;
+    }
+
+    private function text(?string $path, string $side, array &$errors): string
+    {
+        if (blank($path) || ! Storage::disk('public')->exists($path)) {
+            $errors[] = $side === 'front' ? 'صورة وش البطاقة مش موجودة' : 'صورة ضهر البطاقة مش موجودة';
+
+            return '';
+        }
+
+        try {
+            $mime = Storage::disk('public')->mimeType($path) ?: 'image/jpeg';
+
+            return $this->ocr->extractText(base64_encode(Storage::disk('public')->get($path)), $mime)->text;
+        } catch (OcrException $e) {
+            Log::warning('Aman card OCR failed', ['side' => $side, 'error' => $e->getMessage()]);
+            $errors[] = 'قراءة '.($side === 'front' ? 'وش' : 'ضهر').' البطاقة فشلت';
+
+            return '';
+        }
+    }
+
+    /** Front: header, first-name line, rest-of-name line, address lines, the number. */
+    public function parseFront(string $text): array
+    {
+        $out = [];
+        if ($text === '') {
+            return $out;
+        }
+
+        $lines = $this->lines($text);
+        $nidLine = null;
+        foreach ($lines as $i => $line) {
+            $digits = $this->nid->normalizeDigits($line);
+            if (preg_match('/[23]\d{13}/', $digits, $m)) {
+                $out['national_id'] = $m[0];
+                $nidLine = $i;
+                break;
+            }
+        }
+
+        $words = [];
+        foreach ($lines as $i => $line) {
+            if ($nidLine !== null && $i >= $nidLine) {
+                break;
+            }
+            if (in_array($this->norm($line), self::HEADER, true) || ! preg_match('/^[\p{Arabic}\s\-\.،]+$/u', $line) || preg_match('/\d/u', $line)) {
+                continue;
+            }
+            $words[] = trim($line);
+        }
+
+        if (count($words) >= 2) {
+            $rest = preg_split('/\s+/u', $words[1]);
+            $out['name_1'] = $words[0];
+            $out['name_2'] = $rest[0] ?? '';
+            $out['name_3'] = $rest[1] ?? '';
+            $out['name_4'] = trim(implode(' ', array_slice($rest, 2)));
+            $address = array_slice($words, 2);
+            if ($address) {
+                $out['address'] = implode(' - ', $address);
+            }
+        }
+
+        return $out;
+    }
+
+    /** Back: gender, religion, marital status, issue and expiry dates. */
+    public function parseBack(string $text): array
+    {
+        $out = [];
+        if ($text === '') {
+            return $out;
+        }
+
+        $n = $this->norm($text);
+        if (preg_match('/(^|\s)(ذكر|انثي)(\s|$)/u', $n, $m)) {
+            $out['gender'] = $m[2] === 'ذكر' ? 'ذكر' : 'أنثى';
+        }
+        if (preg_match('/(^|\s)(مسلم|مسيحي)(ه)?(\s|$)/u', $n, $m)) {
+            $out['religion'] = $m[2] === 'مسلم' ? 'مسلم' : 'مسيحي';
+        }
+        foreach (['متزوج' => 'متزوج', 'اعزب' => 'أعزب', 'انسه' => 'آنسة', 'مطلق' => 'مطلق', 'ارمل' => 'أرمل'] as $needle => $label) {
+            if (preg_match('/(^|\s)'.$needle.'(ه)?(\s|$)/u', $n, $m)) {
+                $out['marital_status'] = $label.(! empty($m[2]) && $needle !== 'انسه' ? 'ة' : '');
+                break;
+            }
+        }
+
+        $latin = strtr($n, ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9']);
+        if (preg_match('/ساري?ه?\s*حتي\s*:?\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{4}|\d{4}[\/\-.]\d{1,2}([\/\-.]\d{1,2})?)/u', $latin, $m)) {
+            $out['expiry_date'] = $this->date($m[1]);
+        }
+        if (preg_match_all('/\b(\d{4})[\/\-.](\d{1,2})\b/u', $latin, $all, PREG_SET_ORDER)) {
+            $out['issue_date'] = sprintf('%04d-%02d', $all[0][1], $all[0][2]);
+        }
+
+        return $out;
+    }
+
+    public function splitName(string $name): array
+    {
+        $parts = preg_split('/\s+/u', trim($name)) ?: [];
+
+        return [
+            'name_1' => $parts[0] ?? '',
+            'name_2' => $parts[1] ?? '',
+            'name_3' => $parts[2] ?? '',
+            'name_4' => trim(implode(' ', array_slice($parts, 3))),
+        ];
+    }
+
+    private function date(string $raw): string
+    {
+        $p = preg_split('/[\/\-.]/', $raw);
+        if (strlen($p[0]) === 4) {
+            return sprintf('%04d-%02d', $p[0], $p[1]).(isset($p[2]) ? sprintf('-%02d', $p[2]) : '');
+        }
+
+        return sprintf('%04d-%02d-%02d', $p[2], $p[1], $p[0]);
+    }
+
+    private function lines(string $text): array
+    {
+        return array_values(array_filter(array_map(fn ($l) => trim(preg_replace('/\s+/u', ' ', $l)), preg_split('/\R/u', $text)), fn ($l) => $l !== ''));
+    }
+
+    private function norm(string $s): string
+    {
+        $s = preg_replace('/[\x{064B}-\x{0652}\x{0640}]/u', '', $s);
+        $s = strtr($s, ['أ' => 'ا', 'إ' => 'ا', 'آ' => 'ا', 'ة' => 'ه', 'ى' => 'ي']);
+
+        return trim(preg_replace('/\s+/u', ' ', $s));
+    }
+}
