@@ -98,8 +98,13 @@ class AmanExtensionController extends Controller
     {
         $staleBefore = now()->subMinutes((int) config('aman_extension.claim_minutes', 15));
 
+        // A company employee uploads only for the companies on their account, even when they are
+        // also a super admin who sees every company on the requests table (owner 2026-11-16).
+        $companies = $staff->is_company_employee ? $staff->installmentSystems()->pluck('installment_systems.name')->all() : null;
+
         return InstallmentRequest::query()
             ->visibleTo($staff)
+            ->when($companies !== null, fn ($q) => $q->whereIn('installment_type', $companies ?: ['__none__']))
             ->whereIn('status', config('aman_extension.new_statuses'))
             ->whereIn('request_type', config('aman_extension.request_types', ['normal', 'bot']))
             ->where('installment_type', 'like', config('aman_extension.installment_type_like', 'امان%'))
