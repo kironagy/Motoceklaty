@@ -232,6 +232,17 @@ class AmanExtensionController extends Controller
 
         $upload->update($data + ['finished_at' => now()]);
 
+        // Aman refused the customer before: the request is rejected in motobot too (owner 2026-11-16),
+        // like staff rejecting it by hand. Only a request that is still new is touched.
+        if ($data['status'] === 'rejected_before') {
+            $req = InstallmentRequest::find($upload->installment_request_id);
+            if ($req && in_array($req->status, config('aman_extension.new_statuses'), true)) {
+                $req->checks_report = array_merge((array) $req->checks_report, ['aman' => 'العميل عنده طلب مرفوض قبل كده عند أمان']);
+                $req->status = 'rejected';
+                $req->save();
+            }
+        }
+
         return ['ok' => true];
     }
 }

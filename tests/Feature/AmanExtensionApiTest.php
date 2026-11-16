@@ -106,7 +106,9 @@ class AmanExtensionApiTest extends TestCase
 
         $this->api()->postJson('/api/aman/uploads/'.$res->json('upload.id').'/result', ['status' => 'rejected_before', 'message' => 'مرفوض'])->assertOk();
         $this->assertSame('rejected_before', AmanUpload::first()->status);
-        $this->assertSame('new_request', $req->fresh()->status, 'the request itself is never changed');
+        // Refused before at Aman: the request is rejected in motobot too (owner 2026-11-16).
+        $this->assertSame('rejected', $req->fresh()->status);
+        $this->assertSame('العميل عنده طلب مرفوض قبل كده عند أمان', $req->fresh()->checks_report['aman']);
 
         $this->api()->getJson('/api/aman/queue')->assertJsonCount(0, 'items');
         $this->api()->postJson('/api/aman/requests/'.$req->id.'/claim')->assertStatus(409);

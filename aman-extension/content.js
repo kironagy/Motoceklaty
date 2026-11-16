@@ -551,11 +551,29 @@
   const fail = (msg, row) => update('run', (r) => ({ ...r, status: 'error', error: msg, ...(row ? { log: [...r.log, { ...row, ok: false }] } : {}) }));
   const block = (msg) => update('run', (r) => ({ ...r, status: 'blocked', blockMessage: msg }));
 
+  // The customer was refused before: recorded as such (motobot marks the request rejected) and the
+  // batch goes on to the next request without waiting for the employee.
+  const rejectedBefore = (msg) => update('run', (r) => ({ ...r, status: 'resolved', resolution: 'rejected_before', blockMessage: 'أمان قال: ' + msg }));
+  const REJECTED = /مرفوض/;
+
+  // Aman's red text on the page, e.g. "عفواً العميل لدية طلب مرفوض من قبل لذلك لا يمكن عمل طلب تقسيط له الأن".
+  function amanRejection() {
+    for (const el of document.querySelectorAll('span, font, label, td, p, b')) {
+      if (host && host.contains(el)) continue;
+      const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!t || t.length > 250 || !REJECTED.test(t)) continue;
+      if ([...el.children].some((c) => REJECTED.test(c.textContent || ''))) continue; // the innermost one
+      if (visible(el)) return t;
+    }
+    return '';
+  }
+
   // After a click: did the portal pop up a message?
   async function dialogAfter(since) {
     await sleep(900);
     const { run } = await store.get('run');
     const d = (run?.dialogs || []).find((x) => x.at >= since);
+    if (d && REJECTED.test(d.msg)) { await rejectedBefore(d.msg); return true; }
     if (d) { await block('أمان قال: ' + d.msg); return true; }
     return false;
   }
@@ -569,7 +587,9 @@
     }
 
     // Aman can be slow: wait up to 45 s for the element (the page may still be loading after a click).
-    const el = await waitFor(() => findEl(step.target), 45000);
+    // Stops waiting as soon as Aman says the customer was refused before.
+    const el = await waitFor(() => (amanRejection() ? 'rejected' : findEl(step.target)), 45000);
+    if (el === 'rejected') return rejectedBefore(amanRejection());
 
     if (step.kind === 'expect') {
       const got = el ? textOf(el) : '';
@@ -742,6 +762,8 @@
           continue;
         }
         if (run.status !== 'running') break;
+        const rejection = amanRejection();
+        if (rejection) { await rejectedBefore(rejection); break; }
         const step = run.recipe.steps[run.i];
         if (!step) {
           let ref = run.amanRef;

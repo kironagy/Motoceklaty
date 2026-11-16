@@ -34,6 +34,7 @@ function loadCities(){ const g = document.getElementById('ctl00_gov').value; fil
 function loadDistricts(){ const c = document.getElementById('ctl00_city'); const name = c.options[c.selectedIndex].text; fill(document.getElementById('ctl00_district'), []); later(()=>fill(document.getElementById('ctl00_district'), DISTRICTS[name]||[])); }
 function start(){ const v=document.getElementById('ctl00_nid').value;
   if(v.endsWith('9')){ alert('هذا العميل مرفوض سابقا'); return; }
+  if(v.endsWith('8')){ document.getElementById('ctl00_status').innerHTML='<span style="color:red">عفواً العميل لدية طلب مرفوض من قبل لذلك لا يمكن عمل طلب تقسيط له الأن.</span>'; return; }
   document.getElementById('ctl00_status').textContent='عميل جديد'; document.getElementById('s3').classList.remove('hidden'); }
 </script>
 <script src="../shared.js"></script><script src="../content.js"></script></body></html>
