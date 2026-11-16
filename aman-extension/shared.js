@@ -42,6 +42,8 @@ AMAN.FIELD_GROUPS = [
     ['work_address', 'عنوان العمل'],
     ['work_governorate', 'محافظة العمل'],
     ['work_area', 'منطقة العمل'],
+    ['aman_work_address', 'عنوان العمل (أصفار للنقل الذكي)'],
+    ['aman_work_area', 'منطقة العمل (فاضية للنقل الذكي)'],
     ['work_street', 'شارع العمل'],
     ['work_building_number', 'رقم عمارة العمل'],
     ['free_work_name', 'اسم الشغل الحر'],
@@ -85,6 +87,8 @@ AMAN.FILE_FIELDS = [
   ['pension_statement_file', 'بيان المعاش'],
   ['commercial_reg_file', 'السجل التجاري'],
   ['tax_card_file', 'البطاقة الضريبية'],
+  ['proof_merged_1', 'إثبات الدخل مدموج 1 (النقل الذكي، غير كده وش البطاقة)'],
+  ['proof_merged_2', 'إثبات الدخل مدموج 2 (النقل الذكي، غير كده ضهر البطاقة)'],
 ];
 
 AMAN.DATE_FORMATS = [

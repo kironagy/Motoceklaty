@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Domain\Aman\IdCardImage;
 use App\Domain\Aman\IdCardReader;
+use App\Domain\Aman\SmartTransport;
 use App\Http\Controllers\Controller;
 use App\Models\AmanRecipe;
 use App\Models\AmanToken;
@@ -136,7 +137,7 @@ class AmanExtensionController extends Controller
     }
 
     /** Claims one request for this employee and returns its data, files and card reading. */
-    public function claim(Request $request, int $id, IdCardReader $cards)
+    public function claim(Request $request, int $id, IdCardReader $cards, SmartTransport $transport)
     {
         $staff = $this->staff($request);
 
@@ -174,6 +175,16 @@ class AmanExtensionController extends Controller
             $order[$field] = $paths ? array_map(fn ($i) => route('aman.file', ['upload' => $upload->id, 'field' => $field, 'i' => $i] + $clean), array_keys($paths)) : null;
         }
 
+        // Smart-transport drivers: income proof photos merged into the two guarantor slots, work area
+        // and address zeros. Anyone else keeps the card photos there, as before.
+        $smart = $transport->is($req);
+        $proofs = $smart ? count($transport->proofs($req)) : 0;
+        $order['smart_transport'] = $smart;
+        $order['aman_work_address'] = $smart ? SmartTransport::ZERO_ADDRESS : $req->work_address;
+        $order['aman_work_area'] = $smart ? null : $req->work_area;
+        $order['proof_merged_1'] = $proofs >= 1 ? [route('aman.file', ['upload' => $upload->id, 'field' => 'proof_merged_1'])] : $order['applicant_id_image'];
+        $order['proof_merged_2'] = $proofs >= 2 ? [route('aman.file', ['upload' => $upload->id, 'field' => 'proof_merged_2'])] : $order['applicant_id_back_image'];
+
         return [
             'upload' => ['id' => $upload->id, 'type' => $upload->type, 'type_label' => config('aman_extension.types')[$upload->type] ?? $upload->type],
             'request_id' => $req->id,
@@ -201,9 +212,16 @@ class AmanExtensionController extends Controller
             ])];
     }
 
-    public function file(Request $request, AmanUpload $upload, string $field, IdCardImage $images)
+    public function file(Request $request, AmanUpload $upload, string $field, IdCardImage $images, SmartTransport $transport)
     {
         abort_unless($upload->staff_id === $this->staff($request)->id, 403);
+
+        if (preg_match('/^proof_merged_([12])$/', $field, $m)) {
+            $path = $transport->merged($upload->request, (int) $m[1]);
+            abort_if($path === null, 404);
+
+            return Storage::disk('public')->response($path);
+        }
         abort_unless(in_array($field, self::FILE_FIELDS, true), 404);
 
         $value = $upload->request->{$field};
