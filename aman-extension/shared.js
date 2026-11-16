@@ -109,7 +109,7 @@ AMAN.typeLabel = function (key) {
 
 AMAN.describeSource = function (s) {
   if (!s) return '—';
-  const v = s.verify ? ' (تأكيد بس)' : '';
+  const v = s.verify ? ' (تأكيد بس)' : s.smart ? ' (اختيار ذكي)' : '';
   if (s.type === 'field') return 'السيستم: ' + AMAN.fieldLabel(s.key) + v;
   if (s.type === 'card') return 'البطاقة: ' + AMAN.cardLabel(s.key) + v;
   if (s.type === 'file') return 'ملف: ' + AMAN.fieldLabel(s.key);

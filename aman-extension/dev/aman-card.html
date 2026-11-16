@@ -15,10 +15,21 @@ table{width:100%}td{padding:6px}input[type=text],select{width:95%;padding:5px}.h
 <tr><td>النوع</td><td><select id="ctl00_gender"><option value="0">اختار</option><option value="1">ذكر</option><option value="2">انثى</option></select></td>
 <td>رقم الموبايل :</td><td><input type="text" id="ctl00_mobile"></td></tr>
 <tr><td>تاريخ الميلاد :</td><td><input type="text" id="ctl00_birth"></td><td>جهة البيع :</td><td><input type="text" id="ctl00_channel"></td></tr>
+<tr><td>عنوان السكن (بالتفصيل)</td><td colspan="3"><textarea id="ctl00_addr" rows="3" style="width:95%"></textarea></td></tr>
+<tr><td>المحافظة :</td><td><select id="ctl00_gov" onchange="loadCities()"><option value="0">أختر...</option><option value="1">القاهرة</option><option value="2">الجيزة</option></select></td>
+<td>المدينة / المنطقة :</td><td><select id="ctl00_city" onchange="loadDistricts()"><option value="0">أختر...</option></select></td></tr>
+<tr><td>الحى :</td><td><select id="ctl00_district"><option value="0">أختر...</option></select></td><td>رقم عقار :</td><td><input type="text" id="ctl00_bno"></td></tr>
 <tr><td colspan="2"><label><input type="checkbox" id="ctl00_extra"> هل لديه دخل اضافي ؟</label></td></tr>
 </table><input type="button" id="ctl00_save" value="حفظ" onclick="document.getElementById('ctl00_ref').textContent='AMN-'+Math.floor(Math.random()*900000+100000)">
 <p>رقم الطلب: <b id="ctl00_ref"></b></p></div>
 <script>
+const CITIES = { 1: ['وسط القاهرة', 'مدينة نصر', 'المعادي'], 2: ['الدقي', 'الهرم', 'فيصل', '6 أكتوبر'] };
+const DISTRICTS = { 'الهرم': ['خاتم المرسلين', 'المطبعة هرم', 'ترسا', 'الكوم الاخضر - هرم', 'المريوطية - هرم'], 'فيصل': ['الطوابق', 'العشرين'], 'وسط القاهرة': ['عابدين', 'الموسكي'] };
+function fill(sel, list){ sel.innerHTML = '<option value="0">أختر...</option>' + list.map((t,i)=>'<option value="'+(i+1)+'">'+t+'</option>').join(''); }
+// like an ASP.NET UpdatePanel: the dependent list is emptied, then filled after a server round trip
+function later(fn){ window.__amanFakeBusy = true; setTimeout(()=>{ fn(); window.__amanFakeBusy = false; }, 700); }
+function loadCities(){ const g = document.getElementById('ctl00_gov').value; fill(document.getElementById('ctl00_city'), []); fill(document.getElementById('ctl00_district'), []); later(()=>fill(document.getElementById('ctl00_city'), CITIES[g]||[])); }
+function loadDistricts(){ const c = document.getElementById('ctl00_city'); const name = c.options[c.selectedIndex].text; fill(document.getElementById('ctl00_district'), []); later(()=>fill(document.getElementById('ctl00_district'), DISTRICTS[name]||[])); }
 function start(){ const v=document.getElementById('ctl00_nid').value;
   if(v.endsWith('9')){ alert('هذا العميل مرفوض سابقا'); return; }
   document.getElementById('ctl00_status').textContent='عميل جديد'; document.getElementById('s3').classList.remove('hidden'); }

@@ -243,7 +243,9 @@ async function onRunChange(run) {
   if (!item || item.state !== 'working') return;
 
   const state = run.status === 'done' ? 'uploaded' : run.status === 'resolved' ? run.resolution : run.status;
-  const message = run.status === 'error' ? run.error : run.status === 'resolved' ? run.blockMessage : run.status === 'stopped' ? run.stopReason : (run.reportError ? 'ماتسجلش في السيستم: ' + run.reportError : '');
+  const manual = (run.log || []).filter((r) => r.ok === null).map((r) => r.label.replace(/[:：\s]+$/, ''));
+  const message = run.status === 'error' ? run.error : run.status === 'resolved' ? run.blockMessage : run.status === 'stopped' ? run.stopReason
+    : [manual.length ? 'الموظف اختار بإيده: ' + manual.join('، ') : '', run.reportError ? 'ماتسجلش في السيستم: ' + run.reportError : ''].filter(Boolean).join(' — ');
   await editBatch((b) => {
     const it = b.items.find((i) => i.id === run.batchItemId);
     Object.assign(it, { state, amanRef: run.amanRef || '', message: message || '', at: new Date().toISOString() });

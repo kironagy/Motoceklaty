@@ -8,7 +8,7 @@
     { id: 101, nid: '29001011234567', name: 'محمد أحمد علي حسن', gender: 'ذكر' },
     { id: 102, nid: '29505051234569', name: 'سعيد محمود كامل فرج', gender: 'ذكر' },
     { id: 103, nid: '28503031234561', name: 'فاطمة علي حسن محمد', gender: 'أنثى', type: 'pension' },
-    { id: 104, nid: '29107071234563', name: 'كريم سامي فؤاد عبده', gender: 'ذكر' },
+    { id: 104, nid: '29107071234563', name: 'كريم سامي فؤاد عبده', gender: 'ذكر', area: '', street: 'شارع العريش', addr: 'شارع العريش من فيصل محافظة الجيزة' },
   ]);
   const TYPES = { no_income_proof: 'دخل حر', employee: 'موظف / صاحب عمل', pension: 'صاحب معاش', self_employed: 'صاحب نشاط' };
   const ME = { id: 1, name: 'شادي (تجربة)', can_teach: true, types: TYPES };
@@ -45,7 +45,9 @@
       const p = o.name.split(' ');
       return json({
         upload: { id: o.id, type: o.type || 'no_income_proof', type_label: TYPES[o.type || 'no_income_proof'] }, request_id: o.id,
-        order: { applicant_name: o.name, applicant_national_id: o.nid, applicant_phone: '01012345678', applicant_id_image: [file], applicant_id_back_image: [file] },
+        order: { applicant_name: o.name, applicant_national_id: o.nid, applicant_phone: '01012345678', applicant_id_image: [file], applicant_id_back_image: [file],
+          applicant_governorate: o.gov || 'الجيزة', applicant_area: o.area ?? 'الهرم', applicant_street: o.street ?? 'ترسا متفرع من العمده', applicant_building_number: '2',
+          applicant_address: o.addr || 'رقم العقار 2 شارع ترسا متفرع من العمده محافظة الجيزة المنطقة الهرم علامة مميزة: حلواني الروشيه الدور 2 شقة 6' },
         card: { name_1: p[0], name_2: p[1], name_3: p[2], name_4: p[3], full_name: o.name, national_id: o.nid, gender: o.gender, birthdate: '1990-01-01', name_source: 'card', errors: [] },
       });
     }

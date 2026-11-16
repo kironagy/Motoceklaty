@@ -226,7 +226,9 @@
       const fmt = document.createElement('select');
       for (const [k, l] of AMAN.DATE_FORMATS) fmt.append(new Option(l, k));
       fmt.value = cur.format || (el.type === 'date' ? 'iso' : 'dmy');
-      const extras = () => ({ ...(verify.checked ? { verify: true } : {}), format: fmt.value });
+      const smart = document.createElement('input'); smart.type = 'checkbox'; smart.checked = cur.smart !== false;
+      const isSel = el.tagName === 'SELECT';
+      const extras = () => ({ ...(verify.checked ? { verify: true } : {}), format: fmt.value, ...(isSel ? { smart: smart.checked } : {}) });
       const items = [];
       const add = (grp, label, on, fn) => items.push({ grp, label, on, fn });
 
@@ -265,9 +267,11 @@
         const vRow = div('row'); vRow.append(verify, txt('اتأكد بس ماتكتبش (لو أمان بيملاها لوحده)'));
         const fRow = div('row'); fRow.append(txt('شكل التاريخ:'), fmt);
         fRow.hidden = !(el.type === 'date' || /تاريخ|ميلاد/.test(title) || AMAN.isDateKey(cur.key));
-        extra.append(constRow, vRow, fRow);
+        const sRow = div('row'); sRow.append(smart, txt('اختيار ذكي: لو مش لاقي نفس الكلمة، يدوّر عليها في الخانة دي وبعدين في العنوان التفصيلي'));
+        sRow.hidden = !isSel;
+        extra.append(constRow, sRow, vRow, fRow);
         const resave = () => { if (step && ['field', 'card'].includes(cur.type)) saveStep(el, { ...cur, ...extras(), ...(verify.checked ? {} : { verify: undefined }) }); };
-        verify.onchange = resave; fmt.onchange = resave;
+        verify.onchange = resave; fmt.onchange = resave; smart.onchange = resave;
       }
       pop.append(search, list, extra);
       setTimeout(() => search.focus(), 0);
@@ -433,6 +437,73 @@
   function shown(el) { return el.tagName === 'SELECT' ? (el.options[el.selectedIndex]?.text ?? '') : el.value; }
   const same = (el, v) => norm(shown(el)) === norm(v) || (el.tagName === 'SELECT' && norm(el.value) === norm(v));
 
+  // ---- dropdowns: pick the option that the address text names ----
+  // Aman splits the address into dependent lists (governorate -> city/area -> district), while
+  // motobot keeps free text. An option matches when its main part appears as whole words in the text
+  // ("ترسا" in "شارع ترسا متفرع من العمده"); "ال" and words like محافظة / مدينة / حي are ignored.
+  const STOP = new Set(['محافظه', 'مدينه', 'مركز', 'قسم', 'حي', 'منطقه', 'شارع', 'ش', 'قريه', 'عزبه', 'رقم', 'عقار']);
+  const stripAl = (w) => (w.length > 3 && w.startsWith('ال') ? w.slice(2) : w);
+  const words = (t) => norm(t).replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean).map(stripAl);
+  const meaningful = (t) => words(t).filter((w) => !STOP.has(w));
+  function hasSeq(hay, needle) {
+    if (!needle.length) return false;
+    outer: for (let i = 0; i + needle.length <= hay.length; i++) {
+      for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+      return true;
+    }
+    return false;
+  }
+  const isPlaceholder = (o) => !o.value || o.value === '0' || o.value === '-1' || /^(اختر|اختار|select|--|\.\.\.)/i.test(norm(o.text));
+  /** @returns {{option?: HTMLOptionElement, tie?: string[]}} */
+  function optionFromText(el, text) {
+    const hay = words(text);
+    if (!hay.length) return {};
+    let best = [], bestScore = 0;
+    for (const o of el.options) {
+      if (isPlaceholder(o)) continue;
+      const parts = o.text.split(/\s*[-–\/،,()]\s*/).filter((p) => p.trim());
+      const main = meaningful(parts[0] || '');
+      if (!main.length || !hasSeq(hay, main)) continue;
+      let score = main.join('').length * 2;
+      for (const p of parts.slice(1)) { const pw = meaningful(p); if (pw.length && hasSeq(hay, pw)) score += pw.join('').length; }
+      if (score > bestScore) { best = [o]; bestScore = score; } else if (score === bestScore) best.push(o);
+    }
+    const distinct = [...new Map(best.map((o) => [norm(o.text), o])).values()];
+    return distinct.length === 1 ? { option: distinct[0] } : distinct.length > 1 ? { tie: distinct.map((o) => o.text) } : {};
+  }
+  const exactOption = (el, v) => [...el.options].find((o) => !isPlaceholder(o) && (o.value === String(v) || norm(o.text) === norm(v)));
+  const loaded = (el) => [...el.options].filter((o) => !isPlaceholder(o)).length > 0;
+
+  // The page hook marks ASP.NET async postbacks; dependent lists reload during them.
+  async function settle() {
+    await sleep(350);
+    await waitFor(() => document.documentElement.dataset.amanBusy !== '1', 15000);
+    await sleep(250);
+  }
+
+  /** Picks a dropdown option for a field/card source: exact value, then the value's words, then the full address. */
+  async function chooseSmart(el, s, run) {
+    const v = s.type === 'card' ? run.card?.[s.key] : run.order?.[s.key];
+    const texts = [];
+    if (!empty(v)) texts.push(['الخانة', String(v)]);
+    const isWork = /^work_|^free_work/.test(s.key || '');
+    const addr = isWork
+      ? [run.order?.work_address, run.order?.free_work_address, run.order?.work_area, run.order?.work_street, run.order?.work_governorate]
+      : [run.order?.applicant_address, run.order?.applicant_area, run.order?.applicant_street, run.order?.applicant_branch_street, run.order?.applicant_governorate, run.order?.applicant_landmark, run.card?.address];
+    const full = addr.filter((x) => !empty(x)).join(' ');
+    if (full) texts.push(['العنوان', full]);
+
+    await waitFor(() => loaded(el), 10000);
+    if (!empty(v)) { const o = exactOption(el, v); if (o) return { option: o, how: 'نفس الكلمة' }; }
+    let tie = null;
+    for (const [where, t] of texts) {
+      const r = optionFromText(el, t);
+      if (r.option) return { option: r.option, how: 'من ' + where };
+      if (r.tie && !tie) tie = r.tie;
+    }
+    return { tie, wanted: empty(v) ? full : String(v) };
+  }
+
   // Writes without events, so progress is saved before the portal reacts (ASP.NET postbacks reload the page).
   async function setRaw(el, v) {
     if (el.tagName === 'SELECT') {
@@ -555,6 +626,24 @@
       return;
     }
 
+    if (el.tagName === 'SELECT' && ['field', 'card'].includes(s.type) && s.smart !== false && !s.verify) {
+      const pick = await chooseSmart(el, s, run);
+      if (!pick.option) {
+        // Not sure which one: the employee picks it during the review instead of a wrong guess.
+        mark(el, '#f59e0b');
+        return advance({ ...row, expected: pick.wanted || '—', actual: pick.tie ? 'أكتر من اختيار: ' + pick.tie.slice(0, 3).join(' / ') : 'مش لاقيها في القايمة', ok: null });
+      }
+      el.value = pick.option.value;
+      const sv = sourceValue(s, run);
+      row.expected = (empty(sv) ? 'فاضي في السيستم' : sv) + ' (' + pick.how + ')';
+      row.actual = pick.option.text;
+      mark(el, '#16a34a');
+      await advance(row);
+      fire(el);
+      await settle();
+      return;
+    }
+
     const v = sourceValue(s, run);
     if (s.type !== 'const' && empty(v)) return fail((s.type === 'card' ? 'البطاقة مافيهاش: ' : 'الطلب مافيهوش: ') + srcName(s), row);
     row.expected = String(v);
@@ -573,6 +662,7 @@
     if (!row.ok) return fail('"' + what + '" اتكتب فيها "' + row.actual + '" بدل "' + row.expected + '"', row);
     await advance(row);
     fire(el);
+    if (el.tagName === 'SELECT') await settle();
   }
 
   async function runLoop() {
