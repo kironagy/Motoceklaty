@@ -168,4 +168,28 @@ class InventoryWorkflowTest extends TestCase
         $this->assertSame(2, $this->stock->warehouses()->count());
         $this->assertSame(2, $this->stock->modelQuery()->count());
     }
+
+    public function test_an_admin_moves_a_machine_to_another_showroom_and_it_is_logged(): void
+    {
+        $other = Warehouse::create(['name' => 'Showroom B']);
+        $admin = Staff::create(['name' => 'Test Admin', 'email' => 'inventory-admin@example.test', 'password' => 'test-password', 'is_admin' => true]);
+        $this->actingAs($admin, 'filament');
+        $this->assertTrue(\App\Filament\Resources\InventoryResource::canViewAny());
+
+        Livewire::test(ListInventories::class)->callAction('transfer', [
+            'machine_id' => $this->machine->id, 'from_warehouse_id' => $this->warehouse->id,
+            'inventory_item_id' => $this->piece->id, 'to_warehouse_id' => $other->id, 'note' => 'نقل',
+        ])->assertHasNoActionErrors();
+
+        $this->assertSame($other->id, (int) $this->piece->fresh()->inventory->warehouse_id);
+        $this->assertDatabaseHas('inventory_transfers', ['inventory_item_id' => $this->piece->id, 'from_warehouse_id' => $this->warehouse->id, 'to_warehouse_id' => $other->id, 'staff_id' => $admin->id]);
+        $this->expectException(ValidationException::class);
+        $this->stock->transfer(['machine_id' => $this->machine->id, 'inventory_item_id' => $this->piece->id, 'to_warehouse_id' => $other->id]);
+    }
+
+    public function test_a_plain_employee_cannot_move_machines(): void
+    {
+        $this->actingAs(Staff::create(['name' => 'Plain', 'email' => 'inventory-plain@example.test', 'password' => 'test-password']), 'filament');
+        $this->assertFalse(InventoryStock::canTransfer());
+    }
 }

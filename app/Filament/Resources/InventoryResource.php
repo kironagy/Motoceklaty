@@ -29,7 +29,8 @@ class InventoryResource extends Resource
     protected static ?int $navigationSort = 1;
     protected static ?string $navigationIcon = 'heroicon-o-archive-box';
 
-    public static function canViewAny(): bool { return Access::allows(static::class, 'view'); }
+    // Every admin sees the page to move machines between showrooms (owner 2026-11-16).
+    public static function canViewAny(): bool { return Access::allows(static::class, 'view') || InventoryStock::canTransfer(); }
     public static function canEdit(Model $record): bool { return Access::allows(static::class, 'update'); }
     public static function canCreate(): bool { return false; }
     public static function canDelete(Model $record): bool { return false; }
@@ -108,7 +109,7 @@ class InventoryResource extends Resource
 
     public static function canSell(): bool
     {
-        return static::canViewAny();
+        return Access::allows(static::class, 'view');
     }
 
     public static function getPages(): array

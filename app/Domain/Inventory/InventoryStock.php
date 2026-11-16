@@ -2,7 +2,7 @@
 
 namespace App\Domain\Inventory;
 
-use App\Models\{Inventory, InventoryItem, Letter, Machine, Product, Warehouse};
+use App\Models\{Inventory, InventoryItem, InventoryTransfer, Letter, Machine, Product, Warehouse};
 use App\Filament\Resources\InventoryResource;
 use App\Support\Access;
 use Illuminate\Database\Eloquent\Builder;
@@ -117,6 +117,50 @@ class InventoryStock
             $item->sold_at = now();
             $item->save();
             return $letter;
+        });
+    }
+
+    /** Owner 2026-11-16: every admin (and the owner) may move a machine between any two showrooms. */
+    public static function canTransfer(): bool
+    {
+        $staff = Access::user();
+
+        return (bool) $staff?->is_hitler || (bool) $staff?->isAdmin();
+    }
+
+    /** Unsold machines of this model, in every showroom (transfer is not limited to one's own showroom). */
+    public function transferable(int $machineId): Builder
+    {
+        return InventoryItem::query()->whereNull('sold_at')
+            ->whereHas('inventory.product', fn (Builder $q) => $q->where('machine_id', $machineId));
+    }
+
+    public function transfer(array $data): InventoryTransfer
+    {
+        abort_unless(static::canTransfer(), 403);
+        \Illuminate\Support\Facades\Validator::make($data, [
+            'machine_id' => ['required', 'integer'], 'inventory_item_id' => ['required', 'integer'],
+            'to_warehouse_id' => ['required', 'integer', 'exists:warehouses,id'], 'note' => ['nullable', 'string', 'max:1000'],
+        ])->validate();
+
+        return DB::transaction(function () use ($data) {
+            $item = $this->transferable((int) $data['machine_id'])->with('inventory.product')->lockForUpdate()->find($data['inventory_item_id']);
+            if (! $item) {
+                throw ValidationException::withMessages(['inventory_item_id' => 'المكنة اتباعت أو مش موجودة. اختار مكنة تانية.']);
+            }
+            $from = (int) $item->inventory->warehouse_id;
+            $to = (int) $data['to_warehouse_id'];
+            if ($from === $to) {
+                throw ValidationException::withMessages(['to_warehouse_id' => 'المكنة موجودة في المعرض ده أصلًا. اختار معرض تاني.']);
+            }
+            $target = Inventory::firstOrCreate(['product_id' => $item->inventory->product_id, 'warehouse_id' => $to]);
+            $item->update(['inventory_id' => $target->id]);
+
+            return InventoryTransfer::create([
+                'inventory_item_id' => $item->id, 'machine_id' => (int) $data['machine_id'],
+                'from_warehouse_id' => $from, 'to_warehouse_id' => $to,
+                'staff_id' => Access::user()?->id, 'note' => $data['note'] ?? null,
+            ]);
         });
     }
 
