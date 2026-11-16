@@ -111,13 +111,24 @@ $('teachStart').onclick = async () => {
 };
 $('teachCancel').onclick = async () => { if (confirm('تلغي التعليم من غير ما تحفظ؟')) await store.set({ teach: null }); };
 $('pickExpect').onclick = () => editTeach((t) => { t.pick = 'expect'; });
+$('pickGate').onclick = () => editTeach((t) => { t.pick = 'gate'; });
+// Picked the wrong type? Change it while teaching; the recorded steps stay.
+$('teachType').onchange = async () => {
+  const { teach } = await store.get('teach');
+  if (!teach?.active) return;
+  const type = $('teachType').value;
+  const { recipes = {} } = await store.get('recipes');
+  if (recipes[type] && !confirm('فيه وصفة محفوظة لـ "' + AMAN.typeLabel(type) + '". لما تحفظ هتستبدلها. تكمل؟')) { $('teachType').value = teach.type; return; }
+  await editTeach((t) => { t.type = type; });
+};
 $('pickCapture').onclick = () => editTeach((t) => { t.pick = 'capture'; });
 
 $('teachSave').onclick = async () => {
   const { teach, recipes = {} } = await store.get(['teach', 'recipes']);
   if (!teach) return;
   if (!teach.steps.some((s) => s.kind === 'fill')) return alert('مافيش ولا خانة متحددة.');
-  if (!teach.steps.some((s) => s.gate)) return alert('لازم خطوة واحدة على الأقل تبقى "وقفة موافقة" (زرار الحفظ).');
+  if (!teach.steps.some((s) => s.gate)) return alert('لازم تعلّم زرار الحفظ: دوس "علّم زرار الحفظ (من غير ما يتداس)" وبعدين دوس على زرار الحفظ في صفحة أمان.');
+  if (!confirm('هتتحفظ وصفة "' + AMAN.typeLabel(teach.type) + '". متأكد إن ده النوع الصح؟')) return;
   // The run opens the first page itself, so the recipe must start with one.
   if (teach.steps[0].kind !== 'page') {
     const page = teach.steps.find((s) => s.page)?.page || '';
@@ -393,8 +404,8 @@ async function render() {
 
   const on = !!teach?.active;
   $('teachStart').hidden = on; $('teachSave').hidden = !on; $('teachCancel').hidden = !on; $('pickRow').hidden = !on;
-  $('teachType').disabled = on;
-  if (on) $('teachType').value = teach.type;
+  $('teachType').disabled = false;
+  if (on && document.activeElement !== $('teachType')) $('teachType').value = teach.type;
   $('teachStart').disabled = !signedIn || !me.can_teach;
   $('teachHint').textContent = signedIn && !me.can_teach ? 'التعليم للمسؤول بس.'
     : on ? (teach.pick ? 'دوس على الكلام في صفحة أمان…' : 'ارفع الطلب عادي. دوس على الدايرة اللي جوه كل خانة واختار هي تبع إيه. ارفع البطاقة ودوس تأكيد زي ما بتعمل. لما رسالة الحالة تظهر (عميل جديد) دوس "علّم رسالة الحالة". وبعد الحفظ دوس "علّم رقم الطلب".')

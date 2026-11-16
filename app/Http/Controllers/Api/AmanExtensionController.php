@@ -61,12 +61,15 @@ class AmanExtensionController extends Controller
         abort_unless($this->staff($request)->isAdmin(), 403, 'التعليم للمسؤول بس');
         abort_unless(array_key_exists($type, config('aman_extension.types')), 422, 'نوع طلب مش معروف');
 
-        $data = $request->validate(['steps' => 'required|array|min:1', 'steps.*.kind' => 'required|string']);
-        abort_unless(collect($data['steps'])->contains(fn ($s) => ! empty($s['gate'])), 422, 'الوصفة لازم فيها وقفة موافقة');
+        $request->validate(['steps' => 'required|array|min:1', 'steps.*.kind' => 'required|string']);
+        // Not validate()'s result: with a "steps.*.kind" rule it keeps only `kind` of each step and
+        // drops target, source and gate, so every recipe was refused (2026-11-16).
+        $steps = array_values($request->input('steps'));
+        abort_unless(collect($steps)->contains(fn ($s) => ! empty($s['gate'])), 422, 'الوصفة لازم فيها وقفة موافقة');
 
         $recipe = AmanRecipe::firstOrNew(['type' => $type]);
         $recipe->version = ($recipe->exists ? $recipe->version : 0) + 1;
-        $recipe->steps = $data['steps'];
+        $recipe->steps = $steps;
         $recipe->updated_by = $this->staff($request)->id;
         $recipe->save();
 

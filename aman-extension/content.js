@@ -314,7 +314,9 @@
     const done = els.filter((e) => stepFor(e)).length;
     if (teach.pick) {
       banner.className = 'banner pick';
-      banner.textContent = teach.pick === 'expect' ? 'دوس على رسالة الحالة اللي بتظهر لما الطلب سليم (مثلًا: عميل جديد)' : 'دوس على رقم الطلب اللي أمان بيديهولك بعد الحفظ';
+      banner.textContent = teach.pick === 'expect' ? 'دوس على رسالة الحالة اللي بتظهر لما الطلب سليم (مثلًا: عميل جديد)'
+        : teach.pick === 'gate' ? 'دوس على زرار الحفظ: هيتسجل "وقفة موافقة" ومش هيتداس فعلًا'
+          : 'دوس على رقم الطلب اللي أمان بيديهولك بعد الحفظ';
     } else {
       banner.className = 'banner';
       banner.textContent = `تعليم: ${AMAN.typeLabel(teach.type)} — اتحدد ${done} من ${els.length} خانة في الصفحة دي. دوس على الدواير.`;
@@ -382,6 +384,12 @@
       const el = e.target;
       if (hoverEl) hoverEl.style.outline = '';
       const kind = teach.pick;
+      if (kind === 'gate') {
+        const b = el.closest?.(CLICK_SEL) || el;
+        const target = locate(b, 'click');
+        update('teach', (t) => { if (!t) return; t.steps.push({ kind: 'click', key: locKey(pagePath(), target), page: pagePath(), target, gate: true }); t.pick = null; return t; });
+        return;
+      }
       update('teach', (t) => {
         if (!t) return;
         t.steps.push({ kind, page: pagePath(), target: locate(el, 'text'), sample: textOf(el) });
@@ -414,7 +422,13 @@
     const key = locKey(page, target);
     if (key === lastClick.key && Date.now() - lastClick.at < 800) return;
     lastClick = { key, at: Date.now() };
-    const gate = /حفظ|save|submit|ارسال|إرسال|اعتماد|تقديم الطلب/i.test(target.text);
+    // norm() drops the tatweel: Aman's button reads "حفـظ". "تأكيد" is not here: "تأكيد صورة البطاقة" is a normal step.
+    const gate = /حفظ|save|submit|ارسال|اعتماد|تقديم الطلب/i.test(norm(target.text));
+    if (gate) {
+      if (confirm('ده زرار الحفظ عند أمان ("' + target.text + '").\n\nموافق = يتسجل "وقفة موافقة" من غير ما يتداس (الطلب مش هيتبعت لأمان).\nإلغاء = يتداس فعلًا ويتبعت الطلب.')) {
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      }
+    }
     update('teach', (t) => { if (!t) return; t.steps.push({ kind: 'click', key, page, target, gate }); return t; });
   }, true);
 

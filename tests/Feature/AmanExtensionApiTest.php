@@ -78,6 +78,11 @@ class AmanExtensionApiTest extends TestCase
         $this->api()->putJson('/api/aman/recipes/no_income_proof', ['steps' => [['kind' => 'fill']]])->assertStatus(422);
         $this->api()->putJson('/api/aman/recipes/no_income_proof', ['steps' => [['kind' => 'click', 'gate' => true]]])->assertOk()->assertJson(['version' => 1]);
         $this->api()->putJson('/api/aman/recipes/no_income_proof', ['steps' => [['kind' => 'click', 'gate' => true]]])->assertJson(['version' => 2]);
+
+        // The whole step is kept, not only `kind`.
+        $step = ['kind' => 'fill', 'target' => ['id' => 'ctl00_n1'], 'source' => ['type' => 'card', 'key' => 'name_1']];
+        $this->api()->putJson('/api/aman/recipes/no_income_proof', ['steps' => [$step, ['kind' => 'click', 'gate' => true]]])->assertOk();
+        $this->assertSame($step, AmanRecipe::where('type', 'no_income_proof')->first()->steps[0]);
     }
 
     public function test_next_claims_once_reads_card_and_skips_finished(): void
