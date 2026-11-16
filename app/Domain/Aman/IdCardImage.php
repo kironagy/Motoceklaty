@@ -29,7 +29,8 @@ class IdCardImage
     public function cleaned(string $path): string
     {
         $disk = Storage::disk('public');
-        $out = 'aman-clean/'.md5($path.'|'.$disk->lastModified($path)).'.jpg';
+        // "v2": photos cleaned by the first crop rule (which could cut off the number) are made again.
+        $out = 'aman-clean/v2-'.md5($path.'|'.$disk->lastModified($path)).'.jpg';
         if ($disk->exists($out)) {
             return $out;
         }
@@ -48,15 +49,21 @@ class IdCardImage
 
     private function words(string $path, string $bytes, string $mime): array
     {
-        return Cache::remember('aman-words:'.md5($bytes), now()->addDays(30), function () use ($bytes, $mime, $path) {
-            try {
-                return $this->ocr->extractText(base64_encode($bytes), $mime)->words;
-            } catch (OcrException $e) {
-                Log::warning('Aman card image OCR failed', ['path' => $path, 'error' => $e->getMessage()]);
+        $key = 'aman-words:'.md5($bytes);
+        if (Cache::has($key)) {
+            return Cache::get($key);
+        }
+        try {
+            $words = $this->ocr->extractText(base64_encode($bytes), $mime)->words;
+        } catch (OcrException $e) {
+            // Not cached: a failed read is tried again on the next upload.
+            Log::warning('Aman card image OCR failed', ['path' => $path, 'error' => $e->getMessage()]);
 
-                return [];
-            }
-        });
+            return [];
+        }
+        Cache::put($key, $words, now()->addDays(30));
+
+        return $words;
     }
 
     /**
@@ -150,16 +157,22 @@ class IdCardImage
         // Front: the text runs from the header to the number, about 4/5 of the card's height.
         // Back: the text is the top half (the barcode is below) and about 3/5 of the width.
         $textH = max(1, $y2 - $y1);
-        $cardW = (int) round($front ? $textH * 1.25 * self::CARD_RATIO : max($textH * 1.25 * self::CARD_RATIO, ($x2 - $x1) / 0.58));
+        // Front: the Arabic text covers about the right half of the card (the photo is on the left).
+        $cardW = (int) round(max($textH * 1.25 * self::CARD_RATIO, ($x2 - $x1) / ($front ? 0.45 : 0.58)));
         $cardH = (int) round($cardW / self::CARD_RATIO);
 
         $right = $x2 + (int) round($cardW * 0.04);
-        $top = $y1 - (int) round(($cardH - $textH) / 2);
+        // Front: the header is near the card's top edge. Vision can miss a faint number row, so the
+        // card is anchored at the header and grows downwards rather than centred on the text.
+        $top = $front ? $y1 - (int) round($cardH * 0.08) : $y1 - (int) round(($cardH - $textH) / 2);
 
-        $left = max(0, $right - $cardW);
-        $right = min($w, max($right, $left + $cardW));
-        $top = max(0, $top);
-        $bottom = min($h, $top + $cardH);
+        // A margin around the estimate: a little background is fine for Aman, a cut-off number is not.
+        $padX = (int) round($cardW * 0.08);
+        $padY = (int) round($cardH * 0.08);
+        $left = max(0, $right - $cardW - $padX);
+        $right = min($w, $right + $padX);
+        $bottom = min($h, $top + $cardH + ($front ? (int) round($cardH * 0.25) : $padY));
+        $top = max(0, $top - $padY);
 
         return ['x' => $left, 'y' => $top, 'width' => max(1, $right - $left), 'height' => max(1, $bottom - $top)];
     }
