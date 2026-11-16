@@ -15,7 +15,12 @@
     const el = document.querySelector('[data-aman-click="' + e.data.token + '"]');
     if (!el) return;
     el.removeAttribute('data-aman-click');
-    el.click(); // a click from the page's own world may follow a javascript: href
+    const href = el.tagName === 'A' ? (el.getAttribute('href') || '') : '';
+    if (/^javascript:/i.test(href)) {
+      // Run Aman's "javascript:WebForm_DoPostBackWithOptions(...)" directly in the page.
+      try { new Function(decodeURIComponent(href.slice(11)))(); return; } catch (err) { /* fall back to a click */ }
+    }
+    el.click();
   });
 
   // Marks ASP.NET async postbacks (UpdatePanel) so the extension waits while dependent lists reload.

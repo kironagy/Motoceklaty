@@ -591,7 +591,11 @@
     }
 
     if (step.kind === 'click') {
-      if (step.gate) {
+      // Old recipes marked "تأكيد صورة البطاقة" as a save stop by mistake. A click that is not a
+      // save button, with a real save stop later in the recipe, is pressed like any other click.
+      const saveLike = /حفظ|save|submit|ارسال|اعتماد|تقديم الطلب/i.test(norm(step.target?.text || textOf(el)));
+      const laterGate = (run.recipe?.steps || []).slice(run.i + 1).some((x) => x.gate);
+      if (step.gate && (saveLike || !laterGate)) {
         mark(el, '#dc2626');
         el.scrollIntoView({ block: 'center' });
         return update('run', (r) => ({ ...r, status: 'review', gateText: what }));
