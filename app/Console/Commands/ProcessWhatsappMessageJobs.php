@@ -285,7 +285,9 @@ class ProcessWhatsappMessageJobs extends Command
             ->min('created_at');
 
         if ($pending === null
-            || now()->diffInSeconds(\Illuminate\Support\Carbon::parse($pending)) >= (int) config('agent.turns.transcript_wait_seconds')) {
+            // Carbon 3 diffs are signed: now()->diffInSeconds(past) is negative, so the wait never ran
+            // out and a stuck transcription held the reply forever (2026-11-16).
+            || \Illuminate\Support\Carbon::parse($pending)->diffInSeconds(now()) >= (int) config('agent.turns.transcript_wait_seconds')) {
             return false;
         }
 

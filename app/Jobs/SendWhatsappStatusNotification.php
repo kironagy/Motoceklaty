@@ -19,6 +19,13 @@ class SendWhatsappStatusNotification implements ShouldQueue
     // worker's queue for minutes. A re-run joins the same send (dedupe key + worker client_id).
     public int $timeout = 600;
 
+    // retryUntil() lifts the --tries cap, so a send that kept failing was retried at once, again and
+    // again, until its attempts hit the jobs table's 255 limit and blocked the whole default queue
+    // (SMS, voice transcription) from 2026-11-14 21:07. Wait between tries; give up after 5 errors.
+    public int $backoff = 60;
+
+    public int $maxExceptions = 5;
+
     public function retryUntil(): \DateTimeInterface
     {
         return now()->addHours(2);
