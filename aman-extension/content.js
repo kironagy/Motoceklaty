@@ -518,6 +518,40 @@
     return { tie, wanted: empty(v) ? full : String(v) };
   }
 
+  /**
+   * Tries each option of list p (recipe step index) until list c contains `wanted`. Progress is kept in
+   * run.hunt, so a page reload after a choice carries on where it was.
+   * @returns {Promise<{c:number,value:string,text:string,parentText:string}|null|'rejected'>}
+   */
+  async function hunt(at, p, c, wanted, run) {
+    const steps = run.recipe.steps;
+    let h = run.hunt?.at === at ? run.hunt : { at, p, c, wanted, tried: [] };
+    const match = (C) => exactOption(C, wanted) || optionFromText(C, wanted).option;
+    for (let n = 0; n < 200; n++) {
+      await settle();
+      if (amanRejection()) return 'rejected';
+      const P = await waitFor(() => findEl(steps[h.p].target), 8000);
+      if (!P) break;
+      if (h.tried.includes(P.value)) {
+        const C = await waitFor(() => { const x = findEl(steps[h.c].target); return x && loaded(x) ? x : null; }, 6000);
+        const o = C && match(C);
+        if (o) return { c: h.c, value: o.value, text: o.text, parentText: P.selectedOptions[0]?.text || '' };
+      }
+      const next = [...P.options].find((o) => !isPlaceholder(o) && !h.tried.includes(o.value));
+      if (!next) break;
+      if (h.orig === undefined) h = { ...h, orig: P.value };
+      h = { ...h, tried: [...h.tried, next.value] };
+      await update('run', (r) => ({ ...r, hunt: h })); // saved first: the choice may reload the page
+      P.value = next.value;
+      fire(P);
+    }
+    // Not found anywhere: the parent goes back to what it was.
+    const P = findEl(steps[h.p].target);
+    if (P && h.orig !== undefined && P.value !== h.orig) { P.value = h.orig; fire(P); await settle(); }
+    await update('run', (r) => ({ ...r, hunt: null }));
+    return null;
+  }
+
   // Writes without events, so progress is saved before the portal reacts (ASP.NET postbacks reload the page).
   async function setRaw(el, v) {
     if (el.tagName === 'SELECT') {
@@ -670,8 +704,48 @@
       return;
     }
 
+    // A value found by the search below for this list (e.g. district "العياط" under city "المنيب").
+    const found = run.override?.[run.i];
+    if (el.tagName === 'SELECT' && found) {
+      await waitFor(() => loaded(el), 10000);
+      const o = [...el.options].find((x) => x.value === found.value);
+      if (o) {
+        el.value = o.value;
+        mark(el, '#16a34a');
+        await advance({ ...row, expected: found.wanted + ' (لقيتها بالتدوير)', actual: o.text, ok: true });
+        fire(el);
+        await settle();
+        return;
+      }
+    }
+
     if (el.tagName === 'SELECT' && ['field', 'card'].includes(s.type) && s.smart !== false && !s.verify) {
       const pick = await chooseSmart(el, s, run);
+      if (!pick.option && pick.wanted) {
+        // Not in this list: Aman may file it one level lower or under another parent. Try every option
+        // of the parent list until the value shows up in its child list (owner 2026-11-16).
+        const steps = run.recipe.steps;
+        const isSel = (k) => steps[k]?.kind === 'fill' && steps[k]?.target?.tag === 'select';
+        const r = isSel(run.i + 1) ? await hunt(run.i, run.i, run.i + 1, pick.wanted, run)
+          : isSel(run.i - 1) ? await hunt(run.i, run.i - 1, run.i, pick.wanted, run) : null;
+        if (r === 'rejected') return rejectedBefore(amanRejection());
+        if (r && r.c === run.i) {
+          // The parent was changed; this list now has the value.
+          const cur = findEl(step.target) || el;
+          cur.value = r.value;
+          mark(cur, '#16a34a');
+          await advance({ ...row, expected: pick.wanted, actual: r.text + ' (بعد ما غيّرت "' + r.parentText + '")', ok: true }, { hunt: null });
+          fire(cur);
+          await settle();
+          return;
+        }
+        if (r) {
+          // This list (the parent) is set; the value goes in the next list.
+          mark(findEl(step.target) || el, '#16a34a');
+          return advance({ ...row, expected: pick.wanted, actual: r.parentText + ' (فيها "' + r.text + '" في القايمة اللي بعدها)', ok: true },
+            { hunt: null, override: { ...(run.override || {}), [r.c]: { value: r.value, wanted: pick.wanted } } });
+        }
+      }
       if (!pick.option) {
         // Not sure which one: the employee picks it during the review instead of a wrong guess.
         mark(el, '#f59e0b');
