@@ -32,7 +32,11 @@ class AmanIdCardReaderTest extends TestCase
 
         $this->assertSame('30501132101152', $out['national_id']);
         $this->assertSame('مصطفى النجار', $out['name_4']);
-        $this->assertSame('٣٣ش صبحى النجار-جمال عبدالناصر - الوراق - الجيزه', $out['address']);
+        $this->assertSame('33ش صبحى النجار-جمال عبدالناصر - الوراق - الجيزه', $out['address']);
+
+        // Request 5273: Vision gives Persian digits, which Aman drops.
+        $out = $this->reader()->parseFront("طارق\nجمهورية مصر العربية\nبطاقة تحقيق الشخصية\nمحمد حبيب عبدالعظيم\n۱۸ الامام الشافعيش الشهداء-المنيب\nالجيزة - الجيزه\n۳۰۵۰۸۲۸۰۱۰۳۷۹۷");
+        $this->assertSame('18 الامام الشافعيش الشهداء-المنيب - الجيزة - الجيزه', $out['address']);
     }
 
     public function test_back_gives_gender_religion_marital_and_dates(): void

@@ -23,7 +23,8 @@ class SmartTransport
 
     private const PROOF = '/رخص[ةه]\s*(ال)?قياد[ةه]|رخص[ةه]\s*تسيير|driving\s*licen|الدخل\s*الصافي|صافي\s*الدخل|الأرباح|الارباح|ارباحك|رحلات|رحلة|الأميال|uber|didi|indrive|careem|bolt|talabat/iu';
 
-    public const ZERO_ADDRESS = 'رقم العقار 0 شارع 0 متفرع من 0 محافظة 0 المنطقة 0 علامة مميزة: 0 الدور 0 شقة 0';
+    // Owner 2026-11-16: the whole work address is just "0" for smart transport.
+    public const ZERO_ADDRESS = '0';
 
     public function __construct(private OcrProvider $ocr)
     {

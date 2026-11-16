@@ -32,8 +32,8 @@ class IdCardReader
     {
         $front = $request->applicant_id_image;
         $back = $request->applicant_id_back_image;
-        // "v2": cards read before the full-address fix are read again.
-        $key = 'aman-card:v2:'.$request->id.':'.md5($front.'|'.$back.'|'.$request->applicant_name.'|'.$request->applicant_national_id);
+        // "v3": cards read before the address fixes are read again.
+        $key = 'aman-card:v3:'.$request->id.':'.md5($front.'|'.$back.'|'.$request->applicant_name.'|'.$request->applicant_national_id);
 
         return Cache::remember($key, now()->addDays(30), fn () => $this->readFresh($request, $front, $back));
     }
@@ -151,7 +151,11 @@ class IdCardReader
             // The whole card address, both lines as printed (owner 2026-11-16: an exact copy).
             $address = array_slice($words, 2);
             if ($address) {
-                $out['address'] = implode(' - ', $address);
+                // Western digits: Aman drops Vision's Persian "۱۸" (request 5273 lost its building number).
+                $out['address'] = strtr(implode(' - ', $address), [
+                    '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+                    '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4', '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+                ]);
             }
         }
 
