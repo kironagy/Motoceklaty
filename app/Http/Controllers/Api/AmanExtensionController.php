@@ -218,6 +218,17 @@ class AmanExtensionController extends Controller
         return Storage::disk('public')->response($path);
     }
 
+    /** The extension still has this request open (stopped for the employee): keep the claim. */
+    public function alive(Request $request, AmanUpload $upload)
+    {
+        abort_unless($upload->staff_id === $this->staff($request)->id, 403);
+        if ($upload->status === 'claimed') {
+            $upload->update(['claimed_at' => now()]);
+        }
+
+        return ['ok' => true];
+    }
+
     public function result(Request $request, AmanUpload $upload)
     {
         abort_unless($upload->staff_id === $this->staff($request)->id, 403);

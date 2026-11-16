@@ -548,7 +548,9 @@
   }
 
   const advance = (row, extra = {}) => update('run', (r) => ({ ...r, i: r.i + 1, ...(row ? { log: [...r.log, row] } : {}), ...extra }));
-  const fail = (msg, row) => update('run', (r) => ({ ...r, status: 'error', error: msg, ...(row ? { log: [...r.log, { ...row, ok: false }] } : {}) }));
+  // A problem stops the run on this step (not the batch's next request) until the employee fixes it
+  // on Aman's page and presses "كمّل" (the step is tried again) or "عملتها بإيدي" (the next step).
+  const fail = (msg, row) => update('run', (r) => ({ ...r, status: 'blocked', problem: true, blockMessage: msg, problemRow: row ? { ...row, ok: false } : null }));
   const block = (msg) => update('run', (r) => ({ ...r, status: 'blocked', blockMessage: msg }));
 
   // The customer was refused before: recorded as such (motobot marks the request rejected) and the

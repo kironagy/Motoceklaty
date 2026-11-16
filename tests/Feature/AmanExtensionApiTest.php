@@ -104,6 +104,11 @@ class AmanExtensionApiTest extends TestCase
 
         $this->get($res->json('order.applicant_id_image.0'), ['Authorization' => 'Bearer '.$this->token])->assertOk();
 
+        // A run stopped for the employee keeps its claim.
+        AmanUpload::first()->update(['claimed_at' => now()->subHour()]);
+        $this->api()->postJson('/api/aman/uploads/'.$res->json('upload.id').'/alive')->assertOk();
+        $this->assertTrue(AmanUpload::first()->claimed_at->gt(now()->subMinute()));
+
         $this->api()->postJson('/api/aman/uploads/'.$res->json('upload.id').'/result', ['status' => 'rejected_before', 'message' => 'مرفوض'])->assertOk();
         $this->assertSame('rejected_before', AmanUpload::first()->status);
         // Refused before at Aman: the request is rejected in motobot too (owner 2026-11-16).

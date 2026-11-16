@@ -21,4 +21,5 @@ Route::prefix('aman')->middleware(\App\Http\Middleware\AmanExtensionToken::class
     Route::post('/requests/{id}/claim', [\App\Http\Controllers\Api\AmanExtensionController::class, 'claim'])->whereNumber('id');
     Route::get('/uploads/{upload}/files/{field}', [\App\Http\Controllers\Api\AmanExtensionController::class, 'file'])->name('aman.file');
     Route::post('/uploads/{upload}/result', [\App\Http\Controllers\Api\AmanExtensionController::class, 'result']);
+    Route::post('/uploads/{upload}/alive', [\App\Http\Controllers\Api\AmanExtensionController::class, 'alive']);
 });

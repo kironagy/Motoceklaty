@@ -53,6 +53,7 @@
   .st.waiting { background:#f1f5f9; color:var(--muted); } .st.working { background:var(--brand); color:#fff; }
   .st.uploaded { background:#dcfce7; color:var(--good); } .st.rejected_before { background:#fee2e2; color:var(--bad); }
   .st.error, .st.stopped, .st.skipped { background:#fef3c7; color:#92400e; }
+  .why { color:var(--muted); font-size:11px; margin-top:2px; max-width:220px; }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -90,9 +91,10 @@
           <button id="reject" class="bad">مش موافق</button>
         </div>
         <div class="row" id="blockRow" hidden style="margin-top:8px">
+          <button id="goOn" class="ok">حليتها — كمّل</button>
+          <button id="skipStep">عملتها بإيدي — الخطوة اللي بعدها</button>
           <button id="asRejected" class="bad">ده رفض سابق — سجّله</button>
-          <button id="asError">مشكلة تانية</button>
-          <button id="goOn">كمّل عادي</button>
+          <button id="asError">سيبه كمشكلة وخش على اللي بعده</button>
         </div>
       </section>
 

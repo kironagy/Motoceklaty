@@ -203,6 +203,19 @@ function waitTabLoaded(tabId) {
   });
 }
 
+// Opens the recipe's first page and starts filling.
+async function launch(base) {
+  const tab = await activeTab();
+  const start = base.recipe.steps.find((s) => s.kind === 'page');
+  await store.set({ run: { ...base, tabId: tab?.id ?? base.tabId, status: 'starting', problem: false, beforeStart: false, blockMessage: '' } });
+  if (start?.url && tab) {
+    await chrome.tabs.update(tab.id, { url: start.url });
+    await waitTabLoaded(tab.id);
+  }
+  const { run: cur } = await store.get('run');
+  if (cur?.uploadId === base.uploadId && cur.status === 'starting') await store.set({ run: { ...cur, status: 'running' } });
+}
+
 let processing = false;
 async function processNext() {
   if (processing) return;
@@ -231,16 +244,12 @@ async function processNext() {
         order: data.order, card: data.card || {}, recipe, tabId: tab?.id, i: 0, log: [], dialogs: [], startedAt: new Date().toISOString() };
       const cardErrors = data.card?.errors || [];
       if (!recipe) { await store.set({ run: { ...base, status: 'error', error: 'مافيش وصفة لنوع "' + data.upload.type_label + '"' } }); return; }
-      if (cardErrors.some((e) => e.includes('غير اللي'))) { await store.set({ run: { ...base, status: 'error', error: cardErrors.join(' — ') } }); return; }
-
-      const start = recipe.steps.find((s) => s.kind === 'page');
-      await store.set({ run: { ...base, status: 'starting' } });
-      if (start?.url && tab) {
-        await chrome.tabs.update(tab.id, { url: start.url });
-        await waitTabLoaded(tab.id);
+      if (cardErrors.some((e) => e.includes('غير اللي'))) {
+        // Stops here until the employee checks it: go on anyway, or leave it as a problem.
+        await store.set({ run: { ...base, status: 'blocked', problem: true, beforeStart: true, blockMessage: cardErrors.join(' — ') } });
+        return;
       }
-      const { run: cur } = await store.get('run');
-      if (cur?.uploadId === base.uploadId && cur.status === 'starting') await store.set({ run: { ...cur, status: 'running' } });
+      await launch(base);
       return; // the run's end (onRunChange) calls processNext again
     }
   } finally {
@@ -277,6 +286,14 @@ async function onRunChange(run) {
   setTimeout(processNext, 1500);
 }
 
+// While a request is open (stopped for the employee, or waiting for approval) its claim is kept
+// alive, so nobody else picks it up after claim_minutes.
+setInterval(async () => {
+  const { run } = await store.get('run');
+  if (!run?.uploadId || FINAL.includes(run.status)) return;
+  try { await AMAN.api('POST', '/uploads/' + run.uploadId + '/alive'); } catch { /* next time */ }
+}, 4 * 60 * 1000);
+
 // ---------- results sheet (CSV that Excel opens, Arabic kept) ----------
 function downloadSheet(batch, prefix = 'aman-uploads') {
   if (!batch) return;
@@ -300,14 +317,29 @@ $('approve').onclick = async () => { const { run } = await store.get('run'); if 
 $('reject').onclick = () => setRun({ status: 'stopped', stopReason: 'الموظف مش موافق على البيانات' });
 $('asRejected').onclick = () => setRun({ status: 'resolved', resolution: 'rejected_before' });
 $('asError').onclick = () => setRun({ status: 'resolved', resolution: 'error' });
-$('goOn').onclick = async () => { const { run } = await store.get('run'); setRun({ status: 'running', dialogs: [], i: run.recipe.steps[run.i]?.kind === 'expect' ? run.i + 1 : run.i }); };
+// After a stop: the employee fixed it on Aman's page. A failed step is tried again; a message
+// that did not match (expect) is passed.
+$('goOn').onclick = async () => {
+  const { run } = await store.get('run');
+  if (run?.status !== 'blocked') return;
+  if (run.beforeStart) return launch(run);
+  const pass = !run.problem && run.recipe.steps[run.i]?.kind === 'expect';
+  setRun({ status: 'running', dialogs: [], problem: false, problemRow: null, i: pass ? run.i + 1 : run.i });
+};
+// The employee did the failed step by hand: go on from the next one.
+$('skipStep').onclick = async () => {
+  const { run } = await store.get('run');
+  if (run?.status !== 'blocked' || !run.problem) return;
+  const row = { ...(run.problemRow || { label: 'خطوة ' + (run.i + 1), source: '', expected: '' }), actual: 'الموظف عملها بإيده', ok: null };
+  setRun({ status: 'running', dialogs: [], problem: false, problemRow: null, i: run.i + 1, log: [...run.log, row] });
+};
 
 const STATUS = {
   starting: () => 'بيفتح صفحة أمان…',
   running: (r) => `بيملا… خطوة ${r.i + 1} من ${r.recipe.steps.length}`,
   review: (r) => `وقف عند "${r.gateText}". راجع الجدول وصفحة أمان، وبعدين وافق.`,
   approved: () => 'بيحفظ…',
-  blocked: (r) => r.blockMessage,
+  blocked: (r) => r.problem ? 'وقف: ' + r.blockMessage + (r.beforeStart ? '. راجعها، ولو تمام دوس كمّل.' : '. صلّحها في صفحة أمان وبعدين دوس كمّل.') : r.blockMessage,
   error: (r) => 'وقف: ' + r.error,
   done: (r) => 'اترفع' + (r.amanRef ? ' — رقم الطلب عند أمان: ' + r.amanRef : '') + '.',
   stopped: (r) => 'اتوقف: ' + (r.stopReason || ''),
@@ -333,11 +365,14 @@ function renderRun(run) {
     + (FINAL.includes(run.status) && run.uploadId ? (run.reported ? ' (اتسجل في موتوجيت)' : run.reportError ? ' (ماتسجلش: ' + run.reportError + ')' : ' (بيسجل…)') : '');
   $('gateRow').hidden = run.status !== 'review';
   $('blockRow').hidden = run.status !== 'blocked';
+  $('skipStep').hidden = !run.problem || !!run.beforeStart;
+  $('asRejected').hidden = !!run.problem;
 
-  $('review').hidden = !run.log.length;
+  const rows = [...run.log, ...(run.problemRow ? [run.problemRow] : [])]; // the step it stopped on, in red
+  $('review').hidden = !rows.length;
   const tb = $('review').querySelector('tbody');
   tb.innerHTML = '';
-  for (const r of run.log) {
+  for (const r of rows) {
     const tr = document.createElement('tr');
     for (const v of [r.label, r.source, r.expected, r.actual, r.ok === null ? '✍' : r.ok ? '✔' : '✘']) {
       const td = document.createElement('td'); td.textContent = v ?? ''; tr.append(td);
@@ -379,7 +414,10 @@ function renderBatch(batch, run) {
     const cells = [i.id, i.name, i.type_label, null, i.amanRef || ''];
     cells.forEach((v, n) => {
       const td = document.createElement('td');
-      if (n === 3) { const s = document.createElement('span'); s.className = 'st ' + i.state; s.textContent = STATE_LABEL[i.state] || i.state; s.title = i.message || ''; td.append(s); }
+      if (n === 3) {
+        const s = document.createElement('span'); s.className = 'st ' + i.state; s.textContent = STATE_LABEL[i.state] || i.state; s.title = i.message || ''; td.append(s);
+        if (i.message && i.state !== 'uploaded') { const m = document.createElement('div'); m.className = 'why'; m.textContent = i.message; td.append(m); }
+      }
       else td.textContent = v ?? '';
       tr.append(td);
     });
