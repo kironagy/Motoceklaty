@@ -146,7 +146,7 @@ $('teachSave').onclick = async () => {
 // ---------- batch: pull every new request, then upload them one by one ----------
 const ACTIVE_RUN = ['starting', 'running', 'review', 'approved', 'blocked'];
 const FINAL = ['done', 'stopped', 'resolved', 'error'];
-const STATE_LABEL = { released: 'اتوقف', waiting: 'مستني', working: 'شغال عليه', uploaded: 'اترفع', rejected_before: 'مرفوض قبل كده', error: 'مشكلة', stopped: 'اتوقف', skipped: 'اتساب' };
+const STATE_LABEL = { released: 'اتوقف', waiting: 'مستني', working: 'شغال عليه', uploaded: 'اترفع', rejected_before: 'مرفوض قبل كده', error: 'مشكلة', stopped: 'اتوقف', skipped: 'اتساب', held: 'اتوقف في موتوجيت', canceled: 'اتلغى في موتوجيت' };
 
 async function getBatch() { return (await store.get('batch')).batch || null; }
 async function editBatch(fn) {
@@ -315,7 +315,7 @@ async function setRun(patch) {
 }
 $('approve').onclick = async () => { const { run } = await store.get('run'); if (run?.status === 'review') setRun({ status: 'approved' }); };
 $('reject').onclick = () => setRun({ status: 'stopped', stopReason: 'الموظف مش موافق على البيانات' });
-$('asRejected').onclick = () => setRun({ status: 'resolved', resolution: 'rejected_before' });
+$('asRejected').onclick = () => setRun({ status: 'resolved', resolution: 'rejected_before', blockMessage: 'الموظف سجّله: العميل عنده طلب مرفوض قبل كده عند أمان' });
 $('asError').onclick = () => setRun({ status: 'resolved', resolution: 'error' });
 // After a stop: the employee fixed it on Aman's page. A failed step is tried again; a message
 // that did not match (expect) is passed.
@@ -335,6 +335,38 @@ $('refSave').onclick = async () => {
   $('refInput').value = '';
   setRun({ status: 'done', amanRef: ref, amanMessage: 'الموظف كتب رقم طلب أمان: ' + ref, problem: false, noRef: false, finishedAt: new Date().toISOString() });
 };
+// Owner 2026-11-16: the page hung or skipped fields - start the request over from Aman's first page.
+$('refill').onclick = async () => {
+  const { run } = await store.get('run');
+  if (!run || FINAL.includes(run.status)) return;
+  closeDecide();
+  await launch({ ...run, i: 0, log: [], dialogs: [], hunt: null, override: {}, problemRow: null, noRef: false, approvedAt: null, amanRef: '', amanMessage: '' });
+};
+// Owner 2026-11-16: the employee stops a request that cannot go on (paused in motobot with a reason),
+// or cancels one that is no good (status, reason and Aman's reply go to motobot).
+function closeDecide() { $('holdBox').hidden = true; $('cancelBox').hidden = true; }
+$('hold').onclick = () => { $('cancelBox').hidden = true; $('holdBox').hidden = false; $('holdReason').focus(); };
+$('cancel').onclick = () => { $('holdBox').hidden = true; $('cancelBox').hidden = false; $('cancelReason').focus(); };
+$('holdClose').onclick = closeDecide;
+$('cancelClose').onclick = closeDecide;
+$('holdSave').onclick = async () => {
+  const reason = $('holdReason').value.trim();
+  if (!reason) { $('holdReason').focus(); return; }
+  const { run } = await store.get('run');
+  if (!run || FINAL.includes(run.status)) return;
+  $('holdReason').value = ''; closeDecide();
+  setRun({ status: 'resolved', resolution: 'held', blockMessage: reason, problem: false });
+};
+$('cancelSave').onclick = async () => {
+  const reason = $('cancelReason').value.trim();
+  if (!reason) { $('cancelReason').focus(); return; }
+  const { run } = await store.get('run');
+  if (!run || FINAL.includes(run.status)) return;
+  const reply = $('cancelReply').value.trim();
+  $('cancelReason').value = ''; $('cancelReply').value = ''; closeDecide();
+  setRun({ status: 'resolved', resolution: 'canceled', blockMessage: reason, cancelStatus: $('cancelStatus').value, cancelReply: reply, problem: false });
+};
+
 // The employee did the failed step by hand: go on from the next one.
 $('skipStep').onclick = async () => {
   const { run } = await store.get('run');
@@ -352,7 +384,7 @@ const STATUS = {
   error: (r) => 'وقف: ' + r.error,
   done: (r) => 'اترفع' + (r.amanRef ? ' — رقم الطلب عند أمان: ' + r.amanRef : '') + '.',
   stopped: (r) => 'اتوقف: ' + (r.stopReason || ''),
-  resolved: (r) => r.resolution === 'rejected_before' ? 'اتسجل إنه مرفوض قبل كده: ' + r.blockMessage : 'اتسجل كمشكلة: ' + r.blockMessage,
+  resolved: (r) => ({ rejected_before: 'اتسجل إنه مرفوض: ', held: 'الطلب بقى متوقف في موتوجيت: ', canceled: 'الطلب اتلغى في موتوجيت: ' }[r.resolution] || 'اتسجل كمشكلة: ') + r.blockMessage,
 };
 
 function renderRun(run) {
@@ -378,6 +410,8 @@ function renderRun(run) {
   $('refRow').hidden = !(run.status === 'blocked' && run.noRef);
   renderFiles(run);
   $('asRejected').hidden = !!run.problem;
+  $('tools').hidden = FINAL.includes(run.status) || !run.uploadId;
+  if (FINAL.includes(run.status)) closeDecide();
 
   const rows = [...run.log, ...(run.problemRow ? [run.problemRow] : [])]; // the step it stopped on, in red
   $('review').hidden = !rows.length;
@@ -386,13 +420,31 @@ function renderRun(run) {
   for (const r of rows) {
     const tr = document.createElement('tr');
     for (const v of [r.label, r.source, r.expected, r.actual, r.ok === null ? '✍' : r.ok ? '✔' : '✘']) {
-      const td = document.createElement('td'); td.textContent = v ?? ''; tr.append(td);
+      const td = document.createElement('td'); td.textContent = short(v); td.title = v ?? ''; tr.append(td);
     }
     if (r.ok === false) tr.style.color = 'var(--bad)';
     if (r.ok === null) tr.style.color = 'var(--brand-dark)';
     tb.append(tr);
   }
 }
+
+// A long file name ("v2-ea5651...jpg") shows as "صورة …a48f.jpg" so the table keeps its width.
+function short(v) {
+  const t = String(v ?? '');
+  return t.replace(/\S{26,}/g, (w) => /\.(jpe?g|png|webp|gif|pdf)$/i.test(w) ? 'ملف …' + w.slice(-10) : w.slice(0, 12) + '…' + w.slice(-8));
+}
+
+// Tap a photo: it opens over the panel, full width; tap it again for double size.
+const CARD_KEYS = ['applicant_id_image', 'applicant_id_back_image', 'guarantor_id_image', 'guarantor_id_back_image'];
+function zoom(url) {
+  const img = $('zoom').querySelector('img');
+  img.src = url; img.classList.remove('x2');
+  $('zoom').hidden = false; $('zoom').scrollTo(0, 0);
+}
+$('zoom').onclick = (e) => {
+  const img = $('zoom').querySelector('img');
+  if (e.target === img) img.classList.toggle('x2'); else $('zoom').hidden = true;
+};
 
 // ---------- the photos this request uploads: seen and downloadable from the panel ----------
 let filesFor = '';
@@ -411,13 +463,14 @@ async function renderFiles(run) {
     for (const url of (Array.isArray(urls) ? urls : urls ? [urls] : [])) {
       if (seen.has(url)) continue;
       seen.add(url);
-      items.push({ url, label: (st.target?.label || AMAN.fieldLabel(src.key)).replace(/[:：\s]+$/, '') });
+      items.push({ url, big: CARD_KEYS.includes(src.key), label: (st.target?.label || AMAN.fieldLabel(src.key)).replace(/[:：\s]+$/, '') });
     }
   }
   $('files').hidden = !items.length;
+  items.sort((a, b) => b.big - a.big);
   for (const it of items) {
-    const card = document.createElement('div'); card.className = 'thumb';
-    const pic = document.createElement('a'); pic.className = 'pic'; pic.target = '_blank';
+    const card = document.createElement('div'); card.className = 'thumb' + (it.big ? ' big' : '');
+    const pic = document.createElement('a'); pic.className = 'pic'; pic.href = '#';
     const cap = document.createElement('div'); cap.className = 'cap'; cap.textContent = it.label + ' …';
     const dl = document.createElement('a'); dl.className = 'dl'; dl.textContent = 'تحميل'; dl.hidden = true;
     card.append(pic, cap, dl); box.append(card);
@@ -428,7 +481,8 @@ async function renderFiles(run) {
       for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
       const u = URL.createObjectURL(new Blob([buf], { type: r.mime })); fileUrls.push(u);
       const ext = (r.mime.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
-      pic.href = u; pic.style.backgroundImage = `url("${u}")`;
+      pic.onclick = (e) => { e.preventDefault(); zoom(u); };
+      if (it.big) { const img = document.createElement('img'); img.src = u; img.alt = it.label; pic.append(img); } else pic.style.backgroundImage = `url("${u}")`;
       cap.textContent = it.label;
       dl.href = u; dl.download = `طلب-${run.requestId}-${it.label.replace(/[\\/:*?"<>|]/g, '')}.${ext}`; dl.hidden = false;
     });

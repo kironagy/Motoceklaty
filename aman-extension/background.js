@@ -70,6 +70,7 @@ chrome.storage.onChanged.addListener(async (ch, area) => {
   try {
     await api('POST', '/uploads/' + run.uploadId + '/result', {
       status, message, aman_ref: run.amanRef || null, recipe_version: run.recipe?.version || null,
+      request_status: run.resolution === 'canceled' ? (run.cancelStatus || 'canceled') : null, reply: run.cancelReply || null,
       log: (run.log || []).map((r) => ({ label: r.label, source: r.source, expected: r.expected, actual: r.actual, ok: r.ok })),
     });
     const { run: cur } = await AMAN.store.get('run');

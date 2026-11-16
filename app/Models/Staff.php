@@ -99,12 +99,19 @@ public function installmentSystems()
     }
 
     /**
-     * A company (Aman) employee whose view is cut to his companies' requests. Owner 2026-11-13:
-     * a super admin (or the owner) who is also an Aman employee sees everything a super admin sees.
+     * A company (Aman) employee whose view is cut to his companies' requests (the requests table,
+     * the dashboard charts, the uploader). Owner 2026-11-16: this holds for a super admin too, so the
+     * Cairo employee sees only the companies on his account; only the owner is never cut.
      */
     public function isAmaanRestricted(): bool
     {
-        return (bool) ($this->is_company_employee ?? false) && ! $this->isSuperAdmin() && ! (bool) ($this->is_hitler ?? false);
+        return (bool) ($this->is_company_employee ?? false) && ! (bool) ($this->is_hitler ?? false);
+    }
+
+    /** @return list<string> names of the installment companies on this employee's account */
+    public function companyNames(): array
+    {
+        return $this->installmentSystems()->pluck('installment_systems.name')->all();
     }
 
     public function isAdmin(): bool

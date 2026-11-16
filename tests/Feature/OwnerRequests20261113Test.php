@@ -80,22 +80,20 @@ class OwnerRequests20261113Test extends TestCase
         $this->assertStringContainsString('الشارع', CustomerEditLog::noteLine($changed, 'رابط الفورم'));
     }
 
-    public function test_aman_employee_who_is_super_admin_sees_everything(): void
+    /** Owner 2026-11-16 (replaces 2026-11-13): an Aman employee sees only his companies, even as super admin. */
+    public function test_aman_employee_sees_only_his_companies_even_as_super_admin(): void
     {
-        $system = InstallmentSystem::create(['name' => 'امان']);
-        $outside = $this->request(['request_type' => 'bot', 'installment_type' => 'شركة تانية']);
+        $cairo = InstallmentSystem::create(['name' => 'امان - القاهرة']);
+        InstallmentSystem::create(['name' => 'امان - الجيزة']);
+        $mine = $this->request(['request_type' => 'bot', 'installment_type' => 'امان - القاهرة']);
+        $giza = $this->request(['request_type' => 'bot', 'installment_type' => 'امان - الجيزة']);
         $super = $this->staff(['is_company_employee' => true, 'is_admin' => true, 'is_super_admin' => true]);
-        $super->installmentSystems()->attach($system->id);
+        $super->installmentSystems()->attach($cairo->id);
         $this->actingAs($super, 'filament');
 
-        $this->assertContains($outside->id, DeliveryResource::getEloquentQuery()->pluck('id')->all());
-        $this->assertTrue(RequestsByTypeOverview::canView());
-
-        // admin + Aman without super admin stays limited to his companies
-        $admin = $this->staff(['is_company_employee' => true, 'is_admin' => true]);
-        $admin->installmentSystems()->attach($system->id);
-        $this->actingAs($admin, 'filament');
-        $this->assertNotContains($outside->id, DeliveryResource::getEloquentQuery()->pluck('id')->all());
-        $this->assertFalse(RequestsByTypeOverview::canView());
+        $ids = DeliveryResource::getEloquentQuery()->pluck('id')->all();
+        $this->assertContains($mine->id, $ids);
+        $this->assertNotContains($giza->id, $ids);
+        $this->assertTrue(RequestsByTypeOverview::canView(), 'the charts show, counting his companies only');
     }
 }

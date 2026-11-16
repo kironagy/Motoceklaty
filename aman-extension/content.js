@@ -593,7 +593,8 @@
   // The customer was refused before: recorded as such (motobot marks the request rejected) and the
   // batch goes on to the next request without waiting for the employee.
   const rejectedBefore = (msg) => update('run', (r) => ({ ...r, status: 'resolved', resolution: 'rejected_before', blockMessage: 'أمان قال: ' + msg }));
-  const REJECTED = /مرفوض/;
+  // Aman refuses the customer: "مرفوض", or "عفواً هذا العميل لدية طلب كارت لذلك لا يمكن تقديم له طلب تقسيط".
+  const REJECTED = /مرفوض|لا\s*يمكن\s*تقديم/;
 
   // Aman's red text on the page, e.g. "عفواً العميل لدية طلب مرفوض من قبل لذلك لا يمكن عمل طلب تقسيط له الأن".
   function amanRejection() {

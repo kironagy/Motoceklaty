@@ -86,10 +86,35 @@
   .thumb .cap { font-size:11px; padding:4px 6px 0; line-height:1.35; min-height:30px; }
   .thumb a.dl { margin:4px 6px 6px; text-align:center; font-size:11px; font-weight:700; color:var(--brand-dark); background:var(--brand-soft); border-radius:8px; padding:3px 0; text-decoration:none; }
   .thumb.err .cap { color:var(--bad); }
+  /* Nothing spills out of the narrow side panel: long file names / numbers wrap. */
+  html, body { overflow-x:hidden; }
+  td, .kv span, .status, .why, .warn, .now, .cap { overflow-wrap:anywhere; word-break:break-word; }
+  th { overflow-wrap:normal; word-break:normal; }
+  #review { table-layout:fixed; }
+  #review th:nth-child(1), #review td:nth-child(1) { width:28%; }
+  #review th:nth-child(5), #review td:nth-child(5) { width:22px; text-align:center; }
+  /* ID card photos: full width, every word on them readable; tap to zoom. */
+  .thumb.big { grid-column:1 / -1; }
+  .thumb.big a.pic { aspect-ratio:auto; background:#f4efe9; }
+  .thumb.big a.pic img { display:block; width:100%; height:auto; }
+  .thumb.big .cap { min-height:0; font-weight:700; }
+  #zoom { position:fixed; inset:0; z-index:50; background:rgba(22,19,15,.88); overflow:auto; padding:12px; cursor:zoom-out; }
+  #zoom img { display:block; width:100%; height:auto; border-radius:10px; background:#fff; }
+  #zoom img.x2 { width:200%; max-width:none; }
+  #zoom .hint { color:#fff; font-size:12px; text-align:center; margin-bottom:8px; }
+  /* Employee's own decision on a stuck request: hold it, or cancel it. */
+  .tools { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; padding-top:10px; border-top:1px dashed var(--line); }
+  .tools button { flex:1 1 auto; font-size:12.5px; padding:6px 10px; }
+  button.warnb { border-color:#fcd34d; background:var(--warn-soft); color:var(--warn); }
+  .decide { margin-top:8px; padding:10px; border:1px solid var(--line); border-radius:12px; background:#fffaf6; }
+  .decide label.f:first-child { margin-top:0; }
+  .decide textarea, .decide select { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; font:inherit; resize:vertical; }
+  .st.held { background:#e2e8f0; color:#334155; } .st.canceled { background:#f3e8ff; color:#7e22ce; }
   [hidden] { display:none !important; }
 </style>
 </head>
 <body>
+  <div id="zoom" hidden><div class="hint">دوس على الصورة تكبّر أكتر — دوس برّه الصورة تقفل</div><img alt=""></div>
   <header>
     <img src="../icons/logo.png" alt="موتوجيت">
     <div class="ttl"><b>رافع طلبات أمان</b><span>موتوجيت</span></div>
@@ -139,6 +164,29 @@
         <div class="row" id="refRow" hidden style="margin-top:8px">
           <input id="refInput" type="text" class="ltr" placeholder="رقم طلب أمان" style="flex:1;min-width:0">
           <button id="refSave" class="ok">اترفع — سجّل الرقم</button>
+        </div>
+        <div class="tools" id="tools" hidden>
+          <button id="refill" title="يرجع لأول صفحة ويملا كل البيانات من الأول">↻ إعادة ملء الطلب</button>
+          <button id="hold" class="warnb">⏸ خليه متوقف</button>
+          <button id="cancel" class="bad">✕ إلغاء الطلب</button>
+        </div>
+        <div class="decide" id="holdBox" hidden>
+          <label class="f" for="holdReason">سبب التوقف (بيتكتب في موتوجيت والطلب يبقى متوقف)</label>
+          <textarea id="holdReason" rows="3" placeholder="مثلًا: صورة البطاقة مش واضحة"></textarea>
+          <div class="row" style="margin-top:8px"><button id="holdSave" class="ok">وقّفه وسجّل السبب</button><button id="holdClose">رجوع</button></div>
+        </div>
+        <div class="decide" id="cancelBox" hidden>
+          <label class="f" for="cancelStatus">حالة الطلب في موتوجيت</label>
+          <select id="cancelStatus">
+            <option value="canceled">الطلب ملغي</option>
+            <option value="rejected">رفض</option>
+            <option value="paused">متوقف</option>
+          </select>
+          <label class="f" for="cancelReason">السبب</label>
+          <textarea id="cancelReason" rows="3" placeholder="ليه الطلب مش نافع"></textarea>
+          <label class="f" for="cancelReply">الرد (رد أمان أو اللي يتقال للعميل)</label>
+          <textarea id="cancelReply" rows="2"></textarea>
+          <div class="row" style="margin-top:8px"><button id="cancelSave" class="bad">ألغِ الطلب وسجّل</button><button id="cancelClose">رجوع</button></div>
         </div>
       </section>
 

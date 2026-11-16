@@ -176,7 +176,7 @@ public static function isHitler(): bool
             return $query->whereRaw('1 = 0');
         }
 
-        // موظف شركة (أمان): شركاته بس، والسوبر أدمن يشوف كل حاجة (owner 2026-11-13) - InstallmentRequest::scopeVisibleTo
+        // موظف شركة (أمان): شركاته بس حتى لو سوبر أدمن (owner 2026-11-16) - InstallmentRequest::scopeVisibleTo
         return $query->visibleTo($user);
     }
     // ✅ تحميل بيانات النظام تلقائيًا عند التعديل
@@ -713,6 +713,13 @@ $requestType = request()->query('request_type') === 'fake' && ! static::isCompan
                                         ->toArray();
                                 }
 
+                                // A company employee without one fixed company picks among his own.
+                                if ($user && $user->isAmaanRestricted()) {
+                                    return $user->installmentSystems()
+                                        ->pluck('installment_systems.name', 'installment_systems.name')
+                                        ->toArray();
+                                }
+
                                 return InstallmentSystem::query()
                                     ->pluck('name', 'name')
                                     ->toArray();
@@ -734,7 +741,7 @@ $requestType = request()->query('request_type') === 'fake' && ! static::isCompan
                             })
                             ->disabled(
                                 fn() =>
-                                (bool) Auth::user()?->isAmaanRestricted()
+                                (bool) Auth::user()?->isAmaanRestricted() && (bool) Auth::user()?->installment_system_id
                             )
                             ->dehydrated(true)
                             ->searchable()

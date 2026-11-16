@@ -33,7 +33,7 @@ class IdCardReader
         $front = $request->applicant_id_image;
         $back = $request->applicant_id_back_image;
         // "v3": cards read before the address fixes are read again.
-        $key = 'aman-card:v3:'.$request->id.':'.md5($front.'|'.$back.'|'.$request->applicant_name.'|'.$request->applicant_national_id);
+        $key = 'aman-card:v4:'.$request->id.':'.md5($front.'|'.$back.'|'.$request->applicant_name.'|'.$request->applicant_national_id);
 
         return Cache::remember($key, now()->addDays(30), fn () => $this->readFresh($request, $front, $back));
     }
@@ -46,12 +46,21 @@ class IdCardReader
 
         $out = $this->parseFront($frontText) + $this->parseBack($backText);
 
-        // The number: the card's, unless OCR missed it; it must match the system's when both exist.
+        // The number: the card's (owner 2026-11-16: Aman gets the card's number, not the system's).
+        // The system's stands in only when OCR missed it or read an invalid number.
         $systemNid = $this->nid->normalizeDigits((string) $request->applicant_national_id);
-        if (empty($out['national_id']) && strlen($systemNid) === 14) {
+        $cardValid = ! empty($out['national_id']) && $this->nid->parse($out['national_id'])['valid'];
+        if (! $cardValid && strlen($systemNid) === 14 && $this->nid->parse($systemNid)['valid']) {
+            if (! empty($out['national_id'])) {
+                $errors[] = 'الرقم القومي في البطاقة اتقرا غلط ('.$out['national_id'].')، اتكتب اللي في السيستم ('.$systemNid.')';
+            }
             $out['national_id'] = $systemNid;
-        } elseif (! empty($out['national_id']) && strlen($systemNid) === 14 && $out['national_id'] !== $systemNid) {
-            $errors[] = 'الرقم القومي في البطاقة ('.$out['national_id'].') غير اللي في السيستم ('.$systemNid.')';
+            $out['national_id_source'] = 'system';
+        } elseif ($cardValid) {
+            $out['national_id_source'] = 'card';
+            if (strlen($systemNid) === 14 && $out['national_id'] !== $systemNid) {
+                $errors[] = 'الرقم القومي في البطاقة ('.$out['national_id'].') مختلف عن السيستم ('.$systemNid.')، اتكتب اللي في البطاقة';
+            }
         }
 
         $parsed = $this->nid->parse($out['national_id'] ?? null);

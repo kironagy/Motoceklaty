@@ -198,8 +198,13 @@ HTML
         );
 
         // One grouped query (was 11 full-table counts), shared by every viewer for a minute.
-        $counts = Cache::remember('dashboard:requests-status-counts', now()->addMinute(), function (): array {
-            $byStatus = InstallmentRequest::query()
+        // A company (Aman) employee counts only his companies' requests (owner 2026-11-16).
+        $user = Auth::user();
+        $companies = $user?->isAmaanRestricted() ? ($user->companyNames() ?: ['__none__']) : null;
+        $scope = fn ($q) => $q->when($companies !== null, fn ($q) => $q->whereIn('installment_type', $companies)->where('request_type', '!=', 'fake'));
+
+        $counts = Cache::remember('dashboard:requests-status-counts'.($companies !== null ? ':'.md5(implode('|', $companies)) : ''), now()->addMinute(), function () use ($scope): array {
+            $byStatus = InstallmentRequest::query()->tap($scope)
                 ->selectRaw('status, COUNT(*) as aggregate')
                 ->groupBy('status')
                 ->pluck('aggregate', 'status')
@@ -207,7 +212,7 @@ HTML
                 ->all();
 
             $byStatus['__total'] = array_sum($byStatus);
-            $byStatus['__new_normal'] = InstallmentRequest::query()
+            $byStatus['__new_normal'] = InstallmentRequest::query()->tap($scope)
                 ->where('status', 'new')
                 ->where('request_type', 'normal')
                 ->count();

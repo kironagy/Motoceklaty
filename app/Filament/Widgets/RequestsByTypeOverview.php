@@ -44,7 +44,7 @@ class RequestsByTypeOverview extends Widget
     {
         $user = auth()->user();
 
-        if (! $user || $user->isAmaanRestricted()) {
+        if (! $user) {
             return false;
         }
 
@@ -54,9 +54,13 @@ class RequestsByTypeOverview extends Widget
     /** [type => [status => count]] for requests filed between the two dates. */
     protected function counts(CarbonInterface $from, CarbonInterface $to): array
     {
-        $key = 'dashboard:requests-by-type:'.$from->format('YmdHi').'-'.$to->format('YmdHi');
+        // A company (Aman) employee counts only his companies' requests (owner 2026-11-16).
+        $user = auth()->user();
+        $companies = $user?->isAmaanRestricted() ? ($user->companyNames() ?: ['__none__']) : null;
+        $key = 'dashboard:requests-by-type:'.$from->format('YmdHi').'-'.$to->format('YmdHi').($companies !== null ? ':'.md5(implode('|', $companies)) : '');
 
         return Cache::remember($key, now()->addMinute(), fn (): array => InstallmentRequest::query()
+            ->when($companies !== null, fn ($q) => $q->whereIn('installment_type', $companies))
             ->whereIn('request_type', array_keys(self::TYPES))
             ->whereBetween('created_at', [$from, $to])
             ->selectRaw('request_type, status, COUNT(*) as total')

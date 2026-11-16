@@ -187,11 +187,17 @@ class AmanExtensionController extends Controller
         $order['proof_merged_1'] = $proofs >= 1 ? [route('aman.file', ['upload' => $upload->id, 'field' => 'proof_merged_1'])] : $order['applicant_id_image'];
         $order['proof_merged_2'] = $proofs >= 2 ? [route('aman.file', ['upload' => $upload->id, 'field' => 'proof_merged_2'])] : $order['applicant_id_back_image'];
 
+        // Aman gets the national ID read off the card (owner 2026-11-16), not the one typed in motobot.
+        $card = $cards->read($req);
+        if (! empty($card['national_id'])) {
+            $order['applicant_national_id'] = $card['national_id'];
+        }
+
         return [
             'upload' => ['id' => $upload->id, 'type' => $upload->type, 'type_label' => config('aman_extension.types')[$upload->type] ?? $upload->type],
             'request_id' => $req->id,
             'order' => $order,
-            'card' => $cards->read($req),
+            'card' => $card,
         ];
     }
 
@@ -254,7 +260,10 @@ class AmanExtensionController extends Controller
         abort_unless($upload->staff_id === $this->staff($request)->id, 403);
 
         $data = $request->validate([
-            'status' => ['required', Rule::in(['uploaded', 'rejected_before', 'error', 'released'])],
+            'status' => ['required', Rule::in(['uploaded', 'rejected_before', 'error', 'released', 'held', 'canceled'])],
+            // "إلغاء الطلب" from the extension: the status the request takes, and Aman's reply.
+            'request_status' => ['nullable', Rule::in(['rejected', 'canceled', 'paused'])],
+            'reply' => 'nullable|string|max:2000',
             'aman_ref' => 'nullable|string|max:100',
             'message' => 'nullable|string|max:2000',
             'recipe_version' => 'nullable|integer',
@@ -267,7 +276,7 @@ class AmanExtensionController extends Controller
             $data['message'] = 'اتبعت إنه اترفع من غير رقم طلب من أمان'.(filled($data['message'] ?? null) ? ' — '.$data['message'] : '');
         }
 
-        $upload->update($data + ['finished_at' => now()]);
+        $upload->update(\Illuminate\Support\Arr::only($data, ['status', 'aman_ref', 'message', 'recipe_version', 'log']) + ['finished_at' => now()]);
 
         // Like staff doing it by hand (owner 2026-11-16), and only on a request that is still new:
         // - refused before at Aman: the request is rejected;
@@ -276,8 +285,16 @@ class AmanExtensionController extends Controller
         $req = InstallmentRequest::find($upload->installment_request_id);
         if ($req && in_array($req->status, config('aman_extension.new_statuses'), true)) {
             if ($data['status'] === 'rejected_before') {
-                $req->checks_report = array_merge((array) $req->checks_report, ['aman' => 'العميل عنده طلب مرفوض قبل كده عند أمان']);
+                // Aman's own words when it gave them ("عفواً هذا العميل لدية طلب كارت ...").
+                $req->checks_report = array_merge((array) $req->checks_report, ['aman' => filled($data['message'] ?? null) ? $data['message'] : 'العميل عنده طلب مرفوض قبل كده عند أمان']);
                 $req->status = 'rejected';
+                $req->save();
+            } elseif (in_array($data['status'], ['held', 'canceled'], true)) {
+                // Owner 2026-11-16: "خليه متوقف" pauses the request with the employee's reason;
+                // "إلغاء الطلب" sets the status the employee picked, with the reason and Aman's reply.
+                $reason = trim(implode("\n", array_filter([$data['message'] ?? null, filled($data['reply'] ?? null) ? 'رد أمان: '.$data['reply'] : null])));
+                $req->checks_report = array_merge((array) $req->checks_report, ['aman' => $reason ?: 'من رافع أمان']);
+                $req->status = $data['status'] === 'held' ? 'paused' : ($data['request_status'] ?? 'canceled');
                 $req->save();
             } elseif ($data['status'] === 'uploaded' && filled($data['aman_ref'] ?? null)) {
                 $note = 'رقم طلب أمان: '.$data['aman_ref'].(filled($data['message'] ?? null) ? ' — '.$data['message'] : '');
