@@ -8,6 +8,16 @@
   window.alert = function (m) { fire('alert', m); return alert0.apply(this, arguments); };
   window.confirm = function (m) { fire('confirm', m); return confirm0.apply(this, arguments); };
 
+  // Clicks asked for by the extension run here, in the page's own world: Chrome does not let an
+  // extension follow "javascript:__doPostBack(...)" links (Aman's "تأكيد صورة البطاقة").
+  window.addEventListener('message', (e) => {
+    if (e.source !== window || !e.data?.__amanClick) return;
+    const el = document.querySelector('[data-aman-click="' + e.data.token + '"]');
+    if (!el) return;
+    el.removeAttribute('data-aman-click');
+    el.click(); // a click from the page's own world may follow a javascript: href
+  });
+
   // Marks ASP.NET async postbacks (UpdatePanel) so the extension waits while dependent lists reload.
   setInterval(() => {
     let busy = false;

@@ -564,11 +564,12 @@
     const what = stepName(step);
 
     if (step.kind === 'page') {
-      if (!(await waitFor(() => pagePath() === step.page, 20000))) return fail('مستني صفحة "' + (step.title || step.page) + '" ومافتحتش');
+      if (!(await waitFor(() => pagePath() === step.page, 45000))) return fail('مستني صفحة "' + (step.title || step.page) + '" ومافتحتش');
       return advance();
     }
 
-    const el = await waitFor(() => findEl(step.target), step.kind === 'expect' ? 15000 : 12000);
+    // Aman can be slow: wait up to 45 s for the element (the page may still be loading after a click).
+    const el = await waitFor(() => findEl(step.target), 45000);
 
     if (step.kind === 'expect') {
       const got = el ? textOf(el) : '';
@@ -597,7 +598,8 @@
       }
       await advance(); // save progress first: the click may reload the page
       const t = Date.now();
-      el.click();
+      await realClick(el);
+      await afterClick();
       return dialogAfter(t);
     }
 
@@ -699,6 +701,22 @@
   }
 
   let again = false;
+  /** Clicks through the page hook (page world) so javascript: links and ASP.NET postbacks work. */
+  async function realClick(el) {
+    const token = Math.random().toString(36).slice(2);
+    el.setAttribute('data-aman-click', token);
+    window.postMessage({ __amanClick: true, token }, '*');
+    await sleep(150);
+    if (el.isConnected && el.getAttribute('data-aman-click') === token) { el.removeAttribute('data-aman-click'); el.click(); } // no hook on this page
+  }
+
+  /** After a click: wait for Aman's postback / page load to finish before the next step. */
+  async function afterClick() {
+    await sleep(500);
+    await waitFor(() => document.readyState === 'complete' && document.documentElement.dataset.amanBusy !== '1', 60000);
+    await sleep(400);
+  }
+
   async function runLoop() {
     // A change (e.g. the employee's approval) that lands while the loop is finishing must not be lost.
     if (running) { again = true; return; }
@@ -714,7 +732,8 @@
           if (!el) { await fail('زرار الحفظ اختفى من الصفحة'); break; }
           await update('run', (r) => ({ ...r, i: r.i + 1, status: 'running', approvedAt: new Date().toISOString() }));
           const t = Date.now();
-          el.click();
+          await realClick(el);
+          await afterClick();
           if (await dialogAfter(t)) break;
           continue;
         }

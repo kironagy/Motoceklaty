@@ -6,7 +6,7 @@ table{width:100%}td{padding:6px}input[type=text],select{width:95%;padding:5px}.h
 <div class="box"><h2>طلب تقديم حد أئتماني Light Vehicles</h2>
 <table><tr><td>صورة بطاقة العميل الأمامية :</td><td><input type="file" id="ctl00_front"></td>
 <td>صورة بطاقة العميل الخلفية :</td><td><input type="file" id="ctl00_back"></td>
-<td><a href="#" id="ctl00_confirmCard" onclick="document.getElementById('s2').classList.remove('hidden');return false">تأكيد صورة البطاقة</a></td></tr></table></div>
+<td><a id="ctl00_confirmCard" href="javascript:__doPostBack('ctl00$confirmCard','')">تأكيد صورة<br>البطاقة</a></td></tr></table></div>
 <div class="box hidden" id="s2"><table><tr><td>برجاء ادخال الرقم القومي للعميل :</td><td><input type="text" id="ctl00_nid"></td>
 <td><input type="button" id="ctl00_start" value="بدأ العملية" onclick="start()"></td><td><span id="ctl00_status" style="color:green"></span></td></tr></table></div>
 <div class="box hidden" id="s3"><h3>بيانات العميل</h3><table>
@@ -23,6 +23,8 @@ table{width:100%}td{padding:6px}input[type=text],select{width:95%;padding:5px}.h
 </table><input type="button" id="ctl00_save" value="حفظ" onclick="document.getElementById('ctl00_ref').textContent='تم تقديم الحد الائتمانى بنجاح و رقم العملية : '+Math.floor(Math.random()*90000000000+10000000000)">
 <p id="ctl00_ref" style="color:green"></p></div>
 <script>
+// like ASP.NET: a slow server round trip before the next section shows
+function __doPostBack(target){ if (target === 'ctl00$confirmCard') { window.__amanFakeBusy = true; setTimeout(()=>{ document.getElementById('s2').classList.remove('hidden'); window.__amanFakeBusy = false; }, 4000); } }
 const CITIES = { 1: ['وسط القاهرة', 'مدينة نصر', 'المعادي'], 2: ['الدقي', 'الهرم', 'فيصل', '6 أكتوبر'] };
 const DISTRICTS = { 'الهرم': ['خاتم المرسلين', 'المطبعة هرم', 'ترسا', 'الكوم الاخضر - هرم', 'المريوطية - هرم'], 'فيصل': ['الطوابق', 'العشرين'], 'وسط القاهرة': ['عابدين', 'الموسكي'] };
 function fill(sel, list){ sel.innerHTML = '<option value="0">أختر...</option>' + list.map((t,i)=>'<option value="'+(i+1)+'">'+t+'</option>').join(''); }
