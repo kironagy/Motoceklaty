@@ -66,6 +66,39 @@ function stepLine(s) {
   return ['fill', 'خانة', (t.label || t.placeholder || t.name || 'بدون اسم') + ' ← ' + AMAN.describeSource(s.source)];
 }
 
+/** Source picker for a fill step in the steps list (edit any step by hand, owner 2026-11-17). */
+function sourceSelect(s, i) {
+  const sel = document.createElement('select'); sel.className = 'src';
+  const src = s.source || {};
+  const cur = src.type === 'const' ? 'const' : src.type === 'ask' ? 'ask' : src.type + ':' + src.key;
+  const group = (label, items) => { const g = document.createElement('optgroup'); g.label = label; for (const [v, l] of items) g.append(new Option(l, v)); sel.append(g); };
+  if (src.type === 'file') {
+    group('ملف', AMAN.FILE_FIELDS.map(([k, l]) => ['file:' + k, l]));
+  } else {
+    group('أخرى', [['ask', 'الموظف يكتبها'], ['const', 'ثابت' + (src.type === 'const' ? ': ' + src.value : '…')]]);
+    for (const g of AMAN.FIELD_GROUPS) group(g.label, g.fields.map(([k, l]) => ['field:' + k, l]));
+    group('من البطاقة (قراءة آلية)', AMAN.CARD_FIELDS.map(([k, l]) => ['card:' + k, l]));
+  }
+  if (![...sel.options].some((o) => o.value === cur)) sel.prepend(new Option(AMAN.describeSource(src), cur));
+  sel.value = cur;
+  sel.onchange = () => {
+    const v = sel.value;
+    if (!v) return;
+    let next;
+    if (v === 'ask') next = { type: 'ask' };
+    else if (v === 'const') {
+      const value = prompt('القيمة الثابتة:', src.type === 'const' ? src.value : '');
+      if (value === null) { sel.value = cur; return; }
+      next = { type: 'const', value };
+    } else {
+      const [type, key] = v.split(':');
+      next = { type, key, ...(src.format ? { format: src.format } : {}), ...(src.smart !== undefined ? { smart: src.smart } : {}), ...(src.verify ? { verify: true } : {}) };
+    }
+    editTeach((t) => { t.steps[i].source = next; });
+  };
+  return sel;
+}
+
 function renderSteps(list, steps) {
   list.innerHTML = '';
   steps.forEach((s, i) => {
@@ -80,9 +113,18 @@ function renderSteps(list, steps) {
       lab.append(' ', cb, ' وقفة موافقة');
       li.append(lab);
     }
+    const move = (d, label, title) => {
+      const b = document.createElement('button'); b.className = 'mv'; b.textContent = label; b.title = title;
+      b.disabled = i + d < 0 || i + d >= steps.length;
+      b.onclick = () => editTeach((t) => { const [x] = t.steps.splice(i, 1); t.steps.splice(i + d, 0, x); });
+      li.append(b);
+    };
+    move(-1, '▲', 'طلّعها خطوة');
+    move(1, '▼', 'نزّلها خطوة');
     const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = 'شيل الخطوة';
     x.onclick = () => editTeach((t) => { t.steps.splice(i, 1); });
     li.append(x);
+    if (s.kind === 'fill' && s.source?.type !== 'check') li.append(sourceSelect(s, i));
     list.append(li);
   });
 }
@@ -109,13 +151,22 @@ $('teachStart').onclick = async () => {
   if (recipes[type] && !confirm('فيه وصفة لـ "' + AMAN.typeLabel(type) + '". التعليم الجديد هيستبدلها لما تحفظ. تكمل؟')) return;
   await store.set({ teach: { active: true, type, tabId: tab?.id, startUrl: tab?.url || '', steps: [], startedAt: new Date().toISOString() } });
 };
+// Open a saved recipe's steps to change them: delete, move, change a field's source, or add on the Aman page.
+$('teachEdit').onclick = async () => {
+  const tab = await activeTab();
+  const type = $('teachType').value;
+  const { recipes = {} } = await store.get('recipes');
+  const r = recipes[type];
+  if (!r?.steps?.length) return alert('مافيش وصفة محفوظة لـ "' + AMAN.typeLabel(type) + '".');
+  await store.set({ teach: { active: true, edit: true, type, tabId: tab?.id, startUrl: r.steps[0]?.url || tab?.url || '', steps: JSON.parse(JSON.stringify(r.steps)), startedAt: new Date().toISOString() } });
+};
 $('teachCancel').onclick = async () => { if (confirm('تلغي التعليم من غير ما تحفظ؟')) await store.set({ teach: null }); };
 $('pickExpect').onclick = () => editTeach((t) => { t.pick = 'expect'; });
 $('pickGate').onclick = () => editTeach((t) => { t.pick = 'gate'; });
 // Picked the wrong type? Change it while teaching; the recorded steps stay.
 $('teachType').onchange = async () => {
   const { teach } = await store.get('teach');
-  if (!teach?.active) return;
+  if (!teach?.active) return render(); // the edit button follows the picked type
   const type = $('teachType').value;
   const { recipes = {} } = await store.get('recipes');
   if (recipes[type] && !confirm('فيه وصفة محفوظة لـ "' + AMAN.typeLabel(type) + '". لما تحفظ هتستبدلها. تكمل؟')) { $('teachType').value = teach.type; return; }
@@ -541,11 +592,13 @@ async function render() {
   fillTypes();
 
   const on = !!teach?.active;
-  $('teachStart').hidden = on; $('teachSave').hidden = !on; $('teachCancel').hidden = !on; $('pickRow').hidden = !on;
+  $('teachStart').hidden = on; $('teachEdit').hidden = on; $('teachSave').hidden = !on; $('teachCancel').hidden = !on; $('pickRow').hidden = !on;
   $('teachType').disabled = false;
   if (on && document.activeElement !== $('teachType')) $('teachType').value = teach.type;
   $('teachStart').disabled = !signedIn || !me.can_teach;
+  $('teachEdit').disabled = !signedIn || !me.can_teach || !recipes?.[$('teachType').value];
   $('teachHint').textContent = signedIn && !me.can_teach ? 'التعليم للمسؤول بس.'
+    : on && teach.edit && !teach.pick ? 'بتعدّل الوصفة: شيل أي خطوة بـ ✕، حرّكها بالأسهم، غيّر الخانة بتتملي من إيه من القايمة تحتها، أو افتح صفحة أمان ودوس على الدايرة في أي خانة تزوّدها. وبعدين دوس احفظ الوصفة.'
     : on ? (teach.pick ? 'دوس على الكلام في صفحة أمان…' : 'ارفع الطلب عادي. دوس على الدايرة اللي جوه كل خانة واختار هي تبع إيه. ارفع البطاقة ودوس تأكيد زي ما بتعمل. لما رسالة الحالة تظهر (عميل جديد) دوس "علّم رسالة الحالة". وبعد الحفظ دوس "علّم رقم الطلب".')
       : 'اختار نوع الطلب، وافتح صفحة طلب جديد على أمان، وبعدين دوس ابدأ.';
   renderSteps($('teachSteps'), on ? teach.steps : []);

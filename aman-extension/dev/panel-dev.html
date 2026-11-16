@@ -53,6 +53,9 @@
 
   ol { margin:6px 0 0; padding-inline-start:20px; }
   li { margin:4px 0; }
+  li .mv { background:none; border:0; padding:0 3px; box-shadow:none; color:var(--muted); }
+  li select.src { display:block; width:100%; margin-top:3px; font-size:12px; }
+  li .num { color:var(--muted); font-size:11px; margin-inline-end:3px; }
   li .x { background:none; border:0; color:var(--bad); padding:0 4px; box-shadow:none; }
   .pill { display:inline-block; border-radius:6px; padding:0 6px; font-size:11px; font-weight:600; color:#fff; background:var(--muted); }
   .pill.fill { background:var(--brand); } .pill.click { background:#475569; } .pill.page { background:#a8a29e; }
@@ -202,6 +205,7 @@
         <div class="row">
           <select id="teachType"></select>
           <button id="teachStart" class="primary">ابدأ التعليم</button>
+          <button id="teachEdit">عدّل الوصفة</button>
           <button id="teachSave" class="ok" hidden>احفظ الوصفة</button>
           <button id="teachCancel" hidden>إلغاء</button>
         </div>
