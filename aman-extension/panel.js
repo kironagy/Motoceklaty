@@ -135,7 +135,7 @@ $('teachSave').onclick = async () => {
 // ---------- batch: pull every new request, then upload them one by one ----------
 const ACTIVE_RUN = ['starting', 'running', 'review', 'approved', 'blocked'];
 const FINAL = ['done', 'stopped', 'resolved', 'error'];
-const STATE_LABEL = { waiting: 'مستني', working: 'شغال عليه', uploaded: 'اترفع', rejected_before: 'مرفوض قبل كده', error: 'مشكلة', stopped: 'اتوقف', skipped: 'اتساب' };
+const STATE_LABEL = { released: 'اتوقف', waiting: 'مستني', working: 'شغال عليه', uploaded: 'اترفع', rejected_before: 'مرفوض قبل كده', error: 'مشكلة', stopped: 'اتوقف', skipped: 'اتساب' };
 
 async function getBatch() { return (await store.get('batch')).batch || null; }
 async function editBatch(fn) {
@@ -171,6 +171,17 @@ $('stopBatch').onclick = async () => {
   if (run && ACTIVE_RUN.includes(run.status)) await store.set({ run: { ...run, status: 'stopped', stopReason: 'الموظف وقف الرفع' } });
 };
 $('sheet').onclick = async () => downloadSheet(await getBatch());
+// Every request this employee finished today (all runs, from the server), not just this batch.
+$('todayReport').onclick = async () => {
+  try {
+    const { rows } = await AMAN.api('GET', '/report');
+    if (!rows.length) return ($('pullMsg').textContent = 'مارفعتش ولا طلب النهارده لسه.');
+    downloadSheet({ items: rows.map((r) => ({ ...r, state: r.status, amanRef: r.aman_ref })) }, 'aman-today');
+    $('pullMsg').textContent = `اتحمّل تقرير النهارده: ${rows.length} طلب، اترفع منهم ${rows.filter((r) => r.status === 'uploaded').length}.`;
+  } catch (e) {
+    $('pullMsg').textContent = 'ماقدرش يجيب التقرير: ' + e.message;
+  }
+};
 
 function waitTabLoaded(tabId) {
   return new Promise((resolve) => {
@@ -256,7 +267,7 @@ async function onRunChange(run) {
 }
 
 // ---------- results sheet (CSV that Excel opens, Arabic kept) ----------
-function downloadSheet(batch) {
+function downloadSheet(batch, prefix = 'aman-uploads') {
   if (!batch) return;
   const cols = ['رقم الطلب في موتوجيت', 'اسم العميل', 'الرقم القومي', 'نوع الطلب', 'النتيجة', 'رقم الطلب في أمان', 'ملاحظات', 'الوقت'];
   const cell = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
@@ -265,7 +276,7 @@ function downloadSheet(batch) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   const d = new Date(); const p = (n) => String(n).padStart(2, '0');
-  a.download = `aman-uploads-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.csv`;
+  a.download = `${prefix}-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.csv`;
   a.click();
 }
 

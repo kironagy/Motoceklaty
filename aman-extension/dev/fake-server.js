@@ -51,6 +51,10 @@
         card: { name_1: p[0], name_2: p[1], name_3: p[2], name_4: p[3], full_name: o.name, national_id: o.nid, gender: o.gender, birthdate: '1990-01-01', name_source: 'card', errors: [] },
       });
     }
+    if (path.startsWith('/report')) {
+      const q = get('queue', []);
+      return json({ rows: get('results', []).map((r) => ({ id: r.id, name: q.find((x) => x.id === r.id)?.name, type_label: 'دخل حر', status: r.status, aman_ref: r.aman_ref, message: r.message, at: new Date().toISOString() })) });
+    }
     const m = path.match(/^\/uploads\/(\d+)\/result$/);
     if (m) { put('results', [...get('results', []), { id: +m[1], ...body }]); return json({ ok: true }); }
     return json({ message: 'not found' }, 404);

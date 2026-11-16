@@ -568,9 +568,11 @@
     if (!el) return fail('مش لاقي "' + what + '" في الصفحة. ممكن أمان غيّر الصفحة، علّم الخطوة دي تاني.');
 
     if (step.kind === 'capture') {
-      const ref = textOf(el);
+      // "تم تقديم الحد الائتمانى بنجاح و رقم العملية : 26116832162" -> 26116832162
+      const ref = await waitFor(() => refFrom(textOf(findEl(step.target) || el)), 8000) || '';
       mark(el, '#2563eb');
-      return advance({ label: 'رقم الطلب عند أمان', source: 'من الصفحة', expected: '', actual: ref, ok: !!ref }, { amanRef: ref });
+      if (!ref) return fail('مالقتش رقم الطلب في رسالة أمان: "' + textOf(el) + '"');
+      return advance({ label: 'رقم الطلب عند أمان', source: 'من الصفحة', expected: '', actual: ref, ok: true }, { amanRef: ref });
     }
 
     if (step.kind === 'click') {
@@ -665,9 +667,29 @@
     if (el.tagName === 'SELECT') await settle();
   }
 
+  /** The Aman reference in a message: the number after "رقم العملية/الطلب", else its longest number. */
+  function refFrom(text) {
+    const t = String(text || '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+    const m = t.match(/رقم\s*(?:ال)?(?:عمليه|عملية|طلب)\s*[:：]?\s*(\d{5,})/);
+    if (m) return m[1];
+    const all = t.match(/\d{6,}/g);
+    return all ? all.sort((a, b) => b.length - a.length)[0] : '';
+  }
+  /** After saving, when no step reads the number: look for Aman's success message anywhere on the page. */
+  async function autoRef() {
+    return waitFor(() => {
+      const t = document.body?.innerText || '';
+      const m = t.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).match(/رقم\s*(?:ال)?(?:عمليه|عملية|طلب)\s*[:：]?\s*(\d{5,})/);
+      return m ? m[1] : null;
+    }, 10000);
+  }
+
+  let again = false;
   async function runLoop() {
-    if (running) return;
+    // A change (e.g. the employee's approval) that lands while the loop is finishing must not be lost.
+    if (running) { again = true; return; }
     running = true;
+    again = false;
     try {
       for (;;) {
         const { run } = await store.get('run');
@@ -684,7 +706,12 @@
         }
         if (run.status !== 'running') break;
         const step = run.recipe.steps[run.i];
-        if (!step) { await update('run', (r) => ({ ...r, status: 'done', finishedAt: new Date().toISOString() })); break; }
+        if (!step) {
+          let ref = run.amanRef;
+          if (!ref && run.approvedAt) ref = await autoRef();
+          await update('run', (r) => ({ ...r, ...(ref ? { amanRef: ref } : {}), status: 'done', finishedAt: new Date().toISOString() }));
+          break;
+        }
         try {
           await runStep(step, run);
         } catch (e) {
@@ -694,6 +721,7 @@
       }
     } finally {
       running = false;
+      if (again) setTimeout(runLoop, 0);
     }
   }
 

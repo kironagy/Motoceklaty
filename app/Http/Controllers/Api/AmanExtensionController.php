@@ -174,6 +174,25 @@ class AmanExtensionController extends Controller
         ];
     }
 
+    /** One day's uploads by this employee, for the extension's "today's report" sheet. */
+    public function report(Request $request)
+    {
+        $day = $request->validate(['date' => 'nullable|date'])['date'] ?? now()->toDateString();
+        $types = config('aman_extension.types');
+
+        return ['date' => $day, 'rows' => AmanUpload::with('request:id,applicant_name,applicant_national_id')
+            ->where('staff_id', $this->staff($request)->id)
+            ->whereDate('claimed_at', $day)
+            ->whereIn('status', ['uploaded', 'rejected_before', 'error', 'released'])
+            ->orderBy('finished_at')
+            ->get()
+            ->map(fn (AmanUpload $u) => [
+                'id' => $u->installment_request_id, 'name' => $u->request?->applicant_name, 'national_id' => $u->request?->applicant_national_id,
+                'type_label' => $types[$u->type] ?? $u->type, 'status' => $u->status, 'aman_ref' => $u->aman_ref,
+                'message' => $u->message, 'at' => $u->finished_at?->toIso8601String(),
+            ])];
+    }
+
     public function file(Request $request, AmanUpload $upload, string $field)
     {
         abort_unless($upload->staff_id === $this->staff($request)->id, 403);

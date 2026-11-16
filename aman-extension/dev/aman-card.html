@@ -20,8 +20,8 @@ table{width:100%}td{padding:6px}input[type=text],select{width:95%;padding:5px}.h
 <td>المدينة / المنطقة :</td><td><select id="ctl00_city" onchange="loadDistricts()"><option value="0">أختر...</option></select></td></tr>
 <tr><td>الحى :</td><td><select id="ctl00_district"><option value="0">أختر...</option></select></td><td>رقم عقار :</td><td><input type="text" id="ctl00_bno"></td></tr>
 <tr><td colspan="2"><label><input type="checkbox" id="ctl00_extra"> هل لديه دخل اضافي ؟</label></td></tr>
-</table><input type="button" id="ctl00_save" value="حفظ" onclick="document.getElementById('ctl00_ref').textContent='AMN-'+Math.floor(Math.random()*900000+100000)">
-<p>رقم الطلب: <b id="ctl00_ref"></b></p></div>
+</table><input type="button" id="ctl00_save" value="حفظ" onclick="document.getElementById('ctl00_ref').textContent='تم تقديم الحد الائتمانى بنجاح و رقم العملية : '+Math.floor(Math.random()*90000000000+10000000000)">
+<p id="ctl00_ref" style="color:green"></p></div>
 <script>
 const CITIES = { 1: ['وسط القاهرة', 'مدينة نصر', 'المعادي'], 2: ['الدقي', 'الهرم', 'فيصل', '6 أكتوبر'] };
 const DISTRICTS = { 'الهرم': ['خاتم المرسلين', 'المطبعة هرم', 'ترسا', 'الكوم الاخضر - هرم', 'المريوطية - هرم'], 'فيصل': ['الطوابق', 'العشرين'], 'وسط القاهرة': ['عابدين', 'الموسكي'] };

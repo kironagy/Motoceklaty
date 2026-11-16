@@ -17,6 +17,7 @@ Route::prefix('aman')->middleware(\App\Http\Middleware\AmanExtensionToken::class
     Route::put('/recipes/{type}', [\App\Http\Controllers\Api\AmanExtensionController::class, 'saveRecipe']);
     Route::post('/logout', [\App\Http\Controllers\Api\AmanExtensionController::class, 'logout']);
     Route::get('/queue', [\App\Http\Controllers\Api\AmanExtensionController::class, 'queue']);
+    Route::get('/report', [\App\Http\Controllers\Api\AmanExtensionController::class, 'report']);
     Route::post('/requests/{id}/claim', [\App\Http\Controllers\Api\AmanExtensionController::class, 'claim'])->whereNumber('id');
     Route::get('/uploads/{upload}/files/{field}', [\App\Http\Controllers\Api\AmanExtensionController::class, 'file'])->name('aman.file');
     Route::post('/uploads/{upload}/result', [\App\Http\Controllers\Api\AmanExtensionController::class, 'result']);
