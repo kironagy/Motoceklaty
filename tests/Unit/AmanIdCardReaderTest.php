@@ -24,6 +24,17 @@ class AmanIdCardReaderTest extends TestCase
         $this->assertSame('ش زكي - قلعة الكبش - السيدة زينب - القاهرة', $out['address']);
     }
 
+    public function test_front_address_keeps_its_street_number_line(): void
+    {
+        // Request 5033 (Vision text): the street line has a number and used to be dropped.
+        $front = "جمهورية مصر العربية\nبطاقة تحقيق الشخصية\nمصطفى\nايمن مصطفى مصطفى النجار\n٣٣ش صبحى النجار-جمال عبدالناصر\nالوراق - الجيزه\n٢٠٠٥/٠١/١٣\n٣٠٥٠١١٣٢١٠١١٥٢\nIS8105411";
+        $out = $this->reader()->parseFront($front);
+
+        $this->assertSame('30501132101152', $out['national_id']);
+        $this->assertSame('مصطفى النجار', $out['name_4']);
+        $this->assertSame('٣٣ش صبحى النجار-جمال عبدالناصر - الوراق - الجيزه', $out['address']);
+    }
+
     public function test_back_gives_gender_religion_marital_and_dates(): void
     {
         $back = "٢٠٢١/٠٥\nسائق\nذكر    مسلم    متزوج\nالبطاقة سارية حتى ٢٠٢٨/٠٥/١٢";

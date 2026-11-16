@@ -32,7 +32,8 @@ class IdCardReader
     {
         $front = $request->applicant_id_image;
         $back = $request->applicant_id_back_image;
-        $key = 'aman-card:'.$request->id.':'.md5($front.'|'.$back.'|'.$request->applicant_name.'|'.$request->applicant_national_id);
+        // "v2": cards read before the full-address fix are read again.
+        $key = 'aman-card:v2:'.$request->id.':'.md5($front.'|'.$back.'|'.$request->applicant_name.'|'.$request->applicant_national_id);
 
         return Cache::remember($key, now()->addDays(30), fn () => $this->readFresh($request, $front, $back));
     }
@@ -125,12 +126,17 @@ class IdCardReader
             }
         }
 
+        // The two name lines have no digits. The address lines after them may ("٣٣ش صبحى النجار-جمال
+        // عبدالناصر"); the birth date ("٢٠٠٥/٠١/١٣") and the Latin serial never pass.
         $words = [];
         foreach ($lines as $i => $line) {
             if ($nidLine !== null && $i >= $nidLine) {
                 break;
             }
-            if (in_array($this->norm($line), self::HEADER, true) || ! preg_match('/^[\p{Arabic}\s\-\.،]+$/u', $line) || preg_match('/\d/u', $line)) {
+            $isName = count($words) < 2;
+            $allowed = $isName ? '/^[\p{Arabic}\s\-\.،]+$/u' : '/^[\p{Arabic}\d\s\-\.،]+$/u';
+            if (in_array($this->norm($line), self::HEADER, true) || ! preg_match($allowed, $line)
+                || ($isName && preg_match('/\d/u', $line)) || ! preg_match('/\p{L}/u', $line)) {
                 continue;
             }
             $words[] = trim($line);
@@ -142,6 +148,7 @@ class IdCardReader
             $out['name_2'] = $rest[0] ?? '';
             $out['name_3'] = $rest[1] ?? '';
             $out['name_4'] = trim(implode(' ', array_slice($rest, 2)));
+            // The whole card address, both lines as printed (owner 2026-11-16: an exact copy).
             $address = array_slice($words, 2);
             if ($address) {
                 $out['address'] = implode(' - ', $address);
