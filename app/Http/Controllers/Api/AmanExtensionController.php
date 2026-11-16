@@ -261,6 +261,12 @@ class AmanExtensionController extends Controller
             'log' => 'nullable|array',
         ]);
 
+        // Uploaded means Aman gave its number (older extensions sent "uploaded" without one).
+        if ($data['status'] === 'uploaded' && blank($data['aman_ref'] ?? null)) {
+            $data['status'] = 'error';
+            $data['message'] = 'اتبعت إنه اترفع من غير رقم طلب من أمان'.(filled($data['message'] ?? null) ? ' — '.$data['message'] : '');
+        }
+
         $upload->update($data + ['finished_at' => now()]);
 
         // Like staff doing it by hand (owner 2026-11-16), and only on a request that is still new:

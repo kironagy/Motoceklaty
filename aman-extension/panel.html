@@ -78,6 +78,14 @@
   .st.uploaded { background:var(--good-soft); color:var(--good); } .st.rejected_before { background:var(--bad-soft); color:var(--bad); }
   .st.error, .st.stopped, .st.skipped, .st.released { background:var(--warn-soft); color:var(--warn); }
   .why { color:var(--muted); font-size:11px; margin-top:3px; max-width:220px; }
+  #files { margin-top:10px; }
+  .filesHead { display:flex; justify-content:space-between; align-items:baseline; gap:6px; flex-wrap:wrap; }
+  .thumbs { display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:8px; margin-top:6px; }
+  .thumb { border:1px solid var(--line); border-radius:12px; overflow:hidden; background:#fffdfb; display:flex; flex-direction:column; }
+  .thumb a.pic { display:block; aspect-ratio:4/3; background:#f4efe9 center/cover no-repeat; }
+  .thumb .cap { font-size:11px; padding:4px 6px 0; line-height:1.35; min-height:30px; }
+  .thumb a.dl { margin:4px 6px 6px; text-align:center; font-size:11px; font-weight:700; color:var(--brand-dark); background:var(--brand-soft); border-radius:8px; padding:3px 0; text-decoration:none; }
+  .thumb.err .cap { color:var(--bad); }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -113,6 +121,10 @@
         <div class="kv" id="curInfo"></div>
         <div id="curWarn"></div>
         <div id="runStatus"></div>
+        <div id="files" hidden>
+          <div class="filesHead"><b>الصور اللي بتترفع</b><span class="muted">دوس على أي صورة تكبّرها، أو حمّلها</span></div>
+          <div class="thumbs" id="thumbs"></div>
+        </div>
         <table id="review" hidden><thead><tr><th>الخانة</th><th>المصدر</th><th>المفروض</th><th>اتكتب</th><th></th></tr></thead><tbody></tbody></table>
         <div class="row" id="gateRow" hidden style="margin-top:8px">
           <button id="approve" class="ok">راجعت — احفظ عند أمان</button>
@@ -123,6 +135,10 @@
           <button id="skipStep">عملتها بإيدي — الخطوة اللي بعدها</button>
           <button id="asRejected" class="bad">ده رفض سابق — سجّله</button>
           <button id="asError">سيبه كمشكلة وخش على اللي بعده</button>
+        </div>
+        <div class="row" id="refRow" hidden style="margin-top:8px">
+          <input id="refInput" type="text" class="ltr" placeholder="رقم طلب أمان" style="flex:1;min-width:0">
+          <button id="refSave" class="ok">اترفع — سجّل الرقم</button>
         </div>
       </section>
 

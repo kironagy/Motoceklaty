@@ -326,6 +326,15 @@ $('goOn').onclick = async () => {
   const pass = !run.problem && run.recipe.steps[run.i]?.kind === 'expect';
   setRun({ status: 'running', dialogs: [], problem: false, problemRow: null, i: pass ? run.i + 1 : run.i });
 };
+// Saved at Aman but its number was not caught: the employee types it, the request counts as uploaded.
+$('refSave').onclick = async () => {
+  const ref = $('refInput').value.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '');
+  if (ref.length < 5) { $('refInput').focus(); return; }
+  const { run } = await store.get('run');
+  if (run?.status !== 'blocked') return;
+  $('refInput').value = '';
+  setRun({ status: 'done', amanRef: ref, amanMessage: 'الموظف كتب رقم طلب أمان: ' + ref, problem: false, noRef: false, finishedAt: new Date().toISOString() });
+};
 // The employee did the failed step by hand: go on from the next one.
 $('skipStep').onclick = async () => {
   const { run } = await store.get('run');
@@ -365,7 +374,9 @@ function renderRun(run) {
     + (FINAL.includes(run.status) && run.uploadId ? (run.reported ? ' (اتسجل في موتوجيت)' : run.reportError ? ' (ماتسجلش: ' + run.reportError + ')' : ' (بيسجل…)') : '');
   $('gateRow').hidden = run.status !== 'review';
   $('blockRow').hidden = run.status !== 'blocked';
-  $('skipStep').hidden = !run.problem || !!run.beforeStart;
+  $('skipStep').hidden = !run.problem || !!run.beforeStart || !!run.noRef;
+  $('refRow').hidden = !(run.status === 'blocked' && run.noRef);
+  renderFiles(run);
   $('asRejected').hidden = !!run.problem;
 
   const rows = [...run.log, ...(run.problemRow ? [run.problemRow] : [])]; // the step it stopped on, in red
@@ -380,6 +391,47 @@ function renderRun(run) {
     if (r.ok === false) tr.style.color = 'var(--bad)';
     if (r.ok === null) tr.style.color = 'var(--brand-dark)';
     tb.append(tr);
+  }
+}
+
+// ---------- the photos this request uploads: seen and downloadable from the panel ----------
+let filesFor = '';
+const fileUrls = []; // blob URLs to free when the request changes
+async function renderFiles(run) {
+  const key = run.uploadId + ':' + (run.recipe?.version || '');
+  if (filesFor === key) return;
+  filesFor = key;
+  fileUrls.splice(0).forEach((u) => URL.revokeObjectURL(u));
+  const box = $('thumbs'); box.innerHTML = '';
+  const seen = new Set(), items = [];
+  for (const st of run.recipe?.steps || []) {
+    const src = st.source;
+    if (st.kind !== 'fill' || src?.type !== 'file') continue;
+    const urls = run.order?.[src.key];
+    for (const url of (Array.isArray(urls) ? urls : urls ? [urls] : [])) {
+      if (seen.has(url)) continue;
+      seen.add(url);
+      items.push({ url, label: (st.target?.label || AMAN.fieldLabel(src.key)).replace(/[:：\s]+$/, '') });
+    }
+  }
+  $('files').hidden = !items.length;
+  for (const it of items) {
+    const card = document.createElement('div'); card.className = 'thumb';
+    const pic = document.createElement('a'); pic.className = 'pic'; pic.target = '_blank';
+    const cap = document.createElement('div'); cap.className = 'cap'; cap.textContent = it.label + ' …';
+    const dl = document.createElement('a'); dl.className = 'dl'; dl.textContent = 'تحميل'; dl.hidden = true;
+    card.append(pic, cap, dl); box.append(card);
+    chrome.runtime.sendMessage({ type: 'fetchFile', url: it.url }, (r) => {
+      if (filesFor !== key) return; // another request by now
+      if (!r?.ok) { card.classList.add('err'); cap.textContent = it.label + ' — مش قادر أجيبها'; return; }
+      const bin = atob(r.b64); const buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      const u = URL.createObjectURL(new Blob([buf], { type: r.mime })); fileUrls.push(u);
+      const ext = (r.mime.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
+      pic.href = u; pic.style.backgroundImage = `url("${u}")`;
+      cap.textContent = it.label;
+      dl.href = u; dl.download = `طلب-${run.requestId}-${it.label.replace(/[\\/:*?"<>|]/g, '')}.${ext}`; dl.hidden = false;
+    });
   }
 }
 

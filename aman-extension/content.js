@@ -108,8 +108,11 @@
   }
 
   // ---------- dialogs (alert/confirm) seen by page-hook.js ----------
+  let lastRun = null;
+  const lastDialogs = []; // also read while waiting for Aman's number after the save
   window.addEventListener('message', (e) => {
     if (e.source !== window || !e.data?.__amanDialog) return;
+    lastDialogs.push({ kind: e.data.kind, msg: e.data.msg, at: e.data.at });
     update('run', (r) => {
       if (!r || r.tabId !== myTab || !['running', 'approved'].includes(r.status)) return;
       return { ...r, dialogs: [...(r.dialogs || []), { kind: e.data.kind, msg: e.data.msg, at: e.data.at }] };
@@ -806,9 +809,27 @@
   async function autoRef() {
     const RE = /رقم\s*(?:ال)?(?:عمليه|عملية|طلب)\s*[:：]?\s*(\d{5,})/;
     const digits = (t) => t.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+    const OK = /بنجاح|تم\s*(?:الحفظ|التسجيل|تقديم|ارسال|إرسال)/;
+    const since = Date.parse(run0().approvedAt || '') || 0;
     return waitFor(() => {
-      const m = digits(document.body?.innerText || '').match(RE);
-      if (!m) return null;
+      // A popup after the save ("تم الحفظ بنجاح رقم 26116832163").
+      for (const d of (lastDialogs || []).filter((x) => x.at >= since)) {
+        const t = digits(d.msg || '');
+        const n = (t.match(RE) || [])[1] || (OK.test(t) ? (t.match(/\d{8,}/g) || []).sort((a, b) => b.length - a.length)[0] : '');
+        if (n) return { ref: n, msg: d.msg };
+      }
+      let m = digits(document.body?.innerText || '').match(RE);
+      if (!m) {
+        // Another wording: a short success message with a long number in it.
+        for (const el of document.querySelectorAll('span, font, label, td, p, b, div')) {
+          if (host && host.contains(el)) continue;
+          const t = digits((el.textContent || '').replace(/\s+/g, ' ').trim());
+          if (t.length > 300 || !OK.test(t) || [...el.children].some((c) => OK.test(c.textContent || ''))) continue;
+          const n = (t.match(/\d{8,}/g) || []).sort((a, b) => b.length - a.length)[0];
+          if (n && visible(el)) return { ref: n, msg: (el.textContent || '').replace(/\s+/g, ' ').trim() };
+        }
+        return null;
+      }
       let msg = '';
       for (const el of document.querySelectorAll('span, font, label, td, p, b, div')) {
         if (host && host.contains(el)) continue;
@@ -820,6 +841,7 @@
   }
 
   let again = false;
+  const run0 = () => lastRun || {};
   /** Clicks through the page hook (page world) so javascript: links and ASP.NET postbacks work. */
   async function realClick(el) {
     const token = Math.random().toString(36).slice(2);
@@ -862,11 +884,13 @@
         const step = run.recipe.steps[run.i];
         if (!step) {
           let ref = run.amanRef, msg = run.amanMessage || '';
+          lastRun = run;
+          for (const d of run.dialogs || []) if (!lastDialogs.some((x) => x.at === d.at)) lastDialogs.push(d); // from before a reload
           if (!ref && run.approvedAt) { const got = await autoRef(); if (got) ({ ref, msg } = got); }
           if (run.approvedAt && !ref) {
             // Saved, but Aman showed no request number: not uploaded. The employee looks at the page,
             // fixes what Aman complains about and saves by hand, then "كمّل" looks for the number again.
-            await update('run', (r) => ({ ...r, status: 'blocked', problem: true, problemRow: null,
+            await update('run', (r) => ({ ...r, status: 'blocked', problem: true, problemRow: null, noRef: true,
               blockMessage: 'دوست حفظ بس أمان ماطلّعش رقم طلب، يعني الطلب مااترفعش. شوف صفحة أمان: لو فيه غلط صلّحه واحفظ بإيدك' }));
             break;
           }
