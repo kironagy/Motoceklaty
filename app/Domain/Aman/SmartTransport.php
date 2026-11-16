@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Storage;
  *   proof photos (a driving licence, an app's earnings screen);
  * - their income proof photos go to Aman in the two guarantor slots: the photos are split in two
  *   halves and each half is merged into one picture;
- * - the work area and work address are zeros.
+ * - the work address is zeros; the work governorate and area are the customer's own.
  */
 class SmartTransport
 {

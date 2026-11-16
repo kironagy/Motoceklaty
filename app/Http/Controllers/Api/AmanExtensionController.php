@@ -175,13 +175,15 @@ class AmanExtensionController extends Controller
             $order[$field] = $paths ? array_map(fn ($i) => route('aman.file', ['upload' => $upload->id, 'field' => $field, 'i' => $i] + $clean), array_keys($paths)) : null;
         }
 
-        // Smart-transport drivers: income proof photos merged into the two guarantor slots, work area
-        // and address zeros. Anyone else keeps the card photos there, as before.
+        // Smart-transport drivers: income proof photos merged into the two guarantor slots, work address
+        // zeros. Anyone else keeps the card photos there, as before.
         $smart = $transport->is($req);
         $proofs = $smart ? count($transport->proofs($req)) : 0;
         $order['smart_transport'] = $smart;
         $order['aman_work_address'] = $smart ? SmartTransport::ZERO_ADDRESS : $req->work_address;
-        $order['aman_work_area'] = $smart ? null : $req->work_area;
+        // A driver has no work place: Aman's work governorate / area are the customer's own (owner 2026-11-16).
+        $order['aman_work_governorate'] = $smart ? $req->applicant_governorate : $req->work_governorate;
+        $order['aman_work_area'] = $smart ? $req->applicant_area : $req->work_area;
         $order['proof_merged_1'] = $proofs >= 1 ? [route('aman.file', ['upload' => $upload->id, 'field' => 'proof_merged_1'])] : $order['applicant_id_image'];
         $order['proof_merged_2'] = $proofs >= 2 ? [route('aman.file', ['upload' => $upload->id, 'field' => 'proof_merged_2'])] : $order['applicant_id_back_image'];
 
