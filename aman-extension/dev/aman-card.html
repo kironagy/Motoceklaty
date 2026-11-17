@@ -24,7 +24,8 @@ table{width:100%}td{padding:6px}input[type=text],select{width:95%;padding:5px}.h
 <p id="ctl00_ref" style="color:green"></p></div>
 <script>
 // like ASP.NET: a slow server round trip before the next section shows
-function __doPostBack(target){ if (target === 'ctl00$confirmCard') { window.__amanFakeBusy = true; setTimeout(()=>{ document.getElementById('s2').classList.remove('hidden'); window.__amanFakeBusy = false; }, 4000); } }
+// then (like Aman since 2026-11-18) a card review box whose "تأكيد" opens the next section
+function __doPostBack(target){ if (target === 'ctl00$confirmCard') { window.__amanFakeBusy = true; setTimeout(()=>{ window.__amanFakeBusy = false; const m = document.createElement('div'); m.id = 'reviewBox'; m.style.cssText = 'position:fixed;inset:20% 20%;background:#fff;border:1px solid #999;padding:20px'; m.innerHTML = '<h3>مراجعة بيانات بطاقة الرقم القومي</h3><button type="button" class="btn btn-success" onclick="this.parentNode.remove(); document.getElementById(\'s2\').classList.remove(\'hidden\')">تأكيد</button> <button type="button" class="btn">إعادة التصوير</button>'; document.body.append(m); }, 1500); } }
 const CITIES = { 1: ['وسط القاهرة', 'مدينة نصر', 'المعادي'], 2: ['الدقي', 'الهرم', 'فيصل', '6 أكتوبر'] };
 const DISTRICTS = { 'الهرم': ['خاتم المرسلين', 'المطبعة هرم', 'ترسا', 'الكوم الاخضر - هرم', 'المريوطية - هرم'], 'فيصل': ['الطوابق', 'العشرين'], 'وسط القاهرة': ['عابدين', 'الموسكي'] };
 function fill(sel, list){ sel.innerHTML = '<option value="0">أختر...</option>' + list.map((t,i)=>'<option value="'+(i+1)+'">'+t+'</option>').join(''); }

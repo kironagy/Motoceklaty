@@ -99,7 +99,7 @@ function sourceSelect(s, i) {
   return sel;
 }
 
-function renderSteps(list, steps) {
+function renderSteps(list, steps, insertAt) {
   list.innerHTML = '';
   steps.forEach((s, i) => {
     const [cls, kind, text] = stepLine(s);
@@ -119,12 +119,24 @@ function renderSteps(list, steps) {
       b.onclick = () => editTeach((t) => { const [x] = t.steps.splice(i, 1); t.steps.splice(i + d, 0, x); });
       li.append(b);
     };
+    const ins = document.createElement('button'); ins.className = 'ins'; ins.textContent = '＋';
+    ins.title = 'الخطوات الجديدة تتزوّد بعد دي';
+    ins.onclick = () => editTeach((t) => { t.insertAt = t.insertAt === i + 1 ? undefined : i + 1; });
+    li.append(ins);
+    if (insertAt === i + 1) li.classList.add('here');
     move(-1, '▲', 'طلّعها خطوة');
     move(1, '▼', 'نزّلها خطوة');
     const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = 'شيل الخطوة';
     x.onclick = () => editTeach((t) => { t.steps.splice(i, 1); });
     li.append(x);
     if (s.kind === 'fill' && s.source?.type !== 'check') li.append(sourceSelect(s, i));
+    if (s.kind === 'fill' && s.source?.type === 'check' && s.source.mode !== 'when') {
+      const sel = document.createElement('select'); sel.className = 'src';
+      sel.append(new Option('دايمًا متعلّم', 'always'), new Option('دايمًا مش متعلّم', 'never'));
+      sel.value = s.source.mode;
+      sel.onchange = () => editTeach((t) => { t.steps[i].source = { ...t.steps[i].source, mode: sel.value }; });
+      li.append(sel);
+    }
     list.append(li);
   });
 }
@@ -155,10 +167,25 @@ $('teachStart').onclick = async () => {
 $('teachEdit').onclick = async () => {
   const tab = await activeTab();
   const type = $('teachType').value;
+  const from = $('editFrom').value || type;
   const { recipes = {} } = await store.get('recipes');
-  const r = recipes[type];
-  if (!r?.steps?.length) return alert('مافيش وصفة محفوظة لـ "' + AMAN.typeLabel(type) + '".');
+  const r = recipes[from];
+  if (!r?.steps?.length) return alert('مافيش وصفة محفوظة لـ "' + AMAN.typeLabel(from) + '".');
+  if (from !== type && recipes[type] && !confirm('هتبدأ من وصفة "' + AMAN.typeLabel(from) + '" وتحفظها لـ "' + AMAN.typeLabel(type) + '"، والوصفة اللي محفوظة لـ "' + AMAN.typeLabel(type) + '" هتتستبدل. تكمل؟')) return;
   await store.set({ teach: { active: true, edit: true, type, tabId: tab?.id, startUrl: r.steps[0]?.url || tab?.url || '', steps: JSON.parse(JSON.stringify(r.steps)), startedAt: new Date().toISOString() } });
+};
+// A button known only by its text, e.g. the "تأكيد" of Aman's card review box.
+$('addClick').onclick = async () => {
+  const text = (prompt('اسم الزرار زي ما هو مكتوب في صفحة أمان (مثلا: تأكيد):') || '').trim();
+  if (!text) return;
+  const page = prompt('الصفحة (سيبها زي ما هي لو نفس صفحة الخطوة اللي قبلها):', '') ?? '';
+  await editTeach((t) => {
+    const at = Number.isInteger(t.insertAt) ? t.insertAt : t.steps.length;
+    const prevPage = [...t.steps.slice(0, at)].reverse().find((x) => x.page)?.page || '';
+    const pg = page.trim() || prevPage;
+    t.steps.splice(at, 0, { kind: 'click', key: pg + '|text:' + text, page: pg, target: { tag: '*', type: '', id: '', name: '', label: '', aria: '', placeholder: '', css: '', text }, gate: false });
+    if (Number.isInteger(t.insertAt)) t.insertAt++;
+  });
 };
 $('teachCancel').onclick = async () => { if (confirm('تلغي التعليم من غير ما تحفظ؟')) await store.set({ teach: null }); };
 $('pickExpect').onclick = () => editTeach((t) => { t.pick = 'expect'; });
@@ -592,16 +619,20 @@ async function render() {
   fillTypes();
 
   const on = !!teach?.active;
-  $('teachStart').hidden = on; $('teachEdit').hidden = on; $('teachSave').hidden = !on; $('teachCancel').hidden = !on; $('pickRow').hidden = !on;
+  $('teachStart').hidden = on; $('teachEdit').hidden = on; $('editFromRow').hidden = on; $('addClick').hidden = !on; $('teachSave').hidden = !on; $('teachCancel').hidden = !on; $('pickRow').hidden = !on;
   $('teachType').disabled = false;
   if (on && document.activeElement !== $('teachType')) $('teachType').value = teach.type;
   $('teachStart').disabled = !signedIn || !me.can_teach;
-  $('teachEdit').disabled = !signedIn || !me.can_teach || !recipes?.[$('teachType').value];
+  const ef = $('editFrom'), efv = ef.value;
+  ef.innerHTML = '';
+  for (const k of Object.keys(recipes || {})) ef.append(new Option(AMAN.typeLabel(k) + ' (نسخة ' + recipes[k].version + ')', k));
+  ef.value = recipes?.[efv] ? efv : (recipes?.[$('teachType').value] ? $('teachType').value : (ef.options[0]?.value || ''));
+  $('teachEdit').disabled = !signedIn || !me.can_teach || !ef.value;
   $('teachHint').textContent = signedIn && !me.can_teach ? 'التعليم للمسؤول بس.'
-    : on && teach.edit && !teach.pick ? 'بتعدّل الوصفة: شيل أي خطوة بـ ✕، حرّكها بالأسهم، غيّر الخانة بتتملي من إيه من القايمة تحتها، أو افتح صفحة أمان ودوس على الدايرة في أي خانة تزوّدها. وبعدين دوس احفظ الوصفة.'
+    : on && teach.edit && !teach.pick ? 'بتعدّل الوصفة لـ "' + AMAN.typeLabel(teach.type) + '" (تغيّر النوع من فوق تتحفظ باسمه). شيل أي خطوة بـ ✕، حرّكها بالأسهم، غيّر الخانة بتتملي من إيه من القايمة تحتها. دوس ＋ جنب خطوة عشان الجديد يتزوّد بعدها: تدوس في صفحة أمان على زرار أو الدايرة في أي خانة، أو "زوّد زرار بالاسم". وبعدين دوس احفظ الوصفة.'
     : on ? (teach.pick ? 'دوس على الكلام في صفحة أمان…' : 'ارفع الطلب عادي. دوس على الدايرة اللي جوه كل خانة واختار هي تبع إيه. ارفع البطاقة ودوس تأكيد زي ما بتعمل. لما رسالة الحالة تظهر (عميل جديد) دوس "علّم رسالة الحالة". وبعد الحفظ دوس "علّم رقم الطلب".')
       : 'اختار نوع الطلب، وافتح صفحة طلب جديد على أمان، وبعدين دوس ابدأ.';
-  renderSteps($('teachSteps'), on ? teach.steps : []);
+  renderSteps($('teachSteps'), on ? teach.steps : [], on ? teach.insertAt : undefined);
 
   const box = $('recipes');
   const keys = Object.keys(recipes || {});

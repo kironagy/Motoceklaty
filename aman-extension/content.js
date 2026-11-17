@@ -81,15 +81,17 @@
 
   function findEl(t) {
     const c = [];
+    const tag = t.tag === '*' ? CLICK_SEL + ', .btn' : t.tag;
     const q = (sel) => { try { return [...document.querySelectorAll(sel)]; } catch { return []; } };
     if (t.id) c.push(document.getElementById(t.id));
     if (t.name) c.push(...document.getElementsByName(t.name));
-    if (t.label) c.push(...q(t.tag).filter((e) => norm(labelOf(e)) === norm(t.label)));
-    if (t.aria) c.push(...q(t.tag).filter((e) => e.getAttribute('aria-label') === t.aria));
-    if (t.placeholder) c.push(...q(t.tag).filter((e) => e.getAttribute('placeholder') === t.placeholder));
-    if (t.text) c.push(...q(t.tag).filter((e) => norm(textOf(e)) === norm(t.text)));
+    if (t.label) c.push(...q(tag).filter((e) => norm(labelOf(e)) === norm(t.label)));
+    if (t.aria) c.push(...q(tag).filter((e) => e.getAttribute('aria-label') === t.aria));
+    if (t.placeholder) c.push(...q(tag).filter((e) => e.getAttribute('placeholder') === t.placeholder));
+    if (t.text) c.push(...q(tag).filter((e) => norm(textOf(e)) === norm(t.text)));
     if (t.css) c.push(...q(t.css));
-    return c.find((e) => e && e.tagName.toLowerCase() === t.tag && visible(e)
+    // tag "*": a button known only by its text (added by hand, e.g. the "تأكيد" of Aman's card review box).
+    return c.find((e) => e && (t.tag === '*' || e.tagName.toLowerCase() === t.tag) && visible(e)
       && (!t.type || (e.type || '') === t.type)
       && (t.value === undefined || e.value === t.value)) || null;
   }
@@ -167,6 +169,12 @@
 
   function removeOverlay() { host?.remove(); host = root = pop = popFor = null; badges.clear(); }
 
+  // New steps go where the panel's "زوّد هنا" marker is (editing a saved recipe), else at the end.
+  function addStep(t, step) {
+    if (Number.isInteger(t.insertAt) && t.insertAt >= 0 && t.insertAt <= t.steps.length) t.steps.splice(t.insertAt++, 0, step);
+    else t.steps.push(step);
+  }
+
   const stepFor = (el) => {
     const key = locKey(pagePath(), locate(el));
     return teach?.steps.find((s) => s.kind === 'fill' && s.key === key);
@@ -181,7 +189,7 @@
       const i = t.steps.findIndex((s) => s.kind === 'fill' && s.key === key);
       if (!source) { if (i >= 0) t.steps.splice(i, 1); return t; }
       const step = { kind: 'fill', key, page, target, source };
-      if (i >= 0) t.steps[i] = step; else t.steps.push(step);
+      if (i >= 0) t.steps[i] = step; else addStep(t, step);
       return t;
     });
   }
@@ -364,7 +372,7 @@
       if (!t) return;
       const last = [...t.steps].reverse().find((s) => s.kind === 'page');
       if (last && last.page === page) return;
-      t.steps.push({ kind: 'page', page, url: location.href, title: clean(document.title, 60) });
+      addStep(t, { kind: 'page', page, url: location.href, title: clean(document.title, 60) });
       return t;
     });
   }
@@ -390,12 +398,12 @@
       if (kind === 'gate') {
         const b = el.closest?.(CLICK_SEL) || el;
         const target = locate(b, 'click');
-        update('teach', (t) => { if (!t) return; t.steps.push({ kind: 'click', key: locKey(pagePath(), target), page: pagePath(), target, gate: true }); t.pick = null; return t; });
+        update('teach', (t) => { if (!t) return; addStep(t, { kind: 'click', key: locKey(pagePath(), target), page: pagePath(), target, gate: true }); t.pick = null; return t; });
         return;
       }
       update('teach', (t) => {
         if (!t) return;
-        t.steps.push({ kind, page: pagePath(), target: locate(el, 'text'), sample: textOf(el) });
+        addStep(t, { kind, page: pagePath(), target: locate(el, 'text'), sample: textOf(el) });
         t.pick = null;
         return t;
       });
@@ -432,7 +440,7 @@
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
       }
     }
-    update('teach', (t) => { if (!t) return; t.steps.push({ kind: 'click', key, page, target, gate }); return t; });
+    update('teach', (t) => { if (!t) return; addStep(t, { kind: 'click', key, page, target, gate }); return t; });
   }, true);
 
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePop(); }, true);
