@@ -81,6 +81,8 @@ return [
         // Owner 2026-11-18: a customer who answers within this many seconds of the bot's last message
         // is answered first (whatsapp:process-jobs).
         'hot_reply_seconds' => env('AGENT_TURNS_HOT_REPLY_SECONDS', 60),
+        // Owner 2026-11-18: messages younger than this are "new" and answered before older ones.
+        'new_message_minutes' => env('AGENT_TURNS_NEW_MESSAGE_MINUTES', 30),
         // AI down (quota, rate limit): how long a turn keeps retrying, once
         // a minute, before giving up. No handoff - staff cannot fix it.
         'outage_retry_minutes' => env('AGENT_TURNS_OUTAGE_RETRY_MINUTES', 720),
@@ -97,6 +99,11 @@ return [
         // customers a day per number (and 150 an hour, so the day is not spent in one burst).
         'max_customers_per_hour' => env('AGENT_MAX_CUSTOMERS_PER_HOUR', 150),
         'max_customers_per_day' => env('AGENT_MAX_CUSTOMERS_PER_DAY', 1500),
+        // Owner 2026-11-18: a number back from a ban uses half its caps until the date ("93:2026-11-28,95:...").
+        // Kept here, not in wa_limit_level, which whatsapp:watch-sessions overwrites from WhatsApp.
+        'warmup_bots' => collect(explode(',', (string) env('AGENT_WARMUP_BOTS', '93:2026-11-28')))
+            ->map(fn ($p) => explode(':', trim($p), 2))->filter(fn ($p) => count($p) === 2 && is_numeric($p[0]))
+            ->mapWithKeys(fn ($p) => [(int) $p[0] => $p[1]])->all(),
     ],
 
     'reply' => [
