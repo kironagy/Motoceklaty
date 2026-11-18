@@ -222,7 +222,7 @@ $('teachSave').onclick = async () => {
 };
 
 // ---------- batch: pull every new request, then upload them one by one ----------
-const ACTIVE_RUN = ['starting', 'running', 'review', 'approved', 'blocked'];
+const ACTIVE_RUN = ['starting', 'running', 'review', 'approved', 'blocked', 'restart'];
 const FINAL = ['done', 'stopped', 'resolved', 'error'];
 const STATE_LABEL = { released: 'اتوقف', waiting: 'مستني', working: 'شغال عليه', uploaded: 'اترفع', rejected_before: 'مرفوض قبل كده', error: 'مشكلة', stopped: 'اتوقف', skipped: 'اتساب', held: 'اتوقف في موتوجيت', canceled: 'اتلغى في موتوجيت' };
 
@@ -336,7 +336,22 @@ async function finishBatch() {
 
 // A finished run, once recorded on the server, closes its batch item and moves on.
 let handled = '';
+// Aman's page fell over (Cloudflare 524): open its first page again and start this request over, up to 3 times.
+let restarting = '';
+async function restartIfDown(run) {
+  if (run?.status !== 'restart') return;
+  const key = run.uploadId + ':' + run.restarts;
+  if (restarting === key) return;
+  restarting = key;
+  if (run.restarts > 3) return setRun({ status: 'blocked', problem: true, blockMessage: 'صفحة أمان وقعت ' + run.restarts + ' مرات (' + run.blockMessage + '). جرّب كمان شوية ودوس "إعادة ملء الطلب"' });
+  await new Promise((r) => setTimeout(r, 5000));
+  const { run: cur } = await store.get('run');
+  if (cur?.uploadId !== run.uploadId || cur.status !== 'restart') return;
+  await launch({ ...cur, i: 0, log: [], dialogs: [], hunt: null, override: {}, problemRow: null, noRef: false, approvedAt: null, amanRef: '', amanMessage: '' });
+}
+
 async function onRunChange(run) {
+  restartIfDown(run);
   if (!run?.batchItemId || !FINAL.includes(run.status) || !(run.reported || run.reportError)) return;
   const key = run.uploadId + ':' + run.status;
   if (handled === key) return;
@@ -449,6 +464,7 @@ $('skipStep').onclick = async () => {
 
 const STATUS = {
   starting: () => 'بيفتح صفحة أمان…',
+  restart: (r) => 'صفحة أمان وقعت (' + r.blockMessage + ')، هفتحها تاني وأبدأ الطلب من الأول (مرة ' + r.restarts + ' من 3)…',
   running: (r) => `بيملا… خطوة ${r.i + 1} من ${r.recipe.steps.length}`,
   review: (r) => `وقف عند "${r.gateText}". راجع الجدول وصفحة أمان، وبعدين وافق.`,
   approved: () => 'بيحفظ…',
@@ -465,7 +481,7 @@ function renderRun(run) {
   const name = run.card?.full_name || run.order?.applicant_name || '';
   $('curTitle').textContent = `طلب #${run.requestId} — ${run.typeLabel || AMAN.typeLabel(run.type)}`;
   const info = $('curInfo'); info.innerHTML = '';
-  for (const [k, v] of [['العميل', name], ['الرقم القومي', run.order?.applicant_national_id || run.card?.national_id], ['النوع', run.card?.gender], ['الاسم من', run.card?.name_source === 'card' ? 'البطاقة' : 'السيستم (البطاقة ماتقريتش)']]) {
+  for (const [k, v] of [['العميل', name], ['الرقم القومي', run.order?.applicant_national_id || run.card?.national_id], ['سعر القسط المطلوب', price(run.order)], ['النوع', run.card?.gender], ['الاسم من', run.card?.name_source === 'card' ? 'البطاقة' : 'السيستم (البطاقة ماتقريتش)']]) {
     if (!v) continue;
     const b = document.createElement('b'); b.textContent = k; const s = document.createElement('span'); s.textContent = v; info.append(b, s);
   }
@@ -506,6 +522,13 @@ function short(v) {
   return t.replace(/\S{26,}/g, (w) => /\.(jpe?g|png|webp|gif|pdf)$/i.test(w) ? 'ملف …' + w.slice(-10) : w.slice(0, 12) + '…' + w.slice(-8));
 }
 
+/** The installment the customer asked for: price, months, down payment. */
+function price(o) {
+  if (!o?.machine_installment_price) return '';
+  const n = (v) => Number(v).toLocaleString('en-US');
+  return n(o.machine_installment_price) + ' جنيه' + (o.months ? ' — ' + o.months + ' شهر' : '') + (Number(o.deposit) ? ' — مقدم ' + n(o.deposit) : '');
+}
+
 // Tap a photo: it opens over the panel, full width; tap it again for double size.
 const CARD_KEYS = ['applicant_id_image', 'applicant_id_back_image', 'guarantor_id_image', 'guarantor_id_back_image'];
 function zoom(url) {
@@ -527,21 +550,22 @@ async function renderFiles(run) {
   filesFor = key;
   fileUrls.splice(0).forEach((u) => URL.revokeObjectURL(u));
   const box = $('thumbs'); box.innerHTML = '';
+  // Every photo of the request (owner 2026-11-18), the ones the recipe uploads first, all shown big.
   const seen = new Set(), items = [];
-  for (const st of run.recipe?.steps || []) {
-    const src = st.source;
-    if (st.kind !== 'fill' || src?.type !== 'file') continue;
-    const urls = run.order?.[src.key];
+  const add = (key, label) => {
+    const urls = run.order?.[key];
     for (const url of (Array.isArray(urls) ? urls : urls ? [urls] : [])) {
       if (seen.has(url)) continue;
       seen.add(url);
-      items.push({ url, big: CARD_KEYS.includes(src.key), label: (st.target?.label || AMAN.fieldLabel(src.key)).replace(/[:：\s]+$/, '') });
+      items.push({ url, card: CARD_KEYS.includes(key), label: String(label || AMAN.fieldLabel(key)).replace(/[:：\s]+$/, '') });
     }
-  }
+  };
+  for (const st of run.recipe?.steps || []) if (st.kind === 'fill' && st.source?.type === 'file') add(st.source.key, st.target?.label);
+  for (const [k, l] of AMAN.FILE_FIELDS) add(k, l);
   $('files').hidden = !items.length;
-  items.sort((a, b) => b.big - a.big);
+  items.sort((a, b) => b.card - a.card);
   for (const it of items) {
-    const card = document.createElement('div'); card.className = 'thumb' + (it.big ? ' big' : '');
+    const card = document.createElement('div'); card.className = 'thumb big';
     const pic = document.createElement('a'); pic.className = 'pic'; pic.href = '#';
     const cap = document.createElement('div'); cap.className = 'cap'; cap.textContent = it.label + ' …';
     const dl = document.createElement('a'); dl.className = 'dl'; dl.textContent = 'تحميل'; dl.hidden = true;
@@ -554,7 +578,8 @@ async function renderFiles(run) {
       const u = URL.createObjectURL(new Blob([buf], { type: r.mime })); fileUrls.push(u);
       const ext = (r.mime.split('/')[1] || 'jpg').replace('jpeg', 'jpg');
       pic.onclick = (e) => { e.preventDefault(); zoom(u); };
-      if (it.big) { const img = document.createElement('img'); img.src = u; img.alt = it.label; pic.append(img); } else pic.style.backgroundImage = `url("${u}")`;
+      if (r.mime.startsWith('image/')) { const img = document.createElement('img'); img.src = u; img.alt = it.label; pic.append(img); pic.onclick = (e) => { e.preventDefault(); zoom(u); }; }
+      else { pic.textContent = 'ملف ' + (ext.toUpperCase()) + ' — دوس تفتحه'; pic.href = u; pic.target = '_blank'; pic.onclick = null; pic.className = 'pic doc'; }
       cap.textContent = it.label;
       dl.href = u; dl.download = `طلب-${run.requestId}-${it.label.replace(/[\\/:*?"<>|]/g, '')}.${ext}`; dl.hidden = false;
     });

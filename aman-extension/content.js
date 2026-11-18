@@ -616,6 +616,14 @@
     return '';
   }
 
+  // Cloudflare's error page instead of Aman's (e.g. "A timeout occurred", Error code 524).
+  function portalDown() {
+    const t = document.title + ' ' + (document.body?.innerText || '').slice(0, 1500);
+    if (!/cloudflare/i.test(t)) return '';
+    const m = t.match(/Error\s*code\s*(5\d\d)/i) || t.match(/\b(52[0-9]|50[234])\b/);
+    return m ? 'Cloudflare ' + m[1] : /timeout occurred|bad gateway|service unavailable|origin.*(down|unreachable)/i.test(t) ? 'Cloudflare' : '';
+  }
+
   // After a click: did the portal pop up a message?
   async function dialogAfter(since) {
     await sleep(900);
@@ -701,7 +709,14 @@
 
     if (s.type === 'file') {
       const v = run.order?.[s.key];
-      if (empty(v)) return fail('الطلب مافيهوش ملف: ' + AMAN.fieldLabel(s.key), row);
+      if (empty(v)) {
+        // Owner 2026-11-18: a photo the request lacks (e.g. no price offer) is left out, the run goes on.
+        // Only the customer's own card photos are a must.
+        if (['applicant_id_image', 'applicant_id_back_image'].includes(s.key)) return fail('الطلب مافيهوش ملف: ' + AMAN.fieldLabel(s.key), row);
+        row.expected = 'مافيش في الطلب'; row.actual = 'اتساب'; row.ok = true;
+        mark(el, '#a8a29e');
+        return advance(row);
+      }
       const urls = Array.isArray(v) ? v : [v];
       let files;
       try { files = await buildFiles(el.multiple ? urls : urls.slice(0, 1)); } catch (e) { return fail(e.message, row); }
@@ -888,6 +903,14 @@
           continue;
         }
         if (run.status !== 'running') break;
+        if (portalDown()) {
+          // Owner 2026-11-18: Aman's server timed out (Cloudflare 524 page): the panel opens Aman's first
+          // page again and starts the request over. Not after save was pressed: it may have gone through.
+          await update('run', (r) => r.approvedAt
+            ? { ...r, status: 'blocked', problem: true, blockMessage: 'صفحة أمان وقعت (' + portalDown() + ') بعد ما دوست حفظ. شوف في أمان الطلب اترفع ولا لأ قبل ما تعيده' }
+            : { ...r, status: 'restart', restarts: (r.restarts || 0) + 1, blockMessage: portalDown() });
+          break;
+        }
         const rejection = amanRejection();
         if (rejection) { await rejectedBefore(rejection); break; }
         const step = run.recipe.steps[run.i];
