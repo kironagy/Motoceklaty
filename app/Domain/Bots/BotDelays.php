@@ -23,7 +23,7 @@ class BotDelays
     // When the customer started waiting: his first message of the turn sent after the bot last wrote
     // to him. Owner 2026-11-18: a message already answered by another reply (17/11 09:04, answered
     // 11:05) stayed on a later turn and showed a 32-hour wait for a reply that took 38 seconds.
-    private const FIRST = "coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = j.id and m0.created_at > coalesce((select max(o.created_at) from whatsapp_messages o where o.whatsapp_conversation_id = j.whatsapp_conversation_id and o.direction = 'outgoing' and (o.turn_id is null or o.turn_id <> j.id) and o.created_at < coalesce(j.processed_at, now())), '1970-01-01')), (select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = j.id), j.created_at)";
+    private const FIRST = "coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = j.id and m0.created_at > coalesce((select max(o.created_at) from whatsapp_messages o where o.whatsapp_conversation_id = j.whatsapp_conversation_id and o.direction = 'outgoing' and (o.turn_id is null or o.turn_id <> j.id) and o.created_at < coalesce(j.processed_at, '9999-12-31')), '1970-01-01')), (select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = j.id), j.created_at)";
 
     /** @return list<array{level: string, title: string, detail: string}> what holds this bot back now, worst first */
     public function blockers(WhatsappBot $bot): array

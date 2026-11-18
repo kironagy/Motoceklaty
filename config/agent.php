@@ -79,8 +79,8 @@ return [
         // transcription was still on its way. A failed transcription does not wait at all.
         'transcript_wait_seconds' => env('AGENT_TURNS_TRANSCRIPT_WAIT_SECONDS', 90),
         // Owner 2026-11-18: a customer who answers within this many seconds of the bot's last message
-        // is answered first (whatsapp:process-jobs).
-        'hot_reply_seconds' => env('AGENT_TURNS_HOT_REPLY_SECONDS', 60),
+        // is answered first (whatsapp:process-jobs). Two minutes: typing an answer often takes over one.
+        'hot_reply_seconds' => env('AGENT_TURNS_HOT_REPLY_SECONDS', 120),
         // AI down (quota, rate limit): how long a turn keeps retrying, once
         // a minute, before giving up. No handoff - staff cannot fix it.
         'outage_retry_minutes' => env('AGENT_TURNS_OUTAGE_RETRY_MINUTES', 720),

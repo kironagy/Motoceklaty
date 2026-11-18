@@ -562,6 +562,13 @@ class ProcessWhatsappMessageJobs extends Command
                     ->filter(fn ($b) => $b->activeLimit() !== null)->pluck('id'))
                 ->unique()->values()->all();
 
+            // when the customer started waiting on this turn (his first message in it)
+            $first = 'coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at)';
+            // numbers whose next customer turn is the longest waiting one (the last was the newest)
+            $oldestNext = \App\Models\WhatsappBot::pluck('id')
+                ->filter(fn ($id) => \Illuminate\Support\Facades\Cache::get('turn_pick_oldest_'.$id))
+                ->map(fn ($id) => (int) $id)->values()->all();
+
             $job = DB::table('whatsapp_message_jobs')
                 ->when($capped !== [], fn ($q) => $q->whereNotIn('whatsapp_bot_id', $capped))
                 ->when($busyBotIds !== [], fn ($q) => $q->whereNotIn('whatsapp_bot_id', $busyBotIds))
@@ -614,18 +621,28 @@ class ProcessWhatsappMessageJobs extends Command
                 // Owner 2026-11-18 (second word, replaces "longest waiting first"): NEW messages first, in
                 // the order they came - two customers who wrote at the same time are answered first come
                 // first served - and the old ones only when no new customer is waiting.
-                // 1) a customer who answered the bot within a minute of its last message (live chat),
-                ->orderByRaw("exists (select 1 from whatsapp_messages o where o.whatsapp_conversation_id = whatsapp_message_jobs.whatsapp_conversation_id"
+                // Owner 2026-11-18 (third word, replaces "in the order they came"): with ~90 customers an
+                // hour and a backlog, first-come-first-served left someone who wrote now 3 hours behind.
+                // Now one NEW (the latest to write) and one OLD (waiting longest) by turns, per number, so
+                // a customer who writes now is answered within a turn or two and the waiting ones still move.
+                // 1) a customer who answered the bot right after its last message (live chat) - the bot
+                //    stays with him until the conversation ends,
+                ->select('whatsapp_message_jobs.*')
+                ->selectRaw("exists (select 1 from whatsapp_messages o where o.whatsapp_conversation_id = whatsapp_message_jobs.whatsapp_conversation_id"
                     ." and o.direction = 'outgoing' and o.delivery_status = 'sent'"
-                    ." and o.created_at between coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at) - interval ? second and coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at)"
-                    ." and o.created_at >= now() - interval 30 minute) desc",
-                    [(int) config('agent.turns.hot_reply_seconds', 60)])
+                    ." and o.created_at between {$first} - interval ? second and {$first}"
+                    // the app's clock, not MySQL's now(): the DB runs an hour behind Cairo (2026-11-18)
+                    ." and o.created_at >= ?) as is_hot",
+                    [(int) config('agent.turns.hot_reply_seconds', 120), now()->subMinutes(30)->toDateTimeString()])
+                ->orderByDesc('is_hot')
                 // 2) then every customer's own message before the old re-answers (whatsapp:answer-waiting
                 //    backlog). Not by age: with a backlog over half an hour a fixed "new" window turned
                 //    waiting customers into "old" and put 3 o'clock re-answers ahead of them (2026-11-18),
                 ->orderByRaw("coalesce(payload, '') like '%\"answer_waiting%'")
-                // 3) each group in the order the customers wrote.
-                ->orderByRaw("coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at)")
+                // 3) the latest to write or the longest waiting, by turns for each number.
+                ->when($oldestNext !== [], fn ($q) => $q->orderByRaw(
+                    'case when whatsapp_bot_id in ('.implode(',', $oldestNext).") then unix_timestamp({$first}) else -unix_timestamp({$first}) end"),
+                    fn ($q) => $q->orderByRaw("unix_timestamp({$first}) desc"))
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->first();
@@ -644,6 +661,13 @@ class ProcessWhatsappMessageJobs extends Command
                 ]);
 
             $job->attempts = ((int) $job->attempts) + 1;
+
+            // a customer turn picked by the new/old turns (not live chat, not a re-answer): flip the number
+            if (!$job->is_hot && !str_contains((string) ($job->payload ?? ''), 'answer_waiting') && $job->whatsapp_bot_id) {
+                $key = 'turn_pick_oldest_'.$job->whatsapp_bot_id;
+                \Illuminate\Support\Facades\Cache::put($key, !\Illuminate\Support\Facades\Cache::get($key, false), now()->addDay());
+            }
+            unset($job->is_hot);
 
             if (str_contains((string) ($job->payload ?? ''), 'answer_waiting')) {
                 $gap = random_int(60, 65);
