@@ -201,9 +201,12 @@ HTML
         // A company (Aman) employee counts only his companies' requests (owner 2026-11-16).
         $user = Auth::user();
         $companies = $user?->isAmaanRestricted() ? ($user->companyNames() ?: ['__none__']) : null;
-        $scope = fn ($q) => $q->when($companies !== null, fn ($q) => $q->whereIn('installment_type', $companies)->where('request_type', '!=', 'fake'));
+        // Owner 2026-11-18: fake requests are not counted (108 of the 110 "طلب جديد" were fake, and
+        // the requests list opens on the main requests) - they have their own tab.
+        $scope = fn ($q) => $q->where('request_type', '!=', 'fake')
+            ->when($companies !== null, fn ($q) => $q->whereIn('installment_type', $companies));
 
-        $counts = Cache::remember('dashboard:requests-status-counts'.($companies !== null ? ':'.md5(implode('|', $companies)) : ''), now()->addMinute(), function () use ($scope): array {
+        $counts = Cache::remember('dashboard:requests-status-counts:v2'.($companies !== null ? ':'.md5(implode('|', $companies)) : ''), now()->addMinute(), function () use ($scope): array {
             $byStatus = InstallmentRequest::query()->tap($scope)
                 ->selectRaw('status, COUNT(*) as aggregate')
                 ->groupBy('status')
@@ -233,7 +236,7 @@ HTML
         $canceled = $counts['canceled'] ?? 0;
 
         return [
-            $this->card('إجمالي الطلبات', $total, 'كل الطلبات المسجلة على السيستم', 'heroicon-o-clipboard-document-list', 'total', [2, 5, 8, 6, 12, 10, 15]),
+            $this->card('إجمالي الطلبات', $total, 'كل الطلبات من غير الفيك', 'heroicon-o-clipboard-document-list', 'total', [2, 5, 8, 6, 12, 10, 15]),
 
             $this->card('انتظار', $new, 'طلبات في الانتظار', 'heroicon-o-clock', 'waiting'),
             $this->card('طلب جديد', $newRequest, 'طلبات جديدة', 'heroicon-o-sparkles', 'new-request'),

@@ -2153,8 +2153,10 @@ Forms\Components\Section::make('الملاحظات')
                     ->label('⚠️ فيه تنبيه على مستند من الفورم')
                     ->query(fn ($query) => $query->whereNotNull('form_link_id')
                         ->whereIn('application_id', \App\Models\ApplicationDocument::where('status', 'needs_review')->select('application_id'))),
+                // multiple: the home page's "جديدة" opens both new statuses (طلب جديد + انتظار), owner 2026-11-18
                 Tables\Filters\SelectFilter::make('status')
                     ->label('حالة الطلب')
+                    ->multiple()
                     ->options(static::STATUS_LABELS),
 
                 // ⭐⭐⭐ الفلتر الجديد ⭐⭐⭐
@@ -2473,6 +2475,41 @@ Tables\Actions\Action::make('force_delete')
         }
     })
 
+    ->deselectRecordsAfterCompletion(),
+
+               // Owner 2026-11-18: change the status of the selected requests at once (e.g. انتظار -> طلب جديد).
+               // One by one through the model, so the activity log and the customer's status message run.
+               Tables\Actions\BulkAction::make('bulk_change_status')
+    ->label('غيّر حالة الطلبات')
+    ->icon('heroicon-o-arrow-path-rounded-square')
+    ->color('primary')
+    ->visible(fn (): bool => (bool) (Auth::user()?->is_hitler || Auth::user()?->is_admin || Auth::user()?->is_super_admin))
+    ->form([
+        Forms\Components\Select::make('status')
+            ->label('الحالة الجديدة')
+            ->options(static::STATUS_LABELS)
+            ->default('new_request')
+            ->required(),
+    ])
+    ->modalHeading('تغيير حالة الطلبات المحددة')
+    ->modalSubmitActionLabel('غيّر')
+    ->action(function ($records, array $data): void {
+        $changed = 0;
+
+        foreach ($records as $record) {
+            if ($record->trashed() || $record->status === $data['status']) {
+                continue;
+            }
+
+            $record->update(['status' => $data['status']]);
+            $changed++;
+        }
+
+        Notification::make()
+            ->title("اتغيّرت حالة {$changed} طلب إلى \"".(static::STATUS_LABELS[$data['status']] ?? $data['status']).'"')
+            ->success()
+            ->send();
+    })
     ->deselectRecordsAfterCompletion(),
 
                Tables\Actions\BulkAction::make('send_to_deleted')

@@ -53,6 +53,8 @@ class StaffRequestsOverview extends Widget
         */
 
         $rows = InstallmentRequest::query()
+            // Owner 2026-11-18: the home page shows no fake requests.
+            ->where('request_type', '!=', 'fake')
             ->whereBetween('created_at', [
                 $startOfMonth,
                 $endOfMonth,

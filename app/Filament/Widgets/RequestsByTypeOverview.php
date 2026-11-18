@@ -95,7 +95,9 @@ class RequestsByTypeOverview extends Widget
                     'url' => DeliveryResource::getUrl('index', [
                         'activeTab' => $type,
                         'tableFilters' => [
-                            'status' => ['value' => $row['filter']],
+                            // every status the count adds up: "جديدة" is طلب جديد + انتظار (owner 2026-11-18,
+                            // the link opened طلب جديد alone and showed nothing)
+                            'status' => ['values' => $row['statuses']],
                             'created_month' => ['month' => $start->format('Y-m')],
                         ],
                     ]),
