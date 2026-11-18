@@ -20,7 +20,10 @@ class BotDelays
     private const STALE_MINUTES = 10;
 
     /** The time a turn's customer started waiting: his first message in it, else the turn itself. */
-    private const FIRST = 'coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = j.id), j.created_at)';
+    // When the customer started waiting: his first message of the turn sent after the bot last wrote
+    // to him. Owner 2026-11-18: a message already answered by another reply (17/11 09:04, answered
+    // 11:05) stayed on a later turn and showed a 32-hour wait for a reply that took 38 seconds.
+    private const FIRST = "coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = j.id and m0.created_at > coalesce((select max(o.created_at) from whatsapp_messages o where o.whatsapp_conversation_id = j.whatsapp_conversation_id and o.direction = 'outgoing' and (o.turn_id is null or o.turn_id <> j.id) and o.created_at < coalesce(j.processed_at, now())), '1970-01-01')), (select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = j.id), j.created_at)";
 
     /** @return list<array{level: string, title: string, detail: string}> what holds this bot back now, worst first */
     public function blockers(WhatsappBot $bot): array
@@ -55,10 +58,11 @@ class BotDelays
 
         // The hourly / daily customer caps (config agent.delivery), with a warning or warm-up factor.
         $factor = WhatsappBot::limitFactor($limit);
-        $warmUntil = config('agent.delivery.warmup_bots')[$bot->id] ?? null;
-        if ($warmUntil && now()->lt(Carbon::parse($warmUntil)->endOfDay())) {
-            $factor = min($factor, 0.5);
-            $add('info', 'فترة تسخين بعد الحظر', 'شغال بنص الحدود لحد '.Carbon::parse($warmUntil)->format('d/m').'.');
+        $warm = config('agent.delivery.warmup_bots')[$bot->id] ?? null;
+        if ($warm && now()->lt(Carbon::parse($warm['until'])->endOfDay())) {
+            $factor = min($factor, $warm['factor']);
+            $share = match (true) { $warm['factor'] <= 0.25 => 'بربع', $warm['factor'] <= 0.5 => 'بنص', $warm['factor'] <= 0.75 => 'بتلات تربع', default => 'بـ'.round($warm['factor'] * 100).'٪ من' };
+            $add('info', 'فترة تسخين بعد الحظر', "شغال {$share} الحدود لحد ".Carbon::parse($warm['until'])->format('d/m').'.');
         }
         foreach ([['hour', 'max_customers_per_hour', 'في الساعة', now()->subHour()], ['day', 'max_customers_per_day', 'في اليوم', now()->subDay()]] as [, $key, $per, $since]) {
             $cap = (int) config('agent.delivery.'.$key, 0);

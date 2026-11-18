@@ -97,11 +97,14 @@ return [
         // customers a day per number (and 150 an hour, so the day is not spent in one burst).
         'max_customers_per_hour' => env('AGENT_MAX_CUSTOMERS_PER_HOUR', 150),
         'max_customers_per_day' => env('AGENT_MAX_CUSTOMERS_PER_DAY', 1500),
-        // Owner 2026-11-18: a number back from a ban uses half its caps until the date ("93:2026-11-28,95:...").
+        // Owner 2026-11-18: a number back from a ban uses part of its caps until the date
+        // ("93:2026-11-28:0.75,95:2026-12-01" - the factor defaults to half).
         // Kept here, not in wa_limit_level, which whatsapp:watch-sessions overwrites from WhatsApp.
-        'warmup_bots' => collect(explode(',', (string) env('AGENT_WARMUP_BOTS', '93:2026-11-28')))
-            ->map(fn ($p) => explode(':', trim($p), 2))->filter(fn ($p) => count($p) === 2 && is_numeric($p[0]))
-            ->mapWithKeys(fn ($p) => [(int) $p[0] => $p[1]])->all(),
+        // Owner 2026-11-18 (later): 93 got ~90 new customers an hour and half caps (75) left them
+        // waiting 3 hours - three quarters (112) until the warm-up ends.
+        'warmup_bots' => collect(explode(',', (string) env('AGENT_WARMUP_BOTS', '93:2026-11-28:0.75')))
+            ->map(fn ($p) => explode(':', trim($p), 3))->filter(fn ($p) => count($p) >= 2 && is_numeric($p[0]))
+            ->mapWithKeys(fn ($p) => [(int) $p[0] => ['until' => $p[1], 'factor' => min(1.0, max(0.25, (float) ($p[2] ?? 0.5)))]])->all(),
     ],
 
     'reply' => [

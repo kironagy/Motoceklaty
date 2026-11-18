@@ -527,8 +527,10 @@ class SnapshotService
             return ['if_unavailable' => ['rule' => 'no_salary_slip_needed', 'occupation_on_id' => $occupation]];
         }
 
+        // Owner 2026-11-18: a job on the ID no longer makes the slip compulsory - no slip = the
+        // insurance print, and with neither he applies with his ID only, like everyone else.
         if ($occupation !== null) {
-            return ['if_unavailable' => ['rule' => 'insurance_print_only', 'occupation_on_id' => $occupation]];
+            return ['if_unavailable' => ['rule' => 'insurance_print_then_card_only', 'occupation_on_id' => $occupation]];
         }
 
         if (in_array('salary_slip', $workPapers, true)) {

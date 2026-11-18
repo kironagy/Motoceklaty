@@ -79,9 +79,10 @@ const HARD_SWITCH_MIN_MS = 20000;
 const HARD_SWITCH_MAX_MS = 30000;
 const SAME_CHAT_MIN_MS = Math.max(HARD_SAME_CHAT_MIN_MS, Number(process.env.SEND_SAME_CHAT_MIN_MS) || 0);
 const SAME_CHAT_MAX_MS = Math.max(HARD_SAME_CHAT_MAX_MS, SAME_CHAT_MIN_MS, Number(process.env.SEND_SAME_CHAT_MAX_MS) || 0);
-// default 40-60 s between customers for the first days (owner 2026-11-18), then lowered by env
-const SWITCH_MIN_MS = Math.max(HARD_SWITCH_MIN_MS, Number(process.env.SEND_SWITCH_MIN_MS) || 40000);
-const SWITCH_MAX_MS = Math.max(HARD_SWITCH_MAX_MS, SWITCH_MIN_MS, Number(process.env.SEND_SWITCH_MAX_MS) || 60000);
+// default 30-45 s between customers (owner 2026-11-18: 40-60 s left ~90 new customers an hour waiting
+// 3 hours on bot 93; "faster, but not enough to get banned"), env can only slow it
+const SWITCH_MIN_MS = Math.max(HARD_SWITCH_MIN_MS, Number(process.env.SEND_SWITCH_MIN_MS) || 30000);
+const SWITCH_MAX_MS = Math.max(HARD_SWITCH_MAX_MS, SWITCH_MIN_MS, Number(process.env.SEND_SWITCH_MAX_MS) || 45000);
 // a bubble of the same reply counts as "same chat" only this soon after the last send there
 const SAME_CHAT_WINDOW_MS = 5 * 60000;
 const SEND_MAX_PER_MINUTE = 6;

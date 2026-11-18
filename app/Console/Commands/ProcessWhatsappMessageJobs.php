@@ -527,9 +527,9 @@ class ProcessWhatsappMessageJobs extends Command
                 $factor = \App\Models\WhatsappBot::whereNotNull('wa_limit_level')->get()
                     ->mapWithKeys(fn ($b) => [$b->id => \App\Models\WhatsappBot::limitFactor($b->activeLimit())]);
                 // Owner 2026-11-18: a number back from a ban warms up on half its caps (config agent.delivery.warmup_bots).
-                foreach ((array) config('agent.delivery.warmup_bots', []) as $botId => $until) {
-                    if (now()->lt(\Illuminate\Support\Carbon::parse($until)->endOfDay())) {
-                        $factor[$botId] = min($factor[$botId] ?? 1.0, 0.5);
+                foreach ((array) config('agent.delivery.warmup_bots', []) as $botId => $warm) {
+                    if (now()->lt(\Illuminate\Support\Carbon::parse($warm['until'])->endOfDay())) {
+                        $factor[$botId] = min($factor[$botId] ?? 1.0, $warm['factor']);
                     }
                 }
                 $over = fn ($limit) => fn ($n, $botId) => $limit > 0 && $n >= max(1, (int) floor($limit * ($factor[$botId] ?? 1.0)));
