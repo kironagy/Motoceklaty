@@ -601,6 +601,15 @@ class ProcessWhatsappMessageJobs extends Command
                 // Owner 2026-11-18 (replaces "a customer writing now first", 2026-11-10): whoever has
                 // waited longest goes first, and every message he sent while waiting moves him up two
                 // minutes (up to 10 messages) - a customer who wrote a lot is not left behind a new one.
+                // Owner 2026-11-18: a customer who answered the bot within a minute of its last message
+                // is in a live conversation - he goes before everyone else.
+                ->orderByRaw("exists (select 1 from whatsapp_messages o where o.whatsapp_conversation_id = whatsapp_message_jobs.whatsapp_conversation_id"
+                    ." and o.direction = 'outgoing' and o.delivery_status = 'sent'"
+                    ." and o.created_at between coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at) - interval ? second"
+                    ." and coalesce((select min(m1.created_at) from whatsapp_messages m1 where m1.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at)"
+                    // only a conversation going on now, not an old one that once was quick
+                    ." and o.created_at >= now() - interval 30 minute) desc",
+                    [(int) config('agent.turns.hot_reply_seconds', 60)])
                 ->orderByRaw("coalesce((select min(m.created_at) from whatsapp_messages m where m.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at)"
                     ." - interval (2 * least(10, (select count(*) from whatsapp_messages m2 where m2.turn_id = whatsapp_message_jobs.id))) minute")
                 ->orderBy('id')

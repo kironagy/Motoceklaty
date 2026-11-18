@@ -11,7 +11,7 @@ const tmpFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cb-')), '
 
 test('a customer is saved once, with his WhatsApp name, before the first reply', async () => {
     const file = tmpFile();
-    const book = createContactBook({ file, log: quiet });
+    const book = createContactBook({ file, log: quiet, enabled: true });
     const calls = [];
     const sock = { addOrEditContact: async (jid, contact) => calls.push([jid, contact]) };
 
@@ -21,11 +21,11 @@ test('a customer is saved once, with his WhatsApp name, before the first reply',
 
     assert.deepStrictEqual(calls, [['201012345678@s.whatsapp.net', { fullName: 'أحمد علي', firstName: 'أحمد', saveOnPrimaryAddressbook: true, pnJid: '201012345678@s.whatsapp.net' }]]);
     // a restart does not save him again
-    assert.strictEqual(createContactBook({ file, log: quiet }).has(5, '201012345678@s.whatsapp.net'), true);
+    assert.strictEqual(createContactBook({ file, log: quiet, enabled: true }).has(5, '201012345678@s.whatsapp.net'), true);
 });
 
 test('an @lid customer without a name gets one from his number and keeps his lid', async () => {
-    const book = createContactBook({ file: tmpFile(), log: quiet });
+    const book = createContactBook({ file: tmpFile(), log: quiet, enabled: true });
     const calls = [];
     const sock = {
         addOrEditContact: async (jid, contact) => calls.push(contact),
@@ -38,7 +38,7 @@ test('an @lid customer without a name gets one from his number and keeps his lid
 });
 
 test('a failed save never stops the reply and is tried again next time', async () => {
-    const book = createContactBook({ file: tmpFile(), log: quiet });
+    const book = createContactBook({ file: tmpFile(), log: quiet, enabled: true });
     let fail = true;
     const sock = { addOrEditContact: async () => { if (fail) throw new Error('nope'); } };
 
@@ -48,12 +48,12 @@ test('a failed save never stops the reply and is tried again next time', async (
 });
 
 test('groups are never saved', async () => {
-    const book = createContactBook({ file: tmpFile(), log: quiet });
+    const book = createContactBook({ file: tmpFile(), log: quiet, enabled: true });
     assert.strictEqual(await book.ensureSaved({ addOrEditContact: async () => assert.fail() }, 5, '123@g.us'), false);
 });
 
 test('an @lid customer is saved under his phone number from the message, with his name (owner 2026-11-18)', async () => {
-    const book = createContactBook({ file: tmpFile(), log: quiet });
+    const book = createContactBook({ file: tmpFile(), log: quiet, enabled: true });
     const calls = [];
     const sock = { addOrEditContact: async (jid, contact) => calls.push([jid, contact]) };
 
@@ -65,4 +65,9 @@ test('an @lid customer is saved under his phone number from the message, with hi
     assert.strictEqual(calls[0][1].fullName, 'محمود');
     // the reply's own save (by lid alone, mapping unknown) does not save him twice
     assert.strictEqual(await book.ensureSaved(sock, 5, '201055550000@s.whatsapp.net'), false);
+});
+
+test('saving contacts is off unless SAVE_CONTACTS=1 (owner 2026-11-18)', async () => {
+    const book = createContactBook({ file: tmpFile(), log: quiet, enabled: false });
+    assert.strictEqual(await book.ensureSaved({ addOrEditContact: async () => assert.fail() }, 5, '201012345678@s.whatsapp.net'), false);
 });

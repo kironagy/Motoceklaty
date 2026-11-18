@@ -9,7 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 
-function createContactBook({ file, log = console } = {}) {
+function createContactBook({ file, log = console, enabled = process.env.SAVE_CONTACTS === '1' } = {}) {
     let saved = new Set();
     const names = new Map();
 
@@ -61,6 +61,8 @@ function createContactBook({ file, log = console } = {}) {
      * saves), the contact never showed in the phone's address book.
      */
     async function ensureSaved(sock, botId, jid, alt = null) {
+        // Owner 2026-11-18: customers are no longer saved as contacts (SAVE_CONTACTS=1 turns it back on).
+        if (!enabled) return false;
         if (!jid || jid.endsWith('@g.us') || jid.includes('broadcast') || jid.endsWith('@newsletter')) return false;
 
         const isPn = (j) => j && (j.endsWith('@s.whatsapp.net') || j.endsWith('@c.us'));
