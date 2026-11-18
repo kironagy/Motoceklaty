@@ -229,6 +229,9 @@ class BotDelays
 
         return match (true) {
             $e === '' => ['مشكلة من غير تفاصيل', ''],
+            // Owner 2026-11-18: the AI provider's errors showed as "مشكلة تانية".
+            str_contains($e, 'has no available key') => ['الذكاء الاصطناعي موقوف مؤقتاً', 'سيرفر الذكاء الاصطناعي وقع أو رفض الطلبات، فالسيستم وقّف المفتاح نص دقيقة - بيجرّب تاني لوحده.'],
+            str_contains($e, 'connection failed'), str_contains($e, 'call budget exhausted') => ['سيرفر الذكاء الاصطناعي ماردش', 'المزوّد اتأخر أو ماردش خالص - بيجرّب تاني لوحده.'],
             str_contains($e, 'session not found') => ['الرقم ماكانش متوصل وقت الإرسال', 'الرقم اتفصل أو برنامجه اتعمله إعادة تشغيل والرد كان جاهز.'],
             str_contains($e, 'cURL error 52'), str_contains($e, 'Empty reply') => ['برنامج البوت اتعمله إعادة تشغيل وقت الإرسال', 'بيحصل مع التنزيل أو لو البرنامج وقع - الرد بيتعاد.'],
             str_contains($e, 'cURL error 28'), str_contains($e, 'timed out') => ['البوت ماردش في الوقت', 'الإرسال استنى أكتر من اللازم (طابور طويل على الرقم أو الرقم بيعيد الاتصال).'],
