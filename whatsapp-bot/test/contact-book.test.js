@@ -51,3 +51,18 @@ test('groups are never saved', async () => {
     const book = createContactBook({ file: tmpFile(), log: quiet });
     assert.strictEqual(await book.ensureSaved({ addOrEditContact: async () => assert.fail() }, 5, '123@g.us'), false);
 });
+
+test('an @lid customer is saved under his phone number from the message, with his name (owner 2026-11-18)', async () => {
+    const book = createContactBook({ file: tmpFile(), log: quiet });
+    const calls = [];
+    const sock = { addOrEditContact: async (jid, contact) => calls.push([jid, contact]) };
+
+    book.noteName(5, ['999@lid', '201055550000@s.whatsapp.net'], 'محمود');
+    assert.strictEqual(await book.ensureSaved(sock, 5, '999@lid', '201055550000@s.whatsapp.net'), true);
+    assert.strictEqual(calls[0][0], '201055550000@s.whatsapp.net');
+    assert.strictEqual(calls[0][1].pnJid, '201055550000@s.whatsapp.net');
+    assert.strictEqual(calls[0][1].lidJid, '999@lid');
+    assert.strictEqual(calls[0][1].fullName, 'محمود');
+    // the reply's own save (by lid alone, mapping unknown) does not save him twice
+    assert.strictEqual(await book.ensureSaved(sock, 5, '201055550000@s.whatsapp.net'), false);
+});

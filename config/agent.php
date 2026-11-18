@@ -75,7 +75,9 @@ return [
         'max_wait_seconds' => env('AGENT_TURNS_MAX_WAIT_SECONDS', 15),
         // Not decision-gated: how long a turn waits for a pending voice
         // transcription (DEC-08) before claiming anyway.
-        'transcript_wait_seconds' => env('AGENT_TURNS_TRANSCRIPT_WAIT_SECONDS', 10),
+        // Owner 2026-11-18: 10 s was too short - a turn answered "الصوت مش واضح" while the
+        // transcription was still on its way. A failed transcription does not wait at all.
+        'transcript_wait_seconds' => env('AGENT_TURNS_TRANSCRIPT_WAIT_SECONDS', 90),
         // AI down (quota, rate limit): how long a turn keeps retrying, once
         // a minute, before giving up. No handoff - staff cannot fix it.
         'outage_retry_minutes' => env('AGENT_TURNS_OUTAGE_RETRY_MINUTES', 720),

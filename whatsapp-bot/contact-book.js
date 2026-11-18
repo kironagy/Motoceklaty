@@ -56,26 +56,42 @@ function createContactBook({ file, log = console } = {}) {
         return contact;
     }
 
-    async function ensureSaved(sock, botId, jid) {
-        const key = `${botId}|${jid}`;
+    /**
+     * Owner 2026-11-18: saved under his PHONE number. Saved under the @lid id alone (1,224 of 1,228
+     * saves), the contact never showed in the phone's address book.
+     */
+    async function ensureSaved(sock, botId, jid, alt = null) {
+        if (!jid || jid.endsWith('@g.us') || jid.includes('broadcast') || jid.endsWith('@newsletter')) return false;
 
-        if (!jid || saved.has(key) || jid.endsWith('@g.us') || jid.includes('broadcast')) return false;
+        const isPn = (j) => j && (j.endsWith('@s.whatsapp.net') || j.endsWith('@c.us'));
+        let pn = isPn(jid) ? jid : (isPn(alt) ? alt : null);
+        const lid = jid.endsWith('@lid') ? jid : (alt && alt.endsWith('@lid') ? alt : null);
 
         try {
-            let pn = null;
+            if (!pn && lid && sock?.signalRepository?.lidMapping?.getPNForLID) {
+                pn = await sock.signalRepository.lidMapping.getPNForLID(lid).catch(() => null);
+            }
+            if (pn) pn = pn.replace(/:\d+@/, '@').replace('@c.us', '@s.whatsapp.net');
 
-            if (jid.endsWith('@lid') && sock?.signalRepository?.lidMapping?.getPNForLID) {
-                pn = await sock.signalRepository.lidMapping.getPNForLID(jid).catch(() => null);
+            const key = `${botId}|${pn || lid}`;
+            if (saved.has(key)) return false;
+            if (!pn) return false; // no phone number yet: tried again on his next message / the reply
+
+            const contact = contactFor(botId, pn, null);
+            if (lid) contact.lidJid = lid;
+            if (!contact.fullName.trim() || /^عميل \d+$/.test(contact.fullName)) {
+                const named = lid && names.get(`${botId}|${lid}`);
+                if (named) { contact.fullName = named; contact.firstName = named.split(/\s+/)[0]; }
             }
 
-            await sock.addOrEditContact(jid, contactFor(botId, jid, pn));
+            await sock.addOrEditContact(pn, contact);
             saved.add(key);
             persist();
-            log.log(`📇 bot ${botId} saved ${jid} as a contact`);
+            log.log(`📇 bot ${botId} saved ${pn} as a contact`);
 
             return true;
         } catch (error) {
-            log.error(`📇 bot ${botId} could not save ${jid} as a contact:`, error?.message || error);
+            log.error(`📇 bot ${botId} could not save ${pn || jid} as a contact:`, error?.message || error);
 
             return false;
         }

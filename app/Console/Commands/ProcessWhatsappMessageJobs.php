@@ -284,10 +284,23 @@ class ProcessWhatsappMessageJobs extends Command
             ->where('transcription_status', 'pending')
             ->min('created_at');
 
-        if ($pending === null
-            // Carbon 3 diffs are signed: now()->diffInSeconds(past) is negative, so the wait never ran
-            // out and a stuck transcription held the reply forever (2026-11-16).
-            || \Illuminate\Support\Carbon::parse($pending)->diffInSeconds(now()) >= (int) config('agent.turns.transcript_wait_seconds')) {
+        if ($pending === null) {
+            return false;
+        }
+
+        // Carbon 3 diffs are signed: now()->diffInSeconds(past) is negative, so the wait never ran
+        // out and a stuck transcription held the reply forever (2026-11-16).
+        if (\Illuminate\Support\Carbon::parse($pending)->diffInSeconds(now()) >= (int) config('agent.turns.transcript_wait_seconds')) {
+            // Owner 2026-11-18: still not transcribed (its queue job lost or slow) - transcribe it here,
+            // so the customer is not told "الصوت مش واضح" about a clear voice note.
+            foreach (\App\Models\WhatsappMessage::where('turn_id', $job->id)->where('transcription_status', 'pending')->pluck('id') as $id) {
+                try {
+                    \App\Jobs\TranscribeVoiceMessage::dispatchSync($id);
+                } catch (\Throwable $e) {
+                    Log::warning('Inline voice transcription failed', ['message_id' => $id, 'error' => $e->getMessage()]);
+                }
+            }
+
             return false;
         }
 
@@ -547,6 +560,9 @@ class ProcessWhatsappMessageJobs extends Command
                 // Paused bots keep their jobs and generated replies, but do
                 // not consume model calls or block newly connected bots.
                 ->whereIn('whatsapp_bot_id', \App\Models\WhatsappBot::where('is_active', true)->select('id'))
+                // Owner 2026-11-18: a number that is not connected keeps its customers' turns until it
+                // is back - a reply generated for it failed ("session not found") and was lost.
+                ->whereNotIn('whatsapp_bot_id', \App\Models\WhatsappBot::whereNotNull('session_status')->where('session_status', '!=', 'connected')->select('id'))
                 /*
                  * 'generated' = the reply/state mutation already happened
                  * and is stored in `result`; only delivery failed or never
@@ -582,9 +598,11 @@ class ProcessWhatsappMessageJobs extends Command
                             ->orWhereNotIn('from', $busySenders);
                     });
                 })
-                // Owner 2026-11-10: a customer writing now is answered before the late re-answer
-                // backlog (whatsapp:answer-waiting); the backlog carries on when no one is waiting.
-                ->orderByRaw("coalesce(payload, '') like '%\"answer_waiting%'")
+                // Owner 2026-11-18 (replaces "a customer writing now first", 2026-11-10): whoever has
+                // waited longest goes first, and every message he sent while waiting moves him up two
+                // minutes (up to 10 messages) - a customer who wrote a lot is not left behind a new one.
+                ->orderByRaw("coalesce((select min(m.created_at) from whatsapp_messages m where m.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at)"
+                    ." - interval (2 * least(10, (select count(*) from whatsapp_messages m2 where m2.turn_id = whatsapp_message_jobs.id))) minute")
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->first();

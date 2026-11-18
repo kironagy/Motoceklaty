@@ -66,12 +66,25 @@ const LOG_LEVEL = process.env.LOG_LEVEL || 'debug';
  */
 // Owner 2026-11-10: 20 a minute let a number send 300-600 an hour and WhatsApp unlinked it.
 // Owner 2026-11-13: still 5+ a minute - ONE message per number, then a random 1-2 minutes before
-// the next one. These are floors: an env value can only make a number slower, never faster.
-const HARD_MIN_GAP_MS = 60000;
-const HARD_MAX_GAP_MS = 120000;
-const SEND_MAX_PER_MINUTE = 1;
-const SEND_MIN_GAP_MS = Math.max(HARD_MIN_GAP_MS, Number(process.env.SEND_MIN_GAP_MS) || 0);
-const SEND_MAX_GAP_MS = Math.max(HARD_MAX_GAP_MS, SEND_MIN_GAP_MS, Number(process.env.SEND_MAX_GAP_MS) || 0);
+// the next one.
+// Owner 2026-11-18: that held a number to ~40 messages an hour (a reply is 3-4 bubbles), so 8-25
+// customers an hour and 5-20 minute waits, and bot 93 was banned anyway (by late re-answers, not
+// speed). Now a person's rhythm: the bubbles of one reply to the SAME customer a few seconds apart,
+// and a longer random gap when the number moves on to ANOTHER customer. The floors below are hard:
+// an env value can only make a number slower, never faster. Laravel's hourly/daily customer caps
+// (config/agent.php delivery.*) still apply.
+const HARD_SAME_CHAT_MIN_MS = 3000;
+const HARD_SAME_CHAT_MAX_MS = 10000;
+const HARD_SWITCH_MIN_MS = 20000;
+const HARD_SWITCH_MAX_MS = 30000;
+const SAME_CHAT_MIN_MS = Math.max(HARD_SAME_CHAT_MIN_MS, Number(process.env.SEND_SAME_CHAT_MIN_MS) || 0);
+const SAME_CHAT_MAX_MS = Math.max(HARD_SAME_CHAT_MAX_MS, SAME_CHAT_MIN_MS, Number(process.env.SEND_SAME_CHAT_MAX_MS) || 0);
+// default 40-60 s between customers for the first days (owner 2026-11-18), then lowered by env
+const SWITCH_MIN_MS = Math.max(HARD_SWITCH_MIN_MS, Number(process.env.SEND_SWITCH_MIN_MS) || 40000);
+const SWITCH_MAX_MS = Math.max(HARD_SWITCH_MAX_MS, SWITCH_MIN_MS, Number(process.env.SEND_SWITCH_MAX_MS) || 60000);
+// a bubble of the same reply counts as "same chat" only this soon after the last send there
+const SAME_CHAT_WINDOW_MS = 5 * 60000;
+const SEND_MAX_PER_MINUTE = 6;
 /*
  * Owner 2026-10-04: the wait belongs before the "seen", not after it. A
  * message is NOT marked read when it lands - Laravel starts on it at once,
@@ -80,8 +93,10 @@ const SEND_MAX_GAP_MS = Math.max(HARD_MAX_GAP_MS, SEND_MIN_GAP_MS, Number(proces
  * typing -> reply in a few seconds instead of seen, then half a minute of
  * nothing. A turn that never gets a reply (handoff, a closing "تمام") is
  * marked read after READ_FALLBACK_MS.
+ * Owner 2026-11-18: that fallback was 2 minutes, and with replies 5-20 minutes late customers saw
+ * "seen" and then nothing. Now it is 6 hours: a message is seen when its reply goes out.
  */
-const READ_FALLBACK_MS = Number(process.env.READ_FALLBACK_MS || 120000);
+const READ_FALLBACK_MS = Math.max(6 * 3600000, Number(process.env.READ_FALLBACK_MS) || 0);
 
 /** botId|jid -> { keys: [], timer } - customer messages not marked read yet. */
 const pendingReads = new Map();
@@ -234,7 +249,7 @@ function withAttention(botId, jid, job) {
             await sleep(pacing.switchChatMs());
         }
 
-        await waitForTurn(botId);
+        await waitForTurn(botId, jid);
 
         openChat[botId] = jid;
 
@@ -304,9 +319,20 @@ function randomBetween(min, max) {
     return min + Math.random() * Math.max(0, max - min);
 }
 
-async function waitForSendSlot(limiter) {
+/** The gap before the next send on this number: short within one reply, longer to another customer. */
+function nextGapFor(limiter, jid) {
+    if (limiter.nextGap != null && limiter.nextGapJid === jid) return limiter.nextGap;
+
+    const sameChat = jid && limiter.lastJid === jid && Date.now() - limiter.lastAt < SAME_CHAT_WINDOW_MS;
+    limiter.nextGap = sameChat ? randomBetween(SAME_CHAT_MIN_MS, SAME_CHAT_MAX_MS) : randomBetween(SWITCH_MIN_MS, SWITCH_MAX_MS);
+    limiter.nextGapJid = jid;
+
+    return limiter.nextGap;
+}
+
+async function waitForSendSlot(limiter, jid) {
     // drawn once per gap, so waitForTurn (before seen/typing) and this agree on it
-    const gap = limiter.nextGap ??= randomBetween(SEND_MIN_GAP_MS, SEND_MAX_GAP_MS);
+    const gap = nextGapFor(limiter, jid);
     const sinceLast = Date.now() - limiter.lastAt;
 
     if (sinceLast < gap) {
@@ -327,18 +353,20 @@ async function waitForSendSlot(limiter) {
  * Runs `send` once this number's pacing allows it. Sends on one number
  * go out one at a time, whichever chat they are for.
  */
-function throttleSend(botId, send) {
-    const limiter = sendLimiters[botId] ||= { chain: Promise.resolve(), sentAt: [], lastAt: 0 };
+function throttleSend(botId, send, jid = null) {
+    const limiter = sendLimiters[botId] ||= { chain: Promise.resolve(), sentAt: [], lastAt: 0, lastJid: null };
 
     const run = limiter.chain.then(async () => {
-        await waitForSendSlot(limiter);
+        await waitForSendSlot(limiter, jid);
 
         try {
             return await send();
         } finally {
             limiter.lastAt = Date.now();
+            limiter.lastJid = jid;
             limiter.sentAt.push(limiter.lastAt);
             limiter.nextGap = null;
+            limiter.nextGapJid = null;
         }
     });
 
@@ -351,14 +379,12 @@ function throttleSend(botId, send) {
  * Before seen/typing: wait until this number may send again, keeping a few seconds for the typing.
  * Otherwise the customer saw "typing..." and then nothing for up to two minutes.
  */
-async function waitForTurn(botId) {
+async function waitForTurn(botId, jid = null) {
     const limiter = sendLimiters[botId];
 
     if (!limiter || !limiter.lastAt) return;
 
-    limiter.nextGap ??= randomBetween(SEND_MIN_GAP_MS, SEND_MAX_GAP_MS);
-
-    const wait = limiter.lastAt + limiter.nextGap - Date.now() - 8000;
+    const wait = limiter.lastAt + nextGapFor(limiter, jid) - Date.now() - 8000;
 
     if (wait > 0) {
         console.log(`⏳ anti-ban: bot ${botId} next send in ${Math.round((wait + 8000) / 1000)}s`);
@@ -888,6 +914,8 @@ async function handleIncomingMessage(sock, botId, msg, { recovered = false } = {
 
         if (!isFromMe) {
             contactBook.noteName(botId, [originalFrom, customerJid], msg.pushName);
+            // Owner 2026-11-18: saved in the phone's contacts as soon as he writes, before any reply.
+            if (!recovered) contactBook.ensureSaved(sock, botId, originalFrom, customerJid).catch(() => {});
         }
 
         const payload = {
@@ -1003,7 +1031,7 @@ async function startSession(botId) {
             }
 
             return rawSendMessage(jid, content, { ...sendOptions, messageId });
-        });
+        }, jid);
     };
 
     sessions[botId] = sock;

@@ -141,7 +141,9 @@ class IngestionService
 
             if ($isIncoming && $data['type'] === 'audio' && $mediaRows !== []) {
                 $message->update(['transcription_status' => 'pending']);
-                TranscribeVoiceMessage::dispatch($message->id)->afterCommit();
+                // Owner 2026-11-18: its own queue and worker (pm2 voice-queue) - behind summaries on the default
+                // queue, 1 in 10 voice notes took 6+ minutes and the customer heard "الصوت مش واضح".
+                TranscribeVoiceMessage::dispatch($message->id)->onQueue('voice')->afterCommit();
             }
 
             if ($sessionGapExceeded) {
