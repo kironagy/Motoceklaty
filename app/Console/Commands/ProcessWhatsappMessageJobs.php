@@ -494,8 +494,12 @@ class ProcessWhatsappMessageJobs extends Command
              * already busy with is skipped rather than picked up in parallel.
              * Jobs with no conversation id yet fall back to the sender.
              */
+            // Owner 2026-11-18: a reply being delivered is 'generated' while the number waits out its
+            // send gap - it was not counted, so a second worker took another turn of the same number
+            // (often an old one) and both queued up in the bot: old replies went out between new ones.
             $busy = DB::table('whatsapp_message_jobs')
-                ->where('status', 'processing')
+                ->whereIn('status', ['processing', 'generated'])
+                ->whereNotNull('locked_at')
                 ->where('locked_at', '>=', $staleBefore)
                 ->get(['whatsapp_conversation_id', 'from', 'whatsapp_bot_id']);
 
