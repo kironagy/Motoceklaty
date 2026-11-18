@@ -620,8 +620,10 @@ class ProcessWhatsappMessageJobs extends Command
                     ." and o.created_at between coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at) - interval ? second and coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at)"
                     ." and o.created_at >= now() - interval 30 minute) desc",
                     [(int) config('agent.turns.hot_reply_seconds', 60)])
-                // 2) then new messages (written in the last NEW minutes) before old ones,
-                ->orderByRaw("coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at) >= now() - interval ? minute desc", [(int) config('agent.turns.new_message_minutes', 30)])
+                // 2) then every customer's own message before the old re-answers (whatsapp:answer-waiting
+                //    backlog). Not by age: with a backlog over half an hour a fixed "new" window turned
+                //    waiting customers into "old" and put 3 o'clock re-answers ahead of them (2026-11-18),
+                ->orderByRaw("coalesce(payload, '') like '%\"answer_waiting%'")
                 // 3) each group in the order the customers wrote.
                 ->orderByRaw("coalesce((select min(m0.created_at) from whatsapp_messages m0 where m0.turn_id = whatsapp_message_jobs.id), whatsapp_message_jobs.created_at)")
                 ->orderBy('id')

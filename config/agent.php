@@ -81,8 +81,6 @@ return [
         // Owner 2026-11-18: a customer who answers within this many seconds of the bot's last message
         // is answered first (whatsapp:process-jobs).
         'hot_reply_seconds' => env('AGENT_TURNS_HOT_REPLY_SECONDS', 60),
-        // Owner 2026-11-18: messages younger than this are "new" and answered before older ones.
-        'new_message_minutes' => env('AGENT_TURNS_NEW_MESSAGE_MINUTES', 30),
         // AI down (quota, rate limit): how long a turn keeps retrying, once
         // a minute, before giving up. No handoff - staff cannot fix it.
         'outage_retry_minutes' => env('AGENT_TURNS_OUTAGE_RETRY_MINUTES', 720),
