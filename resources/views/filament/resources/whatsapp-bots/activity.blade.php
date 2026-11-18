@@ -11,7 +11,7 @@
         $fmt = fn ($n) => $n >= 1000000 ? round($n / 1000000, 1).'M' : ($n >= 1000 ? round($n / 1000, 1).'K' : number_format($n));
     @endphp
 
-    <div class="ba" dir="rtl" @if ($isToday) wire:poll.30s @endif>
+    <div class="ba" dir="rtl" @if ($isToday || $tab === 'delays') wire:poll.30s @endif>
         <style>
             .ba { --ink: #0f172a; --muted: #64748b; --card: #ffffff; --soft: #f8fafc; --line: rgba(148, 163, 184, .24); --in: #6366f1; --out: #10b981; --staff: #f59e0b; display: grid; gap: 18px; }
             .dark .ba { --ink: #f1f5f9; --muted: #94a3b8; --card: #0f172a; --soft: #111c31; --line: rgba(148, 163, 184, .14); }
@@ -128,6 +128,12 @@
             .ba-empty { display: grid; place-items: center; gap: 10px; height: 100%; min-height: 260px; text-align: center; color: var(--muted); font-size: 14px; font-weight: 700; padding: 24px; }
             .ba-empty-ico { width: 72px; height: 72px; border-radius: 26px; display: grid; place-items: center; color: var(--in); background: color-mix(in srgb, var(--in) 12%, transparent); }
             .ba-empty-ico svg { width: 34px; height: 34px; }
+            .ba-tabs { display: flex; gap: 8px; padding: 6px; border-radius: 18px; background: var(--soft); border: 1px solid var(--line); width: fit-content; max-width: 100%; overflow-x: auto; }
+            .ba-tabs button { display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: 13px; font-size: 14px; font-weight: 800; color: var(--muted); white-space: nowrap; position: relative; }
+            .ba-tabs button svg { width: 18px; height: 18px; }
+            .ba-tabs button.on { color: var(--ink); background: var(--card); box-shadow: 0 6px 18px -10px rgba(15, 23, 42, .5); }
+            .ba-tab-dot { width: 9px; height: 9px; border-radius: 50%; }
+            .ba-tab-dot.stop { background: #ef4444; } .ba-tab-dot.warn { background: #f59e0b; }
         </style>
 
         {{-- البوت واليوم --}}
@@ -159,6 +165,17 @@
             </div>
         </div>
 
+        {{-- Owner 2026-11-18: a tab to follow why the bot is late or stopped --}}
+        <div class="ba-tabs">
+            <button type="button" wire:click="$set('tab', 'activity')" @class(['on' => $tab !== 'delays'])><x-filament::icon icon="heroicon-m-chart-bar" /> النشاط</button>
+            <button type="button" wire:click="$set('tab', 'delays')" @class(['on' => $tab === 'delays'])><x-filament::icon icon="heroicon-m-clock" /> متابعة التأخير والمشاكل
+                @if (collect($blockers)->contains('level', 'stop'))<span class="ba-tab-dot stop"></span>@elseif (collect($blockers)->contains('level', 'warn'))<span class="ba-tab-dot warn"></span>@endif
+            </button>
+        </div>
+
+        @if ($tab === 'delays')
+            @include('filament.resources.whatsapp-bots.delays')
+        @else
         {{-- الأرقام الأساسية --}}
         <div class="ba-kpis">
             <div class="ba-card ba-kpi" style="--c: #6366f1">
@@ -360,5 +377,6 @@
                 @endif
             </div>
         </div>
+        @endif
     </div>
 </x-filament-panels::page>

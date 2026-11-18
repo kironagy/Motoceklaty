@@ -31,6 +31,10 @@ class BotActivityPage extends Page
 
     public string $search = '';
 
+    // Owner 2026-11-18: 'delays' = why the bot is late or stopped (BotDelays)
+    #[Url(as: 'tab')]
+    public string $tab = 'activity';
+
     public function mount(int|string $record): void
     {
         $this->record = $this->resolveRecord($record);
@@ -103,6 +107,8 @@ class BotActivityPage extends Page
         $day = $this->dayDate();
         $conversations = $activity->conversations($bot, $day, trim($this->search));
         $selected = $this->chat ? $conversations->firstWhere('id', $this->chat) : null;
+        $delays = app(\App\Domain\Bots\BotDelays::class);
+        $onDelays = $this->tab === 'delays';
 
         return [
             'bot' => $bot,
@@ -114,6 +120,12 @@ class BotActivityPage extends Page
             'conversations' => $conversations,
             'selected' => $selected,
             'chatMessages' => $this->chat ? $activity->messages($bot, $this->chat) : collect(),
+            'tab' => $this->tab,
+            'blockers' => $delays->blockers($bot),
+            'queue' => $onDelays ? $delays->queue($bot) : null,
+            'todayWaits' => $onDelays ? $delays->today($bot) : null,
+            'problems' => $onDelays ? $delays->problems($bot) : collect(),
+            'recent' => $onDelays ? $delays->recent($bot) : collect(),
         ];
     }
 }
