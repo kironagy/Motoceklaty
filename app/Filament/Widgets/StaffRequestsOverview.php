@@ -104,8 +104,6 @@ class StaffRequestsOverview extends Widget
         && (int) Filament::auth()->user()->is_hitler === 1;
 
 
-        $startOfMonth = now()->startOfMonth();
-        $endOfMonth   = now()->endOfMonth();
 
         /*
         |--------------------------------------------------------------------------
@@ -116,10 +114,8 @@ class StaffRequestsOverview extends Widget
         $rows = InstallmentRequest::query()
             // Owner 2026-11-18: the home page shows no fake requests.
             ->where('request_type', '!=', 'fake')
-            ->whereBetween('created_at', [
-                $startOfMonth,
-                $endOfMonth,
-            ])
+            // Owner 2026-11-19: a request counts for whoever holds it now, whatever month it came in
+            // (moving 10 October requests to an employee used to add nothing).
             ->selectRaw(self::COUNTS_SQL)
             ->whereNotNull('staff_id')
             ->groupBy('staff_id')
@@ -156,22 +152,15 @@ class StaffRequestsOverview extends Widget
         */
 
         // Owner 2026-11-19: the parking accounts (متوقف / مرفوض / موافقه ...) are not in the competition:
-        // they show what they hold now (every month) and always sit at the bottom.
+        // they always sit at the bottom.
         $parkingIds = Staff::whereIn('email', array_column(InstallmentRequest::PARKING_ACCOUNTS, 0))->pluck('id')->all();
-        $parkingRows = $parkingIds === [] ? collect() : InstallmentRequest::query()
-            ->where('request_type', '!=', 'fake')
-            ->whereIn('staff_id', $parkingIds)
-            ->selectRaw(self::COUNTS_SQL)
-            ->groupBy('staff_id')
-            ->get()
-            ->keyBy('staff_id');
 
         $staff = Staff::query()
             ->get()
-            ->map(function ($staff) use ($rows, $parkingRows, $parkingIds, $loginData, $isHitler) {
+            ->map(function ($staff) use ($rows, $parkingIds, $loginData, $isHitler) {
 
                 $parking = in_array($staff->id, $parkingIds, true);
-                $row = $parking ? $parkingRows->get($staff->id) : $rows->get($staff->id);
+                $row = $rows->get($staff->id);
 
                 $data = [
                     'id' => $staff->id,
