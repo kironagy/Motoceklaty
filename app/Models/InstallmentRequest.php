@@ -261,6 +261,18 @@ protected static function booted()
             } elseif (auth('filament')->check()) {
                 $model->status_updated_by = auth('filament')->id();
             }
+
+            // Owner 2026-11-19: a rejected request goes straight to the "مرفوض" account
+            // (owner accounts other than El Hawi keep theirs).
+            if ((static::PARKING_ACCOUNTS[$model->status][1] ?? null) === 0
+                && ($parkId = static::parkingStaffId($model->status))
+                && (int) $model->staff_id !== $parkId
+                && ! static::protectedOwnerIds()->contains((int) $model->getOriginal('staff_id'))) {
+                $model->staff_id = $parkId;
+                $model->pending_staff_id = null;
+                $model->transfer_requested_by = null;
+                $model->transfer_requested_at = null;
+            }
         }
     });
 }
@@ -291,9 +303,49 @@ public function isOwnedByHitler(): bool
         && Staff::whereKey($ownerId)->where('is_hitler', true)->exists();
 }
 
+/**
+ * Owner 2026-11-19: parking accounts per status, instead of everything going to El Hawi.
+ * status => [account email, hours in that status before the move]. 0 = moved at once.
+ */
+public const PARKING_ACCOUNTS = [
+    'paused' => ['hold@motogate.com', 48],
+    'rejected' => ['reject@motogate.com', 0],
+    'approved' => ['accept@motogate.com', 48],
+];
+
+/** El Hawi (25) is the old parking account: its requests move on, other owner accounts keep theirs. */
+public const OLD_PARKING_STAFF_ID = 25;
+
+public static function parkingStaffId(string $status): ?int
+{
+    $email = self::PARKING_ACCOUNTS[$status][0] ?? null;
+
+    return $email ? Staff::where('email', $email)->value('id') : null;
+}
+
+/** Owner accounts whose requests are never parked (El Hawi and the parking accounts excluded). */
+public static function protectedOwnerIds(): \Illuminate\Support\Collection
+{
+    return Staff::where('is_hitler', true)
+        ->where('id', '!=', self::OLD_PARKING_STAFF_ID)
+        ->whereNotIn('email', array_column(self::PARKING_ACCOUNTS, 0))
+        ->pluck('id');
+}
+
 public function canBeReassignedBy(?Staff $actor): bool
 {
-    return ! $this->isOwnedByHitler() || (bool) $actor?->is_hitler;
+    return ! $this->isOwnedByHitler() || (bool) $actor?->is_hitler
+        // the system parking a request: El Hawi / a parking account -> a parking account
+        || ($actor === null && $this->isParkingMove());
+}
+
+private function isParkingMove(): bool
+{
+    $parking = Staff::whereIn('email', array_column(self::PARKING_ACCOUNTS, 0))->pluck('id')->all();
+    $from = (int) $this->getOriginal('staff_id');
+
+    return in_array((int) $this->staff_id, $parking, true)
+        && ($from === self::OLD_PARKING_STAFF_ID || in_array($from, $parking, true));
 }
 
 public function pendingStaff()
