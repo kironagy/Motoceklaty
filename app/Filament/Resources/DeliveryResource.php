@@ -60,6 +60,11 @@ class DeliveryResource extends Resource
 
         $baseTime = $record->status_updated_at ?? $record->updated_at ?? $record->created_at;
 
+        // Owner 2026-11-19: a paused request moved to an employee is open to him for 48 h from that move.
+        if ($record->staff_assigned_at && Carbon::parse($record->staff_assigned_at)->gt(Carbon::parse($baseTime))) {
+            $baseTime = $record->staff_assigned_at;
+        }
+
         return Carbon::parse($baseTime)->addHours(48)->isPast();
     }
     protected static function isSuperAdmin(): bool
