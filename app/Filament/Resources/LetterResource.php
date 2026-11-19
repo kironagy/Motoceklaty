@@ -58,6 +58,29 @@ protected static function isSuperAdmin(): bool
         );
     }
 
+    /** A download button for a saved letter photo (hidden until the photo is saved). */
+    protected static function downloadImageButton(string $name, string $label, string $field, string $prefix): Forms\Components\Actions
+    {
+        return Forms\Components\Actions::make([
+            Forms\Components\Actions\Action::make($name)
+                ->label($label)
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('gray')
+                ->action(function (?Letter $record) use ($field, $prefix) {
+                    $path = $record?->getRawOriginal($field);
+                    $disk = \Illuminate\Support\Facades\Storage::disk(config('filament.default_filesystem_disk'));
+
+                    if (blank($path) || ! $disk->exists($path)) {
+                        \Filament\Notifications\Notification::make()->title('الصورة مش موجودة')->danger()->send();
+
+                        return null;
+                    }
+
+                    return $disk->download($path, $prefix.'-'.($record->chassis_number ?: $record->getKey()).'.'.pathinfo($path, PATHINFO_EXTENSION));
+                }),
+        ])->fullWidth()->visible(fn (?Letter $record) => filled($record?->getRawOriginal($field)));
+    }
+
     public static function form(Form $form): Form
     {
         return $form
@@ -119,15 +142,22 @@ protected static function isSuperAdmin(): bool
                 Forms\Components\Section::make('صور وبيانات المكنة')
                     ->icon('heroicon-o-photo')
                     ->schema([
-                        Forms\Components\FileUpload::make('chassis_image')
-                            ->label('صورة الشاسيه')
-                            ->image()
-                            ->directory('chassis'),
+                        // Owner 2026-11-19: each photo has its download button under it.
+                        Forms\Components\Group::make([
+                            Forms\Components\FileUpload::make('chassis_image')
+                                ->label('صورة الشاسيه')
+                                ->image()
+                                ->directory('chassis'),
+                            static::downloadImageButton('download_chassis', 'تحميل الشاسيه', 'chassis_image', 'شاسيه'),
+                        ]),
 
-                        Forms\Components\FileUpload::make('engine_image')
-                            ->label('صورة الماتور')
-                            ->image()
-                            ->directory('engine'),
+                        Forms\Components\Group::make([
+                            Forms\Components\FileUpload::make('engine_image')
+                                ->label('صورة الماتور')
+                                ->image()
+                                ->directory('engine'),
+                            static::downloadImageButton('download_engine', 'تحميل الماتور', 'engine_image', 'ماتور'),
+                        ]),
 
                         Forms\Components\TextInput::make('color')->label('اللون'),
                         Forms\Components\TextInput::make('chassis_number')->label('رقم الشاسيه'),
