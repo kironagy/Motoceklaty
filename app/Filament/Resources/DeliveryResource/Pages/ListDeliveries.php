@@ -29,6 +29,22 @@ class ListDeliveries extends ListRecords
         session(['deliveries_view' => $this->mode]);
 
         parent::mount();
+
+        $this->openTransferLog();
+    }
+
+    /** The "لوج التحويل" tab is its own page (one row per transfer, not per request). */
+    public function updatedActiveTab(): void
+    {
+        parent::updatedActiveTab();
+        $this->openTransferLog();
+    }
+
+    private function openTransferLog(): void
+    {
+        if ($this->activeTab === 'transfer_log' && $this->isHitler()) {
+            $this->redirect(DeliveryResource::getUrl('transfer-log'));
+        }
     }
 
     protected function viewSwitch(string $mode, string $label, string $icon): Actions\Action
@@ -49,6 +65,12 @@ class ListDeliveries extends ListRecords
    public function getTabs(): array
 {
     $tabs = [
+
+        // Owner 2026-11-19: what the dashboard status cards count (every request but the fake ones),
+        // so a card opens on the same requests it counted.
+        'real' => Tab::make('كل الطلبات')
+            ->icon('heroicon-o-squares-2x2')
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('request_type', '!=', 'fake')),
 
         /*
         |--------------------------------------------------------------------------
@@ -114,6 +136,10 @@ class ListDeliveries extends ListRecords
             ->badge(fn (): int => DeliveryResource::getEloquentQuery()->whereNotNull('pending_staff_id')->whereNotNull('transfer_requested_by')->count())
             ->badgeColor('danger')
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->whereNotNull('pending_staff_id')->whereNotNull('transfer_requested_by'));
+
+        // Owner 2026-11-19: opens the transfer log page (see updatedActiveTab).
+        $tabs['transfer_log'] = Tab::make('لوج التحويل')
+            ->icon('heroicon-o-arrows-right-left');
 
         $tabs['deleted'] = Tab::make('الطلبات المحذوفة')
             ->icon('heroicon-o-trash')

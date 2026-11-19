@@ -2557,6 +2557,7 @@ Tables\Actions\Action::make('force_delete')
         return [
             'index' => Pages\ListDeliveries::route('/'),
             'create' => Pages\CreateDelivery::route('/create'),
+            'transfer-log' => Pages\TransferLog::route('/transfer-log'),
             'edit' => Pages\EditDelivery::route('/{record}/edit'),
         ];
     }
