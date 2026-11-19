@@ -17,7 +17,7 @@
         'delivered' => 3,
         default => 1,
     };
-    $stopped = in_array($r->status, ['rejected', 'canceled', 'paused'], true);
+    $stopped = in_array($r->status, ['rejected', 'canceled', 'paused', 'paused_aman'], true);
 
     $name = trim((string) $r->applicant_name);
     $initials = $name !== '' ? collect(preg_split('/\s+/u', $name))->take(2)->map(fn ($w) => mb_substr($w, 0, 1))->implode('') : '؟';

@@ -57,6 +57,7 @@
         'approved'    => 'موافقة',
         'rejected'    => 'رفض',
         'paused'      => 'متوقف',
+        'paused_aman' => 'متوقف امان',
         'transferred' => 'محول',
         'delivered'   => 'استلم المكنة',
         'canceled'    => 'الطلب ملغي',

@@ -167,6 +167,17 @@ public static function isHitler(): bool
     return (bool) (Auth::user()?->is_hitler ?? false);
 }
 
+    /** Staff names; two accounts with one name (old "متوقف" and hold@) show their email too. */
+    public static function staffFilterOptions(): array
+    {
+        $staff = Staff::query()->get(['id', 'name', 'email']);
+        $dupes = $staff->groupBy(fn ($s) => trim((string) $s->name))->filter(fn ($g) => $g->count() > 1)->keys()->all();
+
+        return $staff->mapWithKeys(fn ($s) => [
+            $s->id => in_array(trim((string) $s->name), $dupes, true) ? trim($s->name).' ('.$s->email.')' : $s->name,
+        ])->all();
+    }
+
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery();
@@ -1928,6 +1939,7 @@ Forms\Components\Section::make('الملاحظات')
                                 'approved' => 'موافقة',
                                 'rejected' => 'رفض',
                                 'paused' => 'متوقف',
+                                'paused_aman' => 'متوقف امان',
                                 'transferred' => 'رد ادارة',
                                 'delivered' => 'استلم المكنة',
                                 'canceled' => 'الطلب ملغي',
@@ -1978,6 +1990,7 @@ Forms\Components\Section::make('الملاحظات')
         'approved' => 'موافقة',
         'rejected' => 'رفض',
         'paused' => 'متوقف',
+        'paused_aman' => 'متوقف امان',
         'transferred' => 'رد ادارة',
         'delivered' => 'استلم المكنة',
         'canceled' => 'الطلب ملغي',
@@ -1991,6 +2004,7 @@ Forms\Components\Section::make('الملاحظات')
         'approved' => 'success',
         'rejected' => 'danger',
         'paused' => 'gray',
+        'paused_aman' => 'gray',
         'transferred' => 'info',
         'delivered' => 'success',
         'canceled' => 'danger',
@@ -2133,7 +2147,7 @@ Forms\Components\Section::make('الملاحظات')
                     ->label('اسم الموظف')
                     ->options(fn() => [
                         '__without_staff__' => 'بدون اسم',
-                    ] + Staff::query()->pluck('name', 'id')->toArray())
+                    ] + static::staffFilterOptions())
                     ->searchable()
                     ->query(function (Builder $query, array $data): Builder {
                         $staffId = $data['value'] ?? null;

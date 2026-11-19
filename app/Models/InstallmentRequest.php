@@ -308,6 +308,7 @@ public function isOwnedByHitler(): bool
  */
 public const PARKING_ACCOUNTS = [
     'paused' => ['hold@motogate.com', 48],
+    'paused_aman' => ['hold-aman@motogate.com', 48],
     'rejected' => ['reject@motogate.com', 0],
     'approved' => ['accept@motogate.com', 48],
 ];

@@ -30,7 +30,7 @@ use Illuminate\Support\Str;
 class FormSubmissionService
 {
     /** A request in one of these still waits for a decision: the same person cannot apply again. */
-    public const UNDECIDED_STATUSES = ['new', 'new_request', 'pending', 'work_check', 'paused', 'transferred'];
+    public const UNDECIDED_STATUSES = ['new', 'new_request', 'pending', 'work_check', 'paused', 'paused_aman', 'transferred'];
 
     public function __construct(
         private readonly FormLinkService $links,

@@ -232,6 +232,7 @@ HTML
         $approved = $counts['approved'] ?? 0;
         $rejected = $counts['rejected'] ?? 0;
         $paused = $counts['paused'] ?? 0;
+        $pausedAman = $counts['paused_aman'] ?? 0;
         $transferred = $counts['transferred'] ?? 0;
         $delivered = $counts['delivered'] ?? 0;
         $canceled = $counts['canceled'] ?? 0;
@@ -248,6 +249,7 @@ HTML
             $this->card('رفض', $rejected, 'طلبات تم رفضها', 'heroicon-o-x-circle', 'rejected', null, ['rejected']),
 
             $this->card('متوقف', $paused, 'طلبات موقوفة مؤقتًا', 'heroicon-o-pause-circle', 'paused', null, ['paused']),
+            $this->card('متوقف امان', $pausedAman, 'طلبات متوقفة عند أمان', 'heroicon-o-pause-circle', 'paused', null, ['paused_aman']),
             $this->card('محول', $transferred, 'طلبات تم تحويلها', 'heroicon-o-arrow-path-rounded-square', 'transferred', null, ['transferred']),
             $this->card('استلم المكنة', $delivered, 'طلبات تم تسليمها', 'heroicon-o-truck', 'delivered', null, ['delivered']),
 

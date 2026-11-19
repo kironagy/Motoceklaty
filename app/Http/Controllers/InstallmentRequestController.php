@@ -34,7 +34,7 @@ public function store(Request $request)
     $exists = InstallmentRequest::where('machine_id', $request->machine_id)
         ->where('applicant_phone', $request->applicant_phone)
         ->where('installment_type', $request->installment_type)
-        ->whereIn('status', ['new', 'new_request', 'pending', 'work_check', 'paused', 'transferred', 'approved'])
+        ->whereIn('status', ['new', 'new_request', 'pending', 'work_check', 'paused', 'paused_aman', 'transferred', 'approved'])
         ->exists();
 
     if ($exists) {

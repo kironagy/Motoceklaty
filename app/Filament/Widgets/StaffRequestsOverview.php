@@ -31,35 +31,8 @@ class StaffRequestsOverview extends Widget
         );
     }
 
-    protected function buildViewData(): array
-    {
-        /*
-        |--------------------------------------------------------------------------
-        | التأكد إن المستخدم هتلر
-        |--------------------------------------------------------------------------
-        */
-
-       $isHitler = Filament::auth()->check()
-        && (int) Filament::auth()->user()->is_hitler === 1;
-
-
-        $startOfMonth = now()->startOfMonth();
-        $endOfMonth   = now()->endOfMonth();
-
-        /*
-        |--------------------------------------------------------------------------
-        | طلبات الموظفين
-        |--------------------------------------------------------------------------
-        */
-
-        $rows = InstallmentRequest::query()
-            // Owner 2026-11-18: the home page shows no fake requests.
-            ->where('request_type', '!=', 'fake')
-            ->whereBetween('created_at', [
-                $startOfMonth,
-                $endOfMonth,
-            ])
-            ->selectRaw("
+    /** Per-staff counts by status (متوقف counts متوقف امان too). */
+    private const COUNTS_SQL = "
                 staff_id,
 
                 SUM(
@@ -80,7 +53,7 @@ class StaffRequestsOverview extends Widget
 
                 SUM(
                     CASE
-                        WHEN status = 'paused'
+                        WHEN status IN ('paused', 'paused_aman')
                         THEN 1
                         ELSE 0
                     END
@@ -117,7 +90,37 @@ class StaffRequestsOverview extends Widget
                         ELSE 0
                     END
                 ) as rejected_count
-            ")
+    ";
+
+    protected function buildViewData(): array
+    {
+        /*
+        |--------------------------------------------------------------------------
+        | التأكد إن المستخدم هتلر
+        |--------------------------------------------------------------------------
+        */
+
+       $isHitler = Filament::auth()->check()
+        && (int) Filament::auth()->user()->is_hitler === 1;
+
+
+        $startOfMonth = now()->startOfMonth();
+        $endOfMonth   = now()->endOfMonth();
+
+        /*
+        |--------------------------------------------------------------------------
+        | طلبات الموظفين
+        |--------------------------------------------------------------------------
+        */
+
+        $rows = InstallmentRequest::query()
+            // Owner 2026-11-18: the home page shows no fake requests.
+            ->where('request_type', '!=', 'fake')
+            ->whereBetween('created_at', [
+                $startOfMonth,
+                $endOfMonth,
+            ])
+            ->selectRaw(self::COUNTS_SQL)
             ->whereNotNull('staff_id')
             ->groupBy('staff_id')
             ->get()
@@ -152,16 +155,28 @@ class StaffRequestsOverview extends Widget
         |--------------------------------------------------------------------------
         */
 
-        $staff = Staff::query()
-            // Owner 2026-11-19: the parking accounts (متوقف / مرفوض / موافقه) are not in the competition.
-            ->whereNotIn('email', array_column(InstallmentRequest::PARKING_ACCOUNTS, 0))
+        // Owner 2026-11-19: the parking accounts (متوقف / مرفوض / موافقه ...) are not in the competition:
+        // they show what they hold now (every month) and always sit at the bottom.
+        $parkingIds = Staff::whereIn('email', array_column(InstallmentRequest::PARKING_ACCOUNTS, 0))->pluck('id')->all();
+        $parkingRows = $parkingIds === [] ? collect() : InstallmentRequest::query()
+            ->where('request_type', '!=', 'fake')
+            ->whereIn('staff_id', $parkingIds)
+            ->selectRaw(self::COUNTS_SQL)
+            ->groupBy('staff_id')
             ->get()
-            ->map(function ($staff) use ($rows, $loginData, $isHitler) {
+            ->keyBy('staff_id');
 
-                $row = $rows->get($staff->id);
+        $staff = Staff::query()
+            ->get()
+            ->map(function ($staff) use ($rows, $parkingRows, $parkingIds, $loginData, $isHitler) {
+
+                $parking = in_array($staff->id, $parkingIds, true);
+                $row = $parking ? $parkingRows->get($staff->id) : $rows->get($staff->id);
 
                 $data = [
                     'id' => $staff->id,
+
+                    'parking' => $parking,
 
                     'name' => $staff->name,
 
@@ -247,6 +262,7 @@ class StaffRequestsOverview extends Widget
                 return $data;
             })
             ->sortByDesc(fn ($item) => [
+                $item['parking'] ? 0 : 1,
                 $item['total'],
                 $item['approved'],
             ])

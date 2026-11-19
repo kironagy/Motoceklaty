@@ -30,7 +30,7 @@ class RequestsByTypeOverview extends Widget
         'pending' => ['label' => 'تحت الاستعلام', 'statuses' => ['pending'], 'filter' => 'pending', 'color' => '#f59e0b', 'icon' => 'heroicon-o-magnifying-glass'],
         'approved' => ['label' => 'موافقة', 'statuses' => ['approved'], 'filter' => 'approved', 'color' => '#10b981', 'icon' => 'heroicon-o-check-badge'],
         'delivered' => ['label' => 'استلمت', 'statuses' => ['delivered'], 'filter' => 'delivered', 'color' => '#06b6d4', 'icon' => 'heroicon-o-truck'],
-        'paused' => ['label' => 'متوقفة', 'statuses' => ['paused'], 'filter' => 'paused', 'color' => '#94a3b8', 'icon' => 'heroicon-o-pause-circle'],
+        'paused' => ['label' => 'متوقفة', 'statuses' => ['paused', 'paused_aman'], 'filter' => 'paused', 'color' => '#94a3b8', 'icon' => 'heroicon-o-pause-circle'],
         'rejected' => ['label' => 'مرفوضة', 'statuses' => ['rejected'], 'filter' => 'rejected', 'color' => '#f43f5e', 'icon' => 'heroicon-o-x-circle'],
         'canceled' => ['label' => 'ملغية', 'statuses' => ['canceled'], 'filter' => 'canceled', 'color' => '#a855f7', 'icon' => 'heroicon-o-no-symbol'],
     ];
