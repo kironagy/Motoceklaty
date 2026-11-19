@@ -44,6 +44,10 @@ class TransferExpiredPausedRequests extends Command
             $count = 0;
             $query->chunkById(100, function ($requests) use ($targetId, &$count) {
                 foreach ($requests as $request) {
+                    // another run may have moved it a moment ago (two runs at once logged every move twice)
+                    if ((int) $request->fresh()?->staff_id === $targetId) {
+                        continue;
+                    }
                     $request->update([
                         'staff_id' => $targetId,
                         // تنظيف أي تحويلات قديمة معلقة

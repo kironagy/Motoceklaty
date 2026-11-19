@@ -140,7 +140,8 @@ Route::get('/ocr-test', function () {
 
 
 Schedule::command('requests:transfer-expired-paused')
-    ->everyFiveMinutes();
+    ->everyFiveMinutes()
+    ->withoutOverlapping();
 
 
 
