@@ -168,6 +168,16 @@ class DeliveryService
             $text = self::withoutLinks($text);
             Log::info('Link held back until the customer has written twice', ['turn_id' => $turn->id, 'text' => mb_substr($held, 0, 200)]);
 
+            // 2026-11-19: a held application link used to be lost - "رابط التقديم اتبعتلك" arrived with no
+            // link and nothing sent it later. It is marked, he is asked to answer, and his next
+            // message's reply carries it (AgentRunner::withApplicationLink).
+            if (preg_match_all('~/f/([A-Za-z0-9]+)~', $held, $tokens)) {
+                foreach (\App\Models\FormLink::whereIn('token', $tokens[1])->get() as $link) {
+                    $link->update(['prefill' => array_merge((array) $link->prefill, ['_held_turn_id' => (int) $turn->id])]);
+                }
+                $text = trim($text."\n\nابعتلي «تمام» وأبعتلك رابط التقديم على طول.");
+            }
+
             if (trim($text) === '') {
                 return;
             }

@@ -68,6 +68,16 @@ class AgentRunner
             $link = $this->linkTheReplyPointsTo($turn, (array) ($result['messages'] ?? []));
         }
 
+        // 2026-11-19: his link held back by the anti-ban rule (he had written once) goes out now.
+        $held = null;
+        if (! $link || ! $link->isOpen()) {
+            $held = \App\Models\FormLink::where('whatsapp_conversation_id', $turn->whatsapp_conversation_id)
+                ->whereNotNull('prefill->_held_turn_id')
+                ->whereIn('status', \App\Models\FormLink::OPEN_STATUSES)
+                ->latest('id')->first();
+            $link = $held?->isOpen() ? $held : $link;
+        }
+
         if (! $link || ! $link->isOpen()) {
             return $result;
         }
@@ -77,6 +87,12 @@ class AgentRunner
 
         if (! collect($messages)->contains(fn ($m) => str_contains((string) $m, $url))) {
             $messages[] = $url;
+        }
+
+        if ($held && $held->is($link)) {
+            $prefill = (array) $held->prefill;
+            unset($prefill['_held_turn_id']);
+            $held->update(['prefill' => $prefill]);
         }
 
         unset($result['no_reply']);
