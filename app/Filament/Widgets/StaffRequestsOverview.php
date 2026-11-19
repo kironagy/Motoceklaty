@@ -114,8 +114,18 @@ class StaffRequestsOverview extends Widget
         $rows = InstallmentRequest::query()
             // Owner 2026-11-18: the home page shows no fake requests.
             ->where('request_type', '!=', 'fake')
-            // Owner 2026-11-19: a request counts for whoever holds it now, whatever month it came in
-            // (moving 10 October requests to an employee used to add nothing).
+            // Owner 2026-11-19: a request counts for whoever holds it now if it reached him this month -
+            // made this month, or moved to him this month (an October request moved to him today counts).
+            ->where(function ($q) {
+                $start = now()->startOfMonth();
+                $q->where('created_at', '>=', $start)
+                    ->orWhere('staff_assigned_at', '>=', $start)
+                    ->orWhereExists(fn ($a) => $a->selectRaw('1')->from('activity_log')
+                        ->where('activity_log.subject_type', InstallmentRequest::class)
+                        ->whereColumn('activity_log.subject_id', 'installment_requests.id')
+                        ->where('activity_log.created_at', '>=', $start)
+                        ->whereRaw("json_unquote(json_extract(activity_log.properties, '$.attributes.staff_id')) = installment_requests.staff_id"));
+            })
             ->selectRaw(self::COUNTS_SQL)
             ->whereNotNull('staff_id')
             ->groupBy('staff_id')
@@ -152,15 +162,22 @@ class StaffRequestsOverview extends Widget
         */
 
         // Owner 2026-11-19: the parking accounts (متوقف / مرفوض / موافقه ...) are not in the competition:
-        // they always sit at the bottom.
+        // they always sit at the bottom, with everything they hold (any month).
         $parkingIds = Staff::whereIn('email', array_column(InstallmentRequest::PARKING_ACCOUNTS, 0))->pluck('id')->all();
+        $parkingRows = $parkingIds === [] ? collect() : InstallmentRequest::query()
+            ->where('request_type', '!=', 'fake')
+            ->whereIn('staff_id', $parkingIds)
+            ->selectRaw(self::COUNTS_SQL)
+            ->groupBy('staff_id')
+            ->get()
+            ->keyBy('staff_id');
 
         $staff = Staff::query()
             ->get()
-            ->map(function ($staff) use ($rows, $parkingIds, $loginData, $isHitler) {
+            ->map(function ($staff) use ($rows, $parkingRows, $parkingIds, $loginData, $isHitler) {
 
                 $parking = in_array($staff->id, $parkingIds, true);
-                $row = $rows->get($staff->id);
+                $row = $parking ? $parkingRows->get($staff->id) : $rows->get($staff->id);
 
                 $data = [
                     'id' => $staff->id,
