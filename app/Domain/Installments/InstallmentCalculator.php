@@ -21,7 +21,9 @@ class InstallmentCalculator
         Machine $machine,
         InstallmentSystem $system,
         InstallmentPlan $plan,
-        float $downPayment
+        float $downPayment,
+        // Owner 2026-11-19: "عروض البوت" can lower a plan's rate for a customer type (20% for employees).
+        ?int $customerTypeId = null,
     ): InstallmentCalculationResult {
         $cashPrice = (float) $machine->cash_price;
         $installmentPrice = (float) ($machine->installment_price ?: $cashPrice);
@@ -44,8 +46,9 @@ class InstallmentCalculator
             );
         }
 
-        $interest = (float) $plan->interest_percent;
         $months = $plan->months;
+        [$interest] = app(\App\Domain\Offers\BotOfferService::class)
+            ->interest((int) $system->id, (int) $months, (float) $plan->interest_percent, $customerTypeId, $machine->id ? (int) $machine->id : null);
 
         if ($system->isZeroFees()) {
             $financedAmount = $cashPrice - $downPayment;

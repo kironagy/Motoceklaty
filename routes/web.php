@@ -143,6 +143,11 @@ Schedule::command('requests:transfer-expired-paused')
     ->everyFiveMinutes()
     ->withoutOverlapping();
 
+// Owner 2026-11-19: عروض البوت - a machine offer turns on/off with its dates and stock.
+Schedule::command('bot-offers:sync')
+    ->everyMinute()
+    ->withoutOverlapping();
+
 
 
 

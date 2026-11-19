@@ -62,7 +62,7 @@ class ContextBuilder
         $system = implode("\n\n", array_values(array_filter([
             // The same text for every customer goes first, so the provider's
             // cache covers it on every call; what is his comes after.
-            $l0['text'], $this->currentRates(), $l3['text'], $l3b['text'], $l4['text'], $told['text'], $l6['text'], $this->ownStyleNote($conversation),
+            $l0['text'], $this->currentRates(), app(\App\Domain\Offers\BotOfferService::class)->promptBlock(), $l3['text'], $l3b['text'], $l4['text'], $told['text'], $l6['text'], $this->ownStyleNote($conversation),
         ], fn ($block) => $block !== null && trim($block) !== '')));
 
         $request = new AiRequest(

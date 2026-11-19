@@ -86,7 +86,7 @@ class CustomerRequestStatus
         }
 
         try {
-            $result = $this->calculator->calculate($application->machine, $plan->installmentSystem, $plan, (float) ($application->down_payment ?? 0));
+            $result = $this->calculator->calculate($application->machine, $plan->installmentSystem, $plan, (float) ($application->down_payment ?? 0), $application->customer_type_id ? (int) $application->customer_type_id : null);
         } catch (InstallmentCalculationException) {
             return [];
         }

@@ -146,6 +146,7 @@ class GetInstallmentOptionsTool implements ReadTool
                 InstallmentSystem::findOrFail($system['installment_system_id']),
                 InstallmentPlan::findOrFail($plan['installment_plan_id']),
                 $minimum,
+                $customerTypeId,
             );
         } catch (InstallmentCalculationException) {
             return $row + ['monthly_at_minimum_down_payment' => null];

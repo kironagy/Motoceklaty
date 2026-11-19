@@ -60,7 +60,7 @@ class BestOfferService
                 }
 
                 try {
-                    $result = $this->calculator->calculate($machine, $system, $plan, $down);
+                    $result = $this->calculator->calculate($machine, $system, $plan, $down, $customerTypeId);
                 } catch (InstallmentCalculationException) {
                     continue;
                 }
@@ -83,6 +83,12 @@ class BestOfferService
                     'cap' => $cap !== null && $minimum > (float) ($system->minimum_down_payment ?? 0) ? $cap : null,
                     'priority' => (int) $system->priority,
                 ];
+                // Owner 2026-11-19: the offer behind a lower rate, so the bot says it is an offer.
+                [$rate, $promo] = app(\App\Domain\Offers\BotOfferService::class)
+                    ->interest((int) $system->id, (int) $plan->months, (float) $plan->interest_percent, $customerTypeId, (int) $machine->id);
+                if ($promo) {
+                    $offer['promo'] = $promo->title.' (الفايدة '.rtrim(rtrim(number_format($rate, 2, '.', ''), '0'), '.').'٪ بدل '.rtrim(rtrim(number_format((float) $plan->interest_percent, 2, '.', ''), '0'), '.').'٪)';
+                }
 
                 $current = $best[$plan->months] ?? null;
 

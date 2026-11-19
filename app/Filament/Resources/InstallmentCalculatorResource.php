@@ -84,6 +84,14 @@ class InstallmentCalculatorResource extends Resource
                         $set('months', null);
                     }),
 
+                // Owner 2026-11-19: an interest offer from "عروض البوت" (20% for employees) applies here too.
+                Forms\Components\Select::make('customer_type_id')
+                    ->label('نوع العميل')
+                    ->options(fn () => \App\Models\CustomerType::where('is_active', true)->orderBy('sort')->pluck('label', 'id'))
+                    ->placeholder('مش محدد')
+                    ->dehydrated(false)
+                    ->live(),
+
                 Forms\Components\Select::make('months')
                     ->label('عدد الشهور')
                     ->options(function (Forms\Get $get) {
@@ -108,11 +116,16 @@ class InstallmentCalculatorResource extends Resource
                                 isset($plan['months']) &&
                                 isset($plan['interest'])
                             ) {
+                                [$rate, $promo] = app(\App\Domain\Offers\BotOfferService::class)->interest(
+                                    (int) $systemId, (int) $plan['months'], (float) $plan['interest'],
+                                    $get('customer_type_id') ? (int) $get('customer_type_id') : null,
+                                    $get('machine_id') ? (int) $get('machine_id') : null,
+                                );
                                 $options[$plan['months']] =
                                     $plan['months'] .
                                     ' شهر (' .
-                                    $plan['interest'] .
-                                    '% فايدة)';
+                                    ($promo ? $rate.'% فايدة - عرض بدل '.$plan['interest'].'%' : $plan['interest'].'% فايدة') .
+                                    ')';
                             }
                         }
 
@@ -175,6 +188,16 @@ Forms\Components\Placeholder::make('machine_installment_price_display')
                             }
                         }
 
+                        [$interest, $promo] = app(\App\Domain\Offers\BotOfferService::class)->interest(
+                            (int) $system->id, (int) $months, $interest,
+                            $get('customer_type_id') ? (int) $get('customer_type_id') : null,
+                            (int) $machine->id,
+                        );
+                        $promoHtml = $promo
+                            ? '<div dir="rtl" style="margin-bottom:10px;padding:10px 14px;border-radius:12px;background:#dcfce7;color:#166534;font-weight:700;">🎁 '
+                                .e($promo->title).' - الفايدة '.e((string) $interest).'% بدل '.e((string) ($plan['interest'] ?? '')).'%</div>'
+                            : '';
+
                         $adminFeesPercent =
                             (float) ($system->administrative_fees ?? 0);
 
@@ -223,7 +246,7 @@ Forms\Components\Placeholder::make('machine_installment_price_display')
                                 ($adminFeesPercent / 100);
                         }
 
-  return new \Illuminate\Support\HtmlString('
+  return new \Illuminate\Support\HtmlString($promoHtml.'
 
 <div dir="rtl" style="
     position:relative;

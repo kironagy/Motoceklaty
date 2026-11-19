@@ -371,6 +371,8 @@ class GetInstallmentOfferTool implements ReadTool
                 'minimum_down_payment' => $o['minimum_down_payment'] ?? 0,
                 'breakdown' => $this->breakdown($machine, $o),
                 'line' => $this->line($o),
+                // Owner 2026-11-19 (عروض البوت): this plan's rate is an offer - tell him it is an offer.
+                'promo' => $o['promo'] ?? null,
                 // internal: pass these to update_application_selection when he picks this offer - never say them
                 'installment_system' => $o['system'],
                 'down_payment' => $o['down_payment'],

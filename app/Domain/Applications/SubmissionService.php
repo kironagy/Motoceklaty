@@ -183,6 +183,7 @@ class SubmissionService
                 $application->installmentPlan->installmentSystem,
                 $application->installmentPlan,
                 (float) $application->down_payment,
+                $application->customer_type_id ? (int) $application->customer_type_id : null,
             );
             $numbers = [
                 'monthly_payment' => $result->monthlyInstallment,
