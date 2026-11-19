@@ -37,6 +37,7 @@ class Staff extends Authenticatable implements FilamentUser
 'is_company_employee',
 'installment_system_id',
 'is_hitler',
+        'aman_extension_enabled',
         'attendance_rules',
         'role_id',
         'permissions',
@@ -55,6 +56,7 @@ class Staff extends Authenticatable implements FilamentUser
 
     protected $casts = [
         'is_admin' => 'boolean',
+        'aman_extension_enabled' => 'boolean',
         'is_super_admin' => 'boolean', // ✅ جديد
         'requests_count' => 'integer',
         'is_company_employee' => 'boolean',

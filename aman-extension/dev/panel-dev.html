@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
-<title>رافع طلبات أمان</title>
+<title>موتوجيت</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -78,6 +78,7 @@
   .kv { display:grid; grid-template-columns:auto 1fr; gap:3px 10px; font-size:12.5px; margin-top:6px; }
   .kv b { color:var(--muted); font-weight:600; }
   .warn { color:var(--bad); font-size:12px; margin-top:4px; }
+  .locked { background:var(--bad); color:#fff; font-weight:700; text-align:center; padding:10px 12px; font-size:13px; }
   .st { white-space:nowrap; font-size:11px; font-weight:700; border-radius:999px; padding:1px 9px; }
   .st.waiting { background:#f1ebe4; color:var(--muted); } .st.working { background:var(--brand); color:#fff; }
   .st.uploaded { background:var(--good-soft); color:var(--good); } .st.rejected_before { background:var(--bad-soft); color:var(--bad); }
@@ -123,9 +124,10 @@
   <div id="zoom" hidden><div class="hint">دوس على الصورة تكبّر أكتر — دوس برّه الصورة تقفل</div><img alt=""></div>
   <header>
     <img src="../icons/logo.png" alt="موتوجيت">
-    <div class="ttl"><b>رافع طلبات أمان</b><span>موتوجيت</span></div>
+    <div class="ttl"><b>موتوجيت</b></div>
     <small id="who">مش داخل</small>
   </header>
+  <div id="locked" class="locked" hidden></div>
   <nav>
     <button data-tab="run" class="on">تنفيذ</button>
     <button data-tab="teach">تعليم</button>

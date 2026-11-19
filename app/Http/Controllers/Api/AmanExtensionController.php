@@ -89,6 +89,10 @@ class AmanExtensionController extends Controller
             return response()->json(['message' => 'الإيميل أو الباسورد غلط'], 422);
         }
 
+        if (! $staff->aman_extension_enabled) {
+            return \App\Http\Middleware\AmanExtensionToken::locked();
+        }
+
         return ['token' => AmanToken::issue($staff, $data['device'] ?? null), 'me' => $this->meData($staff)];
     }
 

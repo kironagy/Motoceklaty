@@ -312,6 +312,9 @@ async function processNext() {
       try {
         data = await AMAN.api('POST', '/requests/' + item.id + '/claim');
       } catch (e) {
+        await setItem(item.id, { state: 'waiting', message: e.message });
+        // Locked by the admin: stop the batch here, the rest stays waiting.
+        if ((await store.get('locked')).locked) { const b = await getBatch(); b.running = false; b.pausedReason = e.message; await store.set({ batch: b }); return; }
         await setItem(item.id, { state: 'skipped', message: e.message });
         continue;
       }
@@ -630,7 +633,8 @@ function renderBatch(batch, run) {
 
 // ---------- render ----------
 async function render() {
-  const { teach, recipes = {}, run, settings = {}, me: cachedMe, batch } = await store.get(['teach', 'recipes', 'run', 'settings', 'me', 'batch']);
+  const { teach, recipes = {}, run, settings = {}, me: cachedMe, batch, locked } = await store.get(['teach', 'recipes', 'run', 'settings', 'me', 'batch', 'locked']);
+  $('locked').hidden = !locked; $('locked').textContent = locked || '';
   if (cachedMe !== undefined) me = cachedMe;
   if (me && !AMAN.types?.length) setTypes(me);
   const signedIn = !!(settings.token && me);

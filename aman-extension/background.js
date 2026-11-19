@@ -24,6 +24,9 @@ async function api(method, path, body) {
     const { settings: cur = {} } = await AMAN.store.get('settings');
     await AMAN.store.set({ settings: { ...cur, token: '' } });
   }
+  // Owner 2026-11-19: the admin locked the extension for this employee (كنترول الاكستنشن).
+  if (res.status === 423 || data.locked) await AMAN.store.set({ locked: data.message || 'الإكستنشن مقفولة عليك من الأدمن.' });
+  else if (res.ok) await AMAN.store.set({ locked: '' });
   if (!res.ok) throw new Error(data.message || ('السيستم رجّع خطأ ' + res.status));
   return data;
 }

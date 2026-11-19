@@ -1,14 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "رافع طلبات أمان",
-  "version": "0.13.0",
+  "name": "موتوجيت",
+  "version": "0.14.0",
   "description": "يعلّم خطوات رفع كل نوع طلب على أمان، ويسحب الطلبات الجديدة من السيستم ويرفعها، ويقف قبل الحفظ لموافقة الموظف.",
   "permissions": ["storage", "sidePanel", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
   "side_panel": { "default_path": "panel.html" },
   "action": {
-    "default_title": "رافع طلبات أمان",
+    "default_title": "موتوجيت",
     "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
   },
   "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
