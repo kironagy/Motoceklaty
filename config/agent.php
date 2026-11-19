@@ -274,7 +274,7 @@ return [
         // locally the Mac's Wi-Fi address so a phone on the same network can open it - never
         // "localhost", which on his phone is the phone itself. Empty = APP_URL.
         'base_url' => env('FORM_LINKS_BASE_URL'),
-        'expires_after_days' => env('AGENT_FORM_LINK_EXPIRES_DAYS', 7),
+        'expires_after_days' => env('AGENT_FORM_LINK_EXPIRES_DAYS', 30), // owner 2026-11-19: a month
         // silence (no form activity and no WhatsApp message) before the first follow-up
         'followup_after_minutes' => env('AGENT_FORM_LINK_FOLLOWUP_MINUTES', 15),
         // the second (last) follow-up waits this long after the first

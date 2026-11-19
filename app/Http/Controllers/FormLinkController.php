@@ -38,11 +38,11 @@ class FormLinkController extends Controller
             return response()->view('forms.closed', ['reason' => 'missing'], 404);
         }
 
-        if ($link->status === 'submitted') {
+        if ($link->status === 'submitted' && ! $link->isEditable()) {
             return view('forms.closed', ['reason' => 'submitted', 'link' => $link]);
         }
 
-        if (! $link->isOpen()) {
+        if (! $link->isEditable()) {
             return view('forms.closed', ['reason' => 'expired', 'link' => $link]);
         }
 
@@ -259,7 +259,8 @@ class FormLinkController extends Controller
     {
         $link = $this->find($token);
         abort_if(! $link, 404);
-        abort_if(! $link->isOpen(), 410, 'الرابط ده انتهى.');
+        // Owner 2026-11-19: a submitted link stays open for his corrections (FormLink::isEditable)
+        abort_if(! $link->isEditable(), 410, 'الرابط ده انتهى.');
 
         return $link;
     }

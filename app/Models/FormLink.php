@@ -88,6 +88,26 @@ class FormLink extends Model
             && ($this->expires_at === null || $this->expires_at->isFuture());
     }
 
+    /**
+     * Owner 2026-11-19: after he submits, the same link stays his to correct his data until it
+     * expires (30 days) - unless the request is closed (delivered / canceled / deleted).
+     */
+    public function isEditable(): bool
+    {
+        if ($this->isOpen()) {
+            return true;
+        }
+
+        if ($this->status !== 'submitted' || ! $this->installment_request_id
+            || ($this->expires_at !== null && ! $this->expires_at->isFuture())) {
+            return false;
+        }
+
+        $status = InstallmentRequest::whereKey($this->installment_request_id)->value('status');
+
+        return $status !== null && ! in_array($status, ['delivered', 'canceled'], true);
+    }
+
     /** @return array<string, mixed> field key => saved value */
     public function answerValues(): array
     {

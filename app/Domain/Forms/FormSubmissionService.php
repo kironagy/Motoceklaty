@@ -49,8 +49,9 @@ class FormSubmissionService
         $result = DB::transaction(function () use ($link, $capConfirmation, &$duplicateOf) {
             $link = FormLink::whereKey($link->id)->lockForUpdate()->firstOrFail();
 
-            // a double tap, or the page sent twice: the first one counts
-            if ($link->status === 'submitted') {
+            // Owner 2026-11-19: a submitted link is his to correct - sending again updates the same request.
+            $editing = $link->status === 'submitted';
+            if ($editing && ! $link->isEditable()) {
                 return ['ok' => true, 'request_id' => $link->installment_request_id, 'already' => true];
             }
 
@@ -62,7 +63,7 @@ class FormSubmissionService
                     : ['ok' => false, 'code' => 'PREVIEW', 'message' => 'دي معاينة: كل حاجة تمام، ومفيش طلب اتبعت.'];
             }
 
-            if (! $link->isOpen()) {
+            if (! $editing && ! $link->isOpen()) {
                 return ['ok' => false, 'code' => 'LINK_CLOSED', 'message' => 'الرابط ده انتهى. كلّمنا على الواتساب ونبعتلك رابط جديد.'];
             }
 
@@ -97,12 +98,16 @@ class FormSubmissionService
                 return ['ok' => false, 'code' => 'DUPLICATE', 'message' => "أنت مقدم عندنا قبل كده بالفعل. هنراجع معاك الطلب الموجود بدل إنشاء طلب جديد."];
             }
 
+            if ($editing) {
+                return $this->applyEdit($link, $schema, $answers, $visible, $columns);
+            }
+
             return $link->purpose === 'fix'
                 ? $this->resubmitFix($link, $schema, $answers, $visible, $columns)
                 : $this->createRequest($link, $schema, $answers, $visible, $columns);
         });
 
-        if (($result['ok'] ?? false) && ! ($result['already'] ?? false)) {
+        if (($result['ok'] ?? false) && ! ($result['already'] ?? false) && ! ($result['edited'] ?? false)) {
             $this->sendReceipt($link->fresh());
         }
 
@@ -184,6 +189,40 @@ class FormSubmissionService
     }
 
     /** Staff asked for a data fix: the same request takes the new answers and goes back to them. */
+    /**
+     * Owner 2026-11-19: he corrected his data on the link after submitting. The same request takes
+     * the new values and documents; its status and staff stay as they are, and every change is
+     * written to its activity log and notes (like resubmitFix, without moving the request).
+     */
+    private function applyEdit(FormLink $link, FormSchema $schema, array $answers, array $visible, array $columns): array
+    {
+        $application = $link->application;
+        $request = $application?->installmentRequest ?? InstallmentRequest::find($link->installment_request_id);
+
+        if (! $application || ! $request) {
+            return ['ok' => false, 'code' => 'FORM_SETUP', 'message' => 'حصلت مشكلة عندنا في الفورم. كلّمنا على الواتساب وهنكمّل معاك.'];
+        }
+
+        ApplicationData::where('application_id', $application->id)->delete();
+        $this->recordData($application, $schema, $answers, $visible);
+
+        ApplicationDocument::where('application_id', $application->id)->whereIn('status', ['accepted', 'needs_review'])
+            ->update(['status' => 'superseded']);
+        $documentColumns = $this->recordDocuments($application, $link, $schema, $visible);
+
+        $before = $request->getAttributes();
+        $request->forceFill(array_merge(array_diff_key($columns, ['notes' => true]), $documentColumns))->saveQuietly();
+
+        $changed = \App\Domain\Requests\CustomerEditLog::record($request, $before, 'customer_form', $application->customer);
+        if ($changed !== []) {
+            $request->forceFill(['notes' => trim((string) $request->notes."\n".\App\Domain\Requests\CustomerEditLog::noteLine($changed, 'تعديل العميل من رابط التقديم'))])->saveQuietly();
+        }
+
+        $link->update(['last_activity_at' => now()]);
+
+        return ['ok' => true, 'request_id' => $request->id, 'edited' => true];
+    }
+
     private function resubmitFix(FormLink $link, FormSchema $schema, array $answers, array $visible, array $columns): array
     {
         $application = $link->application;

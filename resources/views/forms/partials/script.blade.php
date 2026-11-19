@@ -55,6 +55,7 @@ function applicationForm() {
         sending: false,
         submitTried: false,
         done: false,
+        edited: false,
         savedNote: '',
 
         init() {
@@ -524,7 +525,7 @@ function applicationForm() {
             try {
                 const r = await fetch(F.base + '/submit', { method: 'POST', headers: { 'X-CSRF-TOKEN': csrf, 'Content-Type':'application/json', Accept: 'application/json' }, body:JSON.stringify({cap_confirmation:this.capConsent || {}}) });
                 const data = await r.json().catch(() => ({}));
-                if (data.ok) { this.done = true; window.scrollTo({ top: 0 }); return; }
+                if (data.ok) { this.done = true; this.edited = !!data.edited; window.scrollTo({ top: 0 }); return; }
                 if (data.code === 'CAP_CONFIRMATION_REQUIRED' && this.selectedPlan()) {this.capConsent=null;this.capOffer={key:this.keyOf('request.plan'),plan:this.selectedPlan()};}
                 this.errors = Object.assign({}, data.errors || {});
                 this.blocking = data.blocking || (data.message ? [data.message] : []);

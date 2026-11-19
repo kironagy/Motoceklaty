@@ -47,14 +47,20 @@
     <template x-if="done">
         <section class="card success">
             <div class="big-icon">✅</div>
-            <h2>استلمنا طلبك بنجاح</h2>
-            <p>هنراجع البيانات ونتواصل معاك على الواتساب في أقرب وقت.</p>
+            <h2 x-text="edited ? 'اتحفظ التعديل على طلبك' : 'استلمنا طلبك بنجاح'"></h2>
+            <p x-text="edited ? 'التعديل وصل للموظف اللي ماسك طلبك. لو محتاج تعدّل حاجة تانية افتح نفس الرابط.' : 'هنراجع البيانات ونتواصل معاك على الواتساب في أقرب وقت.'"></p>
         </section>
     </template>
 
     <template x-if="!done">
         <main>
-            @if ($link->purpose === 'fix' && filled($link->staff_note))
+            @if ($link->status === 'submitted')
+                {{-- Owner 2026-11-19: the submitted link stays his to correct --}}
+                <section class="card notice">
+                    <strong>طلبك وصلنا ✅</strong>
+                    <p>لو محتاج تعدّل أي بيانات أو ترفع ورق تاني، عدّل هنا ودوس إرسال - التعديل بيروح على نفس طلبك.</p>
+                </section>
+            @elseif ($link->purpose === 'fix' && filled($link->staff_note))
                 <section class="card notice">
                     <strong>المطلوب تعديله:</strong>
                     <p>{{ $link->staff_note }}</p>
@@ -127,7 +133,7 @@
                         <button type="button" class="btn ghost" x-show="i > 0" @click="go(i - 1)">السابق</button>
                         <button type="button" class="btn" x-show="i < shownSections().length - 1" @click="next(section, i)">التالي</button>
                         <button type="button" class="btn" x-show="i === shownSections().length - 1" :disabled="sending" @click="submit()">
-                            <span x-text="sending ? 'جاري الإرسال...' : 'إرسال الطلب'"></span>
+                            <span x-text="sending ? 'جاري الإرسال...' : '{{ $link->status === 'submitted' ? 'حفظ التعديل' : 'إرسال الطلب' }}'"></span>
                         </button>
                     </div>
                 </section>
