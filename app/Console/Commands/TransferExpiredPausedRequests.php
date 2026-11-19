@@ -8,7 +8,7 @@ use Illuminate\Console\Command;
 /**
  * Owner 2026-11-19: each status has its own parking account (InstallmentRequest::PARKING_ACCOUNTS):
  * متوقف 48 ساعة -> hold@, موافقة 48 ساعة -> accept@, مرفوض -> reject@ at once.
- * Requests held by owner accounts (other than El Hawi, the old parking account) are left alone.
+ * Owner accounts' requests move too (owner 2026-11-19: akera and Hoba included).
  */
 class TransferExpiredPausedRequests extends Command
 {
@@ -18,8 +18,6 @@ class TransferExpiredPausedRequests extends Command
 
     public function handle(): int
     {
-        $protected = InstallmentRequest::protectedOwnerIds();
-
         foreach (InstallmentRequest::PARKING_ACCOUNTS as $status => [$email, $hours]) {
             $targetId = InstallmentRequest::parkingStaffId($status);
             if (! $targetId) {
@@ -30,8 +28,7 @@ class TransferExpiredPausedRequests extends Command
 
             $query = InstallmentRequest::query()
                 ->where('status', $status)
-                ->where(fn ($q) => $q->whereNull('staff_id')->orWhere('staff_id', '!=', $targetId))
-                ->where(fn ($q) => $q->whereNull('staff_id')->orWhereNotIn('staff_id', $protected));
+                ->where(fn ($q) => $q->whereNull('staff_id')->orWhere('staff_id', '!=', $targetId));
 
             if ($hours > 0) {
                 $query->whereNotNull('status_updated_at')
