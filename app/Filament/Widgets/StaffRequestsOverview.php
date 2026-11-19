@@ -153,6 +153,8 @@ class StaffRequestsOverview extends Widget
         */
 
         $staff = Staff::query()
+            // Owner 2026-11-19: the parking accounts (متوقف / مرفوض / موافقه) are not in the competition.
+            ->whereNotIn('email', array_column(InstallmentRequest::PARKING_ACCOUNTS, 0))
             ->get()
             ->map(function ($staff) use ($rows, $loginData, $isHitler) {
 
