@@ -287,6 +287,10 @@ class AmanExtensionController extends Controller
                 $reason = trim(implode("\n", array_filter([$data['message'] ?? null, filled($data['reply'] ?? null) ? 'رد أمان: '.$data['reply'] : null])));
                 $req->checks_report = array_merge((array) $req->checks_report, ['aman' => $reason ?: 'من رافع أمان']);
                 $req->status = $data['status'] === 'held' ? 'paused' : ($data['request_status'] ?? 'canceled');
+                // Owner 2026-11-19: "متوقف" from the extension is "متوقف امان" (parked on hold-aman@ after 48 h).
+                if ($req->status === 'paused') {
+                    $req->status = 'paused_aman';
+                }
                 $req->save();
             } elseif ($data['status'] === 'uploaded' && filled($data['aman_ref'] ?? null)) {
                 $note = 'رقم طلب أمان: '.$data['aman_ref'].(filled($data['message'] ?? null) ? ' — '.$data['message'] : '');
