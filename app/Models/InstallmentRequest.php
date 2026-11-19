@@ -252,6 +252,11 @@ protected static function booted()
             $model->pending_staff_id = $model->getOriginal('pending_staff_id');
         }
 
+        // Owner 2026-11-19: when it changed hands - the parking job counts its 48 h from here too.
+        if ($model->isDirty('staff_id')) {
+            $model->staff_assigned_at = now();
+        }
+
         // لو الحالة اتغيرت فقط
         if ($model->isDirty('status')) {
             $model->status_updated_at = now();

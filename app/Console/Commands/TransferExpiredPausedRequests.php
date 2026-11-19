@@ -32,7 +32,9 @@ class TransferExpiredPausedRequests extends Command
 
             if ($hours > 0) {
                 $query->whereNotNull('status_updated_at')
-                    ->where('status_updated_at', '<=', now()->subHours($hours));
+                    ->where('status_updated_at', '<=', now()->subHours($hours))
+                    // Owner 2026-11-19: moved to someone by hand = 48 h from that move, not from the status
+                    ->where(fn ($q) => $q->whereNull('staff_assigned_at')->orWhere('staff_assigned_at', '<=', now()->subHours($hours)));
             }
 
             if ($this->option('dry')) {
