@@ -70,11 +70,11 @@ class TransferLog extends Page implements HasTable
                 ->whereRaw(self::json('old').' is not null')
                 ->whereRaw(self::json('attributes').' is not null')
                 ->whereRaw(self::json('old').' <> '.self::json('attributes'))
-                // the same move logged twice in one second (two runs of the parking job at once, 2026-11-19): show it once
+                // the same move logged twice within seconds (two runs of the parking job at once, 2026-11-19): show it once
                 ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('activity_log as dup')
                     ->whereColumn('dup.subject_type', 'activity_log.subject_type')
                     ->whereColumn('dup.subject_id', 'activity_log.subject_id')
-                    ->whereColumn('dup.created_at', 'activity_log.created_at')
+                    ->whereRaw('dup.created_at between activity_log.created_at - interval 5 second and activity_log.created_at')
                     ->whereColumn('dup.id', '<', 'activity_log.id')
                     ->whereRaw("json_unquote(json_extract(dup.properties, '$.attributes.staff_id')) <=> ".self::json('attributes'))
                     ->whereRaw("json_unquote(json_extract(dup.properties, '$.old.staff_id')) <=> ".self::json('old')))
