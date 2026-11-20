@@ -346,7 +346,6 @@ class AmanExtensionController extends Controller
         $recipe = AmanRecipe::firstOrNew(['type' => self::INQUIRY_RECIPE]);
         $recipe->version = ($recipe->exists ? $recipe->version : 0) + 1;
         // the whole input, not validate()'s result (it drops the targets' keys - see saveRecipe)
-        abort_unless(collect($request->input('steps'))->contains('kind', 'nid'), 422, 'علّم خانة الرقم القومي');
         $recipe->steps = $request->only(['url', 'steps', 'result', 'user', 'map']);
         $recipe->updated_by = $this->staff($request)->id;
         $recipe->save();
