@@ -117,7 +117,10 @@
     }
     if (e.target.closest(TYPING)) return;
     // the click goes through (the search really runs while teaching); it is only noted
-    const el = e.target.closest(CLICKABLE) || e.target;
+    // a click on plain text (a table cell, a label) does nothing on the page: not a step
+    // (owner 2026-11-21: clicking the request number in the table was saved as a click)
+    const el = e.target.closest(CLICKABLE);
+    if (!el) return;
     const target = locate(el, 'click');
     if (target.css === lastClick.css && Date.now() - lastClick.at < 500) return;
     lastClick = { css: target.css, at: Date.now() };
@@ -127,9 +130,28 @@
   document.addEventListener('change', (e) => {
     if (!isTeaching() || teach.pick) return;
     const el = e.target;
+    if (el.matches?.('input, textarea') && el.closest(TYPING)) return typed(el);
     if (el.tagName !== 'SELECT') return;
     addStep({ kind: 'select', target: locate(el), value: el.value, text: clean(el.options[el.selectedIndex]?.text, 80) });
   }, true);
+
+  // typing in a box while teaching is a fill step (owner 2026-11-21: the request number typed by
+  // hand must be the copied one when running). The source is guessed, and changed in the panel.
+  function typed(el) {
+    const v = clean(el.value, 80);
+    if (!v) return;
+    const target = locate(el);
+    const steps = teach.steps || [];
+    const at = Number.isInteger(teach.insertAt) ? teach.insertAt : steps.length;
+    const last = steps[at - 1];
+    // the box was just marked with "علّم خانة": that step already types here
+    if (last && (last.kind === 'fill' || last.kind === 'nid') && last.target?.css === target.css) return;
+    const before = steps.slice(0, at);
+    const copied = before.some((s) => s.kind === 'copy');
+    const hasFill = before.some((s) => s.kind === 'fill' || s.kind === 'nid');
+    const source = /^\d{14}$/.test(v) && !copied ? 'national_id' : (copied ? 'ref' : (hasFill ? 'ref' : 'national_id'));
+    addStep({ kind: 'fill', target, source });
+  }
 
   // ---------- run ----------
   function setValue(el, v) {

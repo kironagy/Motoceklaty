@@ -139,22 +139,25 @@
     await store.set({ inqTeach: t });
   }
 
+  // owner 2026-11-21: "بدوس حفظ مش بيحفظ" - the reason was written under the statuses, out of sight
+  const saveMsg = (m) => { $('inqTeachMsg').textContent = m; $('inqTeachMsg').scrollIntoView({ block: 'center' }); alert(m); };
   $('inqSave').onclick = async () => {
     const { inqTeach: t } = await store.get('inqTeach');
     const steps = t?.steps || [];
-    if (!steps.some((x) => x.kind === 'fill' || x.kind === 'nid')) return ($('inqTeachMsg').textContent = 'علّم خانة الرقم القومي الأول.');
-    if (steps.some((x) => x.kind === 'copy') && !t.user) return ($('inqTeachMsg').textContent = 'علّم اسم يوزر أمان عشان النسخ من الجدول.');
-    if (!t.result) return ($('inqTeachMsg').textContent = 'علّم مكان الحالة الأول.');
+    if (!steps.some((x) => x.kind === 'fill' || x.kind === 'nid')) return saveMsg('علّم خانة الرقم القومي الأول.');
+    if (steps.some((x) => x.kind === 'copy') && !t.user) return saveMsg('علّم اسم يوزر أمان عشان النسخ من الجدول.');
+    if (!t.result) return saveMsg('علّم مكان الحالة الأول.');
     const map = readMap();
-    if (!map.length) return ($('inqTeachMsg').textContent = 'اكتب حالة واحدة على الأقل.');
+    if (!map.length) return saveMsg('اكتب حالة واحدة على الأقل تحت (كلام من حالة أمان زي "' + (t.lastText || 'Doc Collected') + '" وتبقى إيه عندنا).');
     try {
       const body = { url: t.url, steps, result: t.result, user: t.user || null, map };
       const r = await AMAN.api('PUT', '/inquiry/recipe', body);
+      $('inqTeachMsg').textContent = '';
       recipe = { ...body, version: r.version };
       await store.set({ inqTeach: null });
       $('inqSaved').textContent = 'اتحفظت الوصفة (نسخة ' + r.version + ').';
     } catch (e) {
-      $('inqTeachMsg').textContent = 'ماتحفظتش: ' + e.message;
+      saveMsg('ماتحفظتش: ' + e.message);
     }
   };
 
