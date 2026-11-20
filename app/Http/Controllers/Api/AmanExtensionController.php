@@ -54,7 +54,7 @@ class AmanExtensionController extends Controller
 
     public function recipes()
     {
-        return AmanRecipe::all()->keyBy('type')->map(fn (AmanRecipe $r) => [
+        return AmanRecipe::where('type', '!=', self::INQUIRY_RECIPE)->get()->keyBy('type')->map(fn (AmanRecipe $r) => [
             'type' => $r->type, 'version' => $r->version, 'steps' => $r->steps, 'savedAt' => $r->updated_at?->toIso8601String(),
         ]);
     }
@@ -305,5 +305,95 @@ class AmanExtensionController extends Controller
         }
 
         return ['ok' => true];
+    }
+
+    // ---------- متابعة الاستعلام (owner 2026-11-20) ----------
+    // A tab of its own beside the uploader: every request under inquiry ("تحت الاستعلام") is looked up
+    // on Aman by the customer's national id, and the status Aman shows comes back here.
+
+    private const INQUIRY_RECIPE = '_inquiry';
+
+    /** Statuses the follow-up may set; "pending" = still under inquiry, nothing changes. */
+    public const INQUIRY_STATUSES = ['pending', 'approved', 'rejected', 'paused_aman', 'work_check', 'canceled'];
+
+    public function inquiryRecipe()
+    {
+        $r = AmanRecipe::where('type', self::INQUIRY_RECIPE)->first();
+
+        return ['recipe' => $r ? $r->steps + ['version' => $r->version] : null, 'statuses' => array_intersect_key(
+            \App\Filament\Resources\DeliveryResource::STATUS_LABELS, array_flip(self::INQUIRY_STATUSES))];
+    }
+
+    public function saveInquiryRecipe(Request $request)
+    {
+        abort_unless($this->staff($request)->isAdmin(), 403, 'التعليم للمسؤول بس');
+        $request->validate([
+            'url' => 'required|string|max:1000',
+            'nid' => 'required|array', 'search' => 'required|array', 'result' => 'required|array',
+            'map' => 'array', 'map.*.text' => 'required|string|max:200',
+            'map.*.status' => ['required', Rule::in(self::INQUIRY_STATUSES)],
+        ]);
+
+        $recipe = AmanRecipe::firstOrNew(['type' => self::INQUIRY_RECIPE]);
+        $recipe->version = ($recipe->exists ? $recipe->version : 0) + 1;
+        // the whole input, not validate()'s result (it drops the targets' keys - see saveRecipe)
+        $recipe->steps = $request->only(['url', 'nid', 'search', 'result', 'map']);
+        $recipe->updated_by = $this->staff($request)->id;
+        $recipe->save();
+
+        return ['version' => $recipe->version];
+    }
+
+    private function inquiryRequests(Staff $staff)
+    {
+        return InstallmentRequest::query()->visibleTo($staff)
+            ->where('status', 'pending')
+            ->where('installment_type', 'like', config('aman_extension.installment_type_like'))
+            ->whereIn('request_type', config('aman_extension.request_types'))
+            ->whereNotNull('applicant_national_id')->where('applicant_national_id', '!=', '');
+    }
+
+    /** Requests under inquiry, the ones looked at longest ago first. */
+    public function inquiryQueue(Request $request)
+    {
+        $rows = $this->inquiryRequests($this->staff($request))
+            ->orderByRaw('aman_checked_at IS NOT NULL, aman_checked_at, id')
+            ->limit(500)
+            ->get(['id', 'applicant_name', 'applicant_national_id', 'installment_type', 'aman_checked_at', 'aman_check_text']);
+        $refs = AmanUpload::whereIn('installment_request_id', $rows->pluck('id'))->whereNotNull('aman_ref')
+            ->orderBy('id')->pluck('aman_ref', 'installment_request_id');
+
+        return ['requests' => $rows->map(fn (InstallmentRequest $r) => [
+            'id' => $r->id, 'name' => $r->applicant_name, 'national_id' => $r->applicant_national_id,
+            'company' => $r->installment_type, 'aman_ref' => $refs[$r->id] ?? null,
+            'checked_at' => $r->aman_checked_at, 'last_text' => $r->aman_check_text,
+        ])->values()];
+    }
+
+    /** What Aman showed for one request; a mapped status other than "pending" moves the request. */
+    public function inquiryResult(Request $request, int $id)
+    {
+        $staff = $this->staff($request);
+        $data = $request->validate([
+            'text' => 'required|string|max:500',
+            'status' => ['nullable', Rule::in(self::INQUIRY_STATUSES)],
+        ]);
+        $req = $this->inquiryRequests($staff)->whereKey($id)->first();
+        if (! $req) {
+            return ['ok' => true, 'changed' => false, 'skipped' => 'الطلب مبقاش تحت الاستعلام'];
+        }
+
+        $req->aman_checked_at = now();
+        $req->aman_check_text = mb_substr($data['text'], 0, 500);
+        $changed = filled($data['status'] ?? null) && $data['status'] !== 'pending';
+        if ($changed) {
+            $req->checks_report = array_merge((array) $req->checks_report, ['aman' => 'متابعة الاستعلام على أمان: '.$data['text']]);
+            $req->status = $data['status'];
+            $req->status_updated_by = $staff->id;
+            \Spatie\Activitylog\Facades\CauserResolver::setCauser($staff);
+        }
+        $req->save();
+
+        return ['ok' => true, 'changed' => $changed, 'status' => $req->status];
     }
 }

@@ -25,7 +25,7 @@
   if (!location.pathname.endsWith('panel-dev.html')) addEventListener('load', () => localStorage.setItem('dev:loaded', String(Date.now())));
 
   async function builtin(msg) {
-    if (msg.type === 'whoami') return { tabId: 1 };
+    if (msg.type === 'whoami') return { tabId: location.pathname.endsWith('aman-inquiry.html') ? 2 : 1 };
     if (msg.type === 'fetchFile') {
       const res = await fetch(msg.url); const blob = await res.blob();
       const buf = new Uint8Array(await blob.arrayBuffer()); let bin = '';
@@ -47,6 +47,9 @@
     },
     tabs: {
       query: async () => [{ id: 1 }],
+      // dev: the open mock Aman page (aman-inquiry.html) goes to the url instead of a new tab
+      create: async ({ url }) => { localStorage.setItem('dev:navigate', JSON.stringify({ url, at: Date.now() })); return { id: 2 }; },
+      onRemoved: { addListener: () => {} },
       update: async (_id, { url }) => { localStorage.setItem('dev:navigate', JSON.stringify({ url, at: Date.now() })); },
       onUpdated: { addListener: (fn) => tabListeners.push(fn), removeListener: (fn) => tabListeners.splice(tabListeners.indexOf(fn), 1) },
     },

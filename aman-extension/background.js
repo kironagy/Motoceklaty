@@ -47,6 +47,8 @@ async function fetchFile(url) {
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg?.type === 'whoami') { reply({ tabId: sender.tab?.id ?? null }); return false; }
+  // متابعة الاستعلام runs in a background tab, whose own timers Chrome slows to once a minute
+  if (msg?.type === 'sleep') { setTimeout(() => reply(true), Math.min(Number(msg.ms) || 0, 60000)); return true; }
   const job = msg?.type === 'api' ? api(msg.method, msg.path, msg.body)
     : msg?.type === 'fetchFile' ? fetchFile(msg.url) : null;
   if (!job) return false;

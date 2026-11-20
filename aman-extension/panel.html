@@ -130,6 +130,7 @@
   <div id="locked" class="locked" hidden></div>
   <nav>
     <button data-tab="run" class="on">تنفيذ</button>
+    <button data-tab="inquiry">متابعة الاستعلام</button>
     <button data-tab="teach">تعليم</button>
     <button data-tab="settings">الحساب</button>
   </nav>
@@ -233,6 +234,58 @@
       </section>
     </div>
 
+    <div data-pane="inquiry" hidden>
+      <section>
+        <h2>متابعة الاستعلام</h2>
+        <p class="muted">بتفتح صفحة لوحدها على أمان، وبتدوّر بالرقم القومي على كل طلب "تحت الاستعلام"، وتحدّث حالته على موتوجيت. سيب صفحة رفع الطلبات شغالة في تاب تاني عادي.</p>
+        <label class="f" for="inqRepeat">التكرار</label>
+        <select id="inqRepeat">
+          <option value="0">لفة واحدة</option>
+          <option value="15">كل ربع ساعة</option>
+          <option value="30" selected>كل نص ساعة</option>
+          <option value="60">كل ساعة</option>
+        </select>
+        <div class="row" style="margin-top:10px">
+          <button id="inqStart" class="primary">ابدأ المتابعة</button>
+          <button id="inqStop" class="bad" hidden>وقف</button>
+        </div>
+        <div id="inqStatus" class="status" hidden></div>
+        <div class="bar" id="inqBarWrap" hidden><div id="inqBar"></div></div>
+        <div id="inqStats" class="kv"></div>
+        <table id="inqLog" hidden>
+          <thead><tr><th>العميل</th><th>أمان قال</th><th>اتعمل</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+      <section id="inqTeachBox" hidden>
+        <h2>تعليم متابعة الاستعلام</h2>
+        <p class="muted">افتح صفحة البحث في أمان في التاب ده، ودوس "ابدأ التعليم". دوّر على عميل واحد بإيدك الأول عشان الحالة تظهر، وبعدين علّمها.</p>
+        <div class="row">
+          <button id="inqTeachStart">ابدأ التعليم على التاب ده</button>
+          <button id="inqTeachEnd" hidden>اقفل التعليم</button>
+        </div>
+        <div id="inqPicks" hidden>
+          <div class="row" style="margin-top:8px">
+            <button data-inqpick="nid">علّم خانة الرقم القومي</button><span id="inqPick-nid" class="muted"></span>
+          </div>
+          <div class="row" style="margin-top:6px">
+            <button data-inqpick="search">علّم زرار البحث</button><span id="inqPick-search" class="muted"></span>
+          </div>
+          <div class="row" style="margin-top:6px">
+            <button data-inqpick="result">علّم مكان الحالة</button><span id="inqPick-result" class="muted"></span>
+          </div>
+          <div id="inqLast" class="muted" style="margin-top:6px"></div>
+          <label class="f">كل حالة عند أمان تبقى إيه عندنا (لو الكلام ده موجود في الحالة)</label>
+          <div id="inqMap"></div>
+          <div class="row" style="margin-top:6px">
+            <button id="inqMapAdd">+ حالة</button>
+            <button id="inqSave" class="primary">احفظ</button>
+          </div>
+          <div id="inqTeachMsg" class="muted" style="margin-top:6px"></div>
+        </div>
+      </section>
+    </div>
+
     <div data-pane="settings" hidden>
       <section id="loginBox">
         <h2>دخول بحساب موتوجيت</h2>
@@ -256,5 +309,6 @@
 
   <script src="shared.js"></script>
   <script src="panel.js"></script>
+  <script src="inquiry-panel.js"></script>
 </body>
 </html>

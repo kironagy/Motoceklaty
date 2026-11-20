@@ -101,6 +101,8 @@
     while (Date.now() < end) { const v = fn(); if (v) return v; await sleep(250); }
     return null;
   }
+  // the inquiry follow-up (inquiry.js) finds Aman's elements the same way
+  AMAN.dom = { locate, findEl, visible, clean, sleep, waitFor };
 
   // Serialised read-modify-write on one storage key.
   let chain = Promise.resolve();

@@ -22,4 +22,9 @@ Route::prefix('aman')->middleware(\App\Http\Middleware\AmanExtensionToken::class
     Route::get('/uploads/{upload}/files/{field}', [\App\Http\Controllers\Api\AmanExtensionController::class, 'file'])->name('aman.file');
     Route::post('/uploads/{upload}/result', [\App\Http\Controllers\Api\AmanExtensionController::class, 'result']);
     Route::post('/uploads/{upload}/alive', [\App\Http\Controllers\Api\AmanExtensionController::class, 'alive']);
+    // متابعة الاستعلام (owner 2026-11-20)
+    Route::get('/inquiry/recipe', [\App\Http\Controllers\Api\AmanExtensionController::class, 'inquiryRecipe']);
+    Route::put('/inquiry/recipe', [\App\Http\Controllers\Api\AmanExtensionController::class, 'saveInquiryRecipe']);
+    Route::get('/inquiry/queue', [\App\Http\Controllers\Api\AmanExtensionController::class, 'inquiryQueue']);
+    Route::post('/inquiry/requests/{id}/result', [\App\Http\Controllers\Api\AmanExtensionController::class, 'inquiryResult'])->whereNumber('id');
 });

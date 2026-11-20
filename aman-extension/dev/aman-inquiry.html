@@ -1,0 +1,15 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>Check History (تجربة)</title>
+<script src="chrome-shim.js"></script></head><body style="font-family:Tahoma">
+<h3>Check History - صفحة بتقلّد أمان</h3>
+<form method="get">
+  <table><tr><td>الرقم القومي</td><td><input type="text" name="ctl00$nid" id="ctl00_nid"></td></tr></table>
+  <input type="submit" id="ctl00_btnSearch" value="بحث">
+</form>
+<table><tr><td>الحالة</td><td><span id="ctl00_lblStatus"></span></td></tr></table>
+<script>
+  const n = new URLSearchParams(location.search).get('ctl00$nid') || '';
+  const st = { '7': 'تمت الموافقة على الطلب', '9': 'تم رفض الطلب', '1': 'جاري الاستعلام', '3': 'العميل متوقف' };
+  document.getElementById('ctl00_lblStatus').textContent = n ? (st[n.slice(-1)] || 'حالة غريبة') : '';
+</script>
+<script src="fake-server.js"></script><script src="../shared.js"></script><script src="../background.js"></script>
+<script src="../content.js"></script><script src="../inquiry.js"></script></body></html>

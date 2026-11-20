@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "موتوجيت",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "يعلّم خطوات رفع كل نوع طلب على أمان، ويسحب الطلبات الجديدة من السيستم ويرفعها، ويقف قبل الحفظ لموافقة الموظف.",
   "permissions": ["storage", "sidePanel", "tabs"],
   "host_permissions": ["<all_urls>"],
@@ -21,7 +21,7 @@
     },
     {
       "matches": ["https://*.amanportal.com/*", "http://localhost/*", "http://127.0.0.1/*"],
-      "js": ["shared.js", "content.js"],
+      "js": ["shared.js", "content.js", "inquiry.js"],
       "run_at": "document_idle"
     }
   ]
