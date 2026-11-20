@@ -329,7 +329,9 @@ class AmanExtensionController extends Controller
         abort_unless($this->staff($request)->isAdmin(), 403, 'التعليم للمسؤول بس');
         $request->validate([
             'url' => 'required|string|max:1000',
-            'nid' => 'required|array', 'search' => 'required|array', 'result' => 'required|array',
+            // the steps in order (owner 2026-11-20: Aman's check page needs the search type picked first)
+            'steps' => 'required|array|min:1', 'steps.*.kind' => ['required', Rule::in(['select', 'nid', 'click'])],
+            'result' => 'required|array',
             'map' => 'array', 'map.*.text' => 'required|string|max:200',
             'map.*.status' => ['required', Rule::in(self::INQUIRY_STATUSES)],
         ]);
@@ -337,7 +339,8 @@ class AmanExtensionController extends Controller
         $recipe = AmanRecipe::firstOrNew(['type' => self::INQUIRY_RECIPE]);
         $recipe->version = ($recipe->exists ? $recipe->version : 0) + 1;
         // the whole input, not validate()'s result (it drops the targets' keys - see saveRecipe)
-        $recipe->steps = $request->only(['url', 'nid', 'search', 'result', 'map']);
+        abort_unless(collect($request->input('steps'))->contains('kind', 'nid'), 422, 'علّم خانة الرقم القومي');
+        $recipe->steps = $request->only(['url', 'steps', 'result', 'map']);
         $recipe->updated_by = $this->staff($request)->id;
         $recipe->save();
 

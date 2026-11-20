@@ -1,15 +1,25 @@
-<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>Check History (تجربة)</title>
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>Installment Check History (تجربة)</title>
 <script src="chrome-shim.js"></script></head><body style="font-family:Tahoma">
-<h3>Check History - صفحة بتقلّد أمان</h3>
-<form method="get">
-  <table><tr><td>الرقم القومي</td><td><input type="text" name="ctl00$nid" id="ctl00_nid"></td></tr></table>
-  <input type="submit" id="ctl00_btnSearch" value="بحث">
-</form>
-<table><tr><td>الحالة</td><td><span id="ctl00_lblStatus"></span></td></tr></table>
+<h3>Installment Check History - صفحة بتقلّد أمان</h3>
+<select id="searchType"><option value="">-- اختار --</option><option value="ref">Installment Number</option><option value="nid">Customer National ID</option></select>
+<input type="text" id="txtSearch"> <button type="button" id="btnSearch">بحث</button>
+<div id="err" style="color:red"></div>
+<div id="tabs" hidden><a href="#" id="tabMain" onclick="show();return false">Installment Main Details</a></div>
+<div id="details"></div>
 <script>
-  const n = new URLSearchParams(location.search).get('ctl00$nid') || '';
+  // AJAX like Aman: the details are drawn after "بحث", the status shows only after the tab is clicked
   const st = { '7': 'تمت الموافقة على الطلب', '9': 'تم رفض الطلب', '1': 'جاري الاستعلام', '3': 'العميل متوقف' };
-  document.getElementById('ctl00_lblStatus').textContent = n ? (st[n.slice(-1)] || 'حالة غريبة') : '';
+  let cur = '';
+  document.getElementById('btnSearch').onclick = () => {
+    document.getElementById('details').innerHTML = ''; document.getElementById('tabs').hidden = true;
+    if (document.getElementById('searchType').value !== 'nid') return (document.getElementById('err').textContent = 'Error while rendering data');
+    document.getElementById('err').textContent = '';
+    cur = document.getElementById('txtSearch').value;
+    setTimeout(() => { document.getElementById('tabs').hidden = false; }, 700);
+  };
+  function show() {
+    setTimeout(() => { document.getElementById('details').innerHTML = '<table><tr><td>Status</td><td><span class="lblStatus">' + (st[cur.slice(-1)] || 'حالة غريبة') + '</span></td></tr></table>'; }, 500);
+  }
 </script>
 <script src="fake-server.js"></script><script src="../shared.js"></script><script src="../background.js"></script>
 <script src="../content.js"></script><script src="../inquiry.js"></script></body></html>

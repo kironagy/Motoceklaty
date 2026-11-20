@@ -259,22 +259,21 @@
       </section>
       <section id="inqTeachBox" hidden>
         <h2>تعليم متابعة الاستعلام</h2>
-        <p class="muted">افتح صفحة البحث في أمان في التاب ده، ودوس "ابدأ التعليم". دوّر على عميل واحد بإيدك الأول عشان الحالة تظهر، وبعدين علّمها.</p>
+        <p class="muted">افتح صفحة "Installment Check History" في أمان في التاب ده، ودوس "ابدأ التعليم". اعمل البحث بإيدك مرة: اختار "Customer National ID"، ودوس "علّم خانة الرقم القومي" واكتب رقم عميل، ودوس بحث، وأي ضغطة تانية لحد ما الحالة تظهر. في الآخر دوس "علّم مكان الحالة".</p>
         <div class="row">
           <button id="inqTeachStart">ابدأ التعليم على التاب ده</button>
           <button id="inqTeachEnd" hidden>اقفل التعليم</button>
         </div>
         <div id="inqPicks" hidden>
           <div class="row" style="margin-top:8px">
-            <button data-inqpick="nid">علّم خانة الرقم القومي</button><span id="inqPick-nid" class="muted"></span>
+            <button data-inqpick="nid">علّم خانة الرقم القومي</button>
+            <button data-inqpick="result">علّم مكان الحالة</button>
+            <button id="inqRecord">سجّل خطوات تاني</button>
           </div>
-          <div class="row" style="margin-top:6px">
-            <button data-inqpick="search">علّم زرار البحث</button><span id="inqPick-search" class="muted"></span>
-          </div>
-          <div class="row" style="margin-top:6px">
-            <button data-inqpick="result">علّم مكان الحالة</button><span id="inqPick-result" class="muted"></span>
-          </div>
-          <div id="inqLast" class="muted" style="margin-top:6px"></div>
+          <div id="inqPickMsg" class="muted" style="margin-top:4px"></div>
+          <label class="f">الخطوات بالترتيب</label>
+          <ol id="inqSteps"></ol>
+          <div id="inqResult" class="muted" style="margin-top:6px"></div>
           <label class="f">كل حالة عند أمان تبقى إيه عندنا (لو الكلام ده موجود في الحالة)</label>
           <div id="inqMap"></div>
           <div class="row" style="margin-top:6px">

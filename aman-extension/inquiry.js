@@ -1,7 +1,8 @@
 // متابعة الاستعلام (owner 2026-11-20): runs in its own Aman tab, beside the uploader's tab.
-// Teach (inqTeach): the admin marks the national-id box, the search button and where Aman shows the status.
-// Run (inqRun): for every request under inquiry - type the id, search, read the status, send it to motobot.
-// A search that reloads the page (ASP.NET postback) is fine: the step is kept in storage and resumes here.
+// Teach (inqTeach): the admin records the steps in order - Aman's "Installment Check History" needs the search
+//   type picked ("Customer National ID"), the id typed, "بحث", and maybe a tab clicked - then marks where the status is.
+// Run (inqRun): for every request under inquiry - replay the steps with its national id, read the status, send it.
+// A step that reloads the page (ASP.NET postback) is fine: the step number is kept in storage and resumes here.
 (() => {
   if (window.__amanInquiry) return;
   window.__amanInquiry = true;
@@ -26,43 +27,68 @@
     return chain;
   }
 
-  // ---------- teach ----------
+  // ---------- teach: record the steps ----------
   const isTeaching = () => teach && teach.active && teach.tabId === myTab;
   let banner = null;
-  const PICK_TEXT = {
-    nid: 'دوس على خانة الرقم القومي في صفحة البحث',
-    search: 'دوس على زرار البحث (مش هيتداس فعلًا)',
-    result: 'دوس على المكان اللي أمان بيكتب فيه حالة العميل',
-  };
 
   function showBanner() {
-    const text = isTeaching() && teach.pick ? PICK_TEXT[teach.pick] : '';
+    const text = !isTeaching() ? ''
+      : teach.pick === 'nid' ? 'دوس على خانة الرقم القومي'
+      : teach.pick === 'result' ? 'دوس على المكان اللي أمان بيكتب فيه حالة العميل'
+      : teach.recording ? 'بيسجّل: اختار نوع البحث، ودوس "علّم خانة الرقم القومي"، ودوس بحث، وأي حاجة لحد ما الحالة تظهر'
+      : '';
     if (!text) { banner?.remove(); banner = null; return; }
     if (!banner) {
       banner = document.createElement('div');
-      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#0f766e;color:#fff;'
-        + 'font:700 15px Tahoma,Arial,sans-serif;padding:10px;text-align:center;direction:rtl';
+      banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#0f766e;color:#fff;'
+        + 'font:700 14px Tahoma,Arial,sans-serif;padding:8px;text-align:center;direction:rtl;pointer-events:none';
       document.documentElement.appendChild(banner);
     }
     banner.textContent = 'متابعة الاستعلام: ' + text;
   }
 
+  const addStep = (step) => update('inqTeach', (t) => {
+    if (!t) return;
+    const steps = [...(t.steps || [])];
+    const last = steps[steps.length - 1];
+    // a select changed twice in a row: keep the last choice only
+    if (last && step.kind === 'select' && last.kind === 'select' && last.target.css === step.target.css) steps.pop();
+    steps.push(step);
+    return { ...t, steps, url: t.url || location.href };
+  });
+
+  const TYPING = 'input:not([type=submit]):not([type=button]):not([type=image]):not([type=checkbox]):not([type=radio]), textarea, select, option';
+  const CLICKABLE = 'button, a, [role=button], [role=tab], input[type=submit], input[type=button], input[type=image], [onclick], [data-toggle], [data-bs-toggle], li';
+  let lastClick = { css: '', at: 0 };
+
   document.addEventListener('click', (e) => {
-    if (!isTeaching() || !teach.pick || e.target === banner) return;
+    if (!isTeaching()) return;
     const kind = teach.pick;
-    let el = e.target;
-    if (kind === 'nid') el = el.closest('input, textarea') || el;
-    if (kind === 'search') el = el.closest('button, a, input[type=submit], input[type=button], input[type=image], [role=button]') || el;
-    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-    const target = locate(el, kind === 'search' ? 'click' : kind === 'result' ? 'result' : undefined);
-    update('inqTeach', (t) => {
-      if (!t) return;
-      t[kind] = target;
-      if (kind === 'result') t.lastText = clean(el.innerText || el.value, 300);
-      t.url = location.href;
-      t.pick = null;
-      return t;
-    });
+    if (kind === 'nid' || kind === 'result') {
+      const el = kind === 'nid' ? (e.target.closest('input, textarea') || e.target) : e.target;
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      if (kind === 'nid') {
+        addStep({ kind: 'nid', target: locate(el) });
+        update('inqTeach', (t) => (t ? { ...t, pick: null } : t));
+      } else {
+        update('inqTeach', (t) => (t ? { ...t, result: locate(el, 'result'), lastText: clean(el.innerText || el.value, 300), pick: null, recording: false } : t));
+      }
+      return;
+    }
+    if (!teach.recording || e.target.closest(TYPING)) return;
+    // the click goes through (the search really runs while teaching); it is only noted
+    const el = e.target.closest(CLICKABLE) || e.target;
+    const target = locate(el, 'click');
+    if (target.css === lastClick.css && Date.now() - lastClick.at < 500) return;
+    lastClick = { css: target.css, at: Date.now() };
+    addStep({ kind: 'click', target });
+  }, true);
+
+  document.addEventListener('change', (e) => {
+    if (!isTeaching() || !teach.recording || teach.pick) return;
+    const el = e.target;
+    if (el.tagName !== 'SELECT') return;
+    addStep({ kind: 'select', target: locate(el), value: el.value, text: clean(el.options[el.selectedIndex]?.text, 80) });
   }, true);
 
   // ---------- run ----------
@@ -74,7 +100,17 @@
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  const resultText = (recipe) => { const el = findEl(recipe.result); return el ? clean(el.innerText || el.value, 500) : ''; };
+  function choose(el, step) {
+    const o = [...el.options].find((x) => x.value === step.value) || [...el.options].find((x) => norm(x.text) === norm(step.text));
+    if (!o) return false;
+    el.value = o.value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+
+  const resultEl = (recipe) => findEl(recipe.result);
+  const resultText = (recipe) => { const el = resultEl(recipe); return el ? clean(el.innerText || el.value, 500) : ''; };
 
   function mapStatus(recipe, text) {
     const t = norm(text);
@@ -83,6 +119,30 @@
   }
 
   const api = (method, path, body) => AMAN.api(method, path, body);
+
+  async function stillMine() {
+    const r = (await store.get('inqRun')).inqRun;
+    return r && r.status === 'running' && r.tabId === myTab ? r : null;
+  }
+
+  async function record(run, item, text, status) {
+    let row = { id: item.id, name: item.name, text, status, at: Date.now() };
+    try {
+      const res = await api('POST', '/inquiry/requests/' + item.id + '/result', { text, status });
+      row = { ...row, changed: !!res.changed, skipped: res.skipped || null };
+    } catch (e) {
+      row = { ...row, error: e.message };
+    }
+    await update('inqRun', (r) => {
+      if (!r) return r;
+      const s = { ...(r.stats || {}) };
+      s.checked = (s.checked || 0) + 1;
+      if (row.changed) s.changed = (s.changed || 0) + 1;
+      if (!status) s.unknown = (s.unknown || 0) + 1;
+      if (row.error) s.errors = (s.errors || 0) + 1;
+      return { ...r, i: r.i + 1, step: 0, retried: false, stats: s, log: [row, ...(r.log || [])].slice(0, 200), error: null };
+    });
+  }
 
   async function runLoop() {
     if (busy) return;
@@ -98,7 +158,7 @@
           // the next round: the queue again from motobot
           try {
             const q = await api('GET', '/inquiry/queue');
-            await update('inqRun', (r) => (r && r.status === 'waiting' ? { ...r, status: 'running', items: q.requests, i: 0, phase: 'fill', round: (r.round || 1) + 1 } : r));
+            await update('inqRun', (r) => (r && r.status === 'waiting' ? { ...r, status: 'running', items: q.requests, i: 0, step: 0, round: (r.round || 1) + 1 } : r));
           } catch (e) {
             await update('inqRun', (r) => (r ? { ...r, nextAt: Date.now() + 60000, error: 'ماقدرش يسحب الطلبات: ' + e.message } : r));
           }
@@ -115,65 +175,70 @@
         }
 
         const recipe = run.recipe;
-        if (run.phase !== 'read') {
-          const nid = await waitFor(() => findEl(recipe.nid), 15000);
-          if (!nid) {
-            // not on the search page (a result page, or Aman went elsewhere): back to it once
-            if (!run.navigated) {
-              await update('inqRun', (r) => ({ ...r, navigated: true }));
-              location.href = recipe.url;
+        const steps = recipe.steps || [];
+        const step = run.step || 0;
+        const nidAt = steps.findIndex((s) => s.kind === 'nid');
+
+        if (step < steps.length) {
+          const s = steps[step];
+          // the last customer's status must not be read as this one's: mark what is on the page now
+          if (step === 0) {
+            const old = resultEl(recipe);
+            if (old) old.dataset.motoSeen = '1';
+            await update('inqRun', (r) => ({ ...r, prev: old ? resultText(recipe) : '', origin: performance.timeOrigin }));
+          }
+          const el = await waitFor(() => findEl(s.target), 15000);
+          if (!el) {
+            if (step <= nidAt) {
+              // not on the search page: back to it once, then it is the recipe's fault
+              if (!run.navigated) {
+                await update('inqRun', (r) => ({ ...r, step: 0, navigated: true }));
+                location.href = recipe.url;
+                return;
+              }
+              await update('inqRun', (r) => ({ ...r, status: 'error', error: 'مش لاقي خطوة ' + (step + 1) + ' في صفحة أمان. علّم متابعة الاستعلام تاني.' }));
               return;
             }
-            await update('inqRun', (r) => ({ ...r, status: 'error', error: 'مش لاقي خانة الرقم القومي في صفحة أمان. علّم متابعة الاستعلام تاني.' }));
+            // the page reloaded halfway (Aman, or the tab was opened late): this customer from the top, once
+            if (run.origin !== performance.timeOrigin && !run.retried) {
+              await update('inqRun', (r) => ({ ...r, step: 0, retried: true }));
+              continue;
+            }
+            // after the search: Aman showed nothing to click for this customer
+            if (!(await stillMine())) return;
+            await record(run, item, 'أمان مارجّعش بيانات للعميل ده', null);
+            location.href = recipe.url;
             return;
           }
-          const search = findEl(recipe.search);
-          if (!search) {
-            await update('inqRun', (r) => ({ ...r, status: 'error', error: 'مش لاقي زرار البحث في صفحة أمان. علّم متابعة الاستعلام تاني.' }));
-            return;
+          // the step is saved before it runs: a click that reloads the page resumes on the next one
+          await update('inqRun', (r) => ({ ...r, step: step + 1, navigated: false, stepAt: Date.now() }));
+          if (s.kind === 'select') {
+            if (!choose(el, s)) {
+              await update('inqRun', (r) => ({ ...r, status: 'error', error: 'الاختيار "' + (s.text || s.value) + '" مش موجود في القايمة. علّم متابعة الاستعلام تاني.' }));
+              return;
+            }
+          } else if (s.kind === 'nid') {
+            setValue(el, String(item.national_id));
+          } else {
+            el.click();
           }
-          const prev = resultText(recipe);
-          setValue(nid, String(item.national_id));
-          await update('inqRun', (r) => ({ ...r, phase: 'read', prev, origin: performance.timeOrigin, clickedAt: Date.now(), navigated: false }));
-          await sleep(300);
-          search.click();
+          await sleep(s.kind === 'click' ? 900 : 300);
           continue;
         }
 
-        // phase "read": the page may have reloaded since the click
-        const reloaded = run.origin !== performance.timeOrigin;
-        if (reloaded) await sleep(800);
-        const end = run.clickedAt + 20000;
-        let text = '';
-        while (Date.now() < end) {
-          const t = resultText(recipe);
-          if (t && (reloaded || t !== run.prev)) { text = t; break; }
-          await sleep(400);
-        }
-        // the same status as the last customer's is a real answer too (two customers with one status)
+        // all steps done: wait for the status
+        const end = (run.stepAt || Date.now()) + 20000;
+        // fresh = a new element (Aman redrew it, or the page reloaded) or new words in the marked one
+        let text = await waitFor(() => {
+          const el = resultEl(recipe);
+          const t = el ? clean(el.innerText || el.value, 500) : '';
+          return t && (el.dataset.motoSeen !== '1' || t !== run.prev) ? t : null;
+        }, Math.max(1000, end - Date.now())) || '';
+        // the same words as the last customer's: a real answer too (two customers, one status)
         if (!text && run.prev && resultText(recipe) === run.prev) text = run.prev;
         await sleep(200);
-        const fresh = (await store.get('inqRun')).inqRun;
-        if (!fresh || fresh.status !== 'running' || fresh.tabId !== myTab) return;
-
-        const shown = text || 'مفيش حالة ظهرت';
-        const status = text ? mapStatus(recipe, text) : null;
-        let row = { id: item.id, name: item.name, text: shown, status, at: Date.now() };
-        try {
-          const res = await api('POST', '/inquiry/requests/' + item.id + '/result', { text: shown, status });
-          row = { ...row, changed: !!res.changed, skipped: res.skipped || null };
-        } catch (e) {
-          row = { ...row, error: e.message };
-        }
-        await update('inqRun', (r) => {
-          if (!r) return r;
-          const s = { ...(r.stats || {}) };
-          s.checked = (s.checked || 0) + 1;
-          if (row.changed) s.changed = (s.changed || 0) + 1;
-          if (!status) s.unknown = (s.unknown || 0) + 1;
-          if (row.error) s.errors = (s.errors || 0) + 1;
-          return { ...r, i: r.i + 1, phase: 'fill', prev: null, stats: s, log: [row, ...(r.log || [])].slice(0, 200), error: null };
-        });
+        if (!(await stillMine())) return;
+        await record(run, item, text || 'مفيش حالة ظهرت', text ? mapStatus(recipe, text) : null);
         await sleep(1200); // easy on Aman
       }
     } finally {

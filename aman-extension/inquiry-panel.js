@@ -87,9 +87,16 @@
     const tab = await activeTab();
     if (!tab) return;
     const base = recipe || {};
-    await store.set({ inqTeach: { active: true, tabId: tab.id, pick: null, url: base.url || tab.url, nid: base.nid || null, search: base.search || null, result: base.result || null, lastText: '' } });
+    // with a saved recipe its steps stay; "سجّل خطوات تاني" starts them over
+    await store.set({ inqTeach: { active: true, tabId: tab.id, pick: null, recording: !base.steps?.length, url: base.url || tab.url, steps: base.steps || [], result: base.result || null, lastText: '' } });
     $('inqMap').innerHTML = '';
     (base.map?.length ? base.map : [{ text: '', status: 'approved' }, { text: '', status: 'rejected' }]).forEach(mapRow);
+  };
+
+  $('inqRecord').onclick = async () => {
+    const tab = await activeTab();
+    const { inqTeach } = await store.get('inqTeach');
+    if (inqTeach) await store.set({ inqTeach: { ...inqTeach, recording: true, pick: null, steps: [], result: null, lastText: '', url: tab?.url || inqTeach.url } });
   };
 
   $('inqTeachEnd').onclick = () => store.set({ inqTeach: null });
@@ -102,17 +109,31 @@
 
   $('inqSave').onclick = async () => {
     const { inqTeach: t } = await store.get('inqTeach');
-    if (!t?.nid || !t?.search || !t?.result) return ($('inqTeachMsg').textContent = 'علّم الخانة والزرار ومكان الحالة الأول.');
+    const steps = t?.steps || [];
+    if (!steps.some((x) => x.kind === 'nid')) return ($('inqTeachMsg').textContent = 'علّم خانة الرقم القومي الأول.');
+    if (!t.result) return ($('inqTeachMsg').textContent = 'علّم مكان الحالة الأول.');
     const map = readMap();
     if (!map.length) return ($('inqTeachMsg').textContent = 'اكتب حالة واحدة على الأقل.');
     try {
-      const r = await AMAN.api('PUT', '/inquiry/recipe', { url: t.url, nid: t.nid, search: t.search, result: t.result, map });
+      const body = { url: t.url, steps, result: t.result, map };
+      const r = await AMAN.api('PUT', '/inquiry/recipe', body);
       $('inqTeachMsg').textContent = 'اتحفظت (نسخة ' + r.version + ').';
-      recipe = { url: t.url, nid: t.nid, search: t.search, result: t.result, map, version: r.version };
+      recipe = { ...body, version: r.version };
     } catch (e) {
       $('inqTeachMsg').textContent = 'ماتحفظتش: ' + e.message;
     }
   };
+
+  const stepText = (x) => x.kind === 'select' ? 'اختار "' + (x.text || x.value) + '"'
+    : x.kind === 'nid' ? 'اكتب الرقم القومي' : 'دوس "' + (x.target?.text || x.target?.label || x.target?.id || x.target?.tag) + '"';
+
+  async function dropStep(i) {
+    const { inqTeach } = await store.get('inqTeach');
+    if (!inqTeach) return;
+    const steps = [...(inqTeach.steps || [])];
+    steps.splice(i, 1);
+    await store.set({ inqTeach: { ...inqTeach, steps } });
+  }
 
   function renderTeach(t) {
     $('inqTeachBox').hidden = !me?.can_teach;
@@ -121,10 +142,18 @@
     $('inqTeachEnd').hidden = !on;
     $('inqPicks').hidden = !on;
     if (!on) return;
-    ['nid', 'search', 'result'].forEach((k) => {
-      $('inqPick-' + k).textContent = t.pick === k ? 'دوس عليها في صفحة أمان…' : describe(t[k]);
+    $('inqPickMsg').textContent = t.pick === 'nid' ? 'دوس على خانة الرقم القومي في صفحة أمان…'
+      : t.pick === 'result' ? 'دوس على الحالة في صفحة أمان…'
+      : t.recording ? 'بيسجّل كل اختيار وضغطة في صفحة أمان.' : '';
+    const ol = $('inqSteps');
+    ol.innerHTML = '';
+    (t.steps || []).forEach((x, i) => {
+      const li = document.createElement('li');
+      li.innerHTML = esc(stepText(x)) + ' <button class="x" title="امسح">✕</button>';
+      li.querySelector('.x').onclick = () => dropStep(i);
+      ol.appendChild(li);
     });
-    $('inqLast').textContent = t.lastText ? 'الحالة اللي اتقرت دلوقتي: ' + t.lastText : '';
+    $('inqResult').textContent = t.result ? 'مكان الحالة اتعلّم' + (t.lastText ? ': ' + t.lastText : '') : 'مكان الحالة لسه ماتعلّمش';
   }
 
   async function render() {
