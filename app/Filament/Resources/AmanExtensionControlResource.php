@@ -63,8 +63,11 @@ class AmanExtensionControlResource extends Resource
             ->addSelect([
                 'staff.*',
                 'extension_last_used_at' => \App\Models\AmanToken::selectRaw('max(last_used_at)')->whereColumn('staff_id', 'staff.id'),
-                'aman_uploads_today' => \App\Models\AmanUpload::selectRaw('count(*)')->whereColumn('staff_id', 'staff.id')->where('created_at', '>=', today()),
-                'aman_uploads_total' => \App\Models\AmanUpload::selectRaw('count(*)')->whereColumn('staff_id', 'staff.id'),
+                // owner 2026-11-20: "رفع" = really uploaded to Aman, not every try (stopped, held, errors...)
+                'aman_uploads_today' => \App\Models\AmanUpload::selectRaw('count(*)')->whereColumn('staff_id', 'staff.id')->where('status', 'uploaded')->where('created_at', '>=', today()),
+                'aman_uploads_total' => \App\Models\AmanUpload::selectRaw('count(*)')->whereColumn('staff_id', 'staff.id')->where('status', 'uploaded'),
+                'aman_worked_today' => \App\Models\AmanUpload::selectRaw('count(distinct installment_request_id)')->whereColumn('staff_id', 'staff.id')->where('created_at', '>=', today()),
+                'aman_worked_total' => \App\Models\AmanUpload::selectRaw('count(distinct installment_request_id)')->whereColumn('staff_id', 'staff.id'),
             ]);
     }
 
@@ -78,8 +81,10 @@ class AmanExtensionControlResource extends Resource
                     ->state(fn (Staff $record) => $record->installmentSystems()->pluck('installment_systems.name')->implode('، ') ?: '—'),
                 Tables\Columns\TextColumn::make('extension_last_used_at')->label('آخر استخدام')
                     ->dateTime('d/m/Y h:i A')->since()->placeholder('ماستخدمهاش')->sortable(),
-                Tables\Columns\TextColumn::make('aman_uploads_today')->label('رفع النهارده')->numeric()->sortable(),
-                Tables\Columns\TextColumn::make('aman_uploads_total')->label('رفع كله')->numeric()->sortable(),
+                Tables\Columns\TextColumn::make('aman_uploads_today')->label('اترفع النهارده')->numeric()->sortable()
+                    ->description(fn (Staff $record) => 'من '.(int) $record->aman_worked_today.' طلب اشتغل عليه'),
+                Tables\Columns\TextColumn::make('aman_uploads_total')->label('اترفع كله')->numeric()->sortable()
+                    ->description(fn (Staff $record) => 'من '.(int) $record->aman_worked_total.' طلب اشتغل عليه'),
                 Tables\Columns\ToggleColumn::make('aman_extension_enabled')->label('الاكستنشن')
                     ->onColor('success')->offColor('danger')
                     ->afterStateUpdated(fn (Staff $record, $state) => Notification::make()
