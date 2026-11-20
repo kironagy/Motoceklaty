@@ -77,6 +77,7 @@
     @media (max-width: 700px) { .adr-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } .adr-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .adr-main { flex-direction:column; align-items:stretch; } .adr-ring { align-self:center; } }
 </style>
 
+@php $t12 = fn ($t) => $t->format('h:i') . ' ' . ($t->format('A') === 'AM' ? 'ص' : 'م'); @endphp
 <div class="adr">
     <div class="adr-hero">
         <div class="adr-top">
@@ -86,7 +87,7 @@
             </div>
             <div class="adr-nav">
                 <button type="button" wire:click="shiftDay(-1)" title="اليوم اللي قبله">›</button>
-                <input type="date" wire:model.live="day" max="{{ today()->toDateString() }}">
+                <input type="date" wire:model.live="day" value="{{ $date->toDateString() }}" max="{{ today()->toDateString() }}">
                 <button type="button" wire:click="shiftDay(1)" title="اليوم اللي بعده" @disabled($isToday)>‹</button>
                 @unless ($isToday)
                     <button type="button" class="today" wire:click="$set('day', '{{ today()->toDateString() }}')">النهارده</button>
@@ -152,8 +153,8 @@
                     </div>
 
                     <div class="adr-foot">
-                        @if ($p['first'])<span>بدأ <b>{{ $p['first']->format('h:i A') }}</b></span>@endif
-                        @if ($p['last'])<span>آخر حاجة <b>{{ $p['last']->format('h:i A') }}</b></span>@endif
+                        @if ($p['first'])<span>بدأ <b>{{ $t12($p['first']) }}</b></span>@endif
+                        @if ($p['last'])<span>آخر حاجة <b>{{ $t12($p['last']) }}</b></span>@endif
                         <button type="button" class="adr-more" wire:click="toggle({{ $p['id'] }})">
                             {{ $open === $p['id'] ? 'اقفل الأسماء' : 'الأسماء والتفاصيل' }}
                         </button>
@@ -165,7 +166,7 @@
                                 <h4>📤 الطلبات اللي اشتغل عليها ({{ $p['rows']->count() }})</h4>
                                 @foreach ($p['rows'] as $r)
                                     <div class="adr-row">
-                                        <div class="adr-time">{{ $r['at']->format('h:i A') }}</div>
+                                        <div class="adr-time">{{ $t12($r['at']) }}</div>
                                         <div class="adr-name">
                                             @if ($r['url'])<a href="{{ $r['url'] }}" target="_blank">{{ $r['name'] }}</a>@else{{ $r['name'] }}@endif
                                             <small>
@@ -183,7 +184,7 @@
                                 <h4>🔎 متابعة الاستعلام ({{ $p['checkRows']->count() }})</h4>
                                 @foreach ($p['checkRows'] as $r)
                                     <div class="adr-row">
-                                        <div class="adr-time">{{ $r['at']->format('h:i A') }}</div>
+                                        <div class="adr-time">{{ $t12($r['at']) }}</div>
                                         <div class="adr-name">
                                             <a href="{{ $r['url'] }}" target="_blank">{{ $r['name'] }}</a>
                                             <small>أمان قال: {{ \Illuminate\Support\Str::limit($r['text'], 110) }}</small>
