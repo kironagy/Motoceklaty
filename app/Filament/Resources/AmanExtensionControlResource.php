@@ -94,6 +94,11 @@ class AmanExtensionControlResource extends Resource
             ->paginated(false);
     }
 
+    public static function getWidgets(): array
+    {
+        return [AmanExtensionControlResource\Widgets\AmanDailyReport::class];
+    }
+
     public static function getPages(): array
     {
         return [

@@ -396,6 +396,10 @@ class AmanExtensionController extends Controller
             \Spatie\Activitylog\Facades\CauserResolver::setCauser($staff);
         }
         $req->save();
+        DB::table('aman_inquiry_checks')->insert([
+            'installment_request_id' => $req->id, 'staff_id' => $staff->id, 'text' => $req->aman_check_text,
+            'status' => $data['status'] ?? null, 'changed' => $changed, 'created_at' => now(),
+        ]);
 
         return ['ok' => true, 'changed' => $changed, 'status' => $req->status];
     }
