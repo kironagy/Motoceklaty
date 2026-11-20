@@ -39,9 +39,14 @@
     const tab = await chrome.tabs.create({ url: recipe.url, active: false });
     await store.set({ inqRun: {
       tabId: tab.id, status: 'running', recipe, items: inqBatch.items, i: 0, step: 0, round: 1, vars: {},
+      // owner 2026-11-21: old requests were made under another employee's Aman user - he picks whose rows to copy
+      users: $('inqUsers').value.split(/[,،]/).map((u) => u.trim()).filter(Boolean),
       repeat: Number($('inqRepeat').value) || 0, stats: {}, log: [], startedAt: Date.now(),
     } });
   };
+
+  store.get('inqUsers').then(({ inqUsers }) => { $('inqUsers').value = inqUsers || ''; });
+  $('inqUsers').oninput = () => store.set({ inqUsers: $('inqUsers').value });
 
   $('inqStop').onclick = async () => {
     const { inqRun } = await store.get('inqRun');

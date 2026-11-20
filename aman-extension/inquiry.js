@@ -205,14 +205,15 @@
   }
 
   // the row of our Aman user -> its request number (the newest when there are several)
-  function copyRef(step, me) {
+  function copyRef(step, names) {
+    const wanted = names.map(norm).filter(Boolean);
     const table = findEl(step.table);
     if (!table) return { missing: true };
     const uc = columnIndex(table, step.userHeader, step.userCol);
     const rc = columnIndex(table, step.refHeader, step.refCol);
     const mine = dataRows(table).filter((r) => {
       const u = norm(cellText(r.cells[uc]));
-      return u && me && (u === norm(me) || u.includes(norm(me)));
+      return u && wanted.some((w) => u === w || u.includes(w));
     });
     const refs = mine.map((r) => digits(cellText(r.cells[rc])) || cellText(r.cells[rc])).filter(Boolean);
     if (!refs.length) return { none: true };
@@ -285,7 +286,7 @@
 
         if (step === 0) {
           // our Aman user, read off the page once per run
-          let me = vars.me;
+          let me = vars.me || (run.users?.length ? run.users.join('، ') : '');
           if (recipe.user && !me) {
             // owner 2026-11-21: the marked spot was not found on the run's page; the header link to
             // Aman's own password page carries the user name on every page
@@ -306,7 +307,7 @@
               return tb && (tb.dataset.motoSeen !== '1' || clean(tb.innerText, 3000) !== run.prevTable) ? tb : null;
             }, 15000);
             await sleep(300);
-            const got = copyRef(s, vars.me || '');
+            const got = copyRef(s, run.users?.length ? run.users : [vars.me || '']);
             if (!(await stillMine())) return;
             if (!got.ref) {
               await record(item, got.missing ? 'جدول النتايج ماظهرش' : 'مافيش طلب في الجدول باسم ' + (vars.me || 'اليوزر'), null);
