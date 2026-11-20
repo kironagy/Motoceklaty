@@ -140,4 +140,31 @@ class AmanExtensionApiTest extends TestCase
         $this->request(['request_type' => 'fake']);
         $this->api()->getJson('/api/aman/queue')->assertJsonCount(0, 'items');
     }
+    public function test_inquiry_status_that_needs_more_steps_saves_with_its_reason(): void
+    {
+        $t = fn (string $css) => ['tag' => '*', 'css' => $css];
+        $this->api()->putJson('/api/aman/inquiry/recipe', [
+            'url' => 'https://aman/check', 'user' => $t('#lnkUser'), 'result' => $t('.lblStatus'),
+            'steps' => [['kind' => 'fill', 'source' => 'national_id', 'target' => $t('#txt')], ['kind' => 'click', 'target' => $t('#btn')]],
+            'map' => [['text' => 'Pending', 'status' => '_more']],
+        ])->assertStatus(422);
+
+        $this->api()->putJson('/api/aman/inquiry/recipe', [
+            'url' => 'https://aman/check', 'user' => $t('#lnkUser'), 'result' => $t('.lblStatus'),
+            'steps' => [['kind' => 'fill', 'source' => 'national_id', 'target' => $t('#txt')], ['kind' => 'click', 'target' => $t('#btn')]],
+            'map' => [['text' => 'Pending', 'status' => '_more']],
+            'more' => ['steps' => [['kind' => 'click', 'target' => $t('#details')]], 'reason' => $t('.lblReason'), 'map' => [['text' => 'متوقف', 'status' => 'paused_aman']]],
+        ])->assertOk();
+        $this->assertSame('.lblReason', AmanRecipe::where('type', '_inquiry')->first()->steps['more']['reason']['css']);
+
+        $req = $this->request(['status' => 'pending']);
+        $this->api()->postJson('/api/aman/inquiry/requests/'.$req->id.'/result', [
+            'text' => 'Pending', 'status' => 'paused_aman', 'reason' => 'متوقف لحين استيفاء صورة البطاقة',
+        ])->assertOk()->assertJson(['changed' => true]);
+
+        $fresh = $req->fresh();
+        $this->assertSame('paused_aman', $fresh->status);
+        $this->assertSame("متابعة الاستعلام على أمان: Pending\nالسبب: متوقف لحين استيفاء صورة البطاقة", $fresh->checks_report['aman']);
+        $this->assertSame('Pending — السبب: متوقف لحين استيفاء صورة البطاقة', $fresh->aman_check_text);
+    }
 }

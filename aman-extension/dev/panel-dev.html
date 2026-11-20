@@ -261,6 +261,18 @@
           <label class="f">كل حالة عند أمان تبقى إيه عندنا (لو الكلام ده موجود في الحالة)</label>
           <div id="inqMap"></div>
           <div class="row" style="margin-top:6px"><button id="inqMapAdd">+ حالة</button></div>
+          <div id="inqMoreBox">
+            <label class="f">حالة "يكمّل خطوات ويقرا السبب" (زي pending): الخطوات اللي بتعملها بعدها لحد ما السبب يظهر</label>
+            <div class="row">
+              <button id="inqMoreToggle">علّم الخطوات اللي بعد الحالة</button>
+              <button data-inqpick="reason">علّم مكان السبب</button>
+            </div>
+            <ol id="inqMoreSteps"></ol>
+            <div id="inqMoreInfo" class="kv"></div>
+            <label class="f">السبب يبقى إيه عندنا (لو الكلام ده موجود في السبب)</label>
+            <div id="inqReasonMap"></div>
+            <div class="row" style="margin-top:6px"><button id="inqReasonAdd">+ سبب</button></div>
+          </div>
           <div id="inqTeachMsg" class="muted" style="margin-top:6px"></div>
         </div>
       </section>

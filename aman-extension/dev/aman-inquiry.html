@@ -9,7 +9,10 @@
 <div id="details"></div>
 <script>
   // AJAX like Aman: by national id -> a table of applications (number, user); by number -> the status
-  const st = { '7': 'تمت الموافقة على الطلب', '9': 'تم رفض الطلب', '1': 'جاري الاستعلام', '3': 'العميل متوقف' };
+  const st = { '7': 'تمت الموافقة على الطلب', '9': 'تم رفض الطلب', '1': 'جاري الاستعلام', '3': 'العميل متوقف', '5': 'Pending', '6': 'Pending' };
+  // Pending: one more action shows why (owner 2026-11-21)
+  const why = { '5': 'متوقف لحين استيفاء صورة البطاقة', '6': 'Pending - استعلام عمل' };
+  window.showWhy = (v) => setTimeout(() => { document.getElementById('why').innerHTML = '<span class="lblReason">' + (why[v.slice(-1)] || 'مافيش سبب') + '</span>'; }, 500);
   document.getElementById('btnSearch').onclick = () => {
     const type = document.getElementById('searchType').value, v = document.getElementById('txtSearch').value;
     document.getElementById('err').textContent = '';
@@ -21,7 +24,8 @@
           + '<tr><td>' + ours + '</td><td>Shady_Amr_auto</td><td>2026-11-10</td></tr></table>';
         document.getElementById('details').innerHTML = '';
       } else if (type === 'ref') {
-        document.getElementById('details').innerHTML = '<table><tr><td>Status</td><td><span class="lblStatus">' + (st[v.slice(-1)] || 'حالة غريبة') + '</span></td></tr></table>';
+        document.getElementById('details').innerHTML = '<table><tr><td>Status</td><td><span class="lblStatus">' + (st[v.slice(-1)] || 'حالة غريبة') + '</span></td></tr></table>'
+          + '<button type="button" id="btnDetails" onclick="showWhy(\'' + v + '\')">Details</button><div id="why"></div>';
       } else document.getElementById('err').textContent = 'Error while rendering data';
     }, 600);
   };

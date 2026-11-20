@@ -55,10 +55,12 @@
     copy: 'في جدول النتايج: دوس على الخانة اللي فيها اسم اليوزر',
     copy2: 'دلوقتي دوس على رقم الطلب في نفس الصف',
     result: 'دوس على المكان اللي أمان بيكتب فيه حالة العميل',
+    reason: 'دوس على المكان اللي أمان بيكتب فيه السبب',
   };
 
   function showBanner() {
-    const text = !isTeaching() ? '' : teach.pick ? PICK[teach.pick] : 'بيسجّل الاختيارات والضغطات بالترتيب';
+    const text = !isTeaching() ? '' : teach.pick ? PICK[teach.pick]
+      : teach.phase === 'more' ? 'بيسجّل الخطوات اللي بعد الحالة (لحد ما السبب يظهر)' : 'بيسجّل الاختيارات والضغطات بالترتيب';
     if (!text) { banner?.remove(); banner = null; return; }
     if (!banner) {
       banner = document.createElement('div');
@@ -71,6 +73,14 @@
 
   const addStep = (step) => update('inqTeach', (t) => {
     if (!t) return;
+    // the steps after the status (owner 2026-11-21): their own list
+    if (t.phase === 'more') {
+      const list = [...(t.more?.steps || [])];
+      const prev = list[list.length - 1];
+      if (prev && step.kind === 'select' && prev.kind === 'select' && prev.target.css === step.target.css) list.splice(-1, 1, step);
+      else list.push(step);
+      return { ...t, more: { ...(t.more || {}), steps: list } };
+    }
     const steps = [...(t.steps || [])];
     const at = Number.isInteger(t.insertAt) ? t.insertAt : steps.length;
     const last = steps[at - 1];
@@ -110,6 +120,8 @@
           addStep({ kind: 'copy', table: a.table, userCol: a.col, userHeader: a.header, userSample: a.text, refCol: td.cellIndex, refHeader: headerOf(table, td.cellIndex), sample: cellText(td) });
           update('inqTeach', (t) => (t ? { ...t, pick: null, copyA: null } : t));
         }
+      } else if (kind === 'reason') {
+        update('inqTeach', (t) => (t ? { ...t, more: { ...(t.more || {}), reason: locate(el, 'result') }, reasonText: clean(el.innerText || el.value, 300), pick: null } : t));
       } else if (kind === 'result') {
         update('inqTeach', (t) => (t ? { ...t, result: locate(el, 'result'), lastText: clean(el.innerText || el.value, 300), pick: null } : t));
       }
@@ -141,8 +153,9 @@
     const v = clean(el.value, 80);
     if (!v) return;
     const target = locate(el);
-    const steps = teach.steps || [];
-    const at = Number.isInteger(teach.insertAt) ? teach.insertAt : steps.length;
+    const more = teach.phase === 'more';
+    const steps = (more ? teach.more?.steps : teach.steps) || [];
+    const at = !more && Number.isInteger(teach.insertAt) ? teach.insertAt : steps.length;
     const last = steps[at - 1];
     // the box was just marked with "علّم خانة": that step already types here
     if (last && (last.kind === 'fill' || last.kind === 'nid') && last.target?.css === target.css) return;
@@ -196,6 +209,8 @@
     const marks = {};
     const res = findEl(recipe.result);
     if (res) { res.dataset.motoSeen = '1'; marks.prev = textIn(res); } else marks.prev = '';
+    const why = recipe.more?.reason && findEl(recipe.more.reason);
+    if (why) { why.dataset.motoSeen = '1'; marks.prevReason = textIn(why); } else marks.prevReason = '';
     for (const s of recipe.steps || []) {
       if (s.kind !== 'copy') continue;
       const tb = findEl(s.table);
@@ -230,7 +245,7 @@
   async function record(item, text, status, extra = {}) {
     let row = { id: item.id, name: item.name, text, status, at: Date.now(), ...extra };
     try {
-      const res = await api('POST', '/inquiry/requests/' + item.id + '/result', { text, status });
+      const res = await api('POST', '/inquiry/requests/' + item.id + '/result', { text, status, reason: extra.reason || null });
       row = { ...row, changed: !!res.changed, skipped: res.skipped || null };
     } catch (e) {
       row = { ...row, error: e.message };
@@ -242,7 +257,7 @@
       if (row.changed) s.changed = (s.changed || 0) + 1;
       if (!status) s.unknown = (s.unknown || 0) + 1;
       if (row.error) s.errors = (s.errors || 0) + 1;
-      return { ...r, i: r.i + 1, step: 0, retried: false, vars: { me: r.vars?.me }, stats: s, log: [row, ...(r.log || [])].slice(0, 300), error: null };
+      return { ...r, i: r.i + 1, step: 0, phase: null, mainText: null, retried: false, vars: { me: r.vars?.me }, stats: s, log: [row, ...(r.log || [])].slice(0, 300), error: null };
     });
   }
 
@@ -279,12 +294,13 @@
         }
 
         const recipe = run.recipe;
-        const steps = withSearch(recipe.steps || []);
+        const more = run.phase === 'more';
+        const steps = more ? (recipe.more?.steps || []) : withSearch(recipe.steps || []);
         const step = run.step || 0;
         const firstFill = steps.findIndex((s) => s.kind === 'fill' || s.kind === 'nid');
         const vars = run.vars || {};
 
-        if (step === 0) {
+        if (step === 0 && !more) {
           // our Aman user, read off the page once per run
           let me = vars.me || (run.users?.length ? run.users.join('، ') : '');
           if (recipe.user && !me) {
@@ -319,6 +335,12 @@
           }
 
           const el = await waitFor(() => findEl(s.target), 15000);
+          if (!el && more) {
+            if (!(await stillMine())) return;
+            await record(item, run.mainText || '', null, { ref: vars.ref || null, reason: 'مالقيتش خطوة ' + (step + 1) + ' من خطوات السبب' });
+            location.href = recipe.url;
+            return;
+          }
           if (!el) {
             if (step <= firstFill) {
               // not on the search page: back to it once, then it is the recipe's fault
@@ -365,6 +387,22 @@
           continue;
         }
 
+        if (more) {
+          // the steps after the status are done: the reason (a new element, or new words in the marked one)
+          const end = (run.stepAt || Date.now()) + 20000;
+          let why = await waitFor(() => {
+            const el = findEl(recipe.more.reason);
+            const t = textIn(el);
+            return t && (el.dataset.motoSeen !== '1' || t !== run.prevReason) ? t : null;
+          }, Math.max(1000, end - Date.now())) || '';
+          if (!why && run.prevReason && textIn(findEl(recipe.more.reason)) === run.prevReason) why = run.prevReason;
+          await sleep(200);
+          if (!(await stillMine())) return;
+          await record(item, run.mainText || '', why ? mapStatus(recipe.more, why) : null, { ref: vars.ref || null, reason: why || 'السبب ماظهرش' });
+          await sleep(1200);
+          continue;
+        }
+
         // all steps done: wait for the status - a new element (Aman redrew it, or the page reloaded)
         // or new words in the marked one
         const end = (run.stepAt || Date.now()) + 20000;
@@ -377,7 +415,13 @@
         if (!text && run.prev && resultText(recipe) === run.prev) text = run.prev;
         await sleep(200);
         if (!(await stillMine())) return;
-        await record(item, text || 'مفيش حالة ظهرت', text ? mapStatus(recipe, text) : null, { ref: vars.ref || null });
+        const status = text ? mapStatus(recipe, text) : null;
+        // a status that needs one more action on Aman to show its reason
+        if (status === '_more' && recipe.more?.steps?.length) {
+          await update('inqRun', (r) => ({ ...r, phase: 'more', step: 0, mainText: text }));
+          continue;
+        }
+        await record(item, text || 'مفيش حالة ظهرت', status === '_more' ? null : status, { ref: vars.ref || null });
         await sleep(1200); // easy on Aman
       }
     } finally {

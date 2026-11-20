@@ -337,8 +337,18 @@ class AmanExtensionController extends Controller
             'result' => 'required|array',
             'user' => 'nullable|array',
             'map' => 'array', 'map.*.text' => 'required|string|max:200',
-            'map.*.status' => ['required', Rule::in(self::INQUIRY_STATUSES)],
+            // "_more": that status needs more steps on Aman to show its reason (owner 2026-11-21: Aman's
+            // "pending" is stopped - one more action shows why: متوقف أمان with the reason, or استعلام عمل)
+            'map.*.status' => ['required', Rule::in([...self::INQUIRY_STATUSES, '_more'])],
+            'more' => 'nullable|array',
+            'more.steps' => 'array',
+            'more.steps.*.kind' => ['required', Rule::in(['select', 'fill', 'nid', 'click'])],
+            'more.reason' => 'nullable|array',
+            'more.map' => 'array', 'more.map.*.text' => 'required|string|max:200',
+            'more.map.*.status' => ['required', Rule::in(self::INQUIRY_STATUSES)],
         ]);
+        abort_if(collect($request->input('map'))->contains('status', '_more')
+            && (! $request->input('more.steps') || ! $request->input('more.reason')), 422, 'علّم الخطوات اللي بعد الحالة ومكان السبب');
         $steps = collect($request->input('steps'));
         abort_unless($steps->contains(fn ($s) => in_array($s['kind'], ['fill', 'nid'], true)), 422, 'علّم خانة الرقم القومي');
         abort_if($steps->contains('kind', 'copy') && ! $request->input('user'), 422, 'علّم اسم يوزر أمان عشان النسخ من الجدول');
@@ -346,7 +356,7 @@ class AmanExtensionController extends Controller
         $recipe = AmanRecipe::firstOrNew(['type' => self::INQUIRY_RECIPE]);
         $recipe->version = ($recipe->exists ? $recipe->version : 0) + 1;
         // the whole input, not validate()'s result (it drops the targets' keys - see saveRecipe)
-        $recipe->steps = $request->only(['url', 'steps', 'result', 'user', 'map']);
+        $recipe->steps = $request->only(['url', 'steps', 'result', 'user', 'map', 'more']);
         $recipe->updated_by = $this->staff($request)->id;
         $recipe->save();
 
@@ -388,6 +398,7 @@ class AmanExtensionController extends Controller
         $data = $request->validate([
             'text' => 'required|string|max:500',
             'status' => ['nullable', Rule::in(self::INQUIRY_STATUSES)],
+            'reason' => 'nullable|string|max:500',
         ]);
         $req = $this->inquiryRequests($staff)->whereKey($id)->first();
         if (! $req) {
@@ -395,10 +406,13 @@ class AmanExtensionController extends Controller
         }
 
         $req->aman_checked_at = now();
-        $req->aman_check_text = mb_substr($data['text'], 0, 500);
+        $reason = trim((string) ($data['reason'] ?? ''));
+        $req->aman_check_text = mb_substr($data['text'].($reason !== '' ? ' — السبب: '.$reason : ''), 0, 500);
         $changed = filled($data['status'] ?? null) && $data['status'] !== 'pending';
         if ($changed) {
-            $req->checks_report = array_merge((array) $req->checks_report, ['aman' => 'متابعة الاستعلام على أمان: '.$data['text']]);
+            // the reason Aman gave (why it is stopped) is what the employee needs to read
+            $note = $reason !== '' ? 'متابعة الاستعلام على أمان: '.$data['text']."\nالسبب: ".$reason : 'متابعة الاستعلام على أمان: '.$data['text'];
+            $req->checks_report = array_merge((array) $req->checks_report, ['aman' => $note]);
             $req->status = $data['status'];
             $req->status_updated_by = $staff->id;
             \Spatie\Activitylog\Facades\CauserResolver::setCauser($staff);
