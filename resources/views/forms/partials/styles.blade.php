@@ -44,6 +44,7 @@
     .link-btn { border: 0; background: none; color: var(--brand); font: inherit; font-weight: 700; padding: 0; cursor: pointer; text-decoration: underline; }
     .cap-note { background: #fff4e5; border: 1px solid #ffd3a8; color: #8a4300; border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 8px; line-height: 1.7; }
     .plan small.cash { color: #b84500; font-weight: 800; }
+    .plan small.promo { color: #0a7a3d; font-weight: 800; }
     .machine-cash { color: #b84500; font-weight: 700; }
     .remove { border: 0; background: none; color: var(--bad); font: inherit; cursor: pointer; }
     .actions { display: flex; gap: 8px; justify-content: space-between; margin-top: 22px; }

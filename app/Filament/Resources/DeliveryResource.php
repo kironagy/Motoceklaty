@@ -196,9 +196,13 @@ public static function isHitler(): bool
         return $query->visibleTo($user);
     }
     // ✅ تحميل بيانات النظام تلقائيًا عند التعديل
-    protected static function loadSystemData($state, callable $set): void
+    protected static function loadSystemData($state, callable $set, ?callable $get = null, $record = null): void
     {
         $system = InstallmentSystem::where('name', $state)->first();
+        // owner 2026-11-20: a live interest offer (عروض البوت) shows on the months list - the customer
+        // type comes from the bot/form application; a request typed by hand has none, so no offer
+        $customerTypeId = $record instanceof InstallmentRequest ? $record->application?->customer_type_id : null;
+        $machineId = $get ? (int) $get('machine_id') : null;
 
         if ($system && $system->plans) {
             $plans = is_string($system->plans)
@@ -211,7 +215,11 @@ public static function isHitler(): bool
                 $interest = $plan['interest'] ?? null;
 
                 if ($months && $interest !== null) {
-                    $options[$months] = "{$months} شهر ({$interest}%)";
+                    [$rate, $promo] = app(\App\Domain\Offers\BotOfferService::class)
+                        ->interest((int) $system->id, (int) $months, (float) $interest, $customerTypeId ? (int) $customerTypeId : null, $machineId ?: null);
+                    $options[$months] = $promo
+                        ? "{$months} شهر ({$rate}% عرض {$promo->title} بدل {$interest}%)"
+                        : "{$months} شهر ({$interest}%)";
                 }
             }
 
@@ -763,12 +771,12 @@ $requestType = request()->query('request_type') === 'fake' && ! static::isCompan
                             ->searchable()
                             ->reactive()
                             ->afterStateUpdated(
-                                fn($state, callable $set) =>
-                                self::loadSystemData($state, $set)
+                                fn($state, callable $set, callable $get, $record) =>
+                                self::loadSystemData($state, $set, $get, $record)
                             )
                             ->afterStateHydrated(
-                                fn($state, callable $set) =>
-                                self::loadSystemData($state, $set)
+                                fn($state, callable $set, callable $get, $record) =>
+                                self::loadSystemData($state, $set, $get, $record)
                             )
                             // Amaan Giza and Amaan Cairo: a request never moves between them, either way (InstallmentRequest::isAmaanCrossMove).
                             ->rule(fn ($record) => function (string $attribute, $value, \Closure $fail) use ($record) {

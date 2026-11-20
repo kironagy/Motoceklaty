@@ -217,6 +217,8 @@ class FormLinkController extends Controller
             'upfront' => round($offer['cash_due_upfront']),
             'capped' => $offer['cap'] !== null,
             'no_fees' => $noFees,
+            // owner 2026-11-20: an interest offer (عروض البوت) is said to be an offer on the form too
+            'promo' => $offer['promo'] ?? null,
         ];
         $offers = app(BestOfferService::class);
         // Owner 2026-11-09: the bot quotes "أمان بدون مصاريف" to a customer who wants nothing paid at

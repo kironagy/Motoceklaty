@@ -107,6 +107,7 @@
                 <button type="button" class="plan" :class="{on: String(answers[item.key]) === String(p.id)}" @click="pickPlan(item.key, p)">
                     <strong x-text="`${p.months} شهر`"></strong>
                     <span x-show="p.monthly" x-text="`القسط ${money(p.monthly)} ج في الشهر`"></span>
+                    <small class="promo" x-show="p.promo" x-text="`🎁 ${p.promo}`"></small>
                     <small x-show="p.down_payment" :class="{cash: p.capped}" x-text="p.capped ? `مقدم كاش ${money(p.down_payment)} ج` : `مقدم ${money(p.down_payment)} ج`"></small>
                     <small class="muted" x-show="p.upfront" x-text="`تدفع وقت الاستلام ${money(p.upfront)} ج (المقدم والمصاريف)`"></small>
                 </button>
@@ -120,6 +121,7 @@
                         <button type="button" class="plan" :class="{on: String(answers[item.key]) === String(p.id)}" @click="pickPlan(item.key, p)">
                             <strong x-text="`${p.months} شهر`"></strong>
                             <span x-show="p.monthly" x-text="`القسط ${money(p.monthly)} ج في الشهر`"></span>
+                            <small class="promo" x-show="p.promo" x-text="`🎁 ${p.promo}`"></small>
                             <small class="muted">مفيش مقدم ولا مصاريف</small>
                         </button>
                     </template>
