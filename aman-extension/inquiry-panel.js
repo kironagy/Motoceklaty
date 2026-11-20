@@ -1,9 +1,12 @@
 // Panel side of متابعة الاستعلام (owner 2026-11-20); the work itself runs in inquiry.js inside its own Aman tab.
+// - tab "متابعة الاستعلام": pull the requests under inquiry (oldest first), then start;
+// - tab "تعليم", type "متابعة الاستعلام": its own recipe, recorded like the upload recipes.
 // Uses panel.js's globals: $, store, me, activeTab.
 (() => {
   let statuses = {};
   let recipe = null;
   const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const SOURCES = { national_id: 'الرقم القومي', ref: 'رقم الطلب المنسوخ من الجدول', aman_ref: 'رقم طلب أمان المتسجل في موتوجيت' };
 
   async function loadRecipe() {
     try {
@@ -13,19 +16,29 @@
     } catch { /* not signed in yet */ }
   }
 
+  const say = (cls, text) => { const b = $('inqStatus'); b.hidden = false; b.className = 'status ' + cls; b.textContent = text; };
+
   // ---------- run ----------
+  $('inqPull').onclick = async () => {
+    $('inqPullMsg').textContent = 'بيسحب…';
+    try {
+      const q = await AMAN.api('GET', '/inquiry/queue');
+      await store.set({ inqBatch: { items: q.requests, pulledAt: Date.now() } });
+      $('inqPullMsg').textContent = q.requests.length ? `اتسحب ${q.requests.length} طلب تحت الاستعلام، من الأقدم للأحدث.` : 'مافيش طلبات تحت الاستعلام.';
+    } catch (e) {
+      $('inqPullMsg').textContent = 'ماقدرش يسحب: ' + e.message;
+    }
+  };
+
   $('inqStart').onclick = async () => {
     await loadRecipe();
-    if (!recipe) return ($('inqStatus').hidden = false, $('inqStatus').className = 'status error', $('inqStatus').textContent = 'متابعة الاستعلام لسه ماتعلّمتش. المسؤول يعلّمها الأول.');
-    let q;
-    try { q = await AMAN.api('GET', '/inquiry/queue'); } catch (e) {
-      $('inqStatus').hidden = false; $('inqStatus').className = 'status error'; $('inqStatus').textContent = 'ماقدرش يسحب الطلبات: ' + e.message;
-      return;
-    }
+    if (!recipe?.steps?.length) return say('error', 'وصفة متابعة الاستعلام لسه ماتعلّمتش. المسؤول يعلّمها من تبويب "تعليم".');
+    const { inqBatch } = await store.get('inqBatch');
+    if (!inqBatch?.items?.length) return say('error', 'اسحب الطلبات الأول.');
     // its own tab, so the uploader keeps its tab (owner: both run together)
     const tab = await chrome.tabs.create({ url: recipe.url, active: false });
     await store.set({ inqRun: {
-      tabId: tab.id, status: 'running', recipe, items: q.requests, i: 0, phase: 'fill', round: 1,
+      tabId: tab.id, status: 'running', recipe, items: inqBatch.items, i: 0, step: 0, round: 1, vars: {},
       repeat: Number($('inqRepeat').value) || 0, stats: {}, log: [], startedAt: Date.now(),
     } });
   };
@@ -37,37 +50,46 @@
 
   const label = (s) => (s ? (statuses[s] || s) : '');
 
-  function renderRun(run) {
+  function renderBatch(batch, run) {
     const active = run && ['running', 'waiting'].includes(run.status);
+    $('inqStart').disabled = !batch?.items?.length;
     $('inqStart').hidden = !!active;
     $('inqStop').hidden = !active;
-    const box = $('inqStatus');
-    if (!run) { box.hidden = true; $('inqStats').innerHTML = ''; $('inqLog').hidden = true; $('inqBarWrap').hidden = true; return; }
+    $('inqPull').disabled = !!active;
+    const items = batch?.items || [];
+    $('inqListBox').hidden = !items.length || !!active;
+    $('inqList').querySelector('tbody').innerHTML = items.slice(0, 200).map((r, i) => `<tr><td class="muted">${i + 1}</td>`
+      + `<td>${esc(r.name)} <span class="muted">#${r.id}</span></td><td class="muted">${esc(r.national_id)}</td><td class="muted">${esc(r.created_at || '')}</td></tr>`).join('')
+      + (items.length > 200 ? `<tr><td colspan="4" class="muted">و${items.length - 200} طلب كمان</td></tr>` : '');
+  }
+
+  function renderRun(run) {
+    if (!run) { $('inqStatus').hidden = true; $('inqStats').innerHTML = ''; $('inqLogBox').hidden = true; $('inqBarWrap').hidden = true; return; }
     const total = (run.items || []).length;
     const cur = run.items?.[run.i];
-    box.hidden = false;
-    box.className = 'status ' + ({ running: 'running', waiting: 'done', done: 'done', error: 'error', stopped: 'review' }[run.status] || '');
-    box.textContent = run.status === 'running' ? (cur ? `بيدوّر على ${cur.name || ''} (${run.i + 1} من ${total})` : 'بيخلّص…')
-      : run.status === 'waiting' ? `خلصت اللفة. اللفة الجاية الساعة ${new Date(run.nextAt).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}`
-      : run.status === 'done' ? `خلصت: اتراجع ${total} طلب`
-      : run.status === 'error' ? run.error
-      : 'اتوقفت';
-    if (run.error && run.status !== 'error') box.textContent += ' — ' + run.error;
+    say({ running: 'running', waiting: 'done', done: 'done', error: 'error', stopped: 'review' }[run.status] || '',
+      run.status === 'running' ? (cur ? `بيستعلم عن ${cur.name || ''} (${run.i + 1} من ${total})` : 'بيخلّص…')
+        : run.status === 'waiting' ? `خلصت اللفة. اللفة الجاية الساعة ${new Date(run.nextAt).toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' })}`
+        : run.status === 'done' ? `خلصت: اتراجع ${total} طلب`
+        : run.status === 'error' ? run.error
+        : 'اتوقفت');
+    if (run.error && run.status !== 'error') $('inqStatus').textContent += ' — ' + run.error;
     $('inqBarWrap').hidden = run.status !== 'running';
     $('inqBar').style.width = total ? Math.round((run.i / total) * 100) + '%' : '0';
     const s = run.stats || {};
-    $('inqStats').innerHTML = `<b>اللفة</b><span>${run.round || 1}</span><b>اتراجع</b><span>${s.checked || 0}</span>`
-      + `<b>حالته اتغيرت</b><span>${s.changed || 0}</span><b>حالة مش متعلّمة</b><span>${s.unknown || 0}</span>`
+    $('inqStats').innerHTML = (run.vars?.me ? `<b>يوزر أمان</b><span>${esc(run.vars.me)}</span>` : '')
+      + `<b>اللفة</b><span>${run.round || 1}</span><b>اتراجع</b><span>${s.checked || 0}</span>`
+      + `<b>حالته اتغيرت</b><span>${s.changed || 0}</span><b>من غير حالة متعلّمة</b><span>${s.unknown || 0}</span>`
       + (s.errors ? `<b>مشاكل</b><span>${s.errors}</span>` : '');
     const log = run.log || [];
-    $('inqLog').hidden = !log.length;
-    $('inqLog').querySelector('tbody').innerHTML = log.slice(0, 60).map((r) => `<tr><td>${esc(r.name)} <span class="muted">#${r.id}</span></td>`
+    $('inqLogBox').hidden = !log.length;
+    $('inqLog').querySelector('tbody').innerHTML = log.slice(0, 80).map((r) => `<tr><td>${esc(r.name)} <span class="muted">#${r.id}</span>${r.ref ? `<br><span class="muted">طلب أمان ${esc(r.ref)}</span>` : ''}</td>`
       + `<td>${esc(r.text)}</td><td>${r.error ? '<span class="warn">' + esc(r.error) + '</span>'
-        : r.skipped ? esc(r.skipped) : r.changed ? '<b>بقى ' + esc(label(r.status)) + '</b>' : r.status ? 'لسه ' + esc(label(r.status)) : '<span class="warn">حالة مش متعلّمة</span>'}</td></tr>`).join('');
+        : r.skipped ? esc(r.skipped) : r.changed ? '<b>بقى ' + esc(label(r.status)) + '</b>' : r.status ? 'لسه ' + esc(label(r.status)) : '<span class="warn">مااتغيرش</span>'}</td></tr>`).join('');
   }
 
-  // ---------- teach ----------
-  const describe = (t) => (t ? '✓ ' + (t.label || t.text || t.placeholder || t.name || t.id || t.tag) : '');
+  // ---------- teach (tab "تعليم", type "متابعة الاستعلام") ----------
+  const inqMode = () => $('teachType').value === '_inquiry';
 
   function mapRow(m = { text: '', status: 'pending' }) {
     const div = document.createElement('div');
@@ -79,90 +101,121 @@
     div.querySelector('.x').onclick = () => div.remove();
     $('inqMap').appendChild(div);
   }
-
+  $('inqMapAdd').onclick = () => mapRow();
   const readMap = () => [...$('inqMap').children].map((d) => ({ text: d.querySelector('.mt').value.trim(), status: d.querySelector('.ms').value })).filter((m) => m.text);
+  const fillMap = (map) => { $('inqMap').innerHTML = ''; (map?.length ? map : [{ text: '', status: 'approved' }, { text: '', status: 'rejected' }]).forEach(mapRow); };
 
-  $('inqTeachStart').onclick = async () => {
+  async function startTeach(base) {
     await loadRecipe();
     const tab = await activeTab();
     if (!tab) return;
-    const base = recipe || {};
-    // with a saved recipe its steps stay; "سجّل خطوات تاني" starts them over
-    await store.set({ inqTeach: { active: true, tabId: tab.id, pick: null, recording: !base.steps?.length, url: base.url || tab.url, steps: base.steps || [], result: base.result || null, lastText: '' } });
-    $('inqMap').innerHTML = '';
-    (base.map?.length ? base.map : [{ text: '', status: 'approved' }, { text: '', status: 'rejected' }]).forEach(mapRow);
-  };
+    base = base || {};
+    await store.set({ inqTeach: { active: true, tabId: tab.id, pick: null, url: base.url || tab.url, steps: base.steps || [], user: base.user || null, result: base.result || null, lastText: '', userText: '' } });
+    fillMap(base.map);
+  }
 
-  $('inqRecord').onclick = async () => {
-    const tab = await activeTab();
-    const { inqTeach } = await store.get('inqTeach');
-    if (inqTeach) await store.set({ inqTeach: { ...inqTeach, recording: true, pick: null, steps: [], result: null, lastText: '', url: tab?.url || inqTeach.url } });
+  $('inqTeachStart').onclick = async () => {
+    await loadRecipe();
+    if (recipe && !confirm('فيه وصفة محفوظة. التعليم الجديد هيستبدلها لما تحفظ. تكمل؟')) return;
+    startTeach({ map: recipe?.map });
   };
-
-  $('inqTeachEnd').onclick = () => store.set({ inqTeach: null });
-  $('inqMapAdd').onclick = () => mapRow();
+  $('inqTeachEdit').onclick = async () => {
+    await loadRecipe();
+    if (!recipe) return alert('مافيش وصفة محفوظة لمتابعة الاستعلام.');
+    startTeach(recipe);
+  };
+  $('inqTeachEnd').onclick = async () => { if (confirm('تلغي التعليم من غير ما تحفظ؟')) await store.set({ inqTeach: null }); };
 
   document.querySelectorAll('[data-inqpick]').forEach((b) => b.onclick = async () => {
     const { inqTeach } = await store.get('inqTeach');
-    if (inqTeach) await store.set({ inqTeach: { ...inqTeach, pick: b.dataset.inqpick } });
+    if (inqTeach) await store.set({ inqTeach: { ...inqTeach, pick: b.dataset.inqpick, copyA: null } });
   });
+
+  async function editTeach(fn) {
+    const { inqTeach } = await store.get('inqTeach');
+    if (!inqTeach) return;
+    const t = { ...inqTeach, steps: [...(inqTeach.steps || [])] };
+    fn(t);
+    await store.set({ inqTeach: t });
+  }
 
   $('inqSave').onclick = async () => {
     const { inqTeach: t } = await store.get('inqTeach');
     const steps = t?.steps || [];
-    if (!steps.some((x) => x.kind === 'nid')) return ($('inqTeachMsg').textContent = 'علّم خانة الرقم القومي الأول.');
+    if (!steps.some((x) => x.kind === 'fill' || x.kind === 'nid')) return ($('inqTeachMsg').textContent = 'علّم خانة الرقم القومي الأول.');
+    if (steps.some((x) => x.kind === 'copy') && !t.user) return ($('inqTeachMsg').textContent = 'علّم اسم يوزر أمان عشان النسخ من الجدول.');
     if (!t.result) return ($('inqTeachMsg').textContent = 'علّم مكان الحالة الأول.');
     const map = readMap();
     if (!map.length) return ($('inqTeachMsg').textContent = 'اكتب حالة واحدة على الأقل.');
     try {
-      const body = { url: t.url, steps, result: t.result, map };
+      const body = { url: t.url, steps, result: t.result, user: t.user || null, map };
       const r = await AMAN.api('PUT', '/inquiry/recipe', body);
-      $('inqTeachMsg').textContent = 'اتحفظت (نسخة ' + r.version + ').';
       recipe = { ...body, version: r.version };
+      await store.set({ inqTeach: null });
+      $('inqSaved').textContent = 'اتحفظت الوصفة (نسخة ' + r.version + ').';
     } catch (e) {
       $('inqTeachMsg').textContent = 'ماتحفظتش: ' + e.message;
     }
   };
 
-  const stepText = (x) => x.kind === 'select' ? 'اختار "' + (x.text || x.value) + '"'
-    : x.kind === 'nid' ? 'اكتب الرقم القومي' : 'دوس "' + (x.target?.text || x.target?.label || x.target?.id || x.target?.tag) + '"';
-
-  async function dropStep(i) {
-    const { inqTeach } = await store.get('inqTeach');
-    if (!inqTeach) return;
-    const steps = [...(inqTeach.steps || [])];
-    steps.splice(i, 1);
-    await store.set({ inqTeach: { ...inqTeach, steps } });
+  const KIND = { select: ['select', 'اختيار'], fill: ['fill', 'خانة'], nid: ['fill', 'خانة'], click: ['click', 'ضغطة'], copy: ['copy', 'نسخ'] };
+  function stepLine(x) {
+    if (x.kind === 'select') return 'اختار "' + esc(x.text || x.value) + '"';
+    if (x.kind === 'click') return 'دوس "' + esc(x.target?.text || x.target?.label || x.target?.id || x.target?.tag) + '"';
+    if (x.kind === 'copy') return 'من الجدول: الصف اللي في عمود "' + esc(x.userHeader || ('رقم ' + (x.userCol + 1))) + '" يوزرنا، انسخ "' + esc(x.refHeader || ('عمود ' + (x.refCol + 1))) + '"' + (x.sample ? ' <span class="muted">(زي ' + esc(x.sample) + ')</span>' : '');
+    return 'اكتب';
   }
 
   function renderTeach(t) {
-    $('inqTeachBox').hidden = !me?.can_teach;
-    const on = !!t?.active;
-    $('inqTeachStart').hidden = on;
-    $('inqTeachEnd').hidden = !on;
-    $('inqPicks').hidden = !on;
-    if (!on) return;
-    $('inqPickMsg').textContent = t.pick === 'nid' ? 'دوس على خانة الرقم القومي في صفحة أمان…'
-      : t.pick === 'result' ? 'دوس على الحالة في صفحة أمان…'
-      : t.recording ? 'بيسجّل كل اختيار وضغطة في صفحة أمان.' : '';
+    const pane = document.querySelector('[data-pane="teach"]');
+    const on = inqMode();
+    pane.classList.toggle('inq-mode', on);
+    $('inqTeachBox').hidden = !on || !me?.can_teach;
+    $('inqSaved').textContent = recipe ? `الوصفة المحفوظة: نسخة ${recipe.version || 1}، ${recipe.steps?.length || 0} خطوة${recipe.user ? '، وبتنسخ رقم الطلب من صف اليوزر' : ''}.` : 'لسه مافيش وصفة محفوظة.';
+    const active = !!t?.active;
+    $('inqTeachStart').hidden = active;
+    $('inqTeachEdit').hidden = active || !recipe;
+    $('inqSave').hidden = !active;
+    $('inqTeachEnd').hidden = !active;
+    $('inqPicks').hidden = !active;
+    if (!active) return;
+    const pickText = { fill: 'دوس على الخانة في صفحة أمان…', user: 'دوس على اسم اليوزر في صفحة أمان…', copy: 'دوس على اسم اليوزر في صف من الجدول…', copy2: 'دلوقتي دوس على رقم الطلب في نفس الصف…', result: 'دوس على الحالة في صفحة أمان…' }[t.pick];
+    $('inqPickMsg').hidden = !pickText;
+    $('inqPickMsg').textContent = pickText || '';
     const ol = $('inqSteps');
     ol.innerHTML = '';
     (t.steps || []).forEach((x, i) => {
+      const [cls, name] = KIND[x.kind] || ['click', x.kind];
       const li = document.createElement('li');
-      li.innerHTML = esc(stepText(x)) + ' <button class="x" title="امسح">✕</button>';
-      li.querySelector('.x').onclick = () => dropStep(i);
+      li.innerHTML = `<span class="pill ${cls}">${name}</span> ${stepLine(x)}`
+        + ' <button class="mv up" title="لفوق">▲</button><button class="mv down" title="لتحت">▼</button><button class="x" title="امسح">✕</button>';
+      if (x.kind === 'fill' || x.kind === 'nid') {
+        const sel = document.createElement('select');
+        sel.className = 'src';
+        for (const [k, v] of Object.entries(SOURCES)) sel.append(new Option(v, k));
+        sel.value = x.kind === 'nid' ? 'national_id' : (x.source || 'national_id');
+        sel.onchange = () => editTeach((tt) => { tt.steps[i] = { ...tt.steps[i], kind: 'fill', source: sel.value }; });
+        li.append(sel);
+      }
+      li.querySelector('.up').onclick = () => editTeach((tt) => { if (i > 0) [tt.steps[i - 1], tt.steps[i]] = [tt.steps[i], tt.steps[i - 1]]; });
+      li.querySelector('.down').onclick = () => editTeach((tt) => { if (i < tt.steps.length - 1) [tt.steps[i + 1], tt.steps[i]] = [tt.steps[i], tt.steps[i + 1]]; });
+      li.querySelector('.x').onclick = () => editTeach((tt) => { tt.steps.splice(i, 1); });
       ol.appendChild(li);
     });
-    $('inqResult').textContent = t.result ? 'مكان الحالة اتعلّم' + (t.lastText ? ': ' + t.lastText : '') : 'مكان الحالة لسه ماتعلّمش';
+    if (!(t.steps || []).length) ol.innerHTML = '<li class="muted">لسه مافيش خطوات. اعمل الاستعلام في صفحة أمان.</li>';
+    $('inqInfo').innerHTML = `<b>يوزر أمان</b><span>${t.user ? '✓ ' + esc(t.userText || 'اتعلّم') : '<span class="warn">لسه</span>'}</span>`
+      + `<b>مكان الحالة</b><span>${t.result ? '✓ ' + esc(t.lastText || 'اتعلّم') : '<span class="warn">لسه</span>'}</span>`;
   }
 
   async function render() {
-    const { inqRun, inqTeach } = await store.get(['inqRun', 'inqTeach']);
+    const { inqRun, inqTeach, inqBatch } = await store.get(['inqRun', 'inqTeach', 'inqBatch']);
+    renderBatch(inqBatch || null, inqRun || null);
     renderRun(inqRun || null);
     renderTeach(inqTeach || null);
   }
 
-  chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && (ch.inqRun || ch.inqTeach || ch.me)) render(); });
+  $('teachType').addEventListener('change', render);
+  chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && (ch.inqRun || ch.inqTeach || ch.inqBatch || ch.me)) render(); });
   // the tab running the follow-up was closed: the run stops
   chrome.tabs.onRemoved.addListener(async (id) => {
     const { inqRun } = await store.get('inqRun');
@@ -170,9 +223,10 @@
   });
 
   (async () => {
-    const { inqTeach } = await store.get('inqTeach');
+    const { inqTeach, inqBatch } = await store.get(['inqTeach', 'inqBatch']);
     await loadRecipe();
-    if (inqTeach?.active) (recipe?.map?.length ? recipe.map : [{ text: '', status: 'approved' }]).forEach(mapRow);
+    if (inqTeach?.active) { $('teachType').value = '_inquiry'; fillMap(recipe?.map); }
+    if (inqBatch?.items?.length) $('inqPullMsg').textContent = `اتسحب ${inqBatch.items.length} طلب تحت الاستعلام.`;
     render();
   })();
 })();

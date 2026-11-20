@@ -117,6 +117,10 @@
   .decide label.f:first-child { margin-top:0; }
   .decide textarea, .decide select { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; font:inherit; resize:vertical; }
   .st.held { background:#e2e8f0; color:#334155; } .st.canceled { background:#f3e8ff; color:#7e22ce; }
+  .pill.select { background:#6366f1; } .pill.copy { background:#0f766e; } .pill.result { background:#0f172a; }
+  [data-pane="teach"].inq-mode #teachStart, [data-pane="teach"].inq-mode #teachEdit, [data-pane="teach"].inq-mode #addClick,
+  [data-pane="teach"].inq-mode #teachSave, [data-pane="teach"].inq-mode #teachCancel, [data-pane="teach"].inq-mode #editFromRow,
+  [data-pane="teach"].inq-mode #teachHint, [data-pane="teach"].inq-mode #pickRow, [data-pane="teach"].inq-mode #teachSteps { display:none !important; }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -228,6 +232,38 @@
         </div>
         <ol id="teachSteps"></ol>
       </section>
+      <section id="inqTeachBox" hidden>
+        <h2>وصفة متابعة الاستعلام</h2>
+        <div id="inqSaved" class="muted"></div>
+        <p class="muted" id="inqTeachHint">افتح "Installment Check History" في أمان في التاب ده، ودوس "ابدأ التعليم"، واعمل الاستعلام بإيدك مرة لعميل واحد. الإضافة بتسجّل الاختيارات والضغطات بالترتيب، وانت بتحدد بالزراير:</p>
+        <ol class="muted" style="margin-top:0">
+          <li>"علّم خانة": قبل ما تكتب في خانة البحث (أول مرة الرقم القومي، وبعد النسخ رقم الطلب).</li>
+          <li>"علّم اسم يوزر أمان": اسم اليوزر اللي داخل بيه فوق (مثلا Shady_Amr_auto).</li>
+          <li>"انسخ رقم الطلب من الجدول": دوس على اسم اليوزر في صف من الجدول، وبعدين على رقم الطلب في نفس الصف.</li>
+          <li>"علّم مكان الحالة": في الآخر، على الحالة.</li>
+        </ol>
+        <div class="row">
+          <button id="inqTeachStart" class="primary">ابدأ التعليم</button>
+          <button id="inqTeachEdit">عدّل الوصفة</button>
+          <button id="inqSave" class="ok" hidden>احفظ الوصفة</button>
+          <button id="inqTeachEnd" hidden>إلغاء</button>
+        </div>
+        <div id="inqPicks" hidden>
+          <div class="row" style="margin-top:8px">
+            <button data-inqpick="fill">علّم خانة</button>
+            <button data-inqpick="user">علّم اسم يوزر أمان</button>
+            <button data-inqpick="copy">انسخ رقم الطلب من الجدول</button>
+            <button data-inqpick="result">علّم مكان الحالة</button>
+          </div>
+          <div id="inqPickMsg" class="now" hidden></div>
+          <ol id="inqSteps"></ol>
+          <div id="inqInfo" class="kv"></div>
+          <label class="f">كل حالة عند أمان تبقى إيه عندنا (لو الكلام ده موجود في الحالة)</label>
+          <div id="inqMap"></div>
+          <div class="row" style="margin-top:6px"><button id="inqMapAdd">+ حالة</button></div>
+          <div id="inqTeachMsg" class="muted" style="margin-top:6px"></div>
+        </div>
+      </section>
       <section>
         <h2>الوصفات</h2>
         <div id="recipes" class="muted">لسه مافيش.</div>
@@ -237,51 +273,39 @@
     <div data-pane="inquiry" hidden>
       <section>
         <h2>متابعة الاستعلام</h2>
-        <p class="muted">بتفتح صفحة لوحدها على أمان، وبتدوّر بالرقم القومي على كل طلب "تحت الاستعلام"، وتحدّث حالته على موتوجيت. سيب صفحة رفع الطلبات شغالة في تاب تاني عادي.</p>
-        <label class="f" for="inqRepeat">التكرار</label>
-        <select id="inqRepeat">
-          <option value="0">لفة واحدة</option>
-          <option value="15">كل ربع ساعة</option>
-          <option value="30" selected>كل نص ساعة</option>
-          <option value="60">كل ساعة</option>
-        </select>
+        <p class="muted">بتشتغل في تاب أمان لوحده، وتاب رفع الطلبات يفضل شغال عادي. وصفتها في تبويب "تعليم" ← "متابعة الاستعلام".</p>
+        <button id="inqPull" class="primary big">اسحب الطلبات اللي تحت الاستعلام</button>
+        <div id="inqPullMsg" class="muted" style="margin-top:6px"></div>
         <div class="row" style="margin-top:10px">
-          <button id="inqStart" class="primary">ابدأ المتابعة</button>
-          <button id="inqStop" class="bad" hidden>وقف</button>
+          <label class="muted" for="inqRepeat">بعد ما يخلّص:</label>
+          <select id="inqRepeat">
+            <option value="0">يقف</option>
+            <option value="15">يعيد كل ربع ساعة</option>
+            <option value="30" selected>يعيد كل نص ساعة</option>
+            <option value="60">يعيد كل ساعة</option>
+          </select>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="inqStart" class="ok big" disabled>ابدأ المتابعة</button>
+          <button id="inqStop" class="bad big" hidden>وقف</button>
         </div>
         <div id="inqStatus" class="status" hidden></div>
         <div class="bar" id="inqBarWrap" hidden><div id="inqBar"></div></div>
         <div id="inqStats" class="kv"></div>
-        <table id="inqLog" hidden>
+      </section>
+      <section id="inqLogBox" hidden>
+        <h2>اللي اتراجع</h2>
+        <table id="inqLog">
           <thead><tr><th>العميل</th><th>أمان قال</th><th>اتعمل</th></tr></thead>
           <tbody></tbody>
         </table>
       </section>
-      <section id="inqTeachBox" hidden>
-        <h2>تعليم متابعة الاستعلام</h2>
-        <p class="muted">افتح صفحة "Installment Check History" في أمان في التاب ده، ودوس "ابدأ التعليم". اعمل البحث بإيدك مرة: اختار "Customer National ID"، ودوس "علّم خانة الرقم القومي" واكتب رقم عميل، ودوس بحث، وأي ضغطة تانية لحد ما الحالة تظهر. في الآخر دوس "علّم مكان الحالة".</p>
-        <div class="row">
-          <button id="inqTeachStart">ابدأ التعليم على التاب ده</button>
-          <button id="inqTeachEnd" hidden>اقفل التعليم</button>
-        </div>
-        <div id="inqPicks" hidden>
-          <div class="row" style="margin-top:8px">
-            <button data-inqpick="nid">علّم خانة الرقم القومي</button>
-            <button data-inqpick="result">علّم مكان الحالة</button>
-            <button id="inqRecord">سجّل خطوات تاني</button>
-          </div>
-          <div id="inqPickMsg" class="muted" style="margin-top:4px"></div>
-          <label class="f">الخطوات بالترتيب</label>
-          <ol id="inqSteps"></ol>
-          <div id="inqResult" class="muted" style="margin-top:6px"></div>
-          <label class="f">كل حالة عند أمان تبقى إيه عندنا (لو الكلام ده موجود في الحالة)</label>
-          <div id="inqMap"></div>
-          <div class="row" style="margin-top:6px">
-            <button id="inqMapAdd">+ حالة</button>
-            <button id="inqSave" class="primary">احفظ</button>
-          </div>
-          <div id="inqTeachMsg" class="muted" style="margin-top:6px"></div>
-        </div>
+      <section id="inqListBox" hidden>
+        <h2>الطلبات اللي اتسحبت (من الأقدم)</h2>
+        <table id="inqList">
+          <thead><tr><th>#</th><th>العميل</th><th>الرقم القومي</th><th>اتقدم</th></tr></thead>
+          <tbody></tbody>
+        </table>
       </section>
     </div>
 

@@ -329,18 +329,25 @@ class AmanExtensionController extends Controller
         abort_unless($this->staff($request)->isAdmin(), 403, 'التعليم للمسؤول بس');
         $request->validate([
             'url' => 'required|string|max:1000',
-            // the steps in order (owner 2026-11-20: Aman's check page needs the search type picked first)
-            'steps' => 'required|array|min:1', 'steps.*.kind' => ['required', Rule::in(['select', 'nid', 'click'])],
+            // the steps in order (owner 2026-11-20): pick the search type, type the national id, search,
+            // copy the request number from the row of this employee's Aman user, search by it, read the status
+            'steps' => 'required|array|min:1',
+            'steps.*.kind' => ['required', Rule::in(['select', 'fill', 'nid', 'click', 'copy'])],
+            'steps.*.source' => ['nullable', Rule::in(['national_id', 'ref', 'aman_ref'])],
             'result' => 'required|array',
+            'user' => 'nullable|array',
             'map' => 'array', 'map.*.text' => 'required|string|max:200',
             'map.*.status' => ['required', Rule::in(self::INQUIRY_STATUSES)],
         ]);
+        $steps = collect($request->input('steps'));
+        abort_unless($steps->contains(fn ($s) => in_array($s['kind'], ['fill', 'nid'], true)), 422, 'علّم خانة الرقم القومي');
+        abort_if($steps->contains('kind', 'copy') && ! $request->input('user'), 422, 'علّم اسم يوزر أمان عشان النسخ من الجدول');
 
         $recipe = AmanRecipe::firstOrNew(['type' => self::INQUIRY_RECIPE]);
         $recipe->version = ($recipe->exists ? $recipe->version : 0) + 1;
         // the whole input, not validate()'s result (it drops the targets' keys - see saveRecipe)
         abort_unless(collect($request->input('steps'))->contains('kind', 'nid'), 422, 'علّم خانة الرقم القومي');
-        $recipe->steps = $request->only(['url', 'steps', 'result', 'map']);
+        $recipe->steps = $request->only(['url', 'steps', 'result', 'user', 'map']);
         $recipe->updated_by = $this->staff($request)->id;
         $recipe->save();
 
@@ -356,19 +363,21 @@ class AmanExtensionController extends Controller
             ->whereNotNull('applicant_national_id')->where('applicant_national_id', '!=', '');
     }
 
-    /** Requests under inquiry, the ones looked at longest ago first. */
+    /** Requests under inquiry, oldest first. */
     public function inquiryQueue(Request $request)
     {
         $rows = $this->inquiryRequests($this->staff($request))
-            ->orderByRaw('aman_checked_at IS NOT NULL, aman_checked_at, id')
-            ->limit(500)
-            ->get(['id', 'applicant_name', 'applicant_national_id', 'installment_type', 'aman_checked_at', 'aman_check_text']);
+            // owner 2026-11-20: from the oldest request to the newest
+            ->orderBy('created_at')->orderBy('id')
+            ->limit(1000)
+            ->get(['id', 'applicant_name', 'applicant_national_id', 'installment_type', 'created_at', 'aman_checked_at', 'aman_check_text']);
         $refs = AmanUpload::whereIn('installment_request_id', $rows->pluck('id'))->whereNotNull('aman_ref')
             ->orderBy('id')->pluck('aman_ref', 'installment_request_id');
 
         return ['requests' => $rows->map(fn (InstallmentRequest $r) => [
             'id' => $r->id, 'name' => $r->applicant_name, 'national_id' => $r->applicant_national_id,
             'company' => $r->installment_type, 'aman_ref' => $refs[$r->id] ?? null,
+            'created_at' => $r->created_at?->toDateString(),
             'checked_at' => $r->aman_checked_at, 'last_text' => $r->aman_check_text,
         ])->values()];
     }

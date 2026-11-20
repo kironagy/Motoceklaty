@@ -58,7 +58,7 @@
     // متابعة الاستعلام
     if (path === '/inquiry/recipe' && method === 'GET') return json({ recipe: get('inqRecipe', null), statuses: { pending: 'تحت الاستعلام', approved: 'موافقة', rejected: 'رفض', paused_aman: 'متوقف امان', work_check: 'استعلام عمل', canceled: 'الطلب ملغي' } });
     if (path === '/inquiry/recipe' && method === 'PUT') { const v = (get('inqRecipe', {})?.version || 0) + 1; put('inqRecipe', { ...body, version: v }); return json({ version: v }); }
-    if (path === '/inquiry/queue') return json({ requests: get('queue', []).map((q) => ({ id: q.id, name: q.name, national_id: q.nid, company: 'امان' })) });
+    if (path === '/inquiry/queue') return json({ requests: get('queue', []).map((q) => ({ id: q.id, name: q.name, national_id: q.nid, company: 'امان', created_at: '2026-11-1' + (q.id % 10) })) });
     const iq = path.match(/^\/inquiry\/requests\/(\d+)\/result$/);
     if (iq) { put('inqResults', [...get('inqResults', []), { id: +iq[1], ...body }]); return json({ ok: true, changed: !!body.status && body.status !== 'pending', status: body.status }); }
     const m = path.match(/^\/uploads\/(\d+)\/result$/);
