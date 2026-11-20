@@ -154,6 +154,17 @@
   }
 
   // ---------- run ----------
+  const userLink = () => [...document.querySelectorAll('a[href*="resetpassword" i], a[href*="changepassword" i]')].find((a) => clean(a.innerText, 80)) || null;
+
+  // a recipe that ends typing the request number without pressing search (owner 2026-11-21):
+  // press the search taught after the first box again
+  function withSearch(steps) {
+    const last = steps[steps.length - 1];
+    if (!last || (last.kind !== 'fill' && last.kind !== 'nid')) return steps;
+    const firstFill = steps.findIndex((s) => s.kind === 'fill' || s.kind === 'nid');
+    const search = steps.slice(firstFill + 1).find((s) => s.kind === 'click');
+    return search ? [...steps, search] : steps;
+  }
   function setValue(el, v) {
     el.focus();
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -267,7 +278,7 @@
         }
 
         const recipe = run.recipe;
-        const steps = recipe.steps || [];
+        const steps = withSearch(recipe.steps || []);
         const step = run.step || 0;
         const firstFill = steps.findIndex((s) => s.kind === 'fill' || s.kind === 'nid');
         const vars = run.vars || {};
@@ -276,7 +287,9 @@
           // our Aman user, read off the page once per run
           let me = vars.me;
           if (recipe.user && !me) {
-            me = textIn(await waitFor(() => findEl(recipe.user), 10000));
+            // owner 2026-11-21: the marked spot was not found on the run's page; the header link to
+            // Aman's own password page carries the user name on every page
+            me = textIn(await waitFor(() => findEl(recipe.user) || userLink(), 10000)) || textIn(userLink());
             if (!me) return fail('مش لاقي اسم يوزر أمان في الصفحة. علّم الوصفة تاني.');
           }
           await update('inqRun', (r) => ({ ...r, vars: { ...(r.vars || {}), me }, origin: performance.timeOrigin }));
