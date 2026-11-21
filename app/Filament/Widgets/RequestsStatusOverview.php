@@ -233,6 +233,7 @@ HTML
         $rejected = $counts['rejected'] ?? 0;
         $paused = $counts['paused'] ?? 0;
         $pausedAman = $counts['paused_aman'] ?? 0;
+        $edited = $counts['edited'] ?? 0;
         $transferred = $counts['transferred'] ?? 0;
         $delivered = $counts['delivered'] ?? 0;
         $canceled = $counts['canceled'] ?? 0;
@@ -250,6 +251,7 @@ HTML
 
             $this->card('متوقف', $paused, 'طلبات موقوفة مؤقتًا', 'heroicon-o-pause-circle', 'paused', null, ['paused']),
             $this->card('متوقف امان', $pausedAman, 'طلبات متوقفة عند أمان', 'heroicon-o-pause-circle', 'paused', null, ['paused_aman']),
+            $this->card('تم التعديل', $edited, 'طلبات اتعدلت', 'heroicon-o-pencil-square', 'transferred', null, ['edited']),
             $this->card('محول', $transferred, 'طلبات تم تحويلها', 'heroicon-o-arrow-path-rounded-square', 'transferred', null, ['transferred']),
             $this->card('استلم المكنة', $delivered, 'طلبات تم تسليمها', 'heroicon-o-truck', 'delivered', null, ['delivered']),
 

@@ -31,7 +31,7 @@ class TrackingController extends Controller
                 if ($application) {
                     $modelName = $application->machine?->name;
                     $stages = ['new_request', 'pending', 'approved', 'delivered'];
-                    $current = match ($application->status) { 'pending', 'work_check', 'transferred' => 1, 'approved' => 2, 'delivered' => 3, default => 0 };
+                    $current = match ($application->status) { 'pending', 'work_check', 'transferred', 'edited' => 1, 'approved' => 2, 'delivered' => 3, default => 0 };
                     foreach ($stages as $index => $stage) {
                         $timeline[] = [
                             'label' => site('tracking.statuses.' . $stage),

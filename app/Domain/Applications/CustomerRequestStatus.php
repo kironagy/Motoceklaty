@@ -26,6 +26,7 @@ class CustomerRequestStatus
         'work_check' => ['تحت الاستعلام عن الشغل', null],
         'paused' => ['متوقف على حاجة ناقصة', null],
         'paused_aman' => ['متوقف على حاجة ناقصة', null],
+        'edited' => ['تحت المراجعة', null],
         'approved' => ['اتوافق عليه', null],
         'rejected' => ['اترفض', null],
         'delivered' => ['استلم المكنة', null],
