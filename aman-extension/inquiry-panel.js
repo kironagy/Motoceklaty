@@ -1,6 +1,6 @@
 // Panel side of متابعة الاستعلام (owner 2026-11-20); the work itself runs in inquiry.js inside its own Aman tab.
 // - tab "متابعة الاستعلام": pull the requests under inquiry (oldest first), then start;
-// - tab "تعليم", type "متابعة الاستعلام": its own recipe, recorded like the upload recipes.
+// - its recipe is taught in the same tab (owner 2026-11-21), recorded like the upload recipes.
 // Uses panel.js's globals: $, store, me, activeTab.
 (() => {
   let statuses = {};
@@ -93,48 +93,39 @@
         : r.skipped ? esc(r.skipped) : r.changed ? '<b>بقى ' + esc(label(r.status)) + '</b>' : r.status ? 'لسه ' + esc(label(r.status)) : '<span class="warn">مااتغيرش</span>'}</td></tr>`).join('');
   }
 
-  // ---------- teach (tab "تعليم", type "متابعة الاستعلام") ----------
-  const inqMode = () => $('teachType').value === '_inquiry';
+  // ---------- teach (in this tab, owner 2026-11-21: "عايز الخطوات تكون سهلة وبسيطة") ----------
+  // inqTeach holds everything being taught: the steps, our user, where the status is, and the statuses -
+  // each status (added by clicking it on Aman's page) says what it becomes here, or that it needs more
+  // steps on Aman whose reason decides (Aman's Pending: متوقف امان with the reason, or استعلام عمل).
+  const MORE = '_more';
+  const blankMore = () => ({ steps: [], reason: null, reasonText: '', map: [] });
 
-  const MORE = { _more: 'يكمّل خطوات ويقرا السبب' };
-  function mapRow(m = { text: '', status: 'pending' }, box = 'inqMap', extra = MORE) {
-    const div = document.createElement('div');
-    div.className = 'row';
-    div.style.marginTop = '4px';
-    div.innerHTML = `<input type="text" class="mt" placeholder="كلام في حالة أمان" value="${esc(m.text)}" style="flex:1">`
-      + `<select class="ms">${Object.entries({ ...statuses, ...extra }).map(([k, v]) => `<option value="${k}"${k === m.status ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>`
-      + '<button class="x" title="امسح">✕</button>';
-    div.querySelector('.x').onclick = () => div.remove();
-    $(box).appendChild(div);
+  // a recipe saved before statuses had their own steps kept one shared "more"
+  function withRows(base) {
+    return (base?.map || []).map((m) => ({ ...m, more: m.more || (m.status === MORE && base.more ? { ...blankMore(), ...base.more } : null) }));
   }
-  $('inqMapAdd').onclick = () => mapRow();
-  $('inqReasonAdd').onclick = () => mapRow({ text: '', status: 'paused_aman' }, 'inqReasonMap', {});
-  const readReasons = () => [...$('inqReasonMap').children].map((d) => ({ text: d.querySelector('.mt').value.trim(), status: d.querySelector('.ms').value })).filter((m) => m.text);
-  const fillReasons = (map) => { $('inqReasonMap').innerHTML = ''; (map?.length ? map : [{ text: '', status: 'paused_aman' }, { text: '', status: 'work_check' }]).forEach((m) => mapRow(m, 'inqReasonMap', {})); };
-  const readMap = () => [...$('inqMap').children].map((d) => ({ text: d.querySelector('.mt').value.trim(), status: d.querySelector('.ms').value })).filter((m) => m.text);
-  const fillMap = (map) => { $('inqMap').innerHTML = ''; (map?.length ? map : [{ text: '', status: 'approved' }, { text: '', status: 'rejected' }]).forEach(mapRow); };
 
   async function startTeach(base) {
     await loadRecipe();
     const tab = await activeTab();
     if (!tab) return;
     base = base || {};
-    await store.set({ inqTeach: { active: true, tabId: tab.id, pick: null, url: base.url || tab.url, steps: base.steps || [], user: base.user || null, result: base.result || null, lastText: '', userText: '', more: base.more || null, phase: null, reasonText: '' } });
-    fillMap(base.map);
-    fillReasons(base.more?.map);
+    await store.set({ inqTeach: {
+      active: true, tabId: tab.id, pick: null, phase: null, row: null, url: base.url || tab.url, steps: base.steps || [],
+      user: base.user || null, userText: '', result: base.result || null, lastText: '', map: withRows(base),
+    } });
   }
 
   $('inqTeachStart').onclick = async () => {
     await loadRecipe();
     if (recipe && !confirm('فيه وصفة محفوظة. التعليم الجديد هيستبدلها لما تحفظ. تكمل؟')) return;
-    startTeach({ map: recipe?.map, more: recipe?.more ? { map: recipe.more.map } : null });
+    startTeach({ map: recipe?.map, more: recipe?.more });
   };
   $('inqTeachEdit').onclick = async () => {
     await loadRecipe();
     if (!recipe) return alert('مافيش وصفة محفوظة لمتابعة الاستعلام.');
     startTeach(recipe);
   };
-  $('inqMoreToggle').onclick = () => editTeach((tt) => { tt.phase = tt.phase === 'more' ? null : 'more'; tt.pick = null; });
   $('inqTeachEnd').onclick = async () => { if (confirm('تلغي التعليم من غير ما تحفظ؟')) await store.set({ inqTeach: null }); };
 
   document.querySelectorAll('[data-inqpick]').forEach((b) => b.onclick = async () => {
@@ -145,26 +136,31 @@
   async function editTeach(fn) {
     const { inqTeach } = await store.get('inqTeach');
     if (!inqTeach) return;
-    const t = { ...inqTeach, steps: [...(inqTeach.steps || [])] };
+    const t = JSON.parse(JSON.stringify(inqTeach));
+    t.steps = t.steps || [];
+    t.map = t.map || [];
     fn(t);
     await store.set({ inqTeach: t });
   }
 
-  // owner 2026-11-21: "بدوس حفظ مش بيحفظ" - the reason was written under the statuses, out of sight
+  $('inqMapAdd').onclick = () => editTeach((t) => { t.map.push({ text: '', status: 'pending', more: null }); });
+
+  // "بدوس حفظ مش بيحفظ" - the reason is said out loud
   const saveMsg = (m) => { $('inqTeachMsg').textContent = m; $('inqTeachMsg').scrollIntoView({ block: 'center' }); alert(m); };
   $('inqSave').onclick = async () => {
     const { inqTeach: t } = await store.get('inqTeach');
     const steps = t?.steps || [];
     if (!steps.some((x) => x.kind === 'fill' || x.kind === 'nid')) return saveMsg('علّم خانة الرقم القومي الأول.');
-    if (steps.some((x) => x.kind === 'copy') && !t.user) return saveMsg('علّم اسم يوزر أمان عشان النسخ من الجدول.');
-    if (!t.result) return saveMsg('علّم مكان الحالة الأول.');
-    const map = readMap();
-    const moreSteps = t.more?.steps || [];
-    if (map.some((m) => m.status === '_more') && (!moreSteps.length || !t.more?.reason)) return saveMsg('فيه حالة بتكمّل خطوات: علّم الخطوات اللي بعد الحالة ومكان السبب.');
-    if (!map.length) return saveMsg('اكتب حالة واحدة على الأقل تحت (كلام من حالة أمان زي "' + (t.lastText || 'Doc Collected') + '" وتبقى إيه عندنا).');
+    if (!t.result) return saveMsg('دوس على حالة في صفحة أمان الأول.');
+    const map = (t.map || []).filter((m) => m.text?.trim()).map((m) => ({
+      text: m.text.trim(), status: m.status,
+      more: m.status === MORE ? { steps: m.more?.steps || [], reason: m.more?.reason || null, map: (m.more?.map || []).filter((r) => r.text?.trim()) } : null,
+    }));
+    if (!map.length) return saveMsg('زوّد حالة واحدة على الأقل: دوس "دوس على حالة" وبعدين على الحالة في صفحة أمان.');
+    const bad = map.find((m) => m.status === MORE && (!m.more.steps.length || !m.more.reason));
+    if (bad) return saveMsg('الحالة "' + bad.text + '": سجّل خطواتها ودوس على السبب.');
     try {
-      const more = moreSteps.length ? { steps: moreSteps, reason: t.more?.reason || null, map: readReasons() } : null;
-      const body = { url: t.url, steps, result: t.result, user: t.user || null, map, more };
+      const body = { url: t.url, steps, result: t.result, user: t.user || null, map };
       const r = await AMAN.api('PUT', '/inquiry/recipe', body);
       $('inqTeachMsg').textContent = '';
       recipe = { ...body, version: r.version };
@@ -183,12 +179,88 @@
     return 'اكتب';
   }
 
+  // one step line; path picks the list inside inqTeach (the main steps, or a status's own)
+  function stepItem(x, i, list, getList) {
+    const [cls, name] = KIND[x.kind] || ['click', x.kind];
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="pill ${cls}">${name}</span> ${stepLine(x)}`
+      + ' <button class="mv up" title="لفوق">▲</button><button class="mv down" title="لتحت">▼</button><button class="x" title="امسح">✕</button>';
+    if (x.kind === 'fill' || x.kind === 'nid') {
+      const sel = document.createElement('select');
+      sel.className = 'src';
+      for (const [k, v] of Object.entries(SOURCES)) sel.append(new Option(v, k));
+      sel.value = x.kind === 'nid' ? 'national_id' : (x.source || 'national_id');
+      sel.onchange = () => editTeach((tt) => { const l = getList(tt); l[i] = { ...l[i], kind: 'fill', source: sel.value }; });
+      li.append(sel);
+    }
+    li.querySelector('.up').onclick = () => editTeach((tt) => { const l = getList(tt); if (i > 0) [l[i - 1], l[i]] = [l[i], l[i - 1]]; });
+    li.querySelector('.down').onclick = () => editTeach((tt) => { const l = getList(tt); if (i < l.length - 1) [l[i + 1], l[i]] = [l[i], l[i + 1]]; });
+    li.querySelector('.x').onclick = () => editTeach((tt) => { getList(tt).splice(i, 1); });
+    return li;
+  }
+
+  const statusOptions = (cur, withMore) => Object.entries({ ...statuses, ...(withMore ? { [MORE]: 'يعمل خطوات ويقرا السبب' } : {}) })
+    .map(([k, v]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${esc(v)}</option>`).join('');
+
+  function statusCard(t, m, i) {
+    const card = document.createElement('div');
+    const recording = t.phase === 'more' && t.row === i;
+    card.className = 'scard' + (recording ? ' rec' : '');
+    card.innerHTML = '<div class="row"><input type="text" class="mt" placeholder="كلام الحالة عند أمان" style="flex:1">'
+      + `<select class="ms">${statusOptions(m.status, true)}</select><button class="x" title="امسح">✕</button></div>`;
+    card.querySelector('.mt').value = m.text || '';
+    card.querySelector('.mt').onchange = (e) => editTeach((tt) => { tt.map[i].text = e.target.value; });
+    card.querySelector('.ms').onchange = (e) => editTeach((tt) => {
+      tt.map[i].status = e.target.value;
+      if (e.target.value === MORE && !tt.map[i].more) tt.map[i].more = blankMore();
+    });
+    card.querySelector('.x').onclick = () => editTeach((tt) => {
+      tt.map.splice(i, 1);
+      if (tt.row === i) { tt.phase = null; tt.row = null; } else if (tt.row > i) tt.row--;
+    });
+    if (m.status !== MORE) return card;
+
+    const mo = m.more || blankMore();
+    const box = document.createElement('div');
+    box.className = 'more';
+    box.innerHTML = '<div class="row">'
+      + `<button class="rec${recording ? ' ok' : ''}">${recording ? 'خلّصت الخطوات' : (mo.steps.length ? 'كمّل تسجيل خطواتها' : 'سجّل خطواتها')}</button>`
+      + '<button class="why">دوس على السبب</button></div>'
+      + (recording ? '<div class="now">اعمل في صفحة أمان اللي بيطلّع السبب. الضغطات بتتسجل هنا.</div>' : '')
+      + '<ol class="ms-steps"></ol>'
+      + `<div class="kv"><b>مكان السبب</b><span>${mo.reason ? '✓ ' + esc(mo.reasonText || 'اتعلّم') : '<span class="warn">لسه</span>'}</span></div>`
+      + '<label class="f">لو السبب فيه الكلام ده، تبقى إيه عندنا</label><div class="rs"></div>'
+      + '<div class="row" style="margin-top:4px"><button class="radd">+ سبب</button></div>';
+    const ol = box.querySelector('.ms-steps');
+    mo.steps.forEach((x, j) => ol.appendChild(stepItem(x, j, mo.steps, (tt) => tt.map[i].more.steps)));
+    box.querySelector('.rec').onclick = () => editTeach((tt) => {
+      tt.map[i].more = tt.map[i].more || blankMore();
+      const on = tt.phase === 'more' && tt.row === i;
+      tt.phase = on ? null : 'more';
+      tt.row = on ? null : i;
+      tt.pick = null;
+    });
+    box.querySelector('.why').onclick = () => editTeach((tt) => { tt.map[i].more = tt.map[i].more || blankMore(); tt.pick = 'reason'; tt.row = i; });
+    box.querySelector('.radd').onclick = () => editTeach((tt) => { tt.map[i].more.map.push({ text: '', status: 'paused_aman' }); });
+    const rs = box.querySelector('.rs');
+    (mo.map || []).forEach((r, j) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.style.marginTop = '4px';
+      row.innerHTML = `<input type="text" class="rt" placeholder="كلام في السبب" style="flex:1"><select class="rsel">${statusOptions(r.status, false)}</select><button class="x" title="امسح">✕</button>`;
+      row.querySelector('.rt').value = r.text || '';
+      row.querySelector('.rt').onchange = (e) => editTeach((tt) => { tt.map[i].more.map[j].text = e.target.value; });
+      row.querySelector('.rsel').onchange = (e) => editTeach((tt) => { tt.map[i].more.map[j].status = e.target.value; });
+      row.querySelector('.x').onclick = () => editTeach((tt) => { tt.map[i].more.map.splice(j, 1); });
+      rs.appendChild(row);
+    });
+    card.appendChild(box);
+    return card;
+  }
+
   function renderTeach(t) {
-    const pane = document.querySelector('[data-pane="teach"]');
-    const on = inqMode();
-    pane.classList.toggle('inq-mode', on);
-    $('inqTeachBox').hidden = !on || !me?.can_teach;
-    $('inqSaved').textContent = recipe ? `الوصفة المحفوظة: نسخة ${recipe.version || 1}، ${recipe.steps?.length || 0} خطوة${recipe.user ? '، وبتنسخ رقم الطلب من صف اليوزر' : ''}.` : 'لسه مافيش وصفة محفوظة.';
+    $('inqTeachBox').hidden = !me?.can_teach;
+    $('inqSaved').textContent = recipe ? `الوصفة المحفوظة: نسخة ${recipe.version || 1}، ${recipe.steps?.length || 0} خطوة، ${recipe.map?.length || 0} حالة.` : 'لسه مافيش وصفة محفوظة.';
     const active = !!t?.active;
     $('inqTeachStart').hidden = active;
     $('inqTeachEdit').hidden = active || !recipe;
@@ -196,47 +268,23 @@
     $('inqTeachEnd').hidden = !active;
     $('inqPicks').hidden = !active;
     if (!active) return;
-    const pickText = { fill: 'دوس على الخانة في صفحة أمان…', user: 'دوس على اسم اليوزر في صفحة أمان…', copy: 'دوس على اسم اليوزر في صف من الجدول…', copy2: 'دلوقتي دوس على رقم الطلب في نفس الصف…', result: 'دوس على الحالة في صفحة أمان…', reason: 'دوس على السبب في صفحة أمان…' }[t.pick];
+    const rowName = t.map?.[t.row]?.text || '';
+    const pickText = { fill: 'دوس على الخانة في صفحة أمان…', user: 'دوس على اسم اليوزر في صفحة أمان…', copy: 'دوس على اسم اليوزر في صف من الجدول…', copy2: 'دلوقتي دوس على رقم الطلب في نفس الصف…', status: 'دوس على الحالة في صفحة أمان…', result: 'دوس على الحالة في صفحة أمان…', reason: 'دوس على السبب في صفحة أمان (الحالة "' + rowName + '")…' }[t.pick];
     $('inqPickMsg').hidden = !pickText;
     $('inqPickMsg').textContent = pickText || '';
     const ol = $('inqSteps');
     ol.innerHTML = '';
-    (t.steps || []).forEach((x, i) => {
-      const [cls, name] = KIND[x.kind] || ['click', x.kind];
-      const li = document.createElement('li');
-      li.innerHTML = `<span class="pill ${cls}">${name}</span> ${stepLine(x)}`
-        + ' <button class="mv up" title="لفوق">▲</button><button class="mv down" title="لتحت">▼</button><button class="x" title="امسح">✕</button>';
-      if (x.kind === 'fill' || x.kind === 'nid') {
-        const sel = document.createElement('select');
-        sel.className = 'src';
-        for (const [k, v] of Object.entries(SOURCES)) sel.append(new Option(v, k));
-        sel.value = x.kind === 'nid' ? 'national_id' : (x.source || 'national_id');
-        sel.onchange = () => editTeach((tt) => { tt.steps[i] = { ...tt.steps[i], kind: 'fill', source: sel.value }; });
-        li.append(sel);
-      }
-      li.querySelector('.up').onclick = () => editTeach((tt) => { if (i > 0) [tt.steps[i - 1], tt.steps[i]] = [tt.steps[i], tt.steps[i - 1]]; });
-      li.querySelector('.down').onclick = () => editTeach((tt) => { if (i < tt.steps.length - 1) [tt.steps[i + 1], tt.steps[i]] = [tt.steps[i], tt.steps[i + 1]]; });
-      li.querySelector('.x').onclick = () => editTeach((tt) => { tt.steps.splice(i, 1); });
-      ol.appendChild(li);
-    });
+    (t.steps || []).forEach((x, i) => ol.appendChild(stepItem(x, i, t.steps, (tt) => tt.steps)));
     if (!(t.steps || []).length) ol.innerHTML = '<li class="muted">لسه مافيش خطوات. اعمل الاستعلام في صفحة أمان.</li>';
     $('inqInfo').innerHTML = `<b>يوزر أمان</b><span>${t.user ? '✓ ' + esc(t.userText || 'اتعلّم') : '<span class="warn">لسه</span>'}</span>`
       + `<b>مكان الحالة</b><span>${t.result ? '✓ ' + esc(t.lastText || 'اتعلّم') : '<span class="warn">لسه</span>'}</span>`;
-    // the steps after the status (shown for a status "يكمّل خطوات")
-    const recording = t.phase === 'more';
-    $('inqMoreToggle').textContent = recording ? 'خلّصت خطوات السبب' : 'علّم الخطوات اللي بعد الحالة';
-    $('inqMoreToggle').className = recording ? 'ok' : '';
-    const mol = $('inqMoreSteps');
-    mol.innerHTML = '';
-    (t.more?.steps || []).forEach((x, i) => {
-      const [cls, name] = KIND[x.kind] || ['click', x.kind];
-      const li = document.createElement('li');
-      li.innerHTML = `<span class="pill ${cls}">${name}</span> ${stepLine(x)} <button class="x" title="امسح">✕</button>`;
-      li.querySelector('.x').onclick = () => editTeach((tt) => { tt.more = { ...tt.more, steps: tt.more.steps.filter((_, j) => j !== i) }; });
-      mol.appendChild(li);
-    });
-    if (recording && !(t.more?.steps || []).length) mol.innerHTML = '<li class="muted">اعمل في صفحة أمان الخطوة اللي بتطلّع السبب.</li>';
-    $('inqMoreInfo').innerHTML = (t.more?.steps?.length || recording) ? `<b>مكان السبب</b><span>${t.more?.reason ? '✓ ' + esc(t.reasonText || 'اتعلّم') : '<span class="warn">لسه</span>'}</span>` : '';
+    // typing in a status box: a re-render now would drop what is being typed
+    const typing = document.activeElement && $('inqMap').contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+    if (typing) return;
+    const box = $('inqMap');
+    box.innerHTML = '';
+    (t.map || []).forEach((m, i) => box.appendChild(statusCard(t, m, i)));
+    if (!(t.map || []).length) box.innerHTML = '<div class="muted">لسه مافيش حالات. دوس "دوس على حالة" وبعدين على الحالة في صفحة أمان.</div>';
   }
 
   async function render() {
@@ -246,7 +294,6 @@
     renderTeach(inqTeach || null);
   }
 
-  $('teachType').addEventListener('change', render);
   chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && (ch.inqRun || ch.inqTeach || ch.inqBatch || ch.me)) render(); });
   // the tab running the follow-up was closed: the run stops
   chrome.tabs.onRemoved.addListener(async (id) => {
@@ -255,9 +302,8 @@
   });
 
   (async () => {
-    const { inqTeach, inqBatch } = await store.get(['inqTeach', 'inqBatch']);
+    const { inqBatch } = await store.get('inqBatch');
     await loadRecipe();
-    if (inqTeach?.active) { $('teachType').value = '_inquiry'; fillMap(recipe?.map); fillReasons(inqTeach.more?.map || recipe?.more?.map); }
     if (inqBatch?.items?.length) $('inqPullMsg').textContent = `اتسحب ${inqBatch.items.length} طلب تحت الاستعلام.`;
     render();
   })();

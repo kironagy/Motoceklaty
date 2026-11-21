@@ -153,7 +153,6 @@ function fillTypes() {
   const v = sel.value;
   sel.innerHTML = '';
   for (const t of AMAN.types?.length ? AMAN.types : AMAN.REQUEST_TYPES) sel.append(new Option(t.label, t.key));
-  sel.append(new Option('متابعة الاستعلام', '_inquiry')); // its own recipe (inquiry-panel.js)
   if (v) sel.value = v;
 }
 
@@ -196,7 +195,6 @@ $('teachType').onchange = async () => {
   const { teach } = await store.get('teach');
   if (!teach?.active) return render(); // the edit button follows the picked type
   const type = $('teachType').value;
-  if (type === '_inquiry') { alert('خلّص أو الغي تعليم الرفع الأول.'); $('teachType').value = teach.type; return; }
   const { recipes = {} } = await store.get('recipes');
   if (recipes[type] && !confirm('فيه وصفة محفوظة لـ "' + AMAN.typeLabel(type) + '". لما تحفظ هتستبدلها. تكمل؟')) { $('teachType').value = teach.type; return; }
   await editTeach((t) => { t.type = type; });

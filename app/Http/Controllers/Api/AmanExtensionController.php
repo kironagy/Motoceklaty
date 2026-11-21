@@ -340,6 +340,13 @@ class AmanExtensionController extends Controller
             // "_more": that status needs more steps on Aman to show its reason (owner 2026-11-21: Aman's
             // "pending" is stopped - one more action shows why: متوقف أمان with the reason, or استعلام عمل)
             'map.*.status' => ['required', Rule::in([...self::INQUIRY_STATUSES, '_more'])],
+            // owner 2026-11-21: each such status has its own steps, reason spot and reason rules
+            'map.*.more' => 'nullable|array',
+            'map.*.more.steps' => 'array',
+            'map.*.more.steps.*.kind' => ['required', Rule::in(['select', 'fill', 'nid', 'click'])],
+            'map.*.more.reason' => 'nullable|array',
+            'map.*.more.map' => 'array', 'map.*.more.map.*.text' => 'required|string|max:200',
+            'map.*.more.map.*.status' => ['required', Rule::in(self::INQUIRY_STATUSES)],
             'more' => 'nullable|array',
             'more.steps' => 'array',
             'more.steps.*.kind' => ['required', Rule::in(['select', 'fill', 'nid', 'click'])],
@@ -347,11 +354,14 @@ class AmanExtensionController extends Controller
             'more.map' => 'array', 'more.map.*.text' => 'required|string|max:200',
             'more.map.*.status' => ['required', Rule::in(self::INQUIRY_STATUSES)],
         ]);
-        abort_if(collect($request->input('map'))->contains('status', '_more')
-            && (! $request->input('more.steps') || ! $request->input('more.reason')), 422, 'علّم الخطوات اللي بعد الحالة ومكان السبب');
+        $shared = $request->input('more.steps') && $request->input('more.reason');
+        foreach ((array) $request->input('map') as $row) {
+            abort_if(($row['status'] ?? null) === '_more' && ! $shared && (empty($row['more']['steps']) || empty($row['more']['reason'])),
+                422, 'الحالة "'.($row['text'] ?? '').'": سجّل خطواتها ودوس على السبب');
+        }
         $steps = collect($request->input('steps'));
         abort_unless($steps->contains(fn ($s) => in_array($s['kind'], ['fill', 'nid'], true)), 422, 'علّم خانة الرقم القومي');
-        abort_if($steps->contains('kind', 'copy') && ! $request->input('user'), 422, 'علّم اسم يوزر أمان عشان النسخ من الجدول');
+        // our Aman user: the marked spot, the header link, or the names typed in the panel (owner 2026-11-21)
 
         $recipe = AmanRecipe::firstOrNew(['type' => self::INQUIRY_RECIPE]);
         $recipe->version = ($recipe->exists ? $recipe->version : 0) + 1;

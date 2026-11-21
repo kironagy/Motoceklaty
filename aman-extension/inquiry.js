@@ -56,11 +56,12 @@
     copy2: 'دلوقتي دوس على رقم الطلب في نفس الصف',
     result: 'دوس على المكان اللي أمان بيكتب فيه حالة العميل',
     reason: 'دوس على المكان اللي أمان بيكتب فيه السبب',
+    status: 'دوس على الحالة اللي أمان كتبها',
   };
 
   function showBanner() {
     const text = !isTeaching() ? '' : teach.pick ? PICK[teach.pick]
-      : teach.phase === 'more' ? 'بيسجّل الخطوات اللي بعد الحالة (لحد ما السبب يظهر)' : 'بيسجّل الاختيارات والضغطات بالترتيب';
+      : teach.phase === 'more' ? 'بيسجّل خطوات الحالة "' + (teach.map?.[teach.row]?.text || '') + '" لحد ما السبب يظهر' : 'بيسجّل الاختيارات والضغطات بالترتيب';
     if (!text) { banner?.remove(); banner = null; return; }
     if (!banner) {
       banner = document.createElement('div');
@@ -74,12 +75,15 @@
   const addStep = (step) => update('inqTeach', (t) => {
     if (!t) return;
     // the steps after the status (owner 2026-11-21): their own list
-    if (t.phase === 'more') {
-      const list = [...(t.more?.steps || [])];
+    if (t.phase === 'more' && t.map?.[t.row]) {
+      const map = t.map.map((m) => ({ ...m }));
+      const mo = { steps: [], reason: null, map: [], ...(map[t.row].more || {}) };
+      const list = [...(mo.steps || [])];
       const prev = list[list.length - 1];
       if (prev && step.kind === 'select' && prev.kind === 'select' && prev.target.css === step.target.css) list.splice(-1, 1, step);
       else list.push(step);
-      return { ...t, more: { ...(t.more || {}), steps: list } };
+      map[t.row] = { ...map[t.row], more: { ...mo, steps: list } };
+      return { ...t, map };
     }
     const steps = [...(t.steps || [])];
     const at = Number.isInteger(t.insertAt) ? t.insertAt : steps.length;
@@ -121,7 +125,26 @@
           update('inqTeach', (t) => (t ? { ...t, pick: null, copyA: null } : t));
         }
       } else if (kind === 'reason') {
-        update('inqTeach', (t) => (t ? { ...t, more: { ...(t.more || {}), reason: locate(el, 'result') }, reasonText: clean(el.innerText || el.value, 300), pick: null } : t));
+        // the reason of the status being taught: where it shows, and its words as a first rule
+        const text = clean(el.innerText || el.value, 300);
+        update('inqTeach', (t) => {
+          if (!t || !t.map?.[t.row]) return t ? { ...t, pick: null } : t;
+          const map = t.map.map((m) => ({ ...m }));
+          const mo = { steps: [], reason: null, map: [], ...(map[t.row].more || {}) };
+          const rules = [...(mo.map || [])];
+          if (text && !rules.some((r) => norm(r.text) === norm(text))) rules.push({ text: clean(text, 120), status: 'paused_aman' });
+          map[t.row] = { ...map[t.row], more: { ...mo, reason: locate(el, 'result'), reasonText: text, map: rules } };
+          return { ...t, map, pick: null };
+        });
+      } else if (kind === 'status') {
+        // owner 2026-11-21: click a status on Aman's page - it is where the status shows, and a row to decide
+        const text = clean(el.innerText || el.value, 120);
+        update('inqTeach', (t) => {
+          if (!t) return t;
+          const map = [...(t.map || [])];
+          if (text && !map.some((m) => norm(m.text) === norm(text))) map.push({ text, status: 'pending', more: null });
+          return { ...t, result: locate(el, 'result'), lastText: text, map, pick: null };
+        });
       } else if (kind === 'result') {
         update('inqTeach', (t) => (t ? { ...t, result: locate(el, 'result'), lastText: clean(el.innerText || el.value, 300), pick: null } : t));
       }
@@ -154,7 +177,7 @@
     if (!v) return;
     const target = locate(el);
     const more = teach.phase === 'more';
-    const steps = (more ? teach.more?.steps : teach.steps) || [];
+    const steps = (more ? teach.map?.[teach.row]?.more?.steps : teach.steps) || [];
     const at = !more && Number.isInteger(teach.insertAt) ? teach.insertAt : steps.length;
     const last = steps[at - 1];
     // the box was just marked with "علّم خانة": that step already types here
@@ -199,17 +222,19 @@
   const resultText = (recipe) => textIn(findEl(recipe.result));
 
   function mapStatus(recipe, text) {
-    const t = norm(text);
-    const row = (recipe.map || []).find((m) => m.text && t.includes(norm(m.text)));
+    const row = matchRow(recipe.map, text);
     return row ? row.status : null;
   }
+  const matchRow = (map, text) => { const t = norm(text); return (map || []).find((m) => m.text && t.includes(norm(m.text))) || null; };
+  // a status's own steps; a recipe from before kept one shared "more"
+  const moreOf = (recipe, row) => (row?.more?.steps?.length ? row.more : (row?.status === '_more' && recipe.more?.steps?.length ? recipe.more : null));
 
   // the last search's table / status must not be read as this one's: mark what is on the page now
-  function markPage(recipe) {
+  function markPage(recipe, reasonT) {
     const marks = {};
     const res = findEl(recipe.result);
     if (res) { res.dataset.motoSeen = '1'; marks.prev = textIn(res); } else marks.prev = '';
-    const why = recipe.more?.reason && findEl(recipe.more.reason);
+    const why = reasonT && findEl(reasonT);
     if (why) { why.dataset.motoSeen = '1'; marks.prevReason = textIn(why); } else marks.prevReason = '';
     for (const s of recipe.steps || []) {
       if (s.kind !== 'copy') continue;
@@ -257,7 +282,7 @@
       if (row.changed) s.changed = (s.changed || 0) + 1;
       if (!status) s.unknown = (s.unknown || 0) + 1;
       if (row.error) s.errors = (s.errors || 0) + 1;
-      return { ...r, i: r.i + 1, step: 0, phase: null, mainText: null, retried: false, vars: { me: r.vars?.me }, stats: s, log: [row, ...(r.log || [])].slice(0, 300), error: null };
+      return { ...r, i: r.i + 1, step: 0, phase: null, mainText: null, moreRow: null, retried: false, vars: { me: r.vars?.me }, stats: s, log: [row, ...(r.log || [])].slice(0, 300), error: null };
     });
   }
 
@@ -295,7 +320,8 @@
 
         const recipe = run.recipe;
         const more = run.phase === 'more';
-        const steps = more ? (recipe.more?.steps || []) : withSearch(recipe.steps || []);
+        const mo = more ? moreOf(recipe, recipe.map?.[run.moreRow]) : null;
+        const steps = more ? (mo?.steps || []) : withSearch(recipe.steps || []);
         const step = run.step || 0;
         const firstFill = steps.findIndex((s) => s.kind === 'fill' || s.kind === 'nid');
         const vars = run.vars || {};
@@ -303,11 +329,11 @@
         if (step === 0 && !more) {
           // our Aman user, read off the page once per run
           let me = vars.me || (run.users?.length ? run.users.join('، ') : '');
-          if (recipe.user && !me) {
+          if (!me && (recipe.user || steps.some((s) => s.kind === 'copy'))) {
             // owner 2026-11-21: the marked spot was not found on the run's page; the header link to
             // Aman's own password page carries the user name on every page
-            me = textIn(await waitFor(() => findEl(recipe.user) || userLink(), 10000)) || textIn(userLink());
-            if (!me) return fail('مش لاقي اسم يوزر أمان في الصفحة. علّم الوصفة تاني.');
+            me = textIn(await waitFor(() => (recipe.user && findEl(recipe.user)) || userLink(), 10000)) || textIn(userLink());
+            if (!me) return fail('مش لاقي اسم يوزر أمان في الصفحة. اكتبه في خانة "يدور على يوزر أمان مين".');
           }
           await update('inqRun', (r) => ({ ...r, vars: { ...(r.vars || {}), me }, origin: performance.timeOrigin }));
           if (!vars.me && me) continue;
@@ -326,6 +352,13 @@
             const got = copyRef(s, run.users?.length ? run.users : [vars.me || '']);
             if (!(await stillMine())) return;
             if (!got.ref) {
+              // no table at all (Aman was slow, or the search ran before the page was ready): this customer
+              // from the top once before it is written down
+              if (got.missing && !run.retried) {
+                await update('inqRun', (r) => ({ ...r, step: 0, retried: true, vars: { me: r.vars?.me } }));
+                location.href = recipe.url;
+                return;
+              }
               await record(item, got.missing ? 'جدول النتايج ماظهرش' : 'مافيش طلب في الجدول باسم ' + (vars.me || 'اليوزر'), null);
               location.href = recipe.url;
               return;
@@ -374,7 +407,7 @@
           }
           // marks before a click (it may draw new results); the step is saved before it runs,
           // so a click that reloads the page resumes on the next one
-          const marks = s.kind === 'click' ? markPage(recipe) : {};
+          const marks = s.kind === 'click' ? markPage(recipe, mo?.reason) : {};
           await update('inqRun', (r) => ({ ...r, ...marks, step: step + 1, navigated: false, stepAt: Date.now() }));
           if (s.kind === 'select') {
             if (!choose(el, s)) return fail('الاختيار "' + (s.text || s.value) + '" مش موجود في القايمة. علّم الوصفة تاني.');
@@ -391,14 +424,14 @@
           // the steps after the status are done: the reason (a new element, or new words in the marked one)
           const end = (run.stepAt || Date.now()) + 20000;
           let why = await waitFor(() => {
-            const el = findEl(recipe.more.reason);
+            const el = mo?.reason && findEl(mo.reason);
             const t = textIn(el);
             return t && (el.dataset.motoSeen !== '1' || t !== run.prevReason) ? t : null;
           }, Math.max(1000, end - Date.now())) || '';
-          if (!why && run.prevReason && textIn(findEl(recipe.more.reason)) === run.prevReason) why = run.prevReason;
+          if (!why && run.prevReason && mo?.reason && textIn(findEl(mo.reason)) === run.prevReason) why = run.prevReason;
           await sleep(200);
           if (!(await stillMine())) return;
-          await record(item, run.mainText || '', why ? mapStatus(recipe.more, why) : null, { ref: vars.ref || null, reason: why || 'السبب ماظهرش' });
+          await record(item, run.mainText || '', why ? mapStatus(mo || {}, why) : null, { ref: vars.ref || null, reason: why || 'السبب ماظهرش' });
           await sleep(1200);
           continue;
         }
@@ -415,10 +448,11 @@
         if (!text && run.prev && resultText(recipe) === run.prev) text = run.prev;
         await sleep(200);
         if (!(await stillMine())) return;
-        const status = text ? mapStatus(recipe, text) : null;
-        // a status that needs one more action on Aman to show its reason
-        if (status === '_more' && recipe.more?.steps?.length) {
-          await update('inqRun', (r) => ({ ...r, phase: 'more', step: 0, mainText: text }));
+        const row = text ? matchRow(recipe.map, text) : null;
+        const status = row ? row.status : null;
+        // a status that needs more steps on Aman to show its reason
+        if (status === '_more' && moreOf(recipe, row)) {
+          await update('inqRun', (r) => ({ ...r, phase: 'more', step: 0, mainText: text, moreRow: recipe.map.indexOf(row) }));
           continue;
         }
         await record(item, text || 'مفيش حالة ظهرت', status === '_more' ? null : status, { ref: vars.ref || null });

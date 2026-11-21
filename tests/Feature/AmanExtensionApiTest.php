@@ -157,6 +157,14 @@ class AmanExtensionApiTest extends TestCase
         ])->assertOk();
         $this->assertSame('.lblReason', AmanRecipe::where('type', '_inquiry')->first()->steps['more']['reason']['css']);
 
+        // each status with its own steps (owner 2026-11-21)
+        $this->api()->putJson('/api/aman/inquiry/recipe', [
+            'url' => 'https://aman/check', 'user' => $t('#lnkUser'), 'result' => $t('.lblStatus'),
+            'steps' => [['kind' => 'fill', 'source' => 'national_id', 'target' => $t('#txt')], ['kind' => 'click', 'target' => $t('#btn')]],
+            'map' => [['text' => 'Pending', 'status' => '_more', 'more' => ['steps' => [['kind' => 'click', 'target' => $t('#details')]], 'reason' => $t('.lblReason'), 'map' => [['text' => 'استعلام عمل', 'status' => 'work_check']]]]],
+        ])->assertOk();
+        $this->assertSame('work_check', AmanRecipe::where('type', '_inquiry')->first()->steps['map'][0]['more']['map'][0]['status']);
+
         $req = $this->request(['status' => 'pending']);
         $this->api()->postJson('/api/aman/inquiry/requests/'.$req->id.'/result', [
             'text' => 'Pending', 'status' => 'paused_aman', 'reason' => 'متوقف لحين استيفاء صورة البطاقة',

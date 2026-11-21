@@ -118,9 +118,10 @@
   .decide textarea, .decide select { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; font:inherit; resize:vertical; }
   .st.held { background:#e2e8f0; color:#334155; } .st.canceled { background:#f3e8ff; color:#7e22ce; }
   .pill.select { background:#6366f1; } .pill.copy { background:#0f766e; } .pill.result { background:#0f172a; }
-  [data-pane="teach"].inq-mode #teachStart, [data-pane="teach"].inq-mode #teachEdit, [data-pane="teach"].inq-mode #addClick,
-  [data-pane="teach"].inq-mode #teachSave, [data-pane="teach"].inq-mode #teachCancel, [data-pane="teach"].inq-mode #editFromRow,
-  [data-pane="teach"].inq-mode #teachHint, [data-pane="teach"].inq-mode #pickRow, [data-pane="teach"].inq-mode #teachSteps { display:none !important; }
+  .scard { border:1px solid var(--line, #e5e7eb); border-radius:10px; padding:8px; margin-top:6px; }
+  .scard .more { border-top:1px dashed var(--line, #e5e7eb); margin-top:8px; padding-top:6px; }
+  .scard .more ol { margin:6px 0; }
+  .scard.rec { border-color:var(--brand); box-shadow:0 0 0 2px rgba(249,115,22,.15); }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -232,50 +233,6 @@
         </div>
         <ol id="teachSteps"></ol>
       </section>
-      <section id="inqTeachBox" hidden>
-        <h2>وصفة متابعة الاستعلام</h2>
-        <div id="inqSaved" class="muted"></div>
-        <p class="muted" id="inqTeachHint">افتح "Installment Check History" في أمان في التاب ده، ودوس "ابدأ التعليم"، واعمل الاستعلام بإيدك مرة لعميل واحد. الإضافة بتسجّل الاختيارات والضغطات بالترتيب، وانت بتحدد بالزراير:</p>
-        <ol class="muted" style="margin-top:0">
-          <li>"علّم خانة": قبل ما تكتب في خانة البحث (أول مرة الرقم القومي، وبعد النسخ رقم الطلب).</li>
-          <li>"علّم اسم يوزر أمان": اسم اليوزر اللي داخل بيه فوق (مثلا Shady_Amr_auto).</li>
-          <li>"انسخ رقم الطلب من الجدول": دوس على اسم اليوزر في صف من الجدول، وبعدين على رقم الطلب في نفس الصف.</li>
-          <li>"علّم مكان الحالة": في الآخر، على الحالة.</li>
-        </ol>
-        <div class="row">
-          <button id="inqTeachStart" class="primary">ابدأ التعليم</button>
-          <button id="inqTeachEdit">عدّل الوصفة</button>
-          <button id="inqSave" class="ok" hidden>احفظ الوصفة</button>
-          <button id="inqTeachEnd" hidden>إلغاء</button>
-        </div>
-        <div id="inqPicks" hidden>
-          <div class="row" style="margin-top:8px">
-            <button data-inqpick="fill">علّم خانة</button>
-            <button data-inqpick="user">علّم اسم يوزر أمان</button>
-            <button data-inqpick="copy">انسخ رقم الطلب من الجدول</button>
-            <button data-inqpick="result">علّم مكان الحالة</button>
-          </div>
-          <div id="inqPickMsg" class="now" hidden></div>
-          <ol id="inqSteps"></ol>
-          <div id="inqInfo" class="kv"></div>
-          <label class="f">كل حالة عند أمان تبقى إيه عندنا (لو الكلام ده موجود في الحالة)</label>
-          <div id="inqMap"></div>
-          <div class="row" style="margin-top:6px"><button id="inqMapAdd">+ حالة</button></div>
-          <div id="inqMoreBox">
-            <label class="f">حالة "يكمّل خطوات ويقرا السبب" (زي pending): الخطوات اللي بتعملها بعدها لحد ما السبب يظهر</label>
-            <div class="row">
-              <button id="inqMoreToggle">علّم الخطوات اللي بعد الحالة</button>
-              <button data-inqpick="reason">علّم مكان السبب</button>
-            </div>
-            <ol id="inqMoreSteps"></ol>
-            <div id="inqMoreInfo" class="kv"></div>
-            <label class="f">السبب يبقى إيه عندنا (لو الكلام ده موجود في السبب)</label>
-            <div id="inqReasonMap"></div>
-            <div class="row" style="margin-top:6px"><button id="inqReasonAdd">+ سبب</button></div>
-          </div>
-          <div id="inqTeachMsg" class="muted" style="margin-top:6px"></div>
-        </div>
-      </section>
       <section>
         <h2>الوصفات</h2>
         <div id="recipes" class="muted">لسه مافيش.</div>
@@ -285,7 +242,7 @@
     <div data-pane="inquiry" hidden>
       <section>
         <h2>متابعة الاستعلام</h2>
-        <p class="muted">بتشتغل في تاب أمان لوحده، وتاب رفع الطلبات يفضل شغال عادي. وصفتها في تبويب "تعليم" ← "متابعة الاستعلام".</p>
+        <p class="muted">بتشتغل في تاب أمان لوحده، وتاب رفع الطلبات يفضل شغال عادي. الوصفة تحت في نفس التبويب.</p>
         <button id="inqPull" class="primary big">اسحب الطلبات اللي تحت الاستعلام</button>
         <div id="inqPullMsg" class="muted" style="margin-top:6px"></div>
         <div class="row" style="margin-top:10px">
@@ -306,6 +263,38 @@
         <div id="inqStatus" class="status" hidden></div>
         <div class="bar" id="inqBarWrap" hidden><div id="inqBar"></div></div>
         <div id="inqStats" class="kv"></div>
+      </section>
+      <section id="inqTeachBox" hidden>
+        <h2>وصفة الاستعلام</h2>
+        <div id="inqSaved" class="muted"></div>
+        <ol class="muted" style="margin-top:4px">
+          <li>افتح صفحة الاستعلام في أمان في التاب ده، ودوس "ابدأ التعليم".</li>
+          <li>اعمل الاستعلام بإيدك لعميل واحد: الاختيارات والضغطات والكتابة بتتسجل لوحدها.</li>
+          <li>لما الحالة تظهر، دوس "دوس على حالة"، وبعدين دوس عليها في صفحة أمان. هتتضاف تحت، واختار تبقى إيه عندنا.</li>
+          <li>حالة لازم تفتح حاجة عشان تعرف السبب (زي Pending)؟ اختار لها "يعمل خطوات ويقرا السبب"، ودوس "سجّل خطواتها" واعملها في الصفحة، وبعدين "دوس على السبب".</li>
+        </ol>
+        <div class="row">
+          <button id="inqTeachStart" class="primary">ابدأ التعليم</button>
+          <button id="inqTeachEdit">عدّل الوصفة</button>
+          <button id="inqSave" class="ok" hidden>احفظ الوصفة</button>
+          <button id="inqTeachEnd" hidden>إلغاء</button>
+        </div>
+        <div id="inqPicks" hidden>
+          <div class="row" style="margin-top:8px">
+            <button data-inqpick="fill">علّم خانة</button>
+            <button data-inqpick="user">علّم اسم يوزر أمان</button>
+            <button data-inqpick="copy">انسخ رقم الطلب من الجدول</button>
+            <button data-inqpick="status" class="primary">دوس على حالة</button>
+          </div>
+          <div id="inqPickMsg" class="now" hidden></div>
+          <label class="f">الخطوات</label>
+          <ol id="inqSteps"></ol>
+          <div id="inqInfo" class="kv"></div>
+          <label class="f">الحالات: لو أمان كتب الكلام ده، يعمل إيه</label>
+          <div id="inqMap"></div>
+          <div class="row" style="margin-top:6px"><button id="inqMapAdd">+ حالة بإيدك</button></div>
+          <div id="inqTeachMsg" class="muted" style="margin-top:6px"></div>
+        </div>
       </section>
       <section id="inqLogBox" hidden>
         <h2>اللي اتراجع</h2>
