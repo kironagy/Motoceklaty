@@ -39,16 +39,10 @@ module.exports = {
       cwd: __dirname,
       script: 'artisan',
       interpreter: 'php',
-      // Three parallel workers. Each one grabs a free --workers slot via
-      // flock and refuses to start if all are taken, so this number and the
-      // --workers value must stay in sync. Messages inside one conversation
-      // are still answered strictly in order (the command skips a
-      // conversation another worker is busy with); what runs in parallel is
-      // *different* customers, so one slow reply no longer holds up the
-      // whole queue.
-      instances: 3,
-      exec_mode: 'fork',
-      args: 'whatsapp:process-jobs --sleep=1 --workers=3',
+      // Owner 2026-11-22: one supervisor that keeps one reply worker per active bot
+      // (whatsapp:process-jobs --bot=ID), so a busy number never holds up another
+      // number's customers. Bots switched on/off are picked up within seconds.
+      args: 'whatsapp:supervise-jobs',
       autorestart: true,
       max_restarts: 20,
       restart_delay: 3000,

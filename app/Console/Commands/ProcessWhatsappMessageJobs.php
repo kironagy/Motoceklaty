@@ -10,7 +10,9 @@ use Illuminate\Support\Facades\Log;
 
 class ProcessWhatsappMessageJobs extends Command
 {
-    protected $signature = 'whatsapp:process-jobs {--sleep=1} {--workers=3}';
+    // Owner 2026-11-22: one worker per active bot (--bot), started by whatsapp:supervise-jobs, so a
+    // busy number never holds up another number's customers. Without --bot it is the old shared pool.
+    protected $signature = 'whatsapp:process-jobs {--sleep=1} {--workers=3} {--bot= : only this bot\'s jobs} {--parent= : exit when this supervisor pid is gone}';
     protected $description = 'Process queued WhatsApp AI message jobs';
 
     /** @var resource|null kept open for the process lifetime so flock() stays held */
@@ -19,9 +21,15 @@ class ProcessWhatsappMessageJobs extends Command
     /** 1-based slot this process holds, for log lines. */
     private int $slot = 0;
 
+    /** the only bot this worker answers for, null = every bot (shared pool) */
+    private ?int $botId = null;
+
+    private int $botCheckedAt = 0;
+
     public function handle(): int
     {
-        $workers = max(1, (int) $this->option('workers'));
+        $this->botId = filled($this->option('bot')) ? (int) $this->option('bot') : null;
+        $workers = $this->botId ? 1 : max(1, (int) $this->option('workers'));
 
         if (! $this->acquireWorkerSlot($workers)) {
             $this->error("All {$workers} whatsapp:process-jobs slots are already taken. Exiting.");
@@ -32,9 +40,15 @@ class ProcessWhatsappMessageJobs extends Command
             return self::FAILURE;
         }
 
-        $this->info("WhatsApp queue worker started (slot {$this->slot}/{$workers})");
+        $this->info($this->botId ? "WhatsApp queue worker started for bot {$this->botId}" : "WhatsApp queue worker started (slot {$this->slot}/{$workers})");
 
         while (true) {
+            if (! $this->shouldKeepRunning()) {
+                $this->info("WhatsApp queue worker for bot {$this->botId} stopped (bot off, deleted or supervisor gone)");
+
+                return self::SUCCESS;
+            }
+
             // dashboard settings (bot on/off, model, limits) take effect
             // without restarting this long-running worker
             \App\Domain\Settings\AgentSettings::apply();
@@ -399,10 +413,25 @@ class ProcessWhatsappMessageJobs extends Command
      * conversations be answered in parallel; ordering *within* one
      * conversation is preserved by claimNextJob(), not by this lock.
      */
+    /** A bot worker stops between turns when its bot is off or deleted, or its supervisor died. */
+    private function shouldKeepRunning(): bool
+    {
+        $parent = (int) $this->option('parent');
+        if ($parent > 0 && function_exists('posix_getppid') && posix_getppid() !== $parent) {
+            return false;
+        }
+        if (! $this->botId || time() - $this->botCheckedAt < 10) {
+            return true;
+        }
+        $this->botCheckedAt = time();
+
+        return \App\Models\WhatsappBot::whereKey($this->botId)->where('is_active', true)->exists();
+    }
+
     private function acquireWorkerSlot(int $workers): bool
     {
         for ($slot = 1; $slot <= $workers; $slot++) {
-            $handle = fopen(storage_path("app/whatsapp-process-jobs.{$slot}.lock"), 'c');
+            $handle = fopen(storage_path($this->botId ? "app/whatsapp-process-jobs.bot-{$this->botId}.lock" : "app/whatsapp-process-jobs.{$slot}.lock"), 'c');
 
             if ($handle === false) {
                 continue;
@@ -433,6 +462,7 @@ class ProcessWhatsappMessageJobs extends Command
         $staleBefore = now()->subMinutes(10);
 
         return DB::table('whatsapp_message_jobs')
+            ->when($this->botId, fn ($q) => $q->where('whatsapp_bot_id', $this->botId))
             ->where(function ($q) use ($staleBefore) {
                 $q->where(fn ($q) => $q->whereIn('status', ['pending', 'generated'])
                         ->where(fn ($q) => $q->whereNull('process_after')->orWhere('process_after', '<=', now())))
@@ -443,7 +473,8 @@ class ProcessWhatsappMessageJobs extends Command
 
     private function withClaimLock(callable $callback)
     {
-        $handle = fopen(storage_path('app/whatsapp-process-jobs.claim.lock'), 'c');
+        // a bot worker only competes with a shared-pool worker for its own bot's jobs
+        $handle = fopen(storage_path($this->botId ? "app/whatsapp-process-jobs.claim.bot-{$this->botId}.lock" : 'app/whatsapp-process-jobs.claim.lock'), 'c');
 
         if ($handle === false) {
             return $callback();
@@ -475,6 +506,7 @@ class ProcessWhatsappMessageJobs extends Command
             // otherwise it becomes claimable again below - re-running is
             // safe because tool calls are idempotent per turn.
             $abandoned = DB::table('whatsapp_message_jobs')
+                ->when($this->botId, fn ($q) => $q->where('whatsapp_bot_id', $this->botId))
                 ->where('status', 'processing')
                 ->whereNotNull('locked_at')
                 ->where('locked_at', '<', $staleBefore)
@@ -570,6 +602,7 @@ class ProcessWhatsappMessageJobs extends Command
                 ->map(fn ($id) => (int) $id)->values()->all();
 
             $job = DB::table('whatsapp_message_jobs')
+                ->when($this->botId, fn ($q) => $q->where('whatsapp_bot_id', $this->botId))
                 ->when($capped !== [], fn ($q) => $q->whereNotIn('whatsapp_bot_id', $capped))
                 ->when($busyBotIds !== [], fn ($q) => $q->whereNotIn('whatsapp_bot_id', $busyBotIds))
                 ->when($backlogBlocked !== [], fn ($q) => $q->where(fn ($q) => $q->whereNotIn('whatsapp_bot_id', $backlogBlocked)

@@ -417,8 +417,23 @@ class WhatsappBotResource extends Resource
                 Tables\Actions\EditAction::make(),
                 // A bot with customers can only be deactivated: deleting it
                 // cascades to every customer, application and document.
-                Tables\Actions\DeleteAction::make()
-                    ->hidden(fn (WhatsappBot $record) => $record->hasCustomerData()),
+                // Owner 2026-11-22: "مسح البوت" for every bot - one with customers is switched off and
+                // hidden (WhatsappBot::remove), its customers, conversations and requests stay.
+                Tables\Actions\Action::make('remove')
+                    ->label('مسح البوت')
+                    ->icon('heroicon-o-trash')
+                    ->color('danger')
+                    ->visible(fn (WhatsappBot $record) => static::canDelete($record))
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (WhatsappBot $record) => 'مسح البوت '.$record->name.'؟')
+                    ->modalDescription(fn (WhatsappBot $record) => $record->hasCustomerData()
+                        ? 'الواتساب هيتفصل والبوت هيقف ويختفي من القايمة. عملاؤه ومحادثاته وطلباته هيفضلوا زي ما هم.'
+                        : 'الواتساب هيتفصل والبوت هيتمسح نهائي.')
+                    ->modalSubmitActionLabel('امسح')
+                    ->action(function (WhatsappBot $record) {
+                        $deleted = $record->remove();
+                        Notification::make()->title($deleted ? 'البوت اتمسح' : 'البوت اتقفل واختفى، وعملاؤه فضلوا')->success()->send();
+                    }),
                 ])->label('إدارة')->icon('heroicon-m-ellipsis-vertical')->color('gray')->button(),
             ])
             ->bulkActions([
@@ -444,7 +459,7 @@ class WhatsappBotResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->with('staff')->orderByDesc('is_active');
+        return parent::getEloquentQuery()->whereNull('archived_at')->with('staff')->orderByDesc('is_active');
     }
 
     public static function getPages(): array

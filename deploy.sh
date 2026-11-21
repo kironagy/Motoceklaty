@@ -51,7 +51,8 @@ php artisan queue:restart
 
 # whatsapp:process-jobs runs 3 slots (--workers=3): one process left a whole queue
 # waiting behind a single slow reply (owner 2026-11-09: 10+ minute waits).
-SERVER_PROC_NAMES="whatsapp-queue whatsapp-queue-2 whatsapp-queue-3 whatsapp-worker"
+# whatsapp-queue = whatsapp:supervise-jobs (one reply worker per active bot, 2026-11-22)
+SERVER_PROC_NAMES="whatsapp-queue whatsapp-worker"
 
 # "whatsapp-queue" only exists as a pm2 process name on the production
 # server's pm2 setup. A local pm2 (if any) uses different process names

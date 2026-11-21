@@ -26,6 +26,7 @@ class WhatsappBot extends Model
 
     // The bots page calls ->locale()->diffForHumans() on it; uncast it was a string and the page crashed.
     protected $casts = [
+        'archived_at' => 'datetime',
         'connected_at' => 'datetime',
         'wa_limit_until' => 'datetime',
         'wa_limit_since' => 'datetime',
@@ -73,6 +74,32 @@ class WhatsappBot extends Model
     {
         return Customer::where('whatsapp_bot_id', $this->id)->exists()
             || WhatsappConversation::where('whatsapp_bot_id', $this->id)->exists();
+    }
+
+    /**
+     * Owner 2026-11-22 "مسح البوت": the WhatsApp session is logged out and cleared, then a bot
+     * without customers is deleted; one with customers is switched off and hidden, so its
+     * customers, conversations and requests stay. Returns true when it was deleted.
+     */
+    public function remove(): bool
+    {
+        try {
+            \Illuminate\Support\Facades\Http::timeout(10)
+                ->withHeaders(['X-BOT-TOKEN' => config('services.whatsapp.bot_token')])
+                ->post(rtrim((string) config('services.whatsapp.worker_url'), '/')."/sessions/{$this->id}/logout");
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Bot removed while the WhatsApp service was unreachable', ['bot_id' => $this->id, 'error' => $e->getMessage()]);
+        }
+
+        if (! $this->hasCustomerData()) {
+            $this->delete();
+
+            return true;
+        }
+
+        $this->forceFill(['is_active' => false, 'archived_at' => now(), 'qr_code' => null, 'session_status' => 'logged_out', 'connected_at' => null])->save();
+
+        return false;
     }
 
     protected static function booted(): void
