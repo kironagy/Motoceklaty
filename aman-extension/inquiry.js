@@ -132,7 +132,7 @@
           const map = t.map.map((m) => ({ ...m }));
           const mo = { steps: [], reason: null, map: [], ...(map[t.row].more || {}) };
           const rules = [...(mo.map || [])];
-          if (text && !rules.some((r) => norm(r.text) === norm(text))) rules.push({ text: clean(text, 120), status: 'paused_aman' });
+          if (text && !rules.some((r) => norm(r.text) === norm(text))) rules.push({ text: clean(text, 120), status: 'paused' });
           map[t.row] = { ...map[t.row], more: { ...mo, reason: locate(el, 'result'), reasonText: text, map: rules } };
           return { ...t, map, pick: null };
         });

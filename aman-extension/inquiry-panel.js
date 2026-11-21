@@ -241,7 +241,7 @@
       tt.pick = null;
     });
     box.querySelector('.why').onclick = () => editTeach((tt) => { tt.map[i].more = tt.map[i].more || blankMore(); tt.pick = 'reason'; tt.row = i; });
-    box.querySelector('.radd').onclick = () => editTeach((tt) => { tt.map[i].more.map.push({ text: '', status: 'paused_aman' }); });
+    box.querySelector('.radd').onclick = () => editTeach((tt) => { tt.map[i].more.map.push({ text: '', status: 'paused' }); });
     const rs = box.querySelector('.rs');
     (mo.map || []).forEach((r, j) => {
       const row = document.createElement('div');

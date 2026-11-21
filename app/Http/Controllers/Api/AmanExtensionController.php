@@ -291,10 +291,7 @@ class AmanExtensionController extends Controller
                 $reason = trim(implode("\n", array_filter([$data['message'] ?? null, filled($data['reply'] ?? null) ? 'رد أمان: '.$data['reply'] : null])));
                 $req->checks_report = array_merge((array) $req->checks_report, ['aman' => $reason ?: 'من رافع أمان']);
                 $req->status = $data['status'] === 'held' ? 'paused' : ($data['request_status'] ?? 'canceled');
-                // Owner 2026-11-19: "متوقف" from the extension is "متوقف امان" (parked on hold-aman@ after 48 h).
-                if ($req->status === 'paused') {
-                    $req->status = 'paused_aman';
-                }
+                // Owner 2026-11-21: "متوقف" from the extension stays "متوقف" (no longer "متوقف امان").
                 $req->save();
             } elseif ($data['status'] === 'uploaded' && filled($data['aman_ref'] ?? null)) {
                 $note = 'رقم طلب أمان: '.$data['aman_ref'].(filled($data['message'] ?? null) ? ' — '.$data['message'] : '');
@@ -314,13 +311,18 @@ class AmanExtensionController extends Controller
     private const INQUIRY_RECIPE = '_inquiry';
 
     /** Statuses the follow-up may set; "pending" = still under inquiry, nothing changes. */
-    public const INQUIRY_STATUSES = ['pending', 'approved', 'rejected', 'paused_aman', 'work_check', 'canceled'];
+    public const INQUIRY_STATUSES = ['pending', 'approved', 'rejected', 'paused', 'work_check', 'canceled'];
+
+    // Owner 2026-11-21: a stop read on Aman is "متوقف", not "متوقف امان"; recipes saved before still say paused_aman
+    private const OLD_INQUIRY_STATUSES = ['paused_aman' => 'paused'];
 
     public function inquiryRecipe()
     {
         $r = AmanRecipe::where('type', self::INQUIRY_RECIPE)->first();
 
-        return ['recipe' => $r ? $r->steps + ['version' => $r->version] : null, 'statuses' => array_intersect_key(
+        $steps = $r ? json_decode(str_replace('"status":"paused_aman"', '"status":"paused"', json_encode($r->steps)), true) : null;
+
+        return ['recipe' => $r ? $steps + ['version' => $r->version] : null, 'statuses' => array_intersect_key(
             \App\Filament\Resources\DeliveryResource::STATUS_LABELS, array_flip(self::INQUIRY_STATUSES))];
     }
 
@@ -339,20 +341,20 @@ class AmanExtensionController extends Controller
             'map' => 'array', 'map.*.text' => 'required|string|max:200',
             // "_more": that status needs more steps on Aman to show its reason (owner 2026-11-21: Aman's
             // "pending" is stopped - one more action shows why: متوقف أمان with the reason, or استعلام عمل)
-            'map.*.status' => ['required', Rule::in([...self::INQUIRY_STATUSES, '_more'])],
+            'map.*.status' => ['required', Rule::in([...self::INQUIRY_STATUSES, ...array_keys(self::OLD_INQUIRY_STATUSES), '_more'])],
             // owner 2026-11-21: each such status has its own steps, reason spot and reason rules
             'map.*.more' => 'nullable|array',
             'map.*.more.steps' => 'array',
             'map.*.more.steps.*.kind' => ['required', Rule::in(['select', 'fill', 'nid', 'click'])],
             'map.*.more.reason' => 'nullable|array',
             'map.*.more.map' => 'array', 'map.*.more.map.*.text' => 'required|string|max:200',
-            'map.*.more.map.*.status' => ['required', Rule::in(self::INQUIRY_STATUSES)],
+            'map.*.more.map.*.status' => ['required', Rule::in([...self::INQUIRY_STATUSES, ...array_keys(self::OLD_INQUIRY_STATUSES)])],
             'more' => 'nullable|array',
             'more.steps' => 'array',
             'more.steps.*.kind' => ['required', Rule::in(['select', 'fill', 'nid', 'click'])],
             'more.reason' => 'nullable|array',
             'more.map' => 'array', 'more.map.*.text' => 'required|string|max:200',
-            'more.map.*.status' => ['required', Rule::in(self::INQUIRY_STATUSES)],
+            'more.map.*.status' => ['required', Rule::in([...self::INQUIRY_STATUSES, ...array_keys(self::OLD_INQUIRY_STATUSES)])],
         ]);
         $shared = $request->input('more.steps') && $request->input('more.reason');
         foreach ((array) $request->input('map') as $row) {
@@ -407,9 +409,12 @@ class AmanExtensionController extends Controller
         $staff = $this->staff($request);
         $data = $request->validate([
             'text' => 'required|string|max:500',
-            'status' => ['nullable', Rule::in(self::INQUIRY_STATUSES)],
+            'status' => ['nullable', Rule::in([...self::INQUIRY_STATUSES, ...array_keys(self::OLD_INQUIRY_STATUSES)])],
             'reason' => 'nullable|string|max:500',
         ]);
+        if (isset(self::OLD_INQUIRY_STATUSES[$data['status'] ?? ''])) {
+            $data['status'] = self::OLD_INQUIRY_STATUSES[$data['status']];
+        }
         $req = $this->inquiryRequests($staff)->whereKey($id)->first();
         if (! $req) {
             return ['ok' => true, 'changed' => false, 'skipped' => 'الطلب مبقاش تحت الاستعلام'];

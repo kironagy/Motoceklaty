@@ -171,7 +171,7 @@ class AmanExtensionApiTest extends TestCase
         ])->assertOk()->assertJson(['changed' => true]);
 
         $fresh = $req->fresh();
-        $this->assertSame('paused_aman', $fresh->status);
+        $this->assertSame('paused', $fresh->status);
         $this->assertSame("متابعة الاستعلام على أمان: Pending\nالسبب: متوقف لحين استيفاء صورة البطاقة", $fresh->checks_report['aman']);
         $this->assertSame('Pending — السبب: متوقف لحين استيفاء صورة البطاقة', $fresh->aman_check_text);
     }
