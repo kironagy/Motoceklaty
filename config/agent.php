@@ -117,6 +117,10 @@ return [
     // Seconds a customer-reply model call may take before it is dropped for the next key/model.
     'reply_timeout_seconds' => env('AGENT_REPLY_TIMEOUT_SECONDS', 12),
 
+    // Owner 2026-11-22: how many bot workers may generate a reply at the same time (the AI key's
+    // per-minute limit). Each bot still has its own worker; sending happens outside this limit.
+    'max_parallel_turns' => env('AGENT_MAX_PARALLEL_TURNS', 3),
+
     'tools' => [
         \App\Agent\Tools\CheckCashInventoryTool::class,
         \App\Agent\Tools\GetEarlierMessagesTool::class,

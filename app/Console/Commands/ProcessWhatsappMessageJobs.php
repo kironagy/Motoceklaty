@@ -58,9 +58,19 @@ class ProcessWhatsappMessageJobs extends Command
                 continue;
             }
 
+            // Owner 2026-11-22: with a worker per bot, 11 workers at once hit the AI key's limit
+            // ("usage limit reached") and replies failed. Only agent.max_parallel_turns turns
+            // generate at once; a bot waits for a free one, then the reply is sent outside it.
+            $this->releaseTurnSlot();
+            if ($this->botId && $this->anythingClaimable() && ! $this->acquireTurnSlot()) {
+                usleep(random_int(300, 1000) * 1000);
+                continue;
+            }
+
             $job = $this->claimNextJob();
 
             if (!$job) {
+                $this->releaseTurnSlot();
                 sleep((int) $this->option('sleep'));
                 continue;
             }
@@ -157,6 +167,8 @@ class ProcessWhatsappMessageJobs extends Command
                     $generationSucceeded = true;
                 }
 
+                // the send gap (30-45 s per number) does not hold an AI turn
+                $this->releaseTurnSlot();
                 app(DeliveryService::class)->deliver($job, $result);
 
                 DB::table('whatsapp_message_jobs')
@@ -413,6 +425,37 @@ class ProcessWhatsappMessageJobs extends Command
      * conversations be answered in parallel; ordering *within* one
      * conversation is preserved by claimNextJob(), not by this lock.
      */
+    /** @var resource|null the AI turn slot this worker holds while it generates a reply */
+    private $turnSlot = null;
+
+    private function acquireTurnSlot(): bool
+    {
+        $slots = max(1, (int) config('agent.max_parallel_turns', 3));
+        foreach (range(1, $slots) as $i) {
+            $handle = fopen(storage_path("app/whatsapp-turn-slot.{$i}.lock"), 'c');
+            if ($handle === false) {
+                continue;
+            }
+            if (flock($handle, LOCK_EX | LOCK_NB)) {
+                $this->turnSlot = $handle;
+
+                return true;
+            }
+            fclose($handle);
+        }
+
+        return false;
+    }
+
+    private function releaseTurnSlot(): void
+    {
+        if ($this->turnSlot) {
+            flock($this->turnSlot, LOCK_UN);
+            fclose($this->turnSlot);
+            $this->turnSlot = null;
+        }
+    }
+
     /** A bot worker stops between turns when its bot is off or deleted, or its supervisor died. */
     private function shouldKeepRunning(): bool
     {
