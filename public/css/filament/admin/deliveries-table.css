@@ -1,312 +1,318 @@
 /* =====================================================================
-   Deliveries table as "tickets" (owner 2026-11-22: "كرييتف وبيطير").
-   Only on the deliveries list, table mode. Every row is a floating
-   ticket: a stub with the request number, a torn perforation, and an
-   edge lit in the status color (--st, read from the status badge).
+   Deliveries table as a race track (owner 2026-11-22: "كرييتف وبيطير").
+   Only on the deliveries list, table mode. Every row is a lane: the
+   request number sits on an Egyptian plate, and a motorcycle rides the
+   lane's bottom line as far as the request has got (row class st-*).
    ===================================================================== */
 
 .fi-resource-deliveries .fi-ta-ctn {
-    --mg-ta-bg: color-mix(in srgb, var(--mg-canvas) 55%, var(--mg-surface));
     background:
-        radial-gradient(70% 40% at 100% 0%, color-mix(in srgb, var(--mg-brand) 9%, transparent), transparent 70%),
-        var(--mg-ta-bg) !important;
+        radial-gradient(60% 50% at 0% 0%, color-mix(in srgb, var(--mg-brand) 10%, transparent), transparent 70%),
+        radial-gradient(50% 40% at 100% 100%, rgba(129, 140, 248, .08), transparent 70%),
+        color-mix(in srgb, var(--mg-canvas) 55%, var(--mg-surface)) !important;
     border-radius: 26px !important;
 }
 
-/* ---------- toolbar: a search that lights up ---------- */
+/* ---------- toolbar ---------- */
 .fi-resource-deliveries .fi-ta-header-toolbar { border: 0 !important; }
 
 .fi-resource-deliveries .fi-ta-search-field .fi-input-wrp {
-    border-radius: 16px !important;
+    border-radius: 999px !important;
     background: var(--mg-surface) !important;
-    transition: box-shadow .4s var(--mg-ease), transform .4s var(--mg-ease);
+    transition: box-shadow .4s var(--mg-ease);
 }
 
 .fi-resource-deliveries .fi-ta-search-field .fi-input-wrp:focus-within {
-    transform: translateY(-1px);
-    box-shadow:
-        0 0 0 1.5px var(--mg-brand),
-        0 0 0 6px var(--mg-brand-soft),
-        0 14px 30px -14px var(--mg-brand) !important;
+    box-shadow: 0 0 0 1.5px var(--mg-brand), 0 0 0 6px var(--mg-brand-soft), 0 14px 30px -14px var(--mg-brand) !important;
 }
 
-/* ---------- the table: rows float apart ---------- */
-.fi-resource-deliveries .fi-ta-content { border: 0 !important; padding: 0 .6rem .4rem; }
+/* ---------- lanes ---------- */
+.fi-resource-deliveries .fi-ta-content { border: 0 !important; padding: 0 .6rem .5rem; }
 
 .fi-resource-deliveries .fi-ta-table {
     border-collapse: separate !important;
-    border-spacing: 0 10px;
+    border-spacing: 0 12px;
 }
 
 .fi-resource-deliveries .fi-ta-table,
 .fi-resource-deliveries .fi-ta-table > tbody,
-.fi-resource-deliveries .fi-ta-table > thead {
-    border: 0 !important;
-}
+.fi-resource-deliveries .fi-ta-table > thead { border: 0 !important; }
 
 .fi-resource-deliveries .fi-ta-table > :not([hidden]) ~ :not([hidden]),
 .fi-resource-deliveries .fi-ta-table > tbody > :not([hidden]) ~ :not([hidden]) {
     border-top-width: 0 !important;
 }
 
-/* header: floating labels, no bar */
-.fi-resource-deliveries .fi-ta-table > thead { background: transparent !important; }
-.fi-resource-deliveries .fi-ta-table > thead tr { border: 0 !important; background: transparent !important; }
-
-.fi-resource-deliveries .fi-ta-header-cell {
-    padding-block: .4rem .1rem !important;
+.fi-resource-deliveries .fi-ta-table > thead,
+.fi-resource-deliveries .fi-ta-table > thead tr {
+    background: transparent !important;
+    border: 0 !important;
 }
+
+.fi-resource-deliveries .fi-ta-header-cell { padding-block: .3rem 0 !important; }
 
 .fi-resource-deliveries .fi-ta-header-cell,
 .fi-resource-deliveries .fi-ta-header-cell-label {
     font-size: .74rem !important;
     font-weight: 800 !important;
-    letter-spacing: .03em;
-    color: color-mix(in srgb, var(--mg-muted) 85%, var(--mg-brand)) !important;
+    color: color-mix(in srgb, var(--mg-muted) 80%, var(--mg-brand)) !important;
 }
 
-.fi-resource-deliveries .fi-ta-header-cell-sort-icon {
-    color: var(--mg-brand) !important;
-    transition: transform .4s cubic-bezier(.3, 1.6, .5, 1) !important;
-}
+.fi-resource-deliveries .fi-ta-header-cell-sort-icon { color: var(--mg-brand) !important; }
 
-.fi-resource-deliveries .fi-ta-header-cell button:hover .fi-ta-header-cell-sort-icon {
-    transform: translateY(2px) scale(1.2);
-}
-
-/* ---------- a ticket per row ---------- */
+/* each status has its color */
 .fi-resource-deliveries .fi-ta-row {
-    --st: #64748b;
+    --st: #2dd4bf;
     background: transparent !important;
-    animation: mg-tk-in .65s var(--mg-ease) both;
+    animation: mg-rc-in .6s var(--mg-ease) both;
     transition: transform .4s var(--mg-ease), filter .4s var(--mg-ease) !important;
 }
 
-/* the status color comes from the status badge in the row */
-.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-success) { --st: #22c55e; }
-.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-warning) { --st: #f59e0b; }
-.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-danger)  { --st: #ef4444; }
-.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-info)    { --st: #38bdf8; }
-.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-primary) { --st: #2dd4bf; }
-.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-gray)    { --st: #64748b; }
+.fi-resource-deliveries .fi-ta-row.st-new,
+.fi-resource-deliveries .fi-ta-row.st-new_request { --st: #2dd4bf; }
+.fi-resource-deliveries .fi-ta-row.st-pending,
+.fi-resource-deliveries .fi-ta-row.st-work_check  { --st: #f59e0b; }
+.fi-resource-deliveries .fi-ta-row.st-edited,
+.fi-resource-deliveries .fi-ta-row.st-transferred { --st: #818cf8; }
+.fi-resource-deliveries .fi-ta-row.st-approved    { --st: #22c55e; }
+.fi-resource-deliveries .fi-ta-row.st-delivered   { --st: #10b981; }
+.fi-resource-deliveries .fi-ta-row.st-rejected,
+.fi-resource-deliveries .fi-ta-row.st-canceled    { --st: #ef4444; }
+.fi-resource-deliveries .fi-ta-row.st-paused,
+.fi-resource-deliveries .fi-ta-row.st-paused_aman { --st: #64748b; }
 
-/* rows fly in one after the other (again on every page and filter) */
-.fi-resource-deliveries .fi-ta-row:nth-child(2) { animation-delay: .04s; }
-.fi-resource-deliveries .fi-ta-row:nth-child(3) { animation-delay: .08s; }
-.fi-resource-deliveries .fi-ta-row:nth-child(4) { animation-delay: .12s; }
-.fi-resource-deliveries .fi-ta-row:nth-child(5) { animation-delay: .16s; }
-.fi-resource-deliveries .fi-ta-row:nth-child(6) { animation-delay: .20s; }
-.fi-resource-deliveries .fi-ta-row:nth-child(7) { animation-delay: .24s; }
-.fi-resource-deliveries .fi-ta-row:nth-child(8) { animation-delay: .28s; }
-.fi-resource-deliveries .fi-ta-row:nth-child(9) { animation-delay: .32s; }
-.fi-resource-deliveries .fi-ta-row:nth-child(10) { animation-delay: .36s; }
-.fi-resource-deliveries .fi-ta-row:nth-child(n+11) { animation-delay: .40s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(2) { animation-delay: .05s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(3) { animation-delay: .10s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(4) { animation-delay: .15s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(5) { animation-delay: .20s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(6) { animation-delay: .25s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(7) { animation-delay: .30s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(8) { animation-delay: .35s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(9) { animation-delay: .40s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(n+10) { animation-delay: .45s; }
 
+/* each cell is a slice of the lane; its bottom is a slice of the track */
 .fi-resource-deliveries .fi-ta-row > .fi-ta-cell {
     position: relative;
     background:
-        linear-gradient(to bottom, rgba(255, 255, 255, .025), transparent 60%),
-        var(--mg-surface) !important;
-    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--mg-text) 6%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--mg-text) 4%, transparent);
-    transition: background .35s var(--mg-ease);
+        linear-gradient(color-mix(in srgb, var(--mg-text) 9%, transparent), color-mix(in srgb, var(--mg-text) 9%, transparent)) 0 100% / 100% 3px no-repeat,
+        linear-gradient(180deg, color-mix(in srgb, var(--mg-surface) 97%, #fff), var(--mg-surface)) !important;
 }
 
-/* rounded ends, the start edge lit in the status color */
 .fi-resource-deliveries .fi-ta-row > .fi-ta-cell:first-child {
-    border-start-start-radius: 18px;
-    border-end-start-radius: 18px;
-    box-shadow:
-        inset 4px 0 0 var(--st),
-        inset 0 1px 0 color-mix(in srgb, var(--mg-text) 6%, transparent),
-        inset 0 -1px 0 color-mix(in srgb, var(--mg-text) 4%, transparent);
-}
-
-[dir="rtl"] .fi-resource-deliveries .fi-ta-row > .fi-ta-cell:first-child {
-    box-shadow:
-        inset -4px 0 0 var(--st),
-        inset 0 1px 0 color-mix(in srgb, var(--mg-text) 6%, transparent),
-        inset 0 -1px 0 color-mix(in srgb, var(--mg-text) 4%, transparent);
+    border-start-start-radius: 20px;
+    border-end-start-radius: 20px;
 }
 
 .fi-resource-deliveries .fi-ta-row > .fi-ta-cell:last-child {
-    border-start-end-radius: 18px;
-    border-end-end-radius: 18px;
+    border-start-end-radius: 20px;
+    border-end-end-radius: 20px;
 }
 
-/* a soft glow of the status color behind the start edge */
-.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:first-child::before {
-    content: "";
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(2) { --ci: 1; }
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(3) { --ci: 2; }
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(4) { --ci: 3; }
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(5) { --ci: 4; }
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(6) { --ci: 5; }
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(7) { --ci: 6; }
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(8) { --ci: 7; }
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(n+9) { --ci: 8; }
+
+/* the ridden part of the track, filling cell by cell up to where the request has got */
+.fi-resource-deliveries .fi-ta-row.st-new > .fi-ta-cell:nth-child(-n+3),
+.fi-resource-deliveries .fi-ta-row.st-new_request > .fi-ta-cell:nth-child(-n+3),
+.fi-resource-deliveries .fi-ta-row.st-paused > .fi-ta-cell:nth-child(-n+4),
+.fi-resource-deliveries .fi-ta-row.st-paused_aman > .fi-ta-cell:nth-child(-n+4),
+.fi-resource-deliveries .fi-ta-row.st-pending > .fi-ta-cell:nth-child(-n+5),
+.fi-resource-deliveries .fi-ta-row.st-work_check > .fi-ta-cell:nth-child(-n+5),
+.fi-resource-deliveries .fi-ta-row.st-rejected > .fi-ta-cell:nth-child(-n+5),
+.fi-resource-deliveries .fi-ta-row.st-edited > .fi-ta-cell:nth-child(-n+6),
+.fi-resource-deliveries .fi-ta-row.st-transferred > .fi-ta-cell:nth-child(-n+6),
+.fi-resource-deliveries .fi-ta-row.st-approved > .fi-ta-cell:nth-child(-n+7),
+.fi-resource-deliveries .fi-ta-row.st-delivered > .fi-ta-cell {
+    background:
+        linear-gradient(var(--st), var(--st)) 0 100% / 100% 3px no-repeat,
+        linear-gradient(color-mix(in srgb, var(--mg-text) 9%, transparent), color-mix(in srgb, var(--mg-text) 9%, transparent)) 0 100% / 100% 3px no-repeat,
+        linear-gradient(180deg, color-mix(in srgb, var(--st) 5%, var(--mg-surface)), var(--mg-surface)) !important;
+    animation: mg-rc-fill .45s linear both;
+    animation-delay: calc(var(--ci, 0) * 110ms + 350ms);
+}
+
+[dir="rtl"] .fi-resource-deliveries .fi-ta-row > .fi-ta-cell { background-position: 100% 100%, 100% 100%, 0 0 !important; }
+
+/* the bike, parked where the request has got to */
+.fi-resource-deliveries .fi-ta-row.st-new > .fi-ta-cell:nth-child(3)::after,
+.fi-resource-deliveries .fi-ta-row.st-new_request > .fi-ta-cell:nth-child(3)::after,
+.fi-resource-deliveries .fi-ta-row.st-paused > .fi-ta-cell:nth-child(4)::after,
+.fi-resource-deliveries .fi-ta-row.st-paused_aman > .fi-ta-cell:nth-child(4)::after,
+.fi-resource-deliveries .fi-ta-row.st-pending > .fi-ta-cell:nth-child(5)::after,
+.fi-resource-deliveries .fi-ta-row.st-work_check > .fi-ta-cell:nth-child(5)::after,
+.fi-resource-deliveries .fi-ta-row.st-rejected > .fi-ta-cell:nth-child(5)::after,
+.fi-resource-deliveries .fi-ta-row.st-edited > .fi-ta-cell:nth-child(6)::after,
+.fi-resource-deliveries .fi-ta-row.st-transferred > .fi-ta-cell:nth-child(6)::after,
+.fi-resource-deliveries .fi-ta-row.st-approved > .fi-ta-cell:nth-child(7)::after,
+.fi-resource-deliveries .fi-ta-row.st-delivered > .fi-ta-cell:last-child::after {
+    content: "🏍️";
     position: absolute;
-    inset-block: 15%;
-    inset-inline-start: 0;
-    width: 26px;
-    background: radial-gradient(closest-side at 0 50%, color-mix(in srgb, var(--st) 45%, transparent), transparent);
+    inset-inline-end: -6px;
+    bottom: -4px;
+    z-index: 3;
+    font-size: 21px;
+    line-height: 1;
+    transform: scaleX(-1);
+    filter: drop-shadow(0 0 6px var(--st));
+    animation: mg-rc-arrive .9s cubic-bezier(.3, 1.3, .5, 1) both, mg-rc-idle 1.6s ease-in-out infinite;
+    animation-delay: calc(var(--ci, 0) * 110ms + 300ms), calc(var(--ci, 0) * 110ms + 1.3s);
     pointer-events: none;
 }
 
-[dir="rtl"] .fi-resource-deliveries .fi-ta-row > .fi-ta-cell:first-child::before {
-    background: radial-gradient(closest-side at 100% 50%, color-mix(in srgb, var(--st) 45%, transparent), transparent);
-}
+[dir="rtl"] .fi-resource-deliveries .fi-ta-row > .fi-ta-cell::after { transform: none; }
 
-/* ---------- the stub: request number + a torn perforation ---------- */
-.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(2) {
-    background:
-        linear-gradient(135deg, color-mix(in srgb, var(--st) 14%, transparent), transparent 70%),
-        var(--mg-surface) !important;
-}
+/* finished: a flag; stopped: the bike goes grey; rejected: a stop sign */
+.fi-resource-deliveries .fi-ta-row.st-delivered > .fi-ta-cell:last-child::after { content: "🏁"; transform: none; inset-inline-end: 10px; }
+.fi-resource-deliveries .fi-ta-row.st-paused > .fi-ta-cell:nth-child(4)::after,
+.fi-resource-deliveries .fi-ta-row.st-paused_aman > .fi-ta-cell:nth-child(4)::after { filter: grayscale(1) opacity(.55); }
+.fi-resource-deliveries .fi-ta-row.st-rejected > .fi-ta-cell:nth-child(5)::after { content: "⛔"; transform: none; font-size: 17px; bottom: -2px; }
 
+/* ---------- the plate: request number on an Egyptian plate ---------- */
 .fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(2) .fi-ta-text-item-label {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 4.6rem;
+    padding: 0 .55rem .1rem;
+    border-radius: 7px;
+    background: linear-gradient(180deg, #ffffff, #e5eaf1);
+    box-shadow:
+        inset 0 0 0 1.5px #1e293b,
+        inset 0 0 0 3px #ffffff,
+        0 6px 14px -6px rgba(0, 0, 0, .6);
     font-family: ui-monospace, 'SF Mono', Menlo, monospace !important;
-    font-size: 1rem !important;
-    font-weight: 800 !important;
-    letter-spacing: .04em;
-    font-variant-numeric: tabular-nums;
-    color: var(--mg-text) !important;
+    font-size: 1.05rem !important;
+    line-height: 1.35 !important;
+    font-weight: 900 !important;
+    letter-spacing: .08em;
+    color: #0f172a !important;
+    transition: transform .45s cubic-bezier(.3, 1.6, .5, 1);
 }
 
 .fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(2) .fi-ta-text-item-label::before {
-    content: "#";
-    margin-inline-end: 2px;
-    color: var(--st);
-    opacity: .9;
+    content: "مصر   EGYPT";
+    align-self: stretch;
+    margin: 3px -.4rem 1px;
+    padding: 1px 0;
+    border-radius: 4px 4px 0 0;
+    background: linear-gradient(90deg, #38bdf8, #60a5fa);
+    font-family: var(--mg-font);
+    font-size: .5rem;
+    line-height: 1.2;
+    font-weight: 800;
+    letter-spacing: .12em;
+    color: #0b1322;
+    text-align: center;
+    white-space: pre;
 }
 
-/* the dashed tear line with two half-moon notches */
-.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(2)::after {
-    content: "";
-    position: absolute;
-    inset-block: -1px;
-    inset-inline-end: -7px;
-    width: 14px;
-    z-index: 2;
-    background:
-        radial-gradient(circle at 50% 0, var(--mg-ta-bg) 6.5px, transparent 7px),
-        radial-gradient(circle at 50% 100%, var(--mg-ta-bg) 6.5px, transparent 7px),
-        repeating-linear-gradient(to bottom, color-mix(in srgb, var(--mg-text) 22%, transparent) 0 4px, transparent 4px 9px) 50% 10px / 1.5px calc(100% - 20px) no-repeat;
-    transition: transform .5s cubic-bezier(.3, 1.6, .5, 1);
-    pointer-events: none;
-}
-
-/* the name stands out, the rest stays calm */
+/* the name is the lane's headline */
 .fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(3) .fi-ta-text-item-label {
     color: var(--mg-text) !important;
-    font-weight: 700 !important;
-    padding-inline-start: .35rem;
+    font-weight: 800 !important;
 }
 
-/* ---------- hover: the ticket lifts and a light passes over it ---------- */
+/* ---------- hover: the lane lifts and the bike revs ---------- */
 .fi-resource-deliveries .fi-ta-row:hover {
-    transform: translateY(-3px) scale(1.004);
-    filter: drop-shadow(0 14px 22px color-mix(in srgb, var(--st) 28%, transparent));
+    transform: translateY(-3px);
+    filter: drop-shadow(0 16px 24px color-mix(in srgb, var(--st) 25%, transparent));
 }
 
-.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell {
-    background:
-        linear-gradient(to bottom, rgba(255, 255, 255, .04), transparent 60%),
-        var(--mg-surface-hover) !important;
+.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:nth-child(2) .fi-ta-text-item-label {
+    transform: rotate(-4deg) scale(1.06);
 }
 
-.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:nth-child(2) {
-    background:
-        linear-gradient(135deg, color-mix(in srgb, var(--st) 24%, transparent), transparent 75%),
-        var(--mg-surface-hover) !important;
+.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell::after {
+    animation: mg-rc-rev .22s linear infinite !important;
 }
 
-.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:nth-child(2)::after {
-    transform: rotate(3deg);
-}
-
-/* the sweep runs across the whole row: one band per cell, timed by cell */
-.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:not(:nth-child(2))::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, .06) 50%, transparent 80%) -150% 0 / 60% 100% no-repeat;
-    animation: mg-tk-sweep .9s ease-out both;
-    pointer-events: none;
-}
-
-/* ---------- selected ticket ---------- */
-.fi-resource-deliveries .fi-ta-row:has(.fi-ta-record-checkbox:checked) > .fi-ta-cell {
-    background:
-        linear-gradient(to bottom, color-mix(in srgb, var(--mg-brand) 14%, transparent), color-mix(in srgb, var(--mg-brand) 6%, transparent)),
-        var(--mg-surface) !important;
-}
-
+/* ---------- selected lane ---------- */
 .fi-resource-deliveries .fi-ta-row:has(.fi-ta-record-checkbox:checked) {
     filter: drop-shadow(0 0 1px var(--mg-brand)) drop-shadow(0 10px 18px color-mix(in srgb, var(--mg-brand) 30%, transparent));
 }
 
-/* ---------- checkbox: a soft square that pops ---------- */
+/* ---------- checkbox ---------- */
 .fi-resource-deliveries .fi-checkbox-input {
     width: 1.3rem !important;
     height: 1.3rem !important;
-    border-radius: 8px !important;
+    border-radius: 999px !important;
     background-color: transparent;
     box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--mg-text) 25%, transparent) !important;
     transition: transform .35s cubic-bezier(.3, 1.8, .5, 1), box-shadow .3s !important;
 }
-
-.fi-resource-deliveries .fi-checkbox-input:hover { transform: scale(1.1); }
 
 .fi-resource-deliveries .fi-checkbox-input:checked {
     transform: scale(1.12);
     box-shadow: 0 0 0 4px var(--mg-brand-soft), 0 6px 14px -4px var(--mg-brand) !important;
 }
 
-/* ---------- status badge: a pill with a live dot ---------- */
+/* ---------- status badge: a glowing pill ---------- */
 .fi-resource-deliveries .fi-ta-row .fi-badge {
-    --b: var(--st);
-    gap: .4rem !important;
-    padding: .3rem .7rem !important;
+    --b: #94a3b8;
+    padding: .3rem .75rem !important;
     border-radius: 999px !important;
     font-weight: 800 !important;
     color: var(--b) !important;
     background: color-mix(in srgb, var(--b) 13%, transparent) !important;
     --tw-ring-color: color-mix(in srgb, var(--b) 35%, transparent) !important;
+    box-shadow: 0 0 18px -6px var(--b);
 }
 
-.fi-resource-deliveries .fi-ta-row .fi-badge::before {
-    content: "";
-    width: 7px;
-    height: 7px;
-    flex: none;
-    border-radius: 999px;
-    background: var(--b);
-    animation: mg-tk-dot 2.2s ease-out infinite;
-}
-
-/* each badge keeps its own color */
 .fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-success { --b: #22c55e; }
 .fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-warning { --b: #f59e0b; }
 .fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-danger  { --b: #ef4444; }
-.fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-info    { --b: #38bdf8; }
+.fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-info    { --b: #818cf8; }
 .fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-primary { --b: #2dd4bf; }
-.fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-gray    { --b: #94a3b8; }
 
 /* ---------- motion ---------- */
-@keyframes mg-tk-in {
-    from { opacity: 0; transform: translateY(18px) rotateX(-25deg) scale(.97); filter: blur(4px); }
+@keyframes mg-rc-in {
+    from { opacity: 0; transform: translateX(-40px) skewX(-8deg); filter: blur(4px); }
     to { opacity: 1; transform: none; filter: none; }
 }
 
-@keyframes mg-tk-sweep {
-    to { background-position: 250% 0; }
+[dir="rtl"] .fi-resource-deliveries .fi-ta-row { animation-name: mg-rc-in-rtl; }
+
+@keyframes mg-rc-in-rtl {
+    from { opacity: 0; transform: translateX(40px) skewX(8deg); filter: blur(4px); }
+    to { opacity: 1; transform: none; filter: none; }
 }
 
-@keyframes mg-tk-dot {
-    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--b) 60%, transparent); }
-    70%, 100% { box-shadow: 0 0 0 6px transparent; }
+@keyframes mg-rc-fill {
+    from { background-size: 0% 3px, 100% 3px, auto; }
+    to { background-size: 100% 3px, 100% 3px, auto; }
+}
+
+@keyframes mg-rc-arrive {
+    from { opacity: 0; translate: -70px 0; }
+    to { opacity: 1; translate: 0 0; }
+}
+
+@keyframes mg-rc-idle {
+    50% { translate: 0 -2px; }
+}
+
+@keyframes mg-rc-rev {
+    0%, 100% { translate: 0 0; }
+    25% { translate: 1px -1px; }
+    75% { translate: -1px 1px; }
 }
 
 @media (max-width: 767px) {
     .fi-resource-deliveries .fi-ta-content { padding-inline: .35rem; }
-    .fi-resource-deliveries .fi-ta-table { border-spacing: 0 8px; }
+    .fi-resource-deliveries .fi-ta-table { border-spacing: 0 9px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
     .fi-resource-deliveries .fi-ta-row,
-    .fi-resource-deliveries .fi-ta-row .fi-badge::before,
+    .fi-resource-deliveries .fi-ta-row > .fi-ta-cell,
     .fi-resource-deliveries .fi-ta-row > .fi-ta-cell::after {
         animation: none !important;
     }

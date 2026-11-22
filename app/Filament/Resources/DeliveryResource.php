@@ -2070,7 +2070,8 @@ Forms\Components\Section::make('الملاحظات')
         return $table
             ->paginated($cards ? [12, 24, 48, 96] : [5, 10, 25, 50, 100])
             ->contentGrid($cards ? ['md' => 2, 'xl' => 3] : null)
-            ->recordClasses($cards ? 'delivery-card' : null)
+            // owner 2026-11-22: in the table each row carries its status (st-*), the race-track style reads it
+            ->recordClasses($cards ? 'delivery-card' : fn ($record) => 'st-'.$record->status)
             ->columns($cards ? static::cardColumns() : [
                 Tables\Columns\TextColumn::make('id')
                     ->label('رقم الطلب')
