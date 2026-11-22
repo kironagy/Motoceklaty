@@ -691,140 +691,75 @@
             </div>
 
 
-            <div class="staff-rank-grid">
+            {{-- Owner 2026-11-22: ranking cards redesigned (style: public/css/filament/admin/staff-ranking.css) --}}
+            <div class="mg-rank-grid">
 
                 @foreach ($staffList as $staff)
 
                     @php
-
                         $rank = $staff['rank'];
-
-                        $rankClass = match ($rank) {
-                            1 => 'gold',
-                            2 => 'silver',
-                            3 => 'bronze',
-                            default => 'normal',
-                        };
-
-                        $badge = match ($rank) {
-                            1 => '👑',
-                            2 => '♛',
-                            3 => '♕',
-                            default => '🏅',
-                        };
-
-                        $title = match ($rank) {
-                            1 => 'المركز الأول',
-                            2 => 'المركز الثاني',
-                            3 => 'المركز الثالث',
-                            default => 'المركز '.$rank,
-                        };
-
+                        $rankClass = match ($rank) { 1 => 'gold', 2 => 'silver', 3 => 'bronze', default => 'normal' };
+                        $title = match ($rank) { 1 => 'المركز الأول', 2 => 'المركز الثاني', 3 => 'المركز الثالث', default => 'المركز '.$rank };
+                        $initial = mb_strtoupper(mb_substr(trim((string) $staff['name']), 0, 1)) ?: '؟';
+                        $parts = [
+                            'approved' => ['موافقة', $staff['approved']],
+                            'pending' => ['استعلام', $staff['pending']],
+                            'new' => ['جديد', $staff['new']],
+                            'paused' => ['متوقف', $staff['paused']],
+                            'delivered' => ['استلم المكنة', $staff['delivered']],
+                            'rejected' => ['مرفوض', $staff['rejected']],
+                        ];
+                        $sum = max(1, array_sum(array_column($parts, 1)));
                     @endphp
 
+                    <div class="mg-rank-card {{ $rankClass }}" style="--d: {{ min($loop->index, 8) * 90 }}ms">
 
-                    <div class="staff-rank-card {{ $rankClass }}">
-
-                        @if ($isHitler)
-
-                            <button
-                                type="button"
-                                class="staff-eye-btn"
-                                title="تفاصيل دخول الموظف"
-                                @click='showLogin(@json($staff))'
-                            >
-
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke-width="2"
-                                    stroke="currentColor"
-                                >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        d="M2.036 12.322a1.012 1.012 0 010-.644C3.423 7.51 7.36 4.5 12 4.5c4.64 0 8.577 3.01 9.964 7.178.06.18.06.376 0 .556C20.577 16.49 16.64 19.5 12 19.5c-4.64 0-8.577-3.01-9.964-7.178z"
-                                    />
-
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                                    />
-                                </svg>
-
-                            </button>
-
+                        <span class="mg-rank-ghost" aria-hidden="true">{{ $rank }}</span>
+                        @if ($rank === 1)
+                            <span class="mg-rank-spark s1" aria-hidden="true"></span>
+                            <span class="mg-rank-spark s2" aria-hidden="true"></span>
+                            <span class="mg-rank-spark s3" aria-hidden="true"></span>
                         @endif
 
+                        @if ($isHitler)
+                            <button type="button" class="mg-rank-eye" title="تفاصيل دخول الموظف" @click='showLogin(@json($staff))'>
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.644C3.423 7.51 7.36 4.5 12 4.5c4.64 0 8.577 3.01 9.964 7.178.06.18.06.376 0 .556C20.577 16.49 16.64 19.5 12 19.5c-4.64 0-8.577-3.01-9.964-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                            </button>
+                        @endif
 
-                        <div class="staff-card-top">
-
-                            <div>
-
-                                <div class="staff-rank-badge">
-                                    {{ $badge }}
-                                </div>
-
-                                <h3>
-                                    {{ $title }}
-                                </h3>
-
-                                <p>
-                                    {{ $staff['name'] }}
-                                </p>
-
+                        <div class="mg-rank-head">
+                            <div class="mg-rank-avatar">
+                                <span>{{ $initial }}</span>
+                                @if ($rank === 1)<i class="mg-rank-crown" aria-hidden="true">👑</i>@endif
                             </div>
-
-
-                            <div class="staff-total">
-
-                                <strong>
-                                    {{ $staff['total'] }}
-                                </strong>
-
-                                <span>
-                                    طلب
-                                </span>
-
+                            <div class="mg-rank-who">
+                                <span class="mg-rank-chip">{{ $title }}</span>
+                                <h3>{{ $staff['name'] }}</h3>
                             </div>
-
                         </div>
 
+                        <div class="mg-rank-total"
+                            x-data="{ n: 0 }"
+                            x-init="let to = {{ (int) $staff['total'] }}, t0 = null; const step = (t) => { t0 ??= t; const p = Math.min(1, (t - t0) / 1100); n = Math.round(to * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step) }; setTimeout(() => requestAnimationFrame(step), {{ min($loop->index, 8) * 90 + 250 }})">
+                            <strong x-text="n">{{ $staff['total'] }}</strong>
+                            <span>طلب الشهر ده</span>
+                        </div>
 
-                        <div class="staff-stats">
+                        <div class="mg-rank-bar" title="توزيع الطلبات">
+                            @foreach ($parts as $key => [$label, $count])
+                                @if ($count > 0)
+                                    <i class="{{ $key }}" style="width: {{ round($count / $sum * 100, 2) }}%" title="{{ $label }}: {{ $count }}"></i>
+                                @endif
+                            @endforeach
+                        </div>
 
-                            <div class="staff-stat approved">
-                                <span>موافقة</span>
-                                <strong>{{ $staff['approved'] }}</strong>
-                            </div>
-
-                            <div class="staff-stat paused">
-                                <span>متوقف</span>
-                                <strong>{{ $staff['paused'] }}</strong>
-                            </div>
-
-                            <div class="staff-stat new">
-                                <span>جديد</span>
-                                <strong>{{ $staff['new'] }}</strong>
-                            </div>
-
-                            <div class="staff-stat pending">
-                                <span>استعلام</span>
-                                <strong>{{ $staff['pending'] }}</strong>
-                            </div>
-
-                            <div class="staff-stat delivered">
-                                <span>استلم المكنة</span>
-                                <strong>{{ $staff['delivered'] }}</strong>
-                            </div>
-
-                            <div class="staff-stat rejected">
-                                <span>مرفوض</span>
-                                <strong>{{ $staff['rejected'] }}</strong>
-                            </div>
-
+                        <div class="mg-rank-stats">
+                            @foreach ($parts as $key => [$label, $count])
+                                <div class="mg-rank-stat {{ $key }}">
+                                    <span>{{ $label }}</span>
+                                    <strong>{{ $count }}</strong>
+                                </div>
+                            @endforeach
                         </div>
 
                     </div>
