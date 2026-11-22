@@ -35,7 +35,11 @@ class AdminPanelProvider extends PanelProvider
             ->theme(asset('css/filament/admin/theme.css').'?v='.@filemtime(public_path('css/filament/admin/theme.css')))
             ->login()
             ->authGuard('filament')
-            ->brandLogo(asset('images/logolog.png'))
+            // On a merchant's subdomain the panel wears its showroom's name and logo
+            ->brandName(fn () => \App\Support\Merchants\MerchantTenancy::current()?->showroom_name ?? config('app.name'))
+            ->brandLogo(fn () => \App\Support\Merchants\MerchantTenancy::current()
+                ? \App\Support\Merchants\MerchantTenancy::current()->logoUrl()
+                : asset('images/logolog.png'))
             ->brandLogoHeight('3.5rem')
             ->colors([
                 'primary' => Color::Teal,
@@ -82,6 +86,13 @@ class AdminPanelProvider extends PanelProvider
         ->renderHook(
             'panels::head.end',
             fn () => collect(['stats-cards', 'staff-ranking', 'sidebar', 'deliveries-table'])->map(fn ($f) => '<link rel="stylesheet" href="'.asset("css/filament/admin/{$f}.css").'?v='.@filemtime(public_path("css/filament/admin/{$f}.css")).'">')->implode('')
+        )
+        // A showroom's own logo keeps its colours (the main logo is whitened in the sidebar)
+        ->renderHook(
+            'panels::head.end',
+            fn () => \App\Support\Merchants\MerchantTenancy::current()
+                ? '<style>.fi-sidebar-header .fi-logo{filter:drop-shadow(0 6px 16px rgba(45,212,191,.35))}</style>'
+                : ''
         )
         ->renderHook(
             'panels::body.end',

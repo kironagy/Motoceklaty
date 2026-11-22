@@ -12,6 +12,8 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // A merchant's subdomain switches the request to its own database before anything reads it
+        $middleware->prepend(\App\Http\Middleware\ResolveMerchant::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

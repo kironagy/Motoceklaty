@@ -61,6 +61,17 @@ class TransferLog extends Page implements HasTable
         return "json_unquote(json_extract(activity_log.properties, '$.{$path}.staff_id'))";
     }
 
+    /** A merchant's dashboard runs on SQLite (App\Support\Merchants\MerchantTenancy). */
+    private static function sqlite(): bool
+    {
+        return \Illuminate\Support\Facades\DB::connection()->getDriverName() === 'sqlite';
+    }
+
+    private static function nullSafeEquals(): string
+    {
+        return self::sqlite() ? 'is' : '<=>';
+    }
+
     public function table(Table $table): Table
     {
         return $table
@@ -74,10 +85,12 @@ class TransferLog extends Page implements HasTable
                 ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('activity_log as dup')
                     ->whereColumn('dup.subject_type', 'activity_log.subject_type')
                     ->whereColumn('dup.subject_id', 'activity_log.subject_id')
-                    ->whereRaw('dup.created_at between activity_log.created_at - interval 5 second and activity_log.created_at')
+                    ->whereRaw(self::sqlite()
+                        ? "dup.created_at between datetime(activity_log.created_at, '-5 seconds') and activity_log.created_at"
+                        : 'dup.created_at between activity_log.created_at - interval 5 second and activity_log.created_at')
                     ->whereColumn('dup.id', '<', 'activity_log.id')
-                    ->whereRaw("json_unquote(json_extract(dup.properties, '$.attributes.staff_id')) <=> ".self::json('attributes'))
-                    ->whereRaw("json_unquote(json_extract(dup.properties, '$.old.staff_id')) <=> ".self::json('old')))
+                    ->whereRaw("json_unquote(json_extract(dup.properties, '$.attributes.staff_id')) ".self::nullSafeEquals().' '.self::json('attributes'))
+                    ->whereRaw("json_unquote(json_extract(dup.properties, '$.old.staff_id')) ".self::nullSafeEquals().' '.self::json('old')))
                 ->with(['subject' => fn ($q) => $q->withTrashed()]))
             ->defaultSort('created_at', 'desc')
             ->columns([
