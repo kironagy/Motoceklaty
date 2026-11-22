@@ -94,7 +94,8 @@
 
 .fi-sidebar-header .fi-logo {
     animation: mg-side-float 6s ease-in-out infinite;
-    filter: drop-shadow(0 6px 14px rgba(45, 212, 191, .25));
+    /* owner 2026-11-22: the logo is white in the sidebar only */
+    filter: brightness(0) invert(1) drop-shadow(0 6px 16px rgba(45, 212, 191, .35));
 }
 
 /* ---------- nav ---------- */
