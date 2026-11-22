@@ -1,0 +1,315 @@
+/* =====================================================================
+   Deliveries table as "tickets" (owner 2026-11-22: "كرييتف وبيطير").
+   Only on the deliveries list, table mode. Every row is a floating
+   ticket: a stub with the request number, a torn perforation, and an
+   edge lit in the status color (--st, read from the status badge).
+   ===================================================================== */
+
+.fi-resource-deliveries .fi-ta-ctn {
+    --mg-ta-bg: color-mix(in srgb, var(--mg-canvas) 55%, var(--mg-surface));
+    background:
+        radial-gradient(70% 40% at 100% 0%, color-mix(in srgb, var(--mg-brand) 9%, transparent), transparent 70%),
+        var(--mg-ta-bg) !important;
+    border-radius: 26px !important;
+}
+
+/* ---------- toolbar: a search that lights up ---------- */
+.fi-resource-deliveries .fi-ta-header-toolbar { border: 0 !important; }
+
+.fi-resource-deliveries .fi-ta-search-field .fi-input-wrp {
+    border-radius: 16px !important;
+    background: var(--mg-surface) !important;
+    transition: box-shadow .4s var(--mg-ease), transform .4s var(--mg-ease);
+}
+
+.fi-resource-deliveries .fi-ta-search-field .fi-input-wrp:focus-within {
+    transform: translateY(-1px);
+    box-shadow:
+        0 0 0 1.5px var(--mg-brand),
+        0 0 0 6px var(--mg-brand-soft),
+        0 14px 30px -14px var(--mg-brand) !important;
+}
+
+/* ---------- the table: rows float apart ---------- */
+.fi-resource-deliveries .fi-ta-content { border: 0 !important; padding: 0 .6rem .4rem; }
+
+.fi-resource-deliveries .fi-ta-table {
+    border-collapse: separate !important;
+    border-spacing: 0 10px;
+}
+
+.fi-resource-deliveries .fi-ta-table,
+.fi-resource-deliveries .fi-ta-table > tbody,
+.fi-resource-deliveries .fi-ta-table > thead {
+    border: 0 !important;
+}
+
+.fi-resource-deliveries .fi-ta-table > :not([hidden]) ~ :not([hidden]),
+.fi-resource-deliveries .fi-ta-table > tbody > :not([hidden]) ~ :not([hidden]) {
+    border-top-width: 0 !important;
+}
+
+/* header: floating labels, no bar */
+.fi-resource-deliveries .fi-ta-table > thead { background: transparent !important; }
+.fi-resource-deliveries .fi-ta-table > thead tr { border: 0 !important; background: transparent !important; }
+
+.fi-resource-deliveries .fi-ta-header-cell {
+    padding-block: .4rem .1rem !important;
+}
+
+.fi-resource-deliveries .fi-ta-header-cell,
+.fi-resource-deliveries .fi-ta-header-cell-label {
+    font-size: .74rem !important;
+    font-weight: 800 !important;
+    letter-spacing: .03em;
+    color: color-mix(in srgb, var(--mg-muted) 85%, var(--mg-brand)) !important;
+}
+
+.fi-resource-deliveries .fi-ta-header-cell-sort-icon {
+    color: var(--mg-brand) !important;
+    transition: transform .4s cubic-bezier(.3, 1.6, .5, 1) !important;
+}
+
+.fi-resource-deliveries .fi-ta-header-cell button:hover .fi-ta-header-cell-sort-icon {
+    transform: translateY(2px) scale(1.2);
+}
+
+/* ---------- a ticket per row ---------- */
+.fi-resource-deliveries .fi-ta-row {
+    --st: #64748b;
+    background: transparent !important;
+    animation: mg-tk-in .65s var(--mg-ease) both;
+    transition: transform .4s var(--mg-ease), filter .4s var(--mg-ease) !important;
+}
+
+/* the status color comes from the status badge in the row */
+.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-success) { --st: #22c55e; }
+.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-warning) { --st: #f59e0b; }
+.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-danger)  { --st: #ef4444; }
+.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-info)    { --st: #38bdf8; }
+.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-primary) { --st: #2dd4bf; }
+.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-gray)    { --st: #64748b; }
+
+/* rows fly in one after the other (again on every page and filter) */
+.fi-resource-deliveries .fi-ta-row:nth-child(2) { animation-delay: .04s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(3) { animation-delay: .08s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(4) { animation-delay: .12s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(5) { animation-delay: .16s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(6) { animation-delay: .20s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(7) { animation-delay: .24s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(8) { animation-delay: .28s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(9) { animation-delay: .32s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(10) { animation-delay: .36s; }
+.fi-resource-deliveries .fi-ta-row:nth-child(n+11) { animation-delay: .40s; }
+
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell {
+    position: relative;
+    background:
+        linear-gradient(to bottom, rgba(255, 255, 255, .025), transparent 60%),
+        var(--mg-surface) !important;
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--mg-text) 6%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--mg-text) 4%, transparent);
+    transition: background .35s var(--mg-ease);
+}
+
+/* rounded ends, the start edge lit in the status color */
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:first-child {
+    border-start-start-radius: 18px;
+    border-end-start-radius: 18px;
+    box-shadow:
+        inset 4px 0 0 var(--st),
+        inset 0 1px 0 color-mix(in srgb, var(--mg-text) 6%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--mg-text) 4%, transparent);
+}
+
+[dir="rtl"] .fi-resource-deliveries .fi-ta-row > .fi-ta-cell:first-child {
+    box-shadow:
+        inset -4px 0 0 var(--st),
+        inset 0 1px 0 color-mix(in srgb, var(--mg-text) 6%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--mg-text) 4%, transparent);
+}
+
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:last-child {
+    border-start-end-radius: 18px;
+    border-end-end-radius: 18px;
+}
+
+/* a soft glow of the status color behind the start edge */
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:first-child::before {
+    content: "";
+    position: absolute;
+    inset-block: 15%;
+    inset-inline-start: 0;
+    width: 26px;
+    background: radial-gradient(closest-side at 0 50%, color-mix(in srgb, var(--st) 45%, transparent), transparent);
+    pointer-events: none;
+}
+
+[dir="rtl"] .fi-resource-deliveries .fi-ta-row > .fi-ta-cell:first-child::before {
+    background: radial-gradient(closest-side at 100% 50%, color-mix(in srgb, var(--st) 45%, transparent), transparent);
+}
+
+/* ---------- the stub: request number + a torn perforation ---------- */
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(2) {
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--st) 14%, transparent), transparent 70%),
+        var(--mg-surface) !important;
+}
+
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(2) .fi-ta-text-item-label {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace !important;
+    font-size: 1rem !important;
+    font-weight: 800 !important;
+    letter-spacing: .04em;
+    font-variant-numeric: tabular-nums;
+    color: var(--mg-text) !important;
+}
+
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(2) .fi-ta-text-item-label::before {
+    content: "#";
+    margin-inline-end: 2px;
+    color: var(--st);
+    opacity: .9;
+}
+
+/* the dashed tear line with two half-moon notches */
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(2)::after {
+    content: "";
+    position: absolute;
+    inset-block: -1px;
+    inset-inline-end: -7px;
+    width: 14px;
+    z-index: 2;
+    background:
+        radial-gradient(circle at 50% 0, var(--mg-ta-bg) 6.5px, transparent 7px),
+        radial-gradient(circle at 50% 100%, var(--mg-ta-bg) 6.5px, transparent 7px),
+        repeating-linear-gradient(to bottom, color-mix(in srgb, var(--mg-text) 22%, transparent) 0 4px, transparent 4px 9px) 50% 10px / 1.5px calc(100% - 20px) no-repeat;
+    transition: transform .5s cubic-bezier(.3, 1.6, .5, 1);
+    pointer-events: none;
+}
+
+/* the name stands out, the rest stays calm */
+.fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(3) .fi-ta-text-item-label {
+    color: var(--mg-text) !important;
+    font-weight: 700 !important;
+    padding-inline-start: .35rem;
+}
+
+/* ---------- hover: the ticket lifts and a light passes over it ---------- */
+.fi-resource-deliveries .fi-ta-row:hover {
+    transform: translateY(-3px) scale(1.004);
+    filter: drop-shadow(0 14px 22px color-mix(in srgb, var(--st) 28%, transparent));
+}
+
+.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell {
+    background:
+        linear-gradient(to bottom, rgba(255, 255, 255, .04), transparent 60%),
+        var(--mg-surface-hover) !important;
+}
+
+.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:nth-child(2) {
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--st) 24%, transparent), transparent 75%),
+        var(--mg-surface-hover) !important;
+}
+
+.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:nth-child(2)::after {
+    transform: rotate(3deg);
+}
+
+/* the sweep runs across the whole row: one band per cell, timed by cell */
+.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:not(:nth-child(2))::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, .06) 50%, transparent 80%) -150% 0 / 60% 100% no-repeat;
+    animation: mg-tk-sweep .9s ease-out both;
+    pointer-events: none;
+}
+
+/* ---------- selected ticket ---------- */
+.fi-resource-deliveries .fi-ta-row:has(.fi-ta-record-checkbox:checked) > .fi-ta-cell {
+    background:
+        linear-gradient(to bottom, color-mix(in srgb, var(--mg-brand) 14%, transparent), color-mix(in srgb, var(--mg-brand) 6%, transparent)),
+        var(--mg-surface) !important;
+}
+
+.fi-resource-deliveries .fi-ta-row:has(.fi-ta-record-checkbox:checked) {
+    filter: drop-shadow(0 0 1px var(--mg-brand)) drop-shadow(0 10px 18px color-mix(in srgb, var(--mg-brand) 30%, transparent));
+}
+
+/* ---------- checkbox: a soft square that pops ---------- */
+.fi-resource-deliveries .fi-checkbox-input {
+    width: 1.3rem !important;
+    height: 1.3rem !important;
+    border-radius: 8px !important;
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--mg-text) 25%, transparent) !important;
+    transition: transform .35s cubic-bezier(.3, 1.8, .5, 1), box-shadow .3s !important;
+}
+
+.fi-resource-deliveries .fi-checkbox-input:hover { transform: scale(1.1); }
+
+.fi-resource-deliveries .fi-checkbox-input:checked {
+    transform: scale(1.12);
+    box-shadow: 0 0 0 4px var(--mg-brand-soft), 0 6px 14px -4px var(--mg-brand) !important;
+}
+
+/* ---------- status badge: a pill with a live dot ---------- */
+.fi-resource-deliveries .fi-ta-row .fi-badge {
+    --b: var(--st);
+    gap: .4rem !important;
+    padding: .3rem .7rem !important;
+    border-radius: 999px !important;
+    font-weight: 800 !important;
+    color: var(--b) !important;
+    background: color-mix(in srgb, var(--b) 13%, transparent) !important;
+    --tw-ring-color: color-mix(in srgb, var(--b) 35%, transparent) !important;
+}
+
+.fi-resource-deliveries .fi-ta-row .fi-badge::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 999px;
+    background: var(--b);
+    animation: mg-tk-dot 2.2s ease-out infinite;
+}
+
+/* each badge keeps its own color */
+.fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-success { --b: #22c55e; }
+.fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-warning { --b: #f59e0b; }
+.fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-danger  { --b: #ef4444; }
+.fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-info    { --b: #38bdf8; }
+.fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-primary { --b: #2dd4bf; }
+.fi-resource-deliveries .fi-ta-row .fi-badge.fi-color-gray    { --b: #94a3b8; }
+
+/* ---------- motion ---------- */
+@keyframes mg-tk-in {
+    from { opacity: 0; transform: translateY(18px) rotateX(-25deg) scale(.97); filter: blur(4px); }
+    to { opacity: 1; transform: none; filter: none; }
+}
+
+@keyframes mg-tk-sweep {
+    to { background-position: 250% 0; }
+}
+
+@keyframes mg-tk-dot {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--b) 60%, transparent); }
+    70%, 100% { box-shadow: 0 0 0 6px transparent; }
+}
+
+@media (max-width: 767px) {
+    .fi-resource-deliveries .fi-ta-content { padding-inline: .35rem; }
+    .fi-resource-deliveries .fi-ta-table { border-spacing: 0 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fi-resource-deliveries .fi-ta-row,
+    .fi-resource-deliveries .fi-ta-row .fi-badge::before,
+    .fi-resource-deliveries .fi-ta-row > .fi-ta-cell::after {
+        animation: none !important;
+    }
+
+    .fi-resource-deliveries .fi-ta-row:hover { transform: none; }
+}
