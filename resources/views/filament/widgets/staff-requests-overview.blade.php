@@ -738,12 +738,12 @@
                             </div>
                         </div>
 
-                        <div class="mg-rank-total"
+                        <a href="{{ $staff['links']['total'] }}" class="mg-rank-total" title="افتح كل طلبات {{ $staff['name'] }}"
                             x-data="{ n: 0 }"
                             x-init="let to = {{ (int) $staff['total'] }}, t0 = null; const step = (t) => { t0 ??= t; const p = Math.min(1, (t - t0) / 1100); n = Math.round(to * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step) }; setTimeout(() => requestAnimationFrame(step), {{ min($loop->index, 8) * 90 + 250 }})">
                             <strong x-text="n">{{ $staff['total'] }}</strong>
                             <span>طلب الشهر ده</span>
-                        </div>
+                        </a>
 
                         <div class="mg-rank-bar" title="توزيع الطلبات">
                             @foreach ($parts as $key => [$label, $count])
@@ -755,10 +755,10 @@
 
                         <div class="mg-rank-stats">
                             @foreach ($parts as $key => [$label, $count])
-                                <div class="mg-rank-stat {{ $key }}">
+                                <a href="{{ $staff['links'][$key] }}" class="mg-rank-stat {{ $key }}" title="افتح طلبات {{ $label }} بتاعة {{ $staff['name'] }}">
                                     <span>{{ $label }}</span>
                                     <strong>{{ $count }}</strong>
-                                </div>
+                                </a>
                             @endforeach
                         </div>
 

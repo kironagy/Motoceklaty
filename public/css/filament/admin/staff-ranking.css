@@ -273,7 +273,9 @@
     transition: transform .3s var(--mg-ease), background .3s;
 }
 
-.mg-rank-stat:hover { transform: translateY(-3px); background: color-mix(in srgb, var(--s) 20%, transparent); }
+.mg-rank-stat, .mg-rank-total { text-decoration: none; cursor: pointer; }
+.mg-rank-stat:hover { transform: translateY(-3px); box-shadow: inset 0 0 0 1.5px var(--s), 0 10px 22px -12px var(--s); }
+.mg-rank-total:hover strong { filter: brightness(1.15); }
 
 .mg-rank-stat span {
     display: flex;

@@ -31,6 +31,48 @@ class StaffRequestsOverview extends Widget
         );
     }
 
+    /**
+     * Owner 2026-11-19: a request counts for whoever holds it now if it reached him this month - made
+     * this month, or moved to him this month. Also the requests list's filter behind each number.
+     */
+    public static function reachedStaffThisMonth($q): void
+    {
+        $start = now()->startOfMonth();
+        $q->where('installment_requests.created_at', '>=', $start)
+            ->orWhere('installment_requests.staff_assigned_at', '>=', $start)
+            ->orWhereExists(fn ($a) => $a->selectRaw('1')->from('activity_log')
+                ->where('activity_log.subject_type', InstallmentRequest::class)
+                ->whereColumn('activity_log.subject_id', 'installment_requests.id')
+                ->where('activity_log.created_at', '>=', $start)
+                ->whereRaw("json_unquote(json_extract(activity_log.properties, '$.attributes.staff_id')) = installment_requests.staff_id"));
+    }
+
+    /** Owner 2026-11-22: each number opens the requests list on that employee and those statuses. */
+    public const LINK_STATUSES = [
+        'approved' => ['approved'],
+        'paused' => ['paused', 'paused_aman'],
+        'new' => ['new', 'new_request'],
+        'pending' => ['pending', 'work_check'],
+        'delivered' => ['delivered'],
+        'rejected' => ['rejected'],
+    ];
+
+    private static function links(int $staffId, bool $parking): array
+    {
+        $url = fn (array $statuses) => \App\Filament\Resources\DeliveryResource::getUrl('index', [
+            'activeTab' => 'real',
+            'tableFilters' => array_filter([
+                'staff_id' => ['value' => (string) $staffId],
+                'status' => ['values' => $statuses],
+                // a parking account counts everything it holds, any month
+                'reached_staff_month' => $parking ? null : ['isActive' => true],
+            ]),
+        ]);
+        $all = array_values(array_diff(array_keys(\App\Filament\Resources\DeliveryResource::STATUS_LABELS), ['canceled']));
+
+        return ['total' => $url($all)] + array_map($url, self::LINK_STATUSES);
+    }
+
     /** Per-staff counts by status (متوقف counts متوقف امان too). */
     private const COUNTS_SQL = "
                 staff_id,
@@ -116,16 +158,7 @@ class StaffRequestsOverview extends Widget
             ->where('request_type', '!=', 'fake')
             // Owner 2026-11-19: a request counts for whoever holds it now if it reached him this month -
             // made this month, or moved to him this month (an October request moved to him today counts).
-            ->where(function ($q) {
-                $start = now()->startOfMonth();
-                $q->where('created_at', '>=', $start)
-                    ->orWhere('staff_assigned_at', '>=', $start)
-                    ->orWhereExists(fn ($a) => $a->selectRaw('1')->from('activity_log')
-                        ->where('activity_log.subject_type', InstallmentRequest::class)
-                        ->whereColumn('activity_log.subject_id', 'installment_requests.id')
-                        ->where('activity_log.created_at', '>=', $start)
-                        ->whereRaw("json_unquote(json_extract(activity_log.properties, '$.attributes.staff_id')) = installment_requests.staff_id"));
-            })
+            ->where(fn ($q) => self::reachedStaffThisMonth($q))
             ->selectRaw(self::COUNTS_SQL)
             ->whereNotNull('staff_id')
             ->groupBy('staff_id')
@@ -199,6 +232,8 @@ class StaffRequestsOverview extends Widget
                     'delivered' => (int) ($row->delivered_count ?? 0),
 
                     'rejected' => (int) ($row->rejected_count ?? 0),
+
+                    'links' => self::links($staff->id, $parking),
                 ];
 
                 /*

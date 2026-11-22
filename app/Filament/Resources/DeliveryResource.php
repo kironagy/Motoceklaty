@@ -2205,6 +2205,13 @@ Forms\Components\Section::make('الملاحظات')
                             });
                     }),
 
+                // Owner 2026-11-22: the home page's staff ranking numbers open the list with this on - the
+                // requests that reached the employee this month, counted the same way as the ranking.
+                Tables\Filters\Filter::make('reached_staff_month')
+                    ->label('وصلت للموظف الشهر ده')
+                    ->toggle()
+                    ->query(fn (Builder $query) => $query->where(fn ($q) => \App\Filament\Widgets\StaffRequestsOverview::reachedStaffThisMonth($q))),
+
                 // A whole month (YYYY-MM) - the home page widget links here with the current month.
                 Tables\Filters\Filter::make('created_month')
                     ->label('شهر التقديم')
