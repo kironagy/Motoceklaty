@@ -28,24 +28,9 @@ class AwaitingAgentConversationResource extends Resource
 
     public static function getEloquentQuery(): Builder
     {
-        return parent::getEloquentQuery()->where(fn (Builder $q) => $q->where('status', 'awaiting_agent')
-            ->orWhere(fn (Builder $q) => static::staleUnanswered($q)));
-    }
-
-    /**
-     * Owner 2026-11-15 (anti-ban): the bot answers by itself only a customer who wrote in the last
-     * 24 hours - a reply days later looks like the number opened a cold chat. A customer waiting
-     * longer than that (up to 10 days) is listed here for a person to answer.
-     */
-    public static function staleUnanswered(Builder $query): Builder
-    {
-        return $query->where('status', '!=', 'awaiting_agent')
-            ->whereBetween('last_inbound_at', [now()->subDays(10), now()->subDay()])
-            ->whereNotExists(fn ($q) => $q->from('whatsapp_messages as o')
-                ->whereColumn('o.whatsapp_conversation_id', 'whatsapp_conversations.id')
-                ->where('o.direction', 'outgoing')
-                ->whereColumn('o.created_at', '>=', 'whatsapp_conversations.last_inbound_at')
-                ->where(fn ($d) => $d->whereNull('o.delivery_status')->orWhere('o.delivery_status', '!=', 'failed')));
+        // Owner 2026-11-22: only conversations handed to a person - customers left unanswered for
+        // more than 24 hours are no longer listed here.
+        return parent::getEloquentQuery()->where('status', 'awaiting_agent');
     }
 
     public static function canViewAny(): bool
@@ -89,8 +74,8 @@ class AwaitingAgentConversationResource extends Resource
                 Tables\Columns\TextColumn::make('waiting_kind')
                     ->label('السبب')
                     ->badge()
-                    ->getStateUsing(fn (WhatsappConversation $record) => $record->status === 'awaiting_agent' ? 'محوّل لموظف' : 'أقدم من 24 ساعة')
-                    ->color(fn (string $state) => $state === 'محوّل لموظف' ? 'warning' : 'gray'),
+                    ->getStateUsing(fn () => 'محوّل لموظف')
+                    ->color('warning'),
                 Tables\Columns\TextColumn::make('last_topic')->label('آخر موضوع'),
                 Tables\Columns\TextColumn::make('messages_count')
                     ->counts('messages')
@@ -124,16 +109,6 @@ class AwaitingAgentConversationResource extends Resource
                                 : 'اتقفل التحويل، الـ AI هيرد على أي رسالة جديدة من العميل')
                             ->success()
                             ->send();
-                    }),
-            ])
-            ->filters([
-                Tables\Filters\SelectFilter::make('waiting_kind')
-                    ->label('السبب')
-                    ->options(['handoff' => 'محوّل لموظف', 'stale' => 'أقدم من 24 ساعة'])
-                    ->query(fn (Builder $q, array $data) => match ($data['value'] ?? null) {
-                        'handoff' => $q->where('status', 'awaiting_agent'),
-                        'stale' => static::staleUnanswered($q),
-                        default => $q,
                     }),
             ])
             ->emptyStateHeading('مفيش محادثات منتظرة الرد دلوقتي');

@@ -28,7 +28,7 @@ class AnswerWaitingCustomers extends Command
     public function handle(): int
     {
         // Owner 2026-11-15 (anti-ban): only a customer who wrote in the last 24 hours is answered by
-        // the bot; older ones are listed for staff (AwaitingAgentConversationResource::staleUnanswered).
+        // the bot; older ones are not answered by the bot (no longer listed for staff since 2026-11-22).
         // bot 93 was banned while re-answering chats days old - that looks like opening cold chats.
         $hours = min(24, max(1, (int) $this->option('hours')));
 
