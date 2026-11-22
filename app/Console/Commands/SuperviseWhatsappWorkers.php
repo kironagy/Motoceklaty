@@ -19,10 +19,13 @@ class SuperviseWhatsappWorkers extends Command
 
     protected $description = 'Keep one WhatsApp reply worker running for each active bot';
 
-    /** @var array<int, Process> bot id => its worker */
+    /** Owner 2026-11-22: each bot has a writer and a sender, so the next reply is written during the send gap. */
+    private const ROLES = ['generate', 'deliver'];
+
+    /** @var array<string, Process> "bot:role" => its worker */
     private array $workers = [];
 
-    /** @var array<int, int> bot id => when it may be started again after exiting */
+    /** @var array<string, int> "bot:role" => when it may be started again after exiting */
     private array $retryAt = [];
 
     private bool $stopping = false;
@@ -81,27 +84,30 @@ class SuperviseWhatsappWorkers extends Command
             return;
         }
 
-        foreach ($this->workers as $botId => $process) {
+        foreach ($this->workers as $key => $process) {
             if (! $process->isRunning()) {
                 $this->forward($process);
-                unset($this->workers[$botId]);
+                unset($this->workers[$key]);
                 // a worker that keeps dying is not restarted in a tight loop
-                $this->retryAt[$botId] = time() + ($process->getExitCode() === 0 ? 0 : 15);
-                if ($process->getExitCode() !== 0 && in_array($botId, $active, true)) {
-                    Log::warning('WhatsApp worker exited', ['bot_id' => $botId, 'exit_code' => $process->getExitCode()]);
+                $this->retryAt[$key] = time() + ($process->getExitCode() === 0 ? 0 : 15);
+                if ($process->getExitCode() !== 0 && in_array((int) $key, $active, true)) {
+                    Log::warning('WhatsApp worker exited', ['worker' => $key, 'exit_code' => $process->getExitCode()]);
                 }
             }
         }
 
         foreach ($active as $botId) {
-            if (isset($this->workers[$botId]) || time() < ($this->retryAt[$botId] ?? 0)) {
-                continue;
+            foreach (self::ROLES as $role) {
+                $key = "{$botId}:{$role}";
+                if (isset($this->workers[$key]) || time() < ($this->retryAt[$key] ?? 0)) {
+                    continue;
+                }
+                $process = new Process([PHP_BINARY, base_path('artisan'), 'whatsapp:process-jobs', '--bot='.$botId, '--role='.$role, '--sleep=1', '--parent='.getmypid()], base_path());
+                $process->setTimeout(null);
+                $process->start();
+                $this->workers[$key] = $process;
+                $this->line("started {$role} worker for bot {$botId} (pid {$process->getPid()})");
             }
-            $process = new Process([PHP_BINARY, base_path('artisan'), 'whatsapp:process-jobs', '--bot='.$botId, '--sleep=1', '--parent='.getmypid()], base_path());
-            $process->setTimeout(null);
-            $process->start();
-            $this->workers[$botId] = $process;
-            $this->line("started worker for bot {$botId} (pid {$process->getPid()})");
         }
     }
 

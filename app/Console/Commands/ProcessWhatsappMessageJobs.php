@@ -12,7 +12,7 @@ class ProcessWhatsappMessageJobs extends Command
 {
     // Owner 2026-11-22: one worker per active bot (--bot), started by whatsapp:supervise-jobs, so a
     // busy number never holds up another number's customers. Without --bot it is the old shared pool.
-    protected $signature = 'whatsapp:process-jobs {--sleep=1} {--workers=3} {--bot= : only this bot\'s jobs} {--parent= : exit when this supervisor pid is gone}';
+    protected $signature = 'whatsapp:process-jobs {--sleep=1} {--workers=3} {--bot= : only this bot\'s jobs} {--parent= : exit when this supervisor pid is gone} {--role=both : generate, deliver or both (with --bot)}';
     protected $description = 'Process queued WhatsApp AI message jobs';
 
     /** @var resource|null kept open for the process lifetime so flock() stays held */
@@ -26,9 +26,19 @@ class ProcessWhatsappMessageJobs extends Command
 
     private int $botCheckedAt = 0;
 
+    /**
+     * Owner 2026-11-22: a number waits 30-45 s between customers; the reply of the next customer is
+     * written during that wait instead of after it. 'generate' writes (at most ONE written reply waits
+     * to be sent per number, so replies never pile up out of order), 'deliver' sends them one by one
+     * in the order they were written, re-checking right before each send that the customer did not
+     * write again (TurnScheduler supersedes it then). 'both' = write then send (the old way).
+     */
+    private string $role = 'both';
+
     public function handle(): int
     {
         $this->botId = filled($this->option('bot')) ? (int) $this->option('bot') : null;
+        $this->role = $this->botId && in_array($this->option('role'), ['generate', 'deliver'], true) ? $this->option('role') : 'both';
         $workers = $this->botId ? 1 : max(1, (int) $this->option('workers'));
 
         if (! $this->acquireWorkerSlot($workers)) {
@@ -40,7 +50,7 @@ class ProcessWhatsappMessageJobs extends Command
             return self::FAILURE;
         }
 
-        $this->info($this->botId ? "WhatsApp queue worker started for bot {$this->botId}" : "WhatsApp queue worker started (slot {$this->slot}/{$workers})");
+        $this->info($this->botId ? "WhatsApp queue worker started for bot {$this->botId} ({$this->role})" : "WhatsApp queue worker started (slot {$this->slot}/{$workers})");
 
         while (true) {
             if (! $this->shouldKeepRunning()) {
@@ -62,12 +72,12 @@ class ProcessWhatsappMessageJobs extends Command
             // ("usage limit reached") and replies failed. Only agent.max_parallel_turns turns
             // generate at once; a bot waits for a free one, then the reply is sent outside it.
             $this->releaseTurnSlot();
-            if ($this->botId && $this->anythingClaimable() && ! $this->acquireTurnSlot()) {
+            if ($this->botId && $this->role !== 'deliver' && $this->anythingClaimable() && ! $this->acquireTurnSlot()) {
                 usleep(random_int(300, 1000) * 1000);
                 continue;
             }
 
-            $job = $this->claimNextJob();
+            $job = $this->role === 'deliver' ? $this->claimNextDelivery() : $this->claimNextJob();
 
             if (!$job) {
                 $this->releaseTurnSlot();
@@ -165,6 +175,16 @@ class ProcessWhatsappMessageJobs extends Command
                     }
 
                     $generationSucceeded = true;
+
+                    if ($this->role === 'generate') {
+                        // written: the sender of this number takes it after the reply before it
+                        DB::table('whatsapp_message_jobs')->where('id', $job->id)->where('status', 'generated')
+                            ->update(['locked_at' => null, 'updated_at' => now()]);
+                        $this->releaseTurnSlot();
+                        $this->line(sprintf('[%s] Job #%d written, waiting for its send turn', now()->toDateTimeString(), $job->id));
+
+                        continue;
+                    }
                 }
 
                 // the send gap (30-45 s per number) does not hold an AI turn
@@ -474,7 +494,8 @@ class ProcessWhatsappMessageJobs extends Command
     private function acquireWorkerSlot(int $workers): bool
     {
         for ($slot = 1; $slot <= $workers; $slot++) {
-            $handle = fopen(storage_path($this->botId ? "app/whatsapp-process-jobs.bot-{$this->botId}.lock" : "app/whatsapp-process-jobs.{$slot}.lock"), 'c');
+            $name = $this->botId ? "bot-{$this->botId}".($this->role === 'both' ? '' : ".{$this->role}") : (string) $slot;
+            $handle = fopen(storage_path("app/whatsapp-process-jobs.{$name}.lock"), 'c');
 
             if ($handle === false) {
                 continue;
@@ -504,10 +525,16 @@ class ProcessWhatsappMessageJobs extends Command
     {
         $staleBefore = now()->subMinutes(10);
 
+        $statuses = match ($this->role) {
+            'generate' => ['pending'],
+            'deliver' => ['generated'],
+            default => ['pending', 'generated'],
+        };
+
         return DB::table('whatsapp_message_jobs')
             ->when($this->botId, fn ($q) => $q->where('whatsapp_bot_id', $this->botId))
-            ->where(function ($q) use ($staleBefore) {
-                $q->where(fn ($q) => $q->whereIn('status', ['pending', 'generated'])
+            ->where(function ($q) use ($staleBefore, $statuses) {
+                $q->where(fn ($q) => $q->whereIn('status', $statuses)
                         ->where(fn ($q) => $q->whereNull('process_after')->orWhere('process_after', '<=', now())))
                     ->orWhere(fn ($q) => $q->where('status', 'processing')->whereNotNull('locked_at')->where('locked_at', '<', $staleBefore));
             })
@@ -531,6 +558,91 @@ class ProcessWhatsappMessageJobs extends Command
             flock($handle, LOCK_UN);
             fclose($handle);
         }
+    }
+
+    /** @return int[] numbers that must not answer now: send cap reached, warned, restricted or timelocked */
+    private function cappedBotIds(): array
+    {
+        $capped = \Illuminate\Support\Facades\Cache::remember('send_capped_bots', 30, function () {
+            // Owner 2026-11-15: different customers answered per number, not messages.
+            $hour = (int) config('agent.delivery.max_customers_per_hour', 150);
+            $day = (int) config('agent.delivery.max_customers_per_day', 1500);
+            $sent = fn ($since) => DB::table('whatsapp_messages')->where('direction', 'outgoing')
+                ->where('delivery_status', 'sent')->where('created_at', '>=', $since)
+                ->groupBy('whatsapp_bot_id')->selectRaw('whatsapp_bot_id, count(distinct whatsapp_conversation_id) n')->pluck('n', 'whatsapp_bot_id');
+
+            // Owner 2026-11-15: a number WhatsApp warned uses half (first warning) or a quarter
+            // (second warning) of its caps until the warning ends.
+            $factor = \App\Models\WhatsappBot::whereNotNull('wa_limit_level')->get()
+                ->mapWithKeys(fn ($b) => [$b->id => \App\Models\WhatsappBot::limitFactor($b->activeLimit())]);
+            // Owner 2026-11-18: a number back from a ban warms up on half its caps (config agent.delivery.warmup_bots).
+            foreach ((array) config('agent.delivery.warmup_bots', []) as $botId => $warm) {
+                if (now()->lt(\Illuminate\Support\Carbon::parse($warm['until'])->endOfDay())) {
+                    $factor[$botId] = min($factor[$botId] ?? 1.0, $warm['factor']);
+                }
+            }
+            $over = fn ($limit) => fn ($n, $botId) => $limit > 0 && $n >= max(1, (int) floor($limit * ($factor[$botId] ?? 1.0)));
+            $capped = $sent(now()->subHour())->filter($over($hour))->keys()
+                ->merge($sent(now()->subDay())->filter($over($day))->keys())
+                ->unique()->values()->all();
+
+            if ($capped !== []) {
+                Log::warning('WhatsApp send cap reached - turns wait', ['bot_ids' => $capped]);
+            }
+
+            return $capped;
+        });
+        // Owner 2026-11-15 (Baileys rc14): a number WhatsApp itself restricted (reachout timelock or
+        // new-chat cap reached, see whatsapp:watch-sessions) takes no turn until it is lifted.
+        $capped = array_values(array_unique(array_merge($capped,
+            \App\Models\WhatsappBot::where('session_status', 'restricted')->pluck('id')->map(fn ($id) => (int) $id)->all(),
+            \App\Models\WhatsappBot::whereIn('wa_limit_level', ['capped', 'timelock'])->get()
+                ->filter(fn ($b) => $b->activeLimit() !== null)->pluck('id')->map(fn ($id) => (int) $id)->all())));
+
+        return $capped;
+    }
+
+    /**
+     * 'deliver' role: the oldest written reply of this number, sent in the order replies were written.
+     * Only one is sent at a time (this process); the number's send gap happens inside deliver().
+     */
+    private function claimNextDelivery(): ?object
+    {
+        if (! $this->anythingClaimable()) {
+            return null;
+        }
+
+        return $this->withClaimLock(fn () => DB::transaction(function () {
+            $staleBefore = now()->subMinutes(10);
+            if (in_array($this->botId, $this->cappedBotIds(), true)
+                || ! \App\Models\WhatsappBot::whereKey($this->botId)->where('is_active', true)
+                    ->where(fn ($q) => $q->whereNull('session_status')->orWhere('session_status', 'connected'))->exists()) {
+                return null;
+            }
+
+            $job = DB::table('whatsapp_message_jobs')
+                ->where('whatsapp_bot_id', $this->botId)
+                ->where('status', 'generated')
+                ->whereNull('superseded_by')
+                ->where(fn ($q) => $q->whereNull('process_after')->orWhere('process_after', '<=', now()))
+                ->where(fn ($q) => $q->whereNull('locked_at')->orWhere('locked_at', '<', $staleBefore))
+                ->orderBy('updated_at')
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->first();
+
+            if (! $job) {
+                return null;
+            }
+
+            DB::table('whatsapp_message_jobs')->where('id', $job->id)->update([
+                'locked_at' => now(),
+                'attempts' => DB::raw('attempts + 1'),
+                'updated_at' => now(),
+            ]);
+
+            return DB::table('whatsapp_message_jobs')->where('id', $job->id)->first();
+        }));
     }
 
     private function claimNextJob(): ?object
@@ -580,50 +692,34 @@ class ProcessWhatsappMessageJobs extends Command
 
             $busyConversationIds = $busy->pluck('whatsapp_conversation_id')->filter()->unique()->values()->all();
             $busySenders = $busy->pluck('from')->filter()->unique()->values()->all();
+
+            if ($this->role === 'generate') {
+                // a written reply not sent yet keeps its customer busy (his next turn waits for it),
+                // and the number writes the next one only when no written reply is still waiting
+                $open = DB::table('whatsapp_message_jobs')
+                    ->where('whatsapp_bot_id', $this->botId)
+                    ->whereNull('superseded_by')
+                    ->where(fn ($q) => $q->where('status', 'generated')
+                        ->orWhere(fn ($q) => $q->where('status', 'processing')->where('locked_at', '>=', $staleBefore)))
+                    ->get(['whatsapp_conversation_id', 'from', 'status', 'locked_at']);
+                $busyConversationIds = array_values(array_unique(array_merge($busyConversationIds, $open->pluck('whatsapp_conversation_id')->filter()->all())));
+                $busySenders = array_values(array_unique(array_merge($busySenders, $open->pluck('from')->filter()->all())));
+            }
             // Owner 2026-11-13: a number sends one message every 1-2 minutes, so a second turn of
             // the same number would only hold a slot waiting - other numbers' customers go first.
             $busyBotIds = $busy->pluck('whatsapp_bot_id')->filter()->unique()->values()->all();
+            if ($this->role === 'generate') {
+                $waiting = $open->contains(fn ($r) => $r->status === 'processing'
+                    || ($r->status === 'generated' && ($r->locked_at === null || $r->locked_at < $staleBefore->toDateTimeString())));
+                $busyBotIds = $waiting ? [$this->botId] : [];
+            }
 
             // Owner 2026-11-10: bot 93 was restricted and logged out by late re-answers sent every
             // ~5 s (three workers at once, the backlog piled up behind live turns). One re-answer per
             // bot at a time, and the next one about a minute after the last was taken (owner).
             // Owner 2026-11-10 (anti-ban): a number that sent its hourly or daily cap of messages
             // takes no turn at all until the window frees - live ones wait too.
-            $capped = \Illuminate\Support\Facades\Cache::remember('send_capped_bots', 30, function () {
-                // Owner 2026-11-15: different customers answered per number, not messages.
-                $hour = (int) config('agent.delivery.max_customers_per_hour', 150);
-                $day = (int) config('agent.delivery.max_customers_per_day', 1500);
-                $sent = fn ($since) => DB::table('whatsapp_messages')->where('direction', 'outgoing')
-                    ->where('delivery_status', 'sent')->where('created_at', '>=', $since)
-                    ->groupBy('whatsapp_bot_id')->selectRaw('whatsapp_bot_id, count(distinct whatsapp_conversation_id) n')->pluck('n', 'whatsapp_bot_id');
-
-                // Owner 2026-11-15: a number WhatsApp warned uses half (first warning) or a quarter
-                // (second warning) of its caps until the warning ends.
-                $factor = \App\Models\WhatsappBot::whereNotNull('wa_limit_level')->get()
-                    ->mapWithKeys(fn ($b) => [$b->id => \App\Models\WhatsappBot::limitFactor($b->activeLimit())]);
-                // Owner 2026-11-18: a number back from a ban warms up on half its caps (config agent.delivery.warmup_bots).
-                foreach ((array) config('agent.delivery.warmup_bots', []) as $botId => $warm) {
-                    if (now()->lt(\Illuminate\Support\Carbon::parse($warm['until'])->endOfDay())) {
-                        $factor[$botId] = min($factor[$botId] ?? 1.0, $warm['factor']);
-                    }
-                }
-                $over = fn ($limit) => fn ($n, $botId) => $limit > 0 && $n >= max(1, (int) floor($limit * ($factor[$botId] ?? 1.0)));
-                $capped = $sent(now()->subHour())->filter($over($hour))->keys()
-                    ->merge($sent(now()->subDay())->filter($over($day))->keys())
-                    ->unique()->values()->all();
-
-                if ($capped !== []) {
-                    Log::warning('WhatsApp send cap reached - turns wait', ['bot_ids' => $capped]);
-                }
-
-                return $capped;
-            });
-            // Owner 2026-11-15 (Baileys rc14): a number WhatsApp itself restricted (reachout timelock or
-            // new-chat cap reached, see whatsapp:watch-sessions) takes no turn until it is lifted.
-            $capped = array_values(array_unique(array_merge($capped,
-                \App\Models\WhatsappBot::where('session_status', 'restricted')->pluck('id')->map(fn ($id) => (int) $id)->all(),
-                \App\Models\WhatsappBot::whereIn('wa_limit_level', ['capped', 'timelock'])->get()
-                    ->filter(fn ($b) => $b->activeLimit() !== null)->pluck('id')->map(fn ($id) => (int) $id)->all())));
+            $capped = $this->cappedBotIds();
 
             $backlogBlocked = DB::table('whatsapp_message_jobs')
                 ->where('status', 'processing')->where('locked_at', '>=', $staleBefore)
@@ -646,6 +742,7 @@ class ProcessWhatsappMessageJobs extends Command
 
             $job = DB::table('whatsapp_message_jobs')
                 ->when($this->botId, fn ($q) => $q->where('whatsapp_bot_id', $this->botId))
+                ->when($this->role === 'generate', fn ($q) => $q->where('status', '!=', 'generated'))
                 ->when($capped !== [], fn ($q) => $q->whereNotIn('whatsapp_bot_id', $capped))
                 ->when($busyBotIds !== [], fn ($q) => $q->whereNotIn('whatsapp_bot_id', $busyBotIds))
                 ->when($backlogBlocked !== [], fn ($q) => $q->where(fn ($q) => $q->whereNotIn('whatsapp_bot_id', $backlogBlocked)
