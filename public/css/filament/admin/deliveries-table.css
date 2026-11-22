@@ -197,10 +197,11 @@
     padding-inline-start: .35rem;
 }
 
+/* mouse only: on phones :hover sticks to whatever was touched */
+@media (hover: hover) and (pointer: fine) {
 /* ---------- hover: the ticket lifts and a light passes over it ---------- */
 .fi-resource-deliveries .fi-ta-row:hover {
     transform: translateY(-3px) scale(1.004);
-    filter: drop-shadow(0 14px 22px color-mix(in srgb, var(--st) 28%, transparent));
 }
 
 .fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell {
@@ -228,32 +229,34 @@
     animation: mg-tk-sweep .9s ease-out both;
     pointer-events: none;
 }
+}
 
 /* ---------- lit: the ticket lights up in its status color ----------
    (owner 2026-11-22) on hover, while pressed, and the last one tapped
-   (mg-tk-on, set by the script in AdminPanelProvider; tapping another moves it) */
-.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) {
+   (mg-tk-on, set by the script in AdminPanelProvider; tapping another moves it).
+   Only one ticket is ever lit: the tapped one, or the one under the mouse. */
+.fi-resource-deliveries .fi-ta-row.mg-tk-on {
     transform: translateY(-2px);
-    filter: drop-shadow(0 0 18px color-mix(in srgb, var(--st) 45%, transparent));
+    filter: drop-shadow(0 6px 12px color-mix(in srgb, var(--st) 38%, transparent));
     animation: mg-tk-press .7s var(--mg-ease) both;
     transition-duration: .12s !important;
 }
 
-.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell {
+.fi-resource-deliveries .fi-ta-row.mg-tk-on > .fi-ta-cell {
     background:
         linear-gradient(to bottom, color-mix(in srgb, var(--st) 14%, transparent), color-mix(in srgb, var(--st) 6%, transparent)),
         var(--mg-surface) !important;
 }
 
 /* the edge grows into a bar of light */
-.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell:first-child {
+.fi-resource-deliveries .fi-ta-row.mg-tk-on > .fi-ta-cell:first-child {
     box-shadow:
         inset 8px 0 0 var(--st),
         inset 0 1px 0 color-mix(in srgb, var(--st) 40%, transparent),
         inset 0 -1px 0 color-mix(in srgb, var(--st) 40%, transparent);
 }
 
-[dir="rtl"] .fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell:first-child {
+[dir="rtl"] .fi-resource-deliveries .fi-ta-row.mg-tk-on > .fi-ta-cell:first-child {
     box-shadow:
         inset -8px 0 0 var(--st),
         inset 0 1px 0 color-mix(in srgb, var(--st) 40%, transparent),
@@ -261,13 +264,13 @@
 }
 
 /* the stub fills with the color and the number pops */
-.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell:nth-child(2) {
+.fi-resource-deliveries .fi-ta-row.mg-tk-on > .fi-ta-cell:nth-child(2) {
     background:
         linear-gradient(135deg, color-mix(in srgb, var(--st) 45%, transparent), color-mix(in srgb, var(--st) 15%, transparent)),
         var(--mg-surface) !important;
 }
 
-.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell:nth-child(2) .fi-ta-text-item-label {
+.fi-resource-deliveries .fi-ta-row.mg-tk-on > .fi-ta-cell:nth-child(2) .fi-ta-text-item-label {
     color: #ffffff !important;
     text-shadow: 0 0 12px var(--st), 0 0 2px var(--st);
     transform: scale(1.12);
@@ -275,18 +278,62 @@
 }
 
 /* the perforation tears a little */
-.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell:nth-child(2)::after {
+.fi-resource-deliveries .fi-ta-row.mg-tk-on > .fi-ta-cell:nth-child(2)::after {
     transform: rotate(-6deg) translateY(2px);
 }
 
 .fi-resource-deliveries .fi-ta-row a:focus { outline: none; }
 
+
+.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell {
+    background:
+        linear-gradient(to bottom, color-mix(in srgb, var(--st) 14%, transparent), color-mix(in srgb, var(--st) 6%, transparent)),
+        var(--mg-surface) !important;
+}
+
+/* the edge grows into a bar of light */
+.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:first-child {
+    box-shadow:
+        inset 8px 0 0 var(--st),
+        inset 0 1px 0 color-mix(in srgb, var(--st) 40%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--st) 40%, transparent);
+}
+
+[dir="rtl"] .fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:first-child {
+    box-shadow:
+        inset -8px 0 0 var(--st),
+        inset 0 1px 0 color-mix(in srgb, var(--st) 40%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--st) 40%, transparent);
+}
+
+/* the stub fills with the color and the number pops */
+.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:nth-child(2) {
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--st) 45%, transparent), color-mix(in srgb, var(--st) 15%, transparent)),
+        var(--mg-surface) !important;
+}
+
+.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:nth-child(2) .fi-ta-text-item-label {
+    color: #ffffff !important;
+    text-shadow: 0 0 12px var(--st), 0 0 2px var(--st);
+    transform: scale(1.12);
+    letter-spacing: .08em;
+}
+
+/* the perforation tears a little */
+.fi-resource-deliveries .fi-ta-row:hover > .fi-ta-cell:nth-child(2)::after {
+    transform: rotate(-6deg) translateY(2px);
+}
+
+.fi-resource-deliveries .fi-ta-row a:focus { outline: none; }
+}
+
 .fi-resource-deliveries .fi-ta-row:active { transform: translateY(1px) scale(.995) !important; }
 
 @keyframes mg-tk-press {
     0% { filter: drop-shadow(0 0 0 transparent); }
-    35% { filter: drop-shadow(0 0 34px color-mix(in srgb, var(--st) 75%, transparent)); }
-    100% { filter: drop-shadow(0 0 18px color-mix(in srgb, var(--st) 45%, transparent)); }
+    35% { filter: drop-shadow(0 6px 18px color-mix(in srgb, var(--st) 60%, transparent)); }
+    100% { filter: drop-shadow(0 6px 12px color-mix(in srgb, var(--st) 38%, transparent)); }
 }
 
 /* ---------- selected ticket ---------- */
