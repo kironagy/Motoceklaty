@@ -78,6 +78,11 @@ class AdminPanelProvider extends PanelProvider
             'panels::topbar.start',
             fn () => view('filament.components.notifications-bell')
         )
+        // Owner 2026-11-22: the stats cards' look (plain CSS, after the theme)
+        ->renderHook(
+            'panels::head.end',
+            fn () => '<link rel="stylesheet" href="'.asset('css/filament/admin/stats-cards.css').'?v='.@filemtime(public_path('css/filament/admin/stats-cards.css')).'">'
+        )
         ->renderHook(
             'panels::body.end',
             fn () => view('filament.components.form-submit-guard')

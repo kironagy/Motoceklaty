@@ -1,0 +1,250 @@
+/* =====================================================================
+   MotoGate stats cards (owner 2026-11-22: "فاجر وكرييتف وبيطير")
+   Plain CSS, loaded after the theme - no build step. Every card takes its
+   color from --c / --c2; the theme tokens (--mg-*) keep light and dark.
+   ===================================================================== */
+
+@property --mg-angle {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+}
+
+.fi-wi-stats-overview { direction: rtl; }
+
+.fi-wi-stats-overview-stats-ctn {
+    gap: 1.1rem !important;
+    align-items: stretch !important;
+}
+
+/* ---------- the card ---------- */
+.fi-wi-stats-overview-stat {
+    --c: var(--mg-brand);
+    --c2: #38bdf8;
+    position: relative !important;
+    isolation: isolate;
+    overflow: hidden !important;
+    min-height: 168px;
+    padding: 1.35rem 1.5rem !important;
+    border-radius: 24px !important;
+    border: 0 !important;
+    background:
+        radial-gradient(120% 95% at 100% 0%, color-mix(in srgb, var(--c) 17%, transparent), transparent 58%),
+        radial-gradient(90% 80% at 0% 100%, color-mix(in srgb, var(--c2) 9%, transparent), transparent 60%),
+        var(--mg-surface) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .05),
+        0 0 0 1px color-mix(in srgb, var(--c) 20%, var(--mg-border)),
+        var(--mg-shadow) !important;
+    --tw-ring-color: transparent !important;
+    transform: translateY(0);
+    transition: transform .45s var(--mg-ease), box-shadow .45s var(--mg-ease) !important;
+    animation: mg-fly-in .8s var(--mg-ease) both;
+}
+
+/* cards fly in one after the other */
+.fi-wi-stats-overview-stat:nth-child(2) { animation-delay: .05s; }
+.fi-wi-stats-overview-stat:nth-child(3) { animation-delay: .10s; }
+.fi-wi-stats-overview-stat:nth-child(4) { animation-delay: .15s; }
+.fi-wi-stats-overview-stat:nth-child(5) { animation-delay: .20s; }
+.fi-wi-stats-overview-stat:nth-child(6) { animation-delay: .25s; }
+.fi-wi-stats-overview-stat:nth-child(7) { animation-delay: .30s; }
+.fi-wi-stats-overview-stat:nth-child(8) { animation-delay: .35s; }
+.fi-wi-stats-overview-stat:nth-child(9) { animation-delay: .40s; }
+.fi-wi-stats-overview-stat:nth-child(10) { animation-delay: .45s; }
+.fi-wi-stats-overview-stat:nth-child(11) { animation-delay: .50s; }
+.fi-wi-stats-overview-stat:nth-child(n+12) { animation-delay: .55s; }
+
+/* a light that runs around the edge on hover */
+.fi-wi-stats-overview-stat::before {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    height: auto !important;
+    z-index: 0;
+    padding: 1.5px;
+    border-radius: inherit;
+    background: conic-gradient(from var(--mg-angle), transparent 0 55%, var(--c), var(--c2), transparent 85% 100%) !important;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0;
+    transition: opacity .45s var(--mg-ease);
+    animation: mg-spin 3.5s linear infinite;
+    pointer-events: none;
+}
+
+/* a soft orb of the card's color drifting in the corner */
+.fi-wi-stats-overview-stat::after {
+    content: "" !important;
+    position: absolute !important;
+    z-index: 0;
+    width: 190px !important;
+    height: 190px !important;
+    top: -80px !important;
+    inset-inline-end: -70px;
+    border-radius: 999px;
+    background: radial-gradient(circle, var(--c), transparent 66%) !important;
+    opacity: .26 !important;
+    filter: blur(14px) !important;
+    animation: mg-float 9s ease-in-out infinite;
+    pointer-events: none;
+}
+
+.fi-wi-stats-overview-stat > * {
+    position: relative;
+    z-index: 1;
+}
+
+.fi-wi-stats-overview-stat:hover {
+    transform: translateY(-7px) scale(1.012);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .06),
+        0 0 0 1px color-mix(in srgb, var(--c) 35%, transparent),
+        0 28px 55px -20px color-mix(in srgb, var(--c) 60%, transparent) !important;
+}
+
+.fi-wi-stats-overview-stat:hover::before { opacity: 1; }
+.fi-wi-stats-overview-stat:hover::after { opacity: .4 !important; }
+
+/* ---------- label: a live dot before it ---------- */
+.fi-wi-stats-overview-stat-label {
+    display: inline-flex;
+    align-items: center;
+    gap: .55rem;
+    color: var(--mg-text-2) !important;
+    font-size: .95rem !important;
+    font-weight: 800 !important;
+    letter-spacing: 0;
+}
+
+.fi-wi-stats-overview-stat-label::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    flex: none;
+    border-radius: 999px;
+    background: var(--c);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 60%, transparent);
+    animation: mg-pulse 2.4s ease-out infinite;
+}
+
+/* ---------- the number ---------- */
+.fi-wi-stats-overview-stat-value {
+    font-size: clamp(2.1rem, 1.6rem + 1.4vw, 3rem) !important;
+    line-height: 1.1 !important;
+    font-weight: 800 !important;
+    letter-spacing: -.02em;
+    background: linear-gradient(120deg, var(--mg-text) 35%, var(--c) 75%, var(--c2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent !important;
+    transition: transform .45s var(--mg-ease);
+    transform-origin: right center;
+}
+
+.fi-wi-stats-overview-stat:hover .fi-wi-stats-overview-stat-value { transform: scale(1.06); }
+
+/* ---------- description: a chip in the card's color ---------- */
+.fi-wi-stats-overview-stat div:has(> .fi-wi-stats-overview-stat-description) {
+    display: inline-flex !important;
+    width: fit-content;
+    align-items: center;
+    gap: .35rem;
+    padding: .3rem .7rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--c) 13%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 25%, transparent);
+}
+
+.fi-wi-stats-overview-stat-description {
+    color: var(--c) !important;
+    font-size: .8rem !important;
+    font-weight: 800 !important;
+}
+
+.fi-wi-stats-overview-stat-description-icon {
+    color: var(--c) !important;
+    transition: transform .45s var(--mg-ease);
+}
+
+.fi-wi-stats-overview-stat:hover .fi-wi-stats-overview-stat-description-icon {
+    transform: translateX(-4px) rotate(-8deg) scale(1.15);
+}
+
+.fi-wi-stats-overview-stat-chart { opacity: .55 !important; }
+
+/* ---------- the total: a full-width hero with a moving aurora ---------- */
+.requests-status-card-total {
+    --c: #2dd4bf;
+    --c2: #818cf8;
+    grid-column: 1 / -1 !important;
+    min-height: 200px;
+    background:
+        radial-gradient(60% 120% at 12% 10%, rgba(45, 212, 191, .35), transparent 60%),
+        radial-gradient(55% 120% at 88% 0%, rgba(129, 140, 248, .38), transparent 60%),
+        radial-gradient(50% 90% at 60% 120%, rgba(245, 158, 11, .22), transparent 60%),
+        linear-gradient(135deg, #0b1324, #111d36 55%, #0e1a30) !important;
+    background-size: 160% 160%, 160% 160%, 160% 160%, 100% 100% !important;
+    animation: mg-fly-in .8s var(--mg-ease) both, mg-aurora 16s ease-in-out infinite !important;
+}
+
+.requests-status-card-total .fi-wi-stats-overview-stat-label { color: #cbd5e1 !important; font-size: 1.1rem !important; }
+.requests-status-card-total .fi-wi-stats-overview-stat-value {
+    font-size: clamp(3rem, 2.2rem + 2.4vw, 4.4rem) !important;
+    background: linear-gradient(120deg, #ffffff 30%, #5eead4 65%, #a5b4fc);
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+.requests-status-card-total .fi-wi-stats-overview-stat-chart { opacity: .8 !important; }
+
+/* ---------- a color for every status ---------- */
+.requests-status-card-waiting      { --c: #f97316; --c2: #fbbf24; }
+.requests-status-card-new-request  { --c: #3b82f6; --c2: #22d3ee; }
+.requests-status-card-pending      { --c: #f59e0b; --c2: #fde047; }
+.requests-status-card-work-check   { --c: #14b8a6; --c2: #5eead4; }
+.requests-status-card-approved     { --c: #22c55e; --c2: #a3e635; }
+.requests-status-card-rejected     { --c: #ef4444; --c2: #fb7185; }
+.requests-status-card-paused       { --c: #64748b; --c2: #94a3b8; }
+.requests-status-card-paused-aman  { --c: #64748b; --c2: #a5b4fc; }
+.requests-status-card-edited       { --c: #8b5cf6; --c2: #c084fc; }
+.requests-status-card-transferred  { --c: #a855f7; --c2: #f0abfc; }
+.requests-status-card-delivered    { --c: #10b981; --c2: #2dd4bf; }
+.requests-status-card-canceled     { --c: #e11d48; --c2: #f472b6; }
+
+/* ---------- motion ---------- */
+@keyframes mg-fly-in {
+    from { opacity: 0; transform: translateY(26px) scale(.97); filter: blur(4px); }
+    to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+@keyframes mg-spin { to { --mg-angle: 360deg; } }
+
+@keyframes mg-float {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(-28px, 24px) scale(1.18); }
+}
+
+@keyframes mg-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 60%, transparent); }
+    70%, 100% { box-shadow: 0 0 0 9px transparent; }
+}
+
+@keyframes mg-aurora {
+    0%, 100% { background-position: 0% 0%, 100% 0%, 50% 100%, 0 0; }
+    50% { background-position: 30% 40%, 70% 30%, 40% 60%, 0 0; }
+}
+
+@media (max-width: 1024px) {
+    .requests-status-card-total { grid-column: auto !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fi-wi-stats-overview-stat,
+    .fi-wi-stats-overview-stat::before,
+    .fi-wi-stats-overview-stat::after,
+    .fi-wi-stats-overview-stat-label::before {
+        animation: none !important;
+    }
+    .fi-wi-stats-overview-stat:hover { transform: none; }
+}
