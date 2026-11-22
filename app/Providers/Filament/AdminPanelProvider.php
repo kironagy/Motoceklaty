@@ -87,6 +87,14 @@ class AdminPanelProvider extends PanelProvider
             'panels::body.end',
             fn () => view('filament.components.form-submit-guard')
         )
+        // Owner 2026-11-22: the tapped request stays lit (mg-tk-on) until another one is tapped;
+        // the touch listener also lets iPhone Safari show :active
+        ->renderHook(
+            'panels::body.end',
+            fn () => '<script>document.addEventListener("touchstart", function () {}, { passive: true });'
+                .'document.addEventListener("pointerdown", function (e) { var r = e.target.closest(".fi-resource-deliveries .fi-ta-row"); if (! r) return;'
+                .' document.querySelectorAll(".fi-ta-row.mg-tk-on").forEach(function (x) { x.classList.remove("mg-tk-on"); }); r.classList.add("mg-tk-on"); }, { passive: true });</script>'
+        )
                     ->authMiddleware([
                 Authenticate::class,
             ]);

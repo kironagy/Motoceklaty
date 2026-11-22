@@ -88,7 +88,7 @@
 .fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-danger)  { --st: #ef4444; }
 .fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-info)    { --st: #38bdf8; }
 .fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-primary) { --st: #2dd4bf; }
-.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-gray)    { --st: #64748b; }
+.fi-resource-deliveries .fi-ta-row:has(.fi-badge.fi-color-gray)    { --st: #94a3b8; }
 
 /* rows fly in one after the other (again on every page and filter) */
 .fi-resource-deliveries .fi-ta-row:nth-child(2) { animation-delay: .04s; }
@@ -161,14 +161,17 @@
     font-weight: 800 !important;
     letter-spacing: .04em;
     font-variant-numeric: tabular-nums;
-    color: var(--mg-text) !important;
+    /* owner 2026-11-22: the number takes the status color */
+    color: var(--st) !important;
+    text-shadow: 0 0 14px color-mix(in srgb, var(--st) 45%, transparent);
+    transition: transform .45s cubic-bezier(.3, 1.6, .5, 1), letter-spacing .45s var(--mg-ease);
 }
 
 .fi-resource-deliveries .fi-ta-row > .fi-ta-cell:nth-child(2) .fi-ta-text-item-label::before {
     content: "#";
     margin-inline-end: 2px;
     color: var(--st);
-    opacity: .9;
+    opacity: .6;
 }
 
 /* the dashed tear line with two half-moon notches */
@@ -224,6 +227,66 @@
     background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, .06) 50%, transparent 80%) -150% 0 / 60% 100% no-repeat;
     animation: mg-tk-sweep .9s ease-out both;
     pointer-events: none;
+}
+
+/* ---------- lit: the ticket lights up in its status color ----------
+   (owner 2026-11-22) on hover, while pressed, and the last one tapped
+   (mg-tk-on, set by the script in AdminPanelProvider; tapping another moves it) */
+.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) {
+    transform: translateY(-2px);
+    filter: drop-shadow(0 0 18px color-mix(in srgb, var(--st) 45%, transparent));
+    animation: mg-tk-press .7s var(--mg-ease) both;
+    transition-duration: .12s !important;
+}
+
+.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell {
+    background:
+        linear-gradient(to bottom, color-mix(in srgb, var(--st) 14%, transparent), color-mix(in srgb, var(--st) 6%, transparent)),
+        var(--mg-surface) !important;
+}
+
+/* the edge grows into a bar of light */
+.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell:first-child {
+    box-shadow:
+        inset 8px 0 0 var(--st),
+        inset 0 1px 0 color-mix(in srgb, var(--st) 40%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--st) 40%, transparent);
+}
+
+[dir="rtl"] .fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell:first-child {
+    box-shadow:
+        inset -8px 0 0 var(--st),
+        inset 0 1px 0 color-mix(in srgb, var(--st) 40%, transparent),
+        inset 0 -1px 0 color-mix(in srgb, var(--st) 40%, transparent);
+}
+
+/* the stub fills with the color and the number pops */
+.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell:nth-child(2) {
+    background:
+        linear-gradient(135deg, color-mix(in srgb, var(--st) 45%, transparent), color-mix(in srgb, var(--st) 15%, transparent)),
+        var(--mg-surface) !important;
+}
+
+.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell:nth-child(2) .fi-ta-text-item-label {
+    color: #ffffff !important;
+    text-shadow: 0 0 12px var(--st), 0 0 2px var(--st);
+    transform: scale(1.12);
+    letter-spacing: .08em;
+}
+
+/* the perforation tears a little */
+.fi-resource-deliveries .fi-ta-row:is(:hover, :active, .mg-tk-on) > .fi-ta-cell:nth-child(2)::after {
+    transform: rotate(-6deg) translateY(2px);
+}
+
+.fi-resource-deliveries .fi-ta-row a:focus { outline: none; }
+
+.fi-resource-deliveries .fi-ta-row:active { transform: translateY(1px) scale(.995) !important; }
+
+@keyframes mg-tk-press {
+    0% { filter: drop-shadow(0 0 0 transparent); }
+    35% { filter: drop-shadow(0 0 34px color-mix(in srgb, var(--st) 75%, transparent)); }
+    100% { filter: drop-shadow(0 0 18px color-mix(in srgb, var(--st) 45%, transparent)); }
 }
 
 /* ---------- selected ticket ---------- */
