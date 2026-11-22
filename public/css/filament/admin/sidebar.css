@@ -1,0 +1,371 @@
+/* =====================================================================
+   Sidebar "night ride" (owner 2026-11-22: "بيطير وكرييتف ورايق").
+   Plain CSS loaded after the theme. Every item takes a hue --h that
+   cycles down the list; the active item glows in its own hue.
+   ===================================================================== */
+
+@property --mg-side-angle {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+}
+
+/* ---------- the shell: deep glass with a slow aurora ---------- */
+.fi-sidebar {
+    isolation: isolate;
+    background:
+        radial-gradient(120% 40% at 50% 0%, rgba(45, 212, 191, .10), transparent 70%),
+        linear-gradient(180deg, #0b1322 0%, #0d1628 45%, #0a1120 100%) !important;
+}
+
+/* two soft lights drifting behind the menu */
+.fi-sidebar::before {
+    content: "";
+    position: absolute;
+    inset: -20%;
+    z-index: -1;
+    background:
+        radial-gradient(38% 24% at 20% 18%, rgba(45, 212, 191, .16), transparent 70%),
+        radial-gradient(34% 22% at 85% 62%, rgba(129, 140, 248, .13), transparent 70%),
+        radial-gradient(30% 18% at 30% 92%, rgba(251, 191, 36, .07), transparent 70%);
+    animation: mg-side-aurora 22s ease-in-out infinite alternate;
+    pointer-events: none;
+}
+
+/* a headlight that runs down the edge now and then */
+.fi-sidebar::after {
+    content: "";
+    position: absolute;
+    inset-inline-end: 0;
+    top: -30%;
+    width: 2px;
+    height: 30%;
+    z-index: 5;
+    border-radius: 999px;
+    background: linear-gradient(180deg, transparent, #5eead4, #a5b4fc, transparent);
+    filter: drop-shadow(0 0 6px #2dd4bf);
+    animation: mg-side-headlight 7s cubic-bezier(.6, 0, .3, 1) 1.5s infinite;
+    pointer-events: none;
+}
+
+/* phone and tablet: the drawer lands with a small bounce */
+@media (max-width: 1023px) {
+    .fi-sidebar {
+        transition: transform .6s cubic-bezier(.3, 1.35, .5, 1) !important;
+    }
+
+    .fi-sidebar-close-overlay {
+        background:
+            radial-gradient(80% 60% at 100% 30%, rgba(45, 212, 191, .14), transparent 70%),
+            rgba(2, 6, 23, .6) !important;
+        backdrop-filter: blur(6px) saturate(1.2);
+    }
+}
+
+/* ---------- header: the logo floats on a breathing halo ---------- */
+.fi-sidebar-header {
+    position: relative;
+    overflow: hidden;
+    border-bottom: 0 !important;
+}
+
+.fi-sidebar-header::before {
+    content: "";
+    position: absolute;
+    inset: auto 15% 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(94, 234, 212, .5), transparent);
+}
+
+.fi-sidebar-header::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 220px;
+    height: 70px;
+    z-index: -1;
+    border-radius: 999px;
+    background: radial-gradient(closest-side, rgba(45, 212, 191, .28), transparent);
+    transform: translate(-50%, -50%);
+    animation: mg-side-breathe 4.5s ease-in-out infinite;
+    pointer-events: none;
+}
+
+.fi-sidebar-header .fi-logo {
+    animation: mg-side-float 6s ease-in-out infinite;
+    filter: drop-shadow(0 6px 14px rgba(45, 212, 191, .25));
+}
+
+/* ---------- nav ---------- */
+.fi-sidebar-nav {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(94, 234, 212, .25) transparent;
+}
+
+.fi-sidebar-nav-groups { gap: 1.4rem !important; }
+
+/* group label: a colored dot, the name, then a fading line */
+.fi-sidebar-group-button { gap: .6rem !important; }
+
+.fi-sidebar-group-label {
+    flex: none !important;
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    font-size: .72rem !important;
+    font-weight: 800 !important;
+    letter-spacing: .04em;
+    color: #6f80a0 !important;
+}
+
+.fi-sidebar-group-label::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 2px;
+    transform: rotate(45deg);
+    background: var(--g, #2dd4bf);
+    box-shadow: 0 0 10px var(--g, #2dd4bf);
+}
+
+.fi-sidebar-group-button::after {
+    content: "";
+    order: 2;
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to left, rgba(148, 163, 184, .22), transparent);
+}
+
+[dir="ltr"] .fi-sidebar-group-button::after {
+    background: linear-gradient(to right, rgba(148, 163, 184, .22), transparent);
+}
+
+.fi-sidebar-group-collapse-button { order: 3; }
+.fi-sidebar-group-collapse-button svg { transition: transform .4s var(--mg-ease); }
+
+.fi-sidebar-group:nth-child(4n+1) { --g: #2dd4bf; }
+.fi-sidebar-group:nth-child(4n+2) { --g: #fbbf24; }
+.fi-sidebar-group:nth-child(4n+3) { --g: #a78bfa; }
+.fi-sidebar-group:nth-child(4n+4) { --g: #38bdf8; }
+
+/* ---------- items ---------- */
+.fi-sidebar-item { --h: #2dd4bf; }
+
+/* the items fly in each time the menu opens */
+.fi-sidebar-open .fi-sidebar-item {
+    animation: mg-side-in .7s var(--mg-ease) both;
+    animation-delay: calc(var(--gi, 0) * 90ms + var(--ii, 0) * 45ms + 120ms);
+}
+
+/* a hue for every item, cycling down the list */
+.fi-sidebar-item:nth-child(7n+1) { --h: #2dd4bf; --ii: 1; }
+.fi-sidebar-item:nth-child(7n+2) { --h: #38bdf8; --ii: 2; }
+.fi-sidebar-item:nth-child(7n+3) { --h: #a78bfa; --ii: 3; }
+.fi-sidebar-item:nth-child(7n+4) { --h: #fbbf24; --ii: 4; }
+.fi-sidebar-item:nth-child(7n+5) { --h: #fb7185; --ii: 5; }
+.fi-sidebar-item:nth-child(7n+6) { --h: #a3e635; --ii: 6; }
+.fi-sidebar-item:nth-child(7n+7) { --h: #fb923c; --ii: 7; }
+
+.fi-sidebar-group:nth-child(1) { --gi: 0; }
+.fi-sidebar-group:nth-child(2) { --gi: 2; }
+.fi-sidebar-group:nth-child(3) { --gi: 4; }
+.fi-sidebar-group:nth-child(4) { --gi: 6; }
+.fi-sidebar-group:nth-child(n+5) { --gi: 8; }
+
+.fi-sidebar-item > a {
+    min-height: 2.9rem !important;
+    padding-inline: .45rem .7rem !important;
+    gap: .85rem !important;
+    border-radius: 16px !important;
+    transition: background-color .35s var(--mg-ease), transform .35s var(--mg-ease), box-shadow .35s var(--mg-ease) !important;
+}
+
+/* the icon sits on its own tile */
+.fi-sidebar-item > a::before {
+    content: "";
+    position: absolute;
+    inset-inline-start: .2rem;
+    top: 50%;
+    width: 2.3rem;
+    height: 2.3rem;
+    margin-top: -1.15rem;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--h) 7%, rgba(148, 163, 184, .05));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--h) 14%, rgba(148, 163, 184, .06));
+    transition: transform .45s cubic-bezier(.3, 1.6, .5, 1), background .35s, box-shadow .35s;
+}
+
+.fi-sidebar-item-icon {
+    position: relative;
+    z-index: 1;
+    width: 1.3rem !important;
+    height: 1.3rem !important;
+    margin-inline: .3rem;
+    color: color-mix(in srgb, var(--h) 55%, #8696b0) !important;
+    transition: transform .45s cubic-bezier(.3, 1.6, .5, 1), color .3s !important;
+}
+
+.fi-sidebar-item-label {
+    position: relative;
+    z-index: 1;
+    color: #c6d0de !important;
+    font-weight: 700 !important;
+    font-size: .9rem !important;
+    transition: color .3s, letter-spacing .4s var(--mg-ease);
+}
+
+/* hover: the row leans in, the tile tilts and lights in the item's hue */
+.fi-sidebar-item > a:hover,
+.fi-sidebar-item > a:focus-visible {
+    background: linear-gradient(to left, color-mix(in srgb, var(--h) 10%, transparent), transparent 85%) !important;
+    transform: translateX(-4px);
+}
+
+[dir="ltr"] .fi-sidebar-item > a:hover,
+[dir="ltr"] .fi-sidebar-item > a:focus-visible {
+    background: linear-gradient(to right, color-mix(in srgb, var(--h) 10%, transparent), transparent 85%) !important;
+    transform: translateX(4px);
+}
+
+.fi-sidebar-item > a:hover::before {
+    transform: rotate(-10deg) scale(1.08);
+    background: color-mix(in srgb, var(--h) 18%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--h) 45%, transparent), 0 8px 20px -8px var(--h);
+}
+
+.fi-sidebar-item > a:hover .fi-sidebar-item-icon {
+    color: var(--h) !important;
+    transform: rotate(-10deg) scale(1.12);
+}
+
+.fi-sidebar-item > a:hover .fi-sidebar-item-label {
+    color: #ffffff !important;
+    letter-spacing: .01em;
+}
+
+/* ---------- the active item: a glowing pill in its hue ---------- */
+.fi-sidebar-item-active > a {
+    background:
+        linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, .07) 45%, transparent 60%) 200% 0 / 250% 100% no-repeat,
+        linear-gradient(to left, color-mix(in srgb, var(--h) 20%, transparent), color-mix(in srgb, var(--h) 4%, transparent)) !important;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .06),
+        0 12px 28px -14px var(--h) !important;
+    animation: mg-side-shine 4.5s ease-in-out 1.5s infinite;
+}
+
+[dir="ltr"] .fi-sidebar-item-active > a {
+    background:
+        linear-gradient(110deg, transparent 30%, rgba(255, 255, 255, .07) 45%, transparent 60%) 200% 0 / 250% 100% no-repeat,
+        linear-gradient(to right, color-mix(in srgb, var(--h) 20%, transparent), color-mix(in srgb, var(--h) 4%, transparent)) !important;
+}
+
+.fi-sidebar-item-active > a::before {
+    background: linear-gradient(140deg, var(--h), color-mix(in srgb, var(--h) 55%, #0b1322)) !important;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--h) 14%, transparent), 0 10px 24px -6px var(--h) !important;
+    transform: none;
+}
+
+.fi-sidebar-item-active .fi-sidebar-item-icon {
+    color: #0b1322 !important;
+}
+
+.fi-sidebar-item-active .fi-sidebar-item-label {
+    color: #ffffff !important;
+}
+
+/* a thin light running around the active pill (replaces the theme's side bar) */
+.fi-sidebar-item-active > a::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    width: auto !important;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(from var(--mg-side-angle), transparent 0 60%, var(--h), #ffffff, transparent 90% 100%) !important;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: mg-side-spin 4s linear infinite;
+    pointer-events: none;
+}
+
+.fi-sidebar-item-active > a:hover::before,
+.fi-sidebar-item-active > a:hover .fi-sidebar-item-icon {
+    transform: rotate(-8deg) scale(1.06);
+}
+
+/* ---------- badges ---------- */
+.fi-sidebar .fi-badge {
+    position: relative;
+    z-index: 1;
+    min-width: 1.75rem;
+    justify-content: center;
+    border-radius: 999px !important;
+    font-weight: 800 !important;
+    background: rgba(251, 191, 36, .14) !important;
+    color: #fcd34d !important;
+    --tw-ring-color: rgba(251, 191, 36, .35) !important;
+    animation: mg-side-ping 2.8s ease-out infinite;
+}
+
+/* ---------- motion ---------- */
+@keyframes mg-side-in {
+    from { opacity: 0; transform: translateX(28px) scale(.96); filter: blur(5px); }
+    to { opacity: 1; transform: none; filter: none; }
+}
+
+[dir="ltr"] .fi-sidebar-open .fi-sidebar-item { animation-name: mg-side-in-ltr; }
+
+@keyframes mg-side-in-ltr {
+    from { opacity: 0; transform: translateX(-28px) scale(.96); filter: blur(5px); }
+    to { opacity: 1; transform: none; filter: none; }
+}
+
+@keyframes mg-side-aurora {
+    0% { transform: translate(0, 0) rotate(0deg); }
+    50% { transform: translate(6%, 4%) rotate(8deg); }
+    100% { transform: translate(-4%, 8%) rotate(-6deg); }
+}
+
+@keyframes mg-side-headlight {
+    0% { top: -30%; opacity: 0; }
+    10% { opacity: 1; }
+    45%, 100% { top: 105%; opacity: 0; }
+}
+
+@keyframes mg-side-breathe {
+    50% { opacity: .55; transform: translate(-50%, -50%) scale(1.15); }
+}
+
+@keyframes mg-side-float {
+    50% { transform: translateY(-3px); }
+}
+
+@keyframes mg-side-spin { to { --mg-side-angle: 360deg; } }
+
+@keyframes mg-side-shine {
+    0% { background-position: 200% 0, 0 0; }
+    40%, 100% { background-position: -100% 0, 0 0; }
+}
+
+@keyframes mg-side-ping {
+    0% { box-shadow: 0 0 0 0 rgba(251, 191, 36, .45); }
+    70%, 100% { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fi-sidebar::before,
+    .fi-sidebar::after,
+    .fi-sidebar-header::after,
+    .fi-sidebar-header .fi-logo,
+    .fi-sidebar-item,
+    .fi-sidebar-item-active > a,
+    .fi-sidebar-item-active > a::after,
+    .fi-sidebar .fi-badge {
+        animation: none !important;
+    }
+
+    .fi-sidebar-item > a:hover { transform: none; }
+}

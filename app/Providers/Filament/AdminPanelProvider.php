@@ -81,7 +81,7 @@ class AdminPanelProvider extends PanelProvider
         // Owner 2026-11-22: the stats cards' look (plain CSS, after the theme)
         ->renderHook(
             'panels::head.end',
-            fn () => collect(['stats-cards', 'staff-ranking'])->map(fn ($f) => '<link rel="stylesheet" href="'.asset("css/filament/admin/{$f}.css").'?v='.@filemtime(public_path("css/filament/admin/{$f}.css")).'">')->implode('')
+            fn () => collect(['stats-cards', 'staff-ranking', 'sidebar'])->map(fn ($f) => '<link rel="stylesheet" href="'.asset("css/filament/admin/{$f}.css").'?v='.@filemtime(public_path("css/filament/admin/{$f}.css")).'">')->implode('')
         )
         ->renderHook(
             'panels::body.end',
