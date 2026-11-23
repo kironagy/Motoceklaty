@@ -673,6 +673,12 @@
 
 .mg-rq-ring .fi-section-header-icon {
     position: relative;
+    align-self: center !important;
+    justify-self: center;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    transform: none !important;
     width: 17px !important;
     height: 17px !important;
     padding: 0 !important;
@@ -782,3 +788,18 @@
 
 /* the title reads right to left with its number (تعديل طلب #6198) */
 .fi-resource-deliveries .fi-header-heading { unicode-bidi: plaintext; }
+
+/* the review section wears the status colour (rejected red, approved green...): a full outline
+   and a glow, set from the request's status and from the status picked in the form */
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) [id="data.mragaa-altlb"].fi-section {
+    box-shadow:
+        0 0 0 2px var(--h),
+        0 0 0 6px color-mix(in srgb, var(--h) 14%, transparent),
+        0 26px 54px -24px color-mix(in srgb, var(--h) 75%, transparent) !important;
+    transition: box-shadow .5s var(--mg-ease);
+}
+
+.fi-resource-deliveries [id="data.mragaa-altlb"].fi-section::before {
+    opacity: 1;
+    box-shadow: 0 0 14px var(--h);
+}

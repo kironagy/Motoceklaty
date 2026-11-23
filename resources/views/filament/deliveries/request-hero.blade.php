@@ -9,10 +9,13 @@
 
     $status = (string) $record->status;
     $statusLabel = DeliveryResource::STATUS_LABELS[$status] ?? $status;
-    $statusHue = [
+    $hues = [
         'success' => '#22c55e', 'warning' => '#f59e0b', 'danger' => '#ef4444',
         'info' => '#38bdf8', 'primary' => '#2dd4bf', 'gray' => '#94a3b8',
-    ][DeliveryResource::STATUS_COLORS[$status] ?? 'gray'];
+    ];
+    // every status => its colour, so the review section follows the status picked in the form
+    $statusHues = array_map(fn ($c) => $hues[$c] ?? $hues['gray'], DeliveryResource::STATUS_COLORS);
+    $statusHue = $statusHues[$status] ?? $hues['gray'];
 
     $name = trim((string) $record->applicant_name) ?: 'عميل بدون اسم';
     $initials = mb_substr(preg_replace('/\s+/u', '', $name), 0, 1);
@@ -29,7 +32,10 @@
     ], fn ($c) => filled($c[2]));
 @endphp
 
-<div class="mg-rq" style="--st: {{ $statusHue }}" wire:ignore>
+{{-- the review section is outlined in the request's status colour from the first paint --}}
+<style>.fi-resource-deliveries [id="data.mragaa-altlb"] { --h: {{ $statusHue }}; }</style>
+
+<div class="mg-rq" style="--st: {{ $statusHue }}" data-hues='@json($statusHues)' wire:ignore>
     <section class="mg-rq-hero">
         <span class="mg-rq-ghost" aria-hidden="true">#{{ $record->id }}</span>
         <span class="mg-rq-orb o1" aria-hidden="true"></span>
@@ -91,9 +97,10 @@
         const sections = () => [...document.querySelectorAll('.fi-page form .fi-section')]
             .filter((s) => ! s.parentElement.closest('.fi-section') && s.querySelector(':scope > header .fi-section-header-heading'));
 
-        // a field counts when it is shown and not a switch; it is filled when it holds a value
+        // every field of the section counts, also while the section is folded (Filament doesn't
+        // render the fields it hides), except switches; it is filled when it holds a value
         const fields = (section) => [...section.querySelectorAll('.fi-fo-field-wrp')].filter((w) =>
-            w.offsetParent !== null && ! w.querySelector('.fi-fo-toggle, input[type=checkbox], input[type=radio]') && ! w.querySelector('.fi-fo-field-wrp'));
+            ! w.querySelector('.fi-fo-toggle, input[type=checkbox], input[type=radio]') && ! w.querySelector('.fi-fo-field-wrp'));
 
         const filled = (w) => {
             if (w.querySelector('.filepond--item, .fi-fo-file-upload img')) return true;
@@ -107,7 +114,7 @@
 
         const pct = (section) => {
             const list = fields(section);
-            return list.length ? Math.round(list.filter(filled).length * 100 / list.length) : 100;
+            return list.length ? Math.round(list.filter(filled).length * 100 / list.length) : null;
         };
 
         const build = () => {
@@ -136,15 +143,26 @@
             return list;
         };
 
+        // the review section's outline follows the status picked, before it's even saved
+        const hues = JSON.parse(root.dataset.hues || '{}');
+        const paintReview = () => {
+            const review = document.querySelector('[id="data.mragaa-altlb"]');
+            const status = review?.querySelector('[id="data.status"]');
+            if (review && status && hues[status.value]) review.style.setProperty('--h', hues[status.value]);
+        };
+
         const refresh = () => {
+            paintReview();
             const list = build();
             let sum = 0, count = 0;
             rail.querySelectorAll('.mg-rq-step').forEach((a) => {
                 if (! document.contains(a._section)) { rail.dataset.count = ''; return; }
                 const p = pct(a._section);
-                a.querySelector('small').textContent = p === 100 ? 'كامل ✓' : p + '%';
-                a.querySelector('.fill').style.strokeDashoffset = 94.25 * (1 - p / 100);
+                a.style.setProperty('--h', getComputedStyle(a._section).getPropertyValue('--h').trim() || '#2dd4bf');
+                a.querySelector('small').textContent = p === null ? '—' : p === 100 ? 'كامل ✓' : p + '%';
+                a.querySelector('.fill').style.strokeDashoffset = 94.25 * (1 - (p ?? 0) / 100);
                 a.classList.toggle('done', p === 100);
+                if (p === null) return;
                 const n = fields(a._section).length;
                 sum += p * n; count += n;
             });
