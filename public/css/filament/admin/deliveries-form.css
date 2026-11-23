@@ -12,12 +12,12 @@
 
 /* ---------- one colour per section ---------- */
 .fi-resource-deliveries [id="data.byanat-alntham-oalmkn"] { --h: #38bdf8; } /* the system and machine: sky */
-.fi-resource-deliveries [id="data.ard-alsaar"]            { --h: #f59e0b; } /* the price offer: amber */
+.fi-resource-deliveries [id="data.aard-alsaar"]           { --h: #2dd4bf; } /* the price offer: teal */
 .fi-resource-deliveries [id="data.byanat-alaamyl"]        { --h: #2dd4bf; } /* the customer: teal */
-.fi-resource-deliveries [id="data.alhal-alothyfy"]        { --h: #a78bfa; } /* the job: violet */
-.fi-resource-deliveries [id="data.aanoan-alaaml"]         { --h: #818cf8; } /* the work address: indigo */
+.fi-resource-deliveries [id="data.alhal-alothyfy"]        { --h: #2dd4bf; } /* the job: teal (owner 2026-11-23: like the customer) */
+.fi-resource-deliveries [id="data.aanoan-alaaml"]         { --h: #2dd4bf; } /* the work address: teal */
 .fi-resource-deliveries [id="data.byanat-aldamn"]         { --h: #fb7185; } /* the guarantor: rose */
-.fi-resource-deliveries [id="data.almlahthat"]            { --h: #34d399; } /* the notes: green */
+.fi-resource-deliveries [id="data.almlahthat"]            { --h: #2dd4bf; } /* the notes: teal (owner 2026-11-23: like the customer) */
 .fi-resource-deliveries [id="data.mragaa-altlb"]          { --h: #f472b6; } /* the review: pink */
 
 /* ---------- the page title ---------- */

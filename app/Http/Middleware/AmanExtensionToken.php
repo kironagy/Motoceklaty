@@ -28,6 +28,12 @@ class AmanExtensionToken
         }
 
         $request->attributes->set('aman_staff', $token->staff);
+
+        // Owner 2026-11-23: what the extension changes on a request is the employee's doing - the
+        // request's log names him (not "غير معروف") and status_updated_by is his, like in the dashboard.
+        // Only for this request: the token is the login here, nothing goes into a session.
+        auth('staff')->setUser($token->staff);
+        \Spatie\Activitylog\Facades\CauserResolver::setCauser($token->staff);
         $request->attributes->set('aman_token', $token);
 
         return $next($request);

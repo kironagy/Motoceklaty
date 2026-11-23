@@ -103,7 +103,8 @@
             ! w.querySelector('.fi-fo-toggle, input[type=checkbox], input[type=radio]') && ! w.querySelector('.fi-fo-field-wrp'));
 
         const filled = (w) => {
-            if (w.querySelector('.filepond--item, .fi-fo-file-upload img')) return true;
+            // an upload is filled only by its files (its hidden image editor holds an img and inputs too)
+            if (w.querySelector('.filepond--root, .fi-fo-file-upload')) return !! w.querySelector('.filepond--item');
             const single = w.querySelector('.choices__list--single .choices__item');
             if (single) return ! single.classList.contains('choices__placeholder') && single.textContent.trim() !== '';
             const select = w.querySelector('select');

@@ -240,7 +240,54 @@ class ApplicationService
         $request = $application->installment_request_id ? \App\Models\InstallmentRequest::find($application->installment_request_id) : null;
 
         if ($request && $request->status !== 'canceled') {
-            $request->forceFill(['status' => 'canceled', 'status_updated_at' => now()])->saveQuietly();
+            $before = $request->status;
+            $fill = ['status' => 'canceled', 'status_updated_at' => now()];
+
+            // Owner 2026-11-23: a customer's cancel shows in the system - as the request's reason,
+            // in its log and as a notification to its employee and the admins.
+            if ($actor === 'customer') {
+                $fill['checks_report'] = array_merge((array) $request->checks_report, ['customer' => self::CUSTOMER_CANCEL_NOTE]);
+            }
+
+            $request->forceFill($fill)->saveQuietly();
+
+            if ($actor === 'customer') {
+                $this->announceCustomerCancel($request, $before);
+            }
+        }
+    }
+
+    public const CUSTOMER_CANCEL_NOTE = 'تم إلغاء الطلب من خلال العميل بناءً على رغبته';
+
+    private function announceCustomerCancel(\App\Models\InstallmentRequest $request, ?string $before): void
+    {
+        activity('installment_request')->performedOn($request)
+            ->withProperties([
+                'old' => ['status' => $before],
+                'attributes' => ['status' => 'canceled'],
+                'source' => 'customer_chat',
+                'changed' => ['حالة الطلب'],
+            ])
+            ->event('updated')
+            ->log(self::CUSTOMER_CANCEL_NOTE);
+
+        $title = "العميل لغى الطلب رقم {$request->id}";
+        $message = self::CUSTOMER_CANCEL_NOTE.' — طلب رقم '.$request->id.($request->applicant_name ? ' ('.$request->applicant_name.')' : '');
+        $url = \App\Filament\Resources\DeliveryResource::getUrl('edit', ['record' => $request], panel: 'admin');
+
+        $recipients = \App\Models\Staff::query()->where('is_admin', true)->pluck('id')
+            ->push($request->staff_id)->filter()->unique();
+
+        foreach ($recipients as $userId) {
+            \App\Models\Notification::create(['user_id' => $userId, 'title' => $title, 'message' => $message, 'is_read' => false]);
+
+            try {
+                app(\App\Services\PushNotificationService::class)->sendToUser(
+                    userId: $userId, title: $title, body: $message, url: $url, tag: 'delivery-'.$request->id,
+                );
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
     }
 
