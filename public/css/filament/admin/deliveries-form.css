@@ -326,3 +326,459 @@
         transform: none !important;
     }
 }
+
+/* =====================================================================
+   The request's summary card and sections rail (owner 2026-11-23),
+   resources/views/filament/deliveries/request-hero.blade.php. --st = the status colour.
+   ===================================================================== */
+
+.mg-rq {
+    direction: rtl;
+    display: grid;
+    gap: 14px;
+    margin-bottom: 6px;
+}
+
+/* ---------- the card ---------- */
+.mg-rq-hero {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 18px 24px;
+    align-items: center;
+    padding: 26px 28px 22px;
+    border-radius: 28px;
+    background:
+        radial-gradient(90% 140% at 100% 0%, color-mix(in srgb, var(--st) 22%, transparent), transparent 60%),
+        radial-gradient(70% 120% at 0% 100%, rgba(56, 189, 248, .12), transparent 60%),
+        var(--mg-surface);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .06),
+        0 0 0 1px color-mix(in srgb, var(--st) 30%, var(--mg-border)),
+        0 30px 60px -32px color-mix(in srgb, var(--st) 70%, transparent);
+    animation: mg-rf-in .9s var(--mg-ease) both;
+}
+
+.mg-rq-hero > * { position: relative; z-index: 1; }
+
+/* the request number, huge and faint behind everything */
+.mg-rq-ghost {
+    position: absolute !important;
+    z-index: 0 !important;
+    left: 18px;
+    bottom: -38px;
+    font-size: 150px;
+    font-weight: 900;
+    line-height: 1;
+    color: transparent;
+    -webkit-text-stroke: 1.5px color-mix(in srgb, var(--st) 28%, transparent);
+    direction: ltr;
+    pointer-events: none;
+    user-select: none;
+    animation: mg-rq-float 8s ease-in-out infinite;
+}
+
+/* two soft lights drifting in the background */
+.mg-rq-orb {
+    position: absolute !important;
+    z-index: 0 !important;
+    width: 220px;
+    height: 220px;
+    border-radius: 50%;
+    filter: blur(50px);
+    opacity: .35;
+    pointer-events: none;
+}
+.mg-rq-orb.o1 { top: -90px; right: 18%; background: var(--st); animation: mg-rq-drift 12s ease-in-out infinite; }
+.mg-rq-orb.o2 { bottom: -110px; left: 30%; background: #38bdf8; opacity: .18; animation: mg-rq-drift 15s ease-in-out -4s infinite reverse; }
+
+/* ---------- who ---------- */
+.mg-rq-who {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    min-width: 0;
+}
+
+.mg-rq-avatar {
+    position: relative;
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 76px;
+    height: 76px;
+    border-radius: 24px;
+    background: linear-gradient(135deg, var(--st), color-mix(in srgb, var(--st) 45%, #0f172a));
+    box-shadow: 0 14px 30px -12px var(--st), inset 0 1px 0 rgba(255, 255, 255, .35);
+    transform: rotate(-6deg);
+    animation: mg-rq-bob 5s ease-in-out infinite;
+}
+
+.mg-rq-avatar span {
+    font-size: 34px;
+    font-weight: 900;
+    color: #fff;
+    transform: rotate(6deg);
+    text-shadow: 0 2px 10px rgba(0, 0, 0, .25);
+}
+
+.mg-rq-id { min-width: 0; }
+
+.mg-rq-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.mg-rq-no {
+    font-size: 12.5px;
+    font-weight: 800;
+    letter-spacing: .3px;
+    color: var(--mg-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.mg-rq-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 800;
+    color: var(--st);
+    background: color-mix(in srgb, var(--st) 14%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st) 40%, transparent), 0 0 18px -6px var(--st);
+}
+
+.mg-rq-status i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--st);
+    box-shadow: 0 0 0 0 var(--st);
+    animation: mg-rq-ping 1.8s ease-out infinite;
+}
+
+.mg-rq-id h2 {
+    margin: 6px 0 8px;
+    font-size: 28px;
+    font-weight: 900;
+    line-height: 1.25;
+    color: var(--mg-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mg-rq-contact {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.mg-rq-contact > * {
+    padding: 4px 11px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--mg-text-2);
+    background: color-mix(in srgb, var(--mg-text) 6%, transparent);
+    text-decoration: none;
+    transition: background .25s, color .25s, transform .25s var(--mg-ease);
+}
+
+.mg-rq-contact a:hover {
+    color: var(--st);
+    background: color-mix(in srgb, var(--st) 14%, transparent);
+    transform: translateY(-2px);
+}
+
+/* ---------- the completion meter ---------- */
+.mg-rq-meter {
+    position: relative;
+    width: 124px;
+    height: 124px;
+    display: grid;
+    place-items: center;
+}
+
+.mg-rq-meter .mg-rq-meter-svg {
+    position: absolute;
+    inset: 0;
+    transform: rotate(-90deg);
+}
+
+.mg-rq-meter circle {
+    fill: none;
+    stroke-width: 9;
+}
+
+.mg-rq-meter .track { stroke: color-mix(in srgb, var(--mg-text) 9%, transparent); }
+
+.mg-rq-meter .fill {
+    stroke: #2dd4bf;
+    stroke-linecap: round;
+    stroke-dasharray: 326.7;
+    stroke-dashoffset: 326.7;
+    filter: drop-shadow(0 0 6px rgba(45, 212, 191, .7));
+    transition: stroke-dashoffset 1.2s var(--mg-ease), stroke .4s;
+}
+
+.mg-rq-meter.done .fill { stroke: #22c55e; filter: drop-shadow(0 0 8px rgba(34, 197, 94, .8)); }
+
+.mg-rq-meter > div {
+    display: grid;
+    place-items: center;
+    text-align: center;
+}
+
+.mg-rq-meter strong {
+    font-size: 26px;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--mg-text);
+    font-variant-numeric: tabular-nums;
+}
+
+.mg-rq-meter span {
+    margin-top: 4px;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--mg-muted);
+}
+
+/* ---------- the facts, as glass tiles ---------- */
+.mg-rq-chips {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+}
+
+.mg-rq-chip {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 10px;
+    align-items: center;
+    padding: 11px 13px;
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--mg-surface-2) 65%, transparent);
+    box-shadow: inset 0 0 0 1px var(--mg-border);
+    backdrop-filter: blur(8px);
+    animation: mg-rf-rise .6s var(--mg-ease) both;
+    animation-delay: calc(250ms + var(--i) * 70ms);
+    transition: transform .3s var(--mg-ease), box-shadow .3s;
+}
+
+.mg-rq-chip:hover {
+    transform: translateY(-3px);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--st) 45%, transparent), 0 12px 24px -16px var(--st);
+}
+
+.mg-rq-chip em {
+    grid-row: 1 / 3;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    font-style: normal;
+    font-size: 18px;
+    background: color-mix(in srgb, var(--st) 12%, transparent);
+}
+
+.mg-rq-chip span {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--mg-muted);
+}
+
+.mg-rq-chip strong {
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--mg-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ---------- the sections rail ---------- */
+.mg-rq-rail {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 2px 6px;
+    scrollbar-width: none;
+}
+
+.mg-rq-rail::-webkit-scrollbar { display: none; }
+
+.mg-rq-step {
+    --h: #2dd4bf;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px 7px 8px;
+    border-radius: 16px;
+    text-decoration: none;
+    background: var(--mg-surface);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--h) 20%, var(--mg-border));
+    animation: mg-rf-rise .5s var(--mg-ease) both;
+    animation-delay: calc(400ms + var(--i) * 60ms);
+    transition: transform .3s var(--mg-ease), box-shadow .3s, background .3s;
+}
+
+.mg-rq-step:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--h) 50%, transparent), 0 12px 22px -14px var(--h);
+}
+
+.mg-rq-step.on {
+    background: linear-gradient(120deg, color-mix(in srgb, var(--h) 20%, var(--mg-surface)), var(--mg-surface));
+    box-shadow: 0 0 0 1.5px var(--h), 0 14px 26px -14px var(--h);
+}
+
+.mg-rq-ring {
+    position: relative;
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+}
+
+.mg-rq-ring .mg-rq-ring-svg {
+    position: absolute;
+    inset: 0;
+    transform: rotate(-90deg);
+}
+
+.mg-rq-ring circle { fill: none; stroke-width: 3.5; }
+.mg-rq-ring .track { stroke: color-mix(in srgb, var(--h) 16%, transparent); }
+
+.mg-rq-ring .fill {
+    stroke: var(--h);
+    stroke-linecap: round;
+    stroke-dasharray: 94.25;
+    stroke-dashoffset: 94.25;
+    transition: stroke-dashoffset .8s var(--mg-ease);
+}
+
+.mg-rq-ring .fi-section-header-icon {
+    position: relative;
+    width: 17px !important;
+    height: 17px !important;
+    padding: 0 !important;
+    color: var(--h) !important;
+    background: none !important;
+    box-shadow: none !important;
+}
+
+.mg-rq-step-txt {
+    display: grid;
+    line-height: 1.2;
+}
+
+.mg-rq-step-txt b {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--mg-text);
+    white-space: nowrap;
+}
+
+.mg-rq-step-txt small {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--mg-muted);
+}
+
+.mg-rq-step.done small { color: #22c55e; }
+
+/* jumping to a section leaves room for the top bar */
+.fi-resource-deliveries .fi-section { scroll-margin-top: 90px; }
+
+/* wide screens: the rail stands at the side and follows you down the form */
+@media (min-width: 1440px) {
+    .fi-resource-deliveries.fi-resource-edit-record-page {
+        padding-right: 250px;
+    }
+
+    .mg-rq-rail {
+        position: fixed;
+        z-index: 15;
+        top: 96px;
+        right: 24px;
+        width: 226px;
+        flex-direction: column;
+        overflow: visible;
+        padding: 14px;
+        border-radius: 24px;
+        background: color-mix(in srgb, var(--mg-surface) 72%, transparent);
+        box-shadow: 0 0 0 1px var(--mg-border), 0 24px 50px -24px rgba(2, 6, 23, .5);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+    }
+
+    .mg-rq-rail::before {
+        content: "أقسام الطلب";
+        padding: 0 6px 6px;
+        font-size: 11.5px;
+        font-weight: 800;
+        color: var(--mg-muted);
+    }
+
+    .mg-rq-step { box-shadow: none; background: transparent; }
+    .mg-rq-step:hover { background: color-mix(in srgb, var(--h) 8%, transparent); box-shadow: none; transform: translateX(-3px); }
+    .mg-rq-step.on { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--h) 70%, transparent); }
+}
+
+@media (max-width: 640px) {
+    .mg-rq-hero {
+        grid-template-columns: 1fr;
+        padding: 20px 18px 18px;
+        border-radius: 22px;
+    }
+
+    .mg-rq-meter {
+        position: absolute !important;
+        top: 14px;
+        left: 12px;
+        width: 74px;
+        height: 74px;
+    }
+
+    .mg-rq-meter circle { stroke-width: 11; }
+    .mg-rq-meter strong { font-size: 16px; }
+    .mg-rq-meter span { display: none; }
+
+    .mg-rq-who { padding-left: 76px; gap: 12px; }
+    .mg-rq-avatar { width: 56px; height: 56px; border-radius: 18px; }
+    .mg-rq-avatar span { font-size: 24px; }
+    .mg-rq-id h2 { font-size: 21px; white-space: normal; }
+    .mg-rq-ghost { font-size: 100px; bottom: -24px; }
+    .mg-rq-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .mg-rq-chip { padding: 9px 10px; }
+    .mg-rq-chip em { width: 30px; height: 30px; font-size: 15px; }
+}
+
+@keyframes mg-rq-float { 50% { transform: translateY(-10px) rotate(-3deg); } }
+@keyframes mg-rq-drift { 50% { transform: translate(-60px, 30px) scale(1.2); } }
+@keyframes mg-rq-bob { 50% { transform: rotate(-2deg) translateY(-4px); } }
+@keyframes mg-rq-ping {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--st) 70%, transparent); }
+    80%, 100% { box-shadow: 0 0 0 9px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mg-rq *, .mg-rq-hero { animation: none !important; }
+}
+
+/* the title reads right to left with its number (تعديل طلب #6198) */
+.fi-resource-deliveries .fi-header-heading { unicode-bidi: plaintext; }

@@ -94,6 +94,18 @@ class AdminPanelProvider extends PanelProvider
                 ? '<style>.fi-sidebar-header .fi-logo{filter:drop-shadow(0 6px 16px rgba(45,212,191,.35))}</style>'
                 : ''
         )
+        // Owner 2026-11-23: a request's edit page opens with its summary card and the sections rail
+        ->renderHook(
+            'panels::page.header-widgets.before',
+            function () {
+                $record = \Livewire\Livewire::current()?->record ?? null;
+
+                return $record instanceof \App\Models\InstallmentRequest
+                    ? view('filament.deliveries.request-hero', ['record' => $record])
+                    : '';
+            },
+            \App\Filament\Resources\DeliveryResource\Pages\EditDelivery::class,
+        )
         ->renderHook(
             'panels::body.end',
             fn () => view('filament.components.form-submit-guard')

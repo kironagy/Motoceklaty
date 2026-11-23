@@ -17,7 +17,8 @@ class EditDelivery extends EditRecord
 
     public function getTitle(): string
     {
-        return 'Edit Installment Request #' . $this->record->id;
+        // the number sits in a left-to-right isolate so it reads "#6198", not "6198#"
+        return 'تعديل طلب ' . "\u{2066}#" . $this->record->id . "\u{2069}";
     }
   protected function getHeaderActions(): array
 {
