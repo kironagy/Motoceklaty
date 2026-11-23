@@ -1,0 +1,328 @@
+/* =====================================================================
+   The request form (owner 2026-11-23): the edit / create page of a delivery request.
+   Each section wears its own soft colour (--h): a tinted card, an icon tile, a light
+   rail on its edge; sections float in one after another, fields glow in that colour
+   when focused, and the save bar floats at the bottom. Light and dark come from the
+   theme tokens (--mg-*). Plain CSS after the theme.
+   ===================================================================== */
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) {
+    --h: #2dd4bf;
+}
+
+/* ---------- one colour per section ---------- */
+.fi-resource-deliveries [id="data.byanat-alntham-oalmkn"] { --h: #38bdf8; } /* the system and machine: sky */
+.fi-resource-deliveries [id="data.ard-alsaar"]            { --h: #f59e0b; } /* the price offer: amber */
+.fi-resource-deliveries [id="data.byanat-alaamyl"]        { --h: #2dd4bf; } /* the customer: teal */
+.fi-resource-deliveries [id="data.alhal-alothyfy"]        { --h: #a78bfa; } /* the job: violet */
+.fi-resource-deliveries [id="data.aanoan-alaaml"]         { --h: #818cf8; } /* the work address: indigo */
+.fi-resource-deliveries [id="data.byanat-aldamn"]         { --h: #fb7185; } /* the guarantor: rose */
+.fi-resource-deliveries [id="data.almlahthat"]            { --h: #34d399; } /* the notes: green */
+.fi-resource-deliveries [id="data.mragaa-altlb"]          { --h: #f472b6; } /* the review: pink */
+
+/* ---------- the page title ---------- */
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-header-heading {
+    background: linear-gradient(100deg, var(--mg-text) 30%, #2dd4bf 65%, #38bdf8);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent !important;
+    animation: mg-rf-rise .7s var(--mg-ease) both;
+}
+
+/* ---------- section cards ---------- */
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section:not(.fi-section-not-contained) {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border: 0 !important;
+    border-radius: 22px !important;
+    background:
+        radial-gradient(70% 120px at 100% 0%, color-mix(in srgb, var(--h) 16%, transparent), transparent 70%),
+        radial-gradient(50% 160px at 0% 100%, color-mix(in srgb, var(--h) 7%, transparent), transparent 70%),
+        var(--mg-surface) !important;
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--h) 22%, var(--mg-border)),
+        0 18px 40px -26px color-mix(in srgb, var(--h) 55%, transparent) !important;
+    animation: mg-rf-in .8s var(--mg-ease) both;
+    transition: box-shadow .4s var(--mg-ease), transform .4s var(--mg-ease);
+}
+
+/* sections float in one after another */
+.fi-resource-deliveries .fi-fo-component-ctn > :nth-child(1) .fi-section { animation-delay: 40ms; }
+.fi-resource-deliveries .fi-fo-component-ctn > :nth-child(2) .fi-section { animation-delay: 120ms; }
+.fi-resource-deliveries .fi-fo-component-ctn > :nth-child(3) .fi-section { animation-delay: 200ms; }
+.fi-resource-deliveries .fi-fo-component-ctn > :nth-child(4) .fi-section { animation-delay: 280ms; }
+.fi-resource-deliveries .fi-fo-component-ctn > :nth-child(5) .fi-section { animation-delay: 360ms; }
+.fi-resource-deliveries .fi-fo-component-ctn > :nth-child(n + 6) .fi-section { animation-delay: 440ms; }
+
+/* a light rail down the Arabic edge, brighter while the section is being filled */
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section:not(.fi-section-not-contained)::before {
+    content: "";
+    position: absolute;
+    z-index: 2;
+    top: 18px;
+    bottom: 18px;
+    right: 0;
+    width: 4px;
+    border-radius: 4px 0 0 4px;
+    background: linear-gradient(180deg, var(--h), color-mix(in srgb, var(--h) 20%, transparent));
+    opacity: .7;
+    transition: opacity .3s, box-shadow .3s;
+    pointer-events: none;
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section:not(.fi-section-not-contained):focus-within {
+    box-shadow:
+        0 0 0 1.5px color-mix(in srgb, var(--h) 55%, transparent),
+        0 24px 50px -24px color-mix(in srgb, var(--h) 70%, transparent) !important;
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section:not(.fi-section-not-contained):focus-within::before {
+    opacity: 1;
+    box-shadow: 0 0 14px var(--h);
+}
+
+/* a section nested in another (the work address) is a lighter card inside */
+.fi-resource-deliveries .fi-section .fi-section:not(.fi-section-not-contained) {
+    border-radius: 18px !important;
+    background:
+        radial-gradient(60% 100px at 100% 0%, color-mix(in srgb, var(--h) 12%, transparent), transparent 70%),
+        color-mix(in srgb, var(--mg-surface-2) 70%, transparent) !important;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--h) 18%, var(--mg-border)) !important;
+    animation: none;
+}
+
+/* ---------- section header: a tinted icon tile and a fading line ---------- */
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section-header {
+    position: relative;
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section-header::after {
+    content: "";
+    position: absolute;
+    left: 24px;
+    right: 24px;
+    bottom: 0;
+    height: 1px;
+    background: linear-gradient(270deg, color-mix(in srgb, var(--h) 55%, transparent), transparent 75%);
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section:not(.fi-collapsed) > .fi-section-header::after {
+    opacity: 1;
+}
+
+.fi-resource-deliveries .fi-section.fi-collapsed > .fi-section-header::after {
+    opacity: 0;
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section-header-icon {
+    box-sizing: content-box;
+    width: 20px !important;
+    height: 20px !important;
+    padding: 9px;
+    border-radius: 13px;
+    color: #fff !important;
+    background: linear-gradient(135deg, var(--h), color-mix(in srgb, var(--h) 55%, #0f172a));
+    box-shadow: 0 8px 18px -8px var(--h), inset 0 1px 0 rgba(255, 255, 255, .3);
+    transition: transform .4s var(--mg-ease);
+}
+
+.fi-resource-deliveries .fi-section-header:hover .fi-section-header-icon {
+    transform: rotate(-8deg) scale(1.08);
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section-header-heading {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0;
+}
+
+/* the collapse arrow turns in the section's colour */
+.fi-resource-deliveries .fi-section-header .fi-icon-btn {
+    color: var(--h) !important;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--h) 10%, transparent);
+}
+
+/* ---------- labels ---------- */
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-fo-field-wrp-label > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--mg-text-2);
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-fo-field-wrp-label > span::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 2px;
+    transform: rotate(45deg);
+    background: color-mix(in srgb, var(--h) 75%, transparent);
+}
+
+/* the required star in the section's colour */
+.fi-resource-deliveries .fi-fo-field-wrp-label sup {
+    color: var(--h) !important;
+}
+
+/* ---------- fields ---------- */
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-input-wrp {
+    border-radius: 13px !important;
+    background: color-mix(in srgb, var(--h) 4%, var(--mg-surface-2)) !important;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--h) 14%, var(--mg-border)) !important;
+    transition: box-shadow .25s var(--mg-ease), background .25s, transform .25s var(--mg-ease);
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-input-wrp:hover {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--h) 35%, var(--mg-border)) !important;
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-input-wrp:focus-within {
+    background: var(--mg-surface) !important;
+    box-shadow:
+        0 0 0 1.5px var(--h),
+        0 0 0 5px color-mix(in srgb, var(--h) 16%, transparent),
+        0 10px 24px -14px var(--h) !important;
+    transform: translateY(-1px);
+}
+
+/* a field with an error keeps its red */
+.fi-resource-deliveries .fi-input-wrp.ring-danger-600,
+.fi-resource-deliveries .fi-input-wrp.ring-danger-500 {
+    box-shadow: 0 0 0 1.5px #ef4444 !important;
+}
+
+/* textareas */
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) textarea {
+    line-height: 1.8;
+}
+
+/* ---------- toggles in the section's colour ---------- */
+.fi-resource-deliveries .fi-fo-toggle[aria-checked="true"] {
+    background: linear-gradient(135deg, var(--h), color-mix(in srgb, var(--h) 60%, #0f172a)) !important;
+    box-shadow: 0 0 12px -2px var(--h);
+}
+
+/* ---------- file uploads: a soft dashed drop area ---------- */
+.fi-resource-deliveries .filepond--root {
+    margin-bottom: 0;
+}
+
+.fi-resource-deliveries .filepond--panel-root {
+    border-radius: 16px !important;
+    background: color-mix(in srgb, var(--h) 6%, var(--mg-surface-2)) !important;
+    border: 1.5px dashed color-mix(in srgb, var(--h) 45%, transparent) !important;
+    transition: background .3s, border-color .3s;
+}
+
+.fi-resource-deliveries .filepond--root:hover .filepond--panel-root {
+    background: color-mix(in srgb, var(--h) 11%, var(--mg-surface-2)) !important;
+    border-color: var(--h) !important;
+}
+
+.fi-resource-deliveries .filepond--drop-label {
+    color: var(--mg-muted) !important;
+}
+
+.fi-resource-deliveries .filepond--label-action {
+    color: var(--h) !important;
+    text-decoration-color: color-mix(in srgb, var(--h) 50%, transparent) !important;
+    font-weight: 800;
+}
+
+.fi-resource-deliveries .filepond--item-panel {
+    border-radius: 14px !important;
+}
+
+/* ---------- photos (the ID card, receipts): rounded, they lift on hover ---------- */
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section-content img:not(.fi-avatar) {
+    border-radius: 16px;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--h) 25%, transparent), 0 14px 30px -18px rgba(0, 0, 0, .55);
+    transition: transform .4s var(--mg-ease), box-shadow .4s var(--mg-ease);
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section-content img:not(.fi-avatar):hover {
+    transform: translateY(-4px) scale(1.01);
+    box-shadow: 0 0 0 1.5px var(--h), 0 22px 40px -18px color-mix(in srgb, var(--h) 60%, transparent);
+}
+
+/* ---------- buttons inside the form pick up the section's colour ---------- */
+.fi-resource-deliveries .fi-section-content .fi-btn {
+    border-radius: 12px;
+    transition: transform .25s var(--mg-ease), box-shadow .25s;
+}
+
+.fi-resource-deliveries .fi-section-content .fi-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px -12px var(--h);
+}
+
+/* ---------- the save bar floats at the bottom ---------- */
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-form-actions {
+    position: sticky;
+    bottom: 14px;
+    z-index: 20;
+    padding: 12px 14px;
+    border-radius: 20px;
+    background: color-mix(in srgb, var(--mg-surface) 78%, transparent);
+    box-shadow: 0 0 0 1px var(--mg-border), 0 20px 44px -18px rgba(2, 6, 23, .45);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    animation: mg-rf-rise .7s var(--mg-ease) .5s both;
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-form-actions .fi-btn {
+    border-radius: 14px;
+    padding-inline: 18px;
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-form-actions .fi-btn.fi-color-primary {
+    background: linear-gradient(120deg, #14b8a6, #38bdf8) !important;
+    box-shadow: 0 10px 24px -10px rgba(45, 212, 191, .8);
+    transition: transform .25s var(--mg-ease), box-shadow .25s, filter .25s;
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-form-actions .fi-btn.fi-color-primary:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.08);
+    box-shadow: 0 14px 30px -10px rgba(45, 212, 191, .9);
+}
+
+/* ---------- motion ---------- */
+@keyframes mg-rf-in {
+    from { opacity: 0; transform: translateY(26px) scale(.985); filter: blur(4px); }
+    to { opacity: 1; transform: none; filter: none; }
+}
+
+@keyframes mg-rf-rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 640px) {
+    .fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section:not(.fi-section-not-contained) {
+        border-radius: 18px !important;
+    }
+
+    .fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-form-actions {
+        bottom: 8px;
+        border-radius: 16px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fi-resource-deliveries .fi-section,
+    .fi-resource-deliveries .fi-header-heading,
+    .fi-resource-deliveries .fi-form-actions {
+        animation: none !important;
+    }
+
+    .fi-resource-deliveries .fi-input-wrp:focus-within,
+    .fi-resource-deliveries .fi-section-content img:hover {
+        transform: none !important;
+    }
+}
