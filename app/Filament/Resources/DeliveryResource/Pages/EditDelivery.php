@@ -141,6 +141,9 @@ class EditDelivery extends EditRecord
             $fixed[] = 'الرقم القومي';
         }
 
+        // Owner 2026-11-23: a reason saved as parts ({"aman": ...}, {"customer": ...}) showed "[object Object]"
+        $data['checks_report'] = DeliveryResource::reasonText($data['checks_report'] ?? null);
+
         if ($fixed !== []) {
             \Filament\Notifications\Notification::make()
                 ->title('تم تصحيح صيغة: ' . implode(' + ', $fixed))
@@ -371,7 +374,8 @@ class EditDelivery extends EditRecord
         $newReason = $new['checks_report'] ?? $this->record->checks_report;
 
         $statusChanged = $clean($old['status'] ?? null) !== $clean($newStatus);
-        $reasonChanged = $clean($old['checks_report'] ?? null) !== $clean($newReason);
+        // compared as the text the form shows, so a reason saved as parts isn't "changed" by every save
+        $reasonChanged = $clean(DeliveryResource::reasonText($old['checks_report'] ?? null)) !== $clean(DeliveryResource::reasonText($newReason));
 
         if ($statusChanged) {
             $changes[] = 'حالة الطلب';

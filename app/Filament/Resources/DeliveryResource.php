@@ -1995,6 +1995,27 @@ Forms\Components\Section::make('الملاحظات')
         ]);
     }
 
+    /**
+     * The request's reason (checks_report) as the text staff read: the extension and the bot save it
+     * as parts ({"aman": "...", "customer": "..."}), staff save plain text.
+     */
+    public static function reasonText(mixed $value): ?string
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            $value = json_last_error() === JSON_ERROR_NONE && (is_array($decoded) || is_string($decoded)) ? $decoded : $value;
+        }
+
+        if (is_array($value)) {
+            $value = implode("\n", array_filter(array_map(
+                fn ($part) => is_scalar($part) ? trim((string) $part) : static::reasonText($part),
+                $value,
+            ), fn ($part) => filled($part)));
+        }
+
+        return filled($value) ? (string) $value : null;
+    }
+
     // ✅ جدول العرض
     public const STATUS_LABELS = [
         'new' => 'انتظار',
