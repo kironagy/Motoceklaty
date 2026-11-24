@@ -187,7 +187,25 @@
         0 0 0 1.5px var(--h),
         0 0 0 5px color-mix(in srgb, var(--h) 16%, transparent),
         0 10px 24px -14px var(--h) !important;
-    transform: translateY(-1px);
+}
+
+/* Owner 2026-11-24: an open list (a searchable select) sat under the fields after it - their
+   labels and icons showed through it and nothing could be tapped. The focused field no longer
+   lifts (its transform trapped the list), and the field and section with an open list come to the
+   front; the section stops clipping it at its bottom edge. */
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-section:not(.fi-section-not-contained):has(.choices.is-open) {
+    overflow: visible;
+    z-index: 30;
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .fi-fo-field-wrp:has(.choices.is-open) {
+    position: relative;
+    z-index: 40;
+}
+
+.fi-resource-deliveries:is(.fi-resource-edit-record-page, .fi-resource-create-record-page) .choices__list--dropdown {
+    z-index: 50 !important;
+    background: var(--mg-surface) !important;
 }
 
 /* a field with an error keeps its red */
