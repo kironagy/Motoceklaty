@@ -38,8 +38,25 @@
             form.dispatchEvent(new CustomEvent('form-processing-finished'))
         }, true)
 
+        // Owner 2026-11-24: the errors notice used to go out on every live update of the form (a
+        // select, a typed field) while an error was still on it, so they piled up over the page and
+        // blocked it. Now: only when the form is saved, and one at a time (the old one closes).
+        let lastNoticeId = null
+        const notifyOnce = (title, body) => {
+            if (lastNoticeId) window.dispatchEvent(new CustomEvent('close-notification', { detail: { id: lastNoticeId } }))
+            if (! window.FilamentNotification) return notify(title, body)
+            // (the JS Notification's id() replaces itself with the value, so its own uuid is read instead)
+            const notice = new window.FilamentNotification()
+            lastNoticeId = notice.id
+            notice.title(title).body(body || '').warning().duration(6000).send()
+        }
+
         document.addEventListener('livewire:init', () => {
-            window.Livewire.hook('commit', ({ succeed }) => {
+            window.Livewire.hook('commit', ({ commit, succeed }) => {
+                const saving = (commit?.calls || []).some((c) => /^(save|create|createAnother)$/.test(c.method))
+
+                if (! saving) return
+
                 succeed(() => setTimeout(() => {
                     const errors = [...document.querySelectorAll('.fi-form [data-validation-error]')]
 
@@ -48,7 +65,7 @@
                     const labels = errors.map((e) => e.closest('[data-field-wrapper]')?.querySelector('label')?.innerText?.replace('*', '').trim())
                         .filter(Boolean)
 
-                    notify('الطلب ما اتسجلش - فيه بيانات ناقصة أو غلط', [...new Set(labels)].slice(0, 6).join('، '))
+                    notifyOnce('الطلب ما اتسجلش - فيه بيانات ناقصة أو غلط', [...new Set(labels)].slice(0, 6).join('، '))
                 }, 150))
             })
         })
