@@ -70,6 +70,9 @@ return [
     'tokens' => ['default_chars_per_token' => (float) env('AGENT_DEFAULT_CHARS_PER_TOKEN', 4.0)],
 
     'turns' => [
+        // Owner 2026-11-24: a turn whose customer messages are all older than this is never sent
+        // (a number back after days drained week-old turns). 0 turns the check off.
+        'max_reply_age_hours' => env('AGENT_TURNS_MAX_REPLY_AGE_HOURS', 24),
         'debounce_seconds' => env('AGENT_TURNS_DEBOUNCE_SECONDS', 3),
         'media_debounce_seconds' => env('AGENT_TURNS_MEDIA_DEBOUNCE_SECONDS', 5),
         'max_wait_seconds' => env('AGENT_TURNS_MAX_WAIT_SECONDS', 15),

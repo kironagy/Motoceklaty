@@ -151,10 +151,13 @@ class ReplyGuard
         // bot agreed - "أنا لخبطتك... وده غلط... آسف على اللخبطة" - though 4,840 was right (the rate is on
         // the installment price, tax and services included). Tool numbers are never disowned.
         if (self::disownsNumbers($replyText)) {
+            // Owner 2026-11-24: "the rate is on the installment price, not the cash price" is said only
+            // to a customer who is angry or asks about the difference again - not on the first question.
             $this->detail = 'The numbers came from get_installment_offer and are correct - never say they were wrong, never apologise for them. '
-                .'Explain calmly why his own sum differs: the rate is worked on the installment price, not the cash price; the installment price '
-                .'includes tax and services. '.(string) config('agent.installments.price_difference_explanation')
-                .' Do not say the installment price itself. Then repeat his monthly payment and admin fee from the tool.';
+                .'Tell him calmly these are the finance company\'s numbers for his model and duration, then repeat his monthly payment, deposit and admin fee from the tool. '
+                .'Only if he is angry or is asking about the difference again: explain in your words that the difference is the cost of the financing services. '
+                .(string) config('agent.installments.price_difference_explanation')
+                .' Do not say the installment price itself.';
             return 'NUMBERS_DISOWNED';
         }
         if (preg_match('/قسط|تقسيط|مقدم|مصاريف/u',$replyText)
@@ -1851,6 +1854,12 @@ class ReplyGuard
         }
 
         if (preg_match('/(?<!\p{L})(?:ال)?(?:أداة|اداة|أدوات|ادوات|سيستم|ذاكر[ةه] العميل|برومبت|التعليمات اللي (?:ماشي|ماشيين|ماشيه|بمشي|بنمشي|بشتغل|بنشتغل)\S*)(?!\p{L})/u', $replyText)) {
+            return true;
+        }
+
+        // Owner 2026-11-24 (conversation 11605): a lone "،" got "تمام يا باشا، ابعتلي رسالة العميل وأنا
+        // أرد عليه من غير ما أذكر أي ملاحظات داخلية" - the bot talked to the customer as if to the staff.
+        if (preg_match('/(?<!\p{L})(?:رسال[ةه]|رسايل|كلام|رد) (?:ال)?عميل(?!\p{L})|ملاحظات داخلي|(?:ا|أ)رد علي(?:ه|ها) (?:من غير|بدون)/u', $replyText)) {
             return true;
         }
 

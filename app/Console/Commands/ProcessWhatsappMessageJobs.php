@@ -85,6 +85,10 @@ class ProcessWhatsappMessageJobs extends Command
                 continue;
             }
 
+            if ($this->skipIfTooOld($job)) {
+                continue;
+            }
+
             if ($job->status !== 'generated' && ($this->supersedeIfStale($job) || $this->deferForTranscription($job))) {
                 continue;
             }
@@ -279,6 +283,41 @@ class ProcessWhatsappMessageJobs extends Command
      * the customer had already switched to cash and been answered. Its
      * messages are already in the newer turn's history.
      */
+    /**
+     * Owner 2026-11-24: bot 93's turns queued on 18 Nov (answer_waiting) kept being retried while
+     * the number was down and went out on the 24th - a week late: a lone "،" got "ابعتلي رسالة
+     * العميل وأنا أرد عليه" and an old ad complaint got answered out of nowhere (458 such replies
+     * in a day). The 24-hour rule was checked only when a turn was queued. Now it is checked again
+     * right before a turn runs or is sent: a customer whose newest message in it is older than
+     * agent.turns.max_reply_age_hours (24) is not answered by the bot at all.
+     */
+    private function skipIfTooOld(object $job): bool
+    {
+        $hours = (int) config('agent.turns.max_reply_age_hours', 24);
+        if ($hours <= 0 || ! $job->whatsapp_conversation_id) {
+            return false;
+        }
+
+        // only turns that answer customer messages - reminders and dashboard sends have none
+        $newest = DB::table('whatsapp_messages')->where('turn_id', $job->id)
+            ->where('direction', 'incoming')->where('sender_type', 'customer')->max('created_at');
+
+        if ($newest === null || \Illuminate\Support\Carbon::parse($newest)->gt(now()->subHours($hours))) {
+            return false;
+        }
+
+        DB::table('whatsapp_message_jobs')->where('id', $job->id)->update([
+            'status' => 'skipped',
+            'locked_at' => null,
+            'error' => 'TOO_OLD_TO_ANSWER',
+            'updated_at' => now(),
+        ]);
+
+        $this->line(sprintf('[%s] Skipped job #%d: his last message (%s) is older than %d hours', now()->toDateTimeString(), $job->id, $newest, $hours));
+
+        return true;
+    }
+
     private function supersedeIfStale(object $job): bool
     {
         if ((int) $job->attempts <= 1 || ! $job->whatsapp_conversation_id) {
