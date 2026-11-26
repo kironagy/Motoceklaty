@@ -22,7 +22,7 @@ class AsfooraAgent
     private const TOKEN_BUDGET = 120000;
 
     /** an answer still "thinking" after this long has failed (the process making it died) */
-    public const PENDING_MINUTES = 6;
+    public const PENDING_MINUTES = 15;
 
     public function __construct(private readonly AiProvider $ai)
     {
@@ -53,7 +53,8 @@ class AsfooraAgent
 
     public function run(int $answerId): AsfooraMessage
     {
-        @set_time_limit(300);
+        // a sort of hundreds of requests is several AI calls - minutes, in the background
+        @set_time_limit(900);
         $answer = AsfooraMessage::findOrFail($answerId);
 
         if (! ($answer->meta['pending'] ?? false)) {

@@ -360,31 +360,43 @@ class AsfooraTools
         $system = "إنت بتفرز طلبات تقسيط موتوسيكلات (جهة التمويل أمان) لصاحب المعرض. لكل طلب اختار مجموعة واحدة بالظبط من دول حسب قاعدتها:\n"
             .collect($groups)->map(fn ($g) => "- {$g['title']}: {$g['rule']}")->implode("\n")
             .($memories !== '' ? "\nقواعد صاحب المعرض الثابتة:\n- ".$memories : '')
-            ."\nلكل طلب: id، والمجموعة باسمها بالظبط، وملاحظة قصيرة (أقل من 12 كلمة) بالعامية بتقول ليه. ما تسيبش ولا طلب.";
+            ."\nلكل سطر: k، والمجموعة باسمها بالظبط، وملاحظة قصيرة (أقل من 10 كلمات) بالعامية بتقول ليه. ما تسيبش ولا سطر. رد JSON بس.";
         $ai = app(\App\Agent\Providers\AiProvider::class);
         $labels = [];
 
-        foreach (array_chunk($rows, 60) as $batch) {
-            $lines = implode("\n", array_map(fn ($r) => $r['id'].' | '.$r['status'].' | أمان: '.mb_substr((string) ($r['aman_reason'] ?? 'مفيش رد مكتوب'), 0, 200)
-                .' | الموظف: '.mb_substr((string) ($r['staff_note'] ?? '-'), 0, 160), $batch));
+        // Live 2026-11-26: 477 rejected requests in batches of 60 - every call ran past 30 s and was cut.
+        // Most share their words («لديه طلب مرفوض من قبل»، «وظيفه مرفوضه»): each different reason is
+        // sorted once (40 to a call) and its group goes to every request that has it.
+        $keyOf = fn ($r) => preg_replace('/[^\p{L}\p{N}]+/u', '', mb_substr((string) ($r['aman_reason'] ?? ''), 0, 200).'|'.mb_substr((string) ($r['staff_note'] ?? ''), 0, 160));
+        $reasons = [];
+        foreach ($rows as $r) {
+            $reasons[$keyOf($r)] ??= ['status' => $r['status'], 'aman' => mb_substr((string) ($r['aman_reason'] ?? 'مفيش رد مكتوب'), 0, 200), 'staff' => mb_substr((string) ($r['staff_note'] ?? '-'), 0, 160)];
+        }
+        $keys = array_keys($reasons);
+
+        foreach (array_chunk($keys, 40) as $chunk) {
+            $lines = implode("\n", array_map(fn ($k) => array_search($k, $keys, true).' | '.$reasons[$k]['status'].' | أمان: '.$reasons[$k]['aman'].' | الموظف: '.$reasons[$k]['staff'], $chunk));
             try {
                 $response = $ai->chat(new \App\Agent\Providers\AiRequest(
                     purpose: 'asfoora', label: 'asfoora-sort', system: $system,
-                    contents: [['role' => 'user', 'parts' => [['type' => 'text', 'text' => $lines]]]],
-                    toolMode: 'none', temperature: 0.0, maxOutputTokens: 6000, thinkingLevel: 'low', timeoutSeconds: 90,
+                    contents: [['role' => 'user', 'parts' => [['type' => 'text', 'text' => "كل سطر رقمه (k) وبعده سبب أمان وملاحظة الموظف:\n".$lines]]]],
+                    toolMode: 'none', temperature: 0.0, maxOutputTokens: 4000, thinkingLevel: 'low', timeoutSeconds: 120,
                     responseSchema: ['type' => 'object', 'properties' => ['items' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => [
-                        'id' => ['type' => 'integer'], 'group' => ['type' => 'string', 'enum' => $titles], 'note' => ['type' => 'string'],
-                    ], 'required' => ['id', 'group', 'note']]]], 'required' => ['items']],
+                        'k' => ['type' => 'integer'], 'group' => ['type' => 'string', 'enum' => $titles], 'note' => ['type' => 'string'],
+                    ], 'required' => ['k', 'group', 'note']]]], 'required' => ['items']],
                 ));
-                foreach ((array) (json_decode(trim(implode('', $response->textParts)), true)['items'] ?? []) as $item) {
-                    if (in_array($item['group'] ?? null, $titles, true)) {
-                        $labels[(int) $item['id']] = ['group' => $item['group'], 'note' => (string) ($item['note'] ?? '')];
+                $text = trim(preg_replace('/^```(?:json)?|```$/m', '', implode('', $response->textParts)));
+                foreach ((array) (json_decode($text, true)['items'] ?? []) as $item) {
+                    $key = $keys[(int) ($item['k'] ?? -1)] ?? null;
+                    if ($key !== null && in_array($item['group'] ?? null, $titles, true)) {
+                        $labels[$key] = ['group' => $item['group'], 'note' => (string) ($item['note'] ?? '')];
                     }
                 }
             } catch (\Throwable $e) {
                 report($e);
             }
         }
+        $labels = collect($rows)->mapWithKeys(fn ($r) => [(int) $r['id'] => $labels[$keyOf($r)] ?? null])->filter()->all();
 
         // a request no batch labelled is never silently dropped
         $sorted = ['groups' => array_map(fn ($t) => ['title' => $t, 'ids' => [], 'notes' => []], $titles), 'highlight' => (array) ($args['highlight'] ?? [])];

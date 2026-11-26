@@ -383,16 +383,21 @@ class AsfooraTest extends TestCase
     public function test_many_requests_are_sorted_in_batches_by_a_separate_call(): void
     {
         $owner = $this->staff(['is_hitler' => true]);
-        $this->requests(3, 'rejected', $owner->id);
+        $this->requests(4, 'rejected', $owner->id);
         $ids = DB::table('installment_requests')->orderBy('id')->pluck('id')->all();
+        // two requests share Aman's words: that reason is sorted once, for both
+        foreach (['سكور وحش', 'سكور وحش', 'ناقص مفردات', 'كلام مش واضح'] as $i => $why) {
+            DB::table('installment_requests')->where('id', $ids[$i])->update(['checks_report' => json_encode(['aman' => $why], JSON_UNESCAPED_UNICODE)]);
+        }
         $fake = new FakeAiProvider();
-        // the batch call labels two of the three; the third is never dropped
-        $fake->queue(new AiResponse([json_encode(['items' => [['id' => $ids[0], 'group' => 'ميت', 'note' => 'سكور'], ['id' => $ids[1], 'group' => 'ينفع', 'note' => 'ورق ناقص']]])], [], 'STOP', [], 'bormaa:test', null, 1));
+        // three different reasons (newest first: كلام / ناقص / سكور); the third is left unlabelled and never dropped
+        $fake->queue(new AiResponse(["```json\n".json_encode(['items' => [['k' => 2, 'group' => 'ميت', 'note' => 'سكور'], ['k' => 1, 'group' => 'ينفع', 'note' => 'ورق ناقص']]])."\n```"], [], 'STOP', [], 'bormaa:test', null, 1));
         $this->app->instance(AiProvider::class, $fake);
 
         $r = \App\Domain\Asfoora\AsfooraTools::call('sort_requests', ['statuses' => ['rejected'], 'groups' => [['title' => 'ميت', 'rule' => 'سكور'], ['title' => 'ينفع', 'rule' => 'ورق']]]);
-        $this->assertSame(3, $r['total']);
-        $this->assertSame(['ميت' => 1, 'ينفع' => 1, 'محتاج مراجعة' => 1], array_column($r['files'], 'count', 'title'));
+        $this->assertSame(4, $r['total']);
+        $this->assertCount(1, $fake->requests(), 'one call for three different reasons');
+        $this->assertSame(['ميت' => 2, 'ينفع' => 1, 'محتاج مراجعة' => 1], array_column($r['files'], 'count', 'title'));
         $this->assertStringContainsString('ورق ناقص', json_encode($r['_tables'], JSON_UNESCAPED_UNICODE));
     }
 

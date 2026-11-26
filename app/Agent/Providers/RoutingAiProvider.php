@@ -69,13 +69,19 @@ class RoutingAiProvider implements AiProvider
         // One budget for the whole call, across keys and models.
         // a document photo gets a longer budget: its reader and one fallback both get a real try
         $deadline = microtime(true) + (int) config('agent.provider_budget_seconds', 45) * ($request->purpose === 'document' ? 1.5 : 1);
+        // Live 2026-11-26: «عصفورة» works in the background (no customer waiting) and a sorting batch
+        // took over 30 s - every one was cut at 14 s / 30 s. Her calls get the time they ask for.
+        $slow = $request->purpose === 'asfoora';
+        if ($slow) {
+            $deadline = microtime(true) + max(45, $request->timeoutSeconds) * 2;
+        }
         $firstGemini = null;
 
         foreach ($models as $index => $model) {
             // Real-customer run 2026-10-07: a clear tax card failed because the first model hung for the whole
             // 45s budget and the next one never got its turn. While another model is left, one that has not
             // answered in primary_timeout_seconds (documents: twice that - a photo takes longer) is given up on.
-            $cap = (int) config('agent.primary_timeout_seconds', 15) * ($request->purpose === 'document' ? 2 : 1);
+            $cap = $slow ? max(45, $request->timeoutSeconds) : (int) config('agent.primary_timeout_seconds', 15) * ($request->purpose === 'document' ? 2 : 1);
             $modelDeadline = $index < count($models) - 1 ? min($deadline, microtime(true) + $cap) : $deadline;
 
             try {
