@@ -51,7 +51,8 @@ class CustomerRequestStatus
 
     private function describe(InstallmentRequest $request): array
     {
-        $status = (string) $request->status;
+        // Owner 2026-11-26: the bot's own «متوقف» is our check, not something he is missing.
+        $status = $request->isBotIntakeHold() ? 'new_request' : (string) $request->status;
         [$label] = self::STATUS[$status] ?? ['تحت المراجعة', null];
         $reason = $this->reason($request->checks_report);
 

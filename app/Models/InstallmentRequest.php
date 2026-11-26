@@ -37,6 +37,7 @@ class InstallmentRequest extends Model
  
  
   protected $fillable = [
+    'bot_hold_at',
     'application_id',
     'form_link_id',
     'request_type',
@@ -151,6 +152,7 @@ class InstallmentRequest extends Model
         'place_video' => 'array',
         'status_updated_at' => 'datetime',
         'status_updated_by' => 'integer',
+        'bot_hold_at' => 'datetime',
 
     ];
 
@@ -257,6 +259,14 @@ protected static function booted()
             $model->staff_assigned_at = now();
         }
 
+        // Owner 2026-11-26: a bot request's first «متوقف» ends with any status change, or when staff
+        // write a reason (or what the customer must send) on it - that is a real pause (see the observer).
+        if ($model->isBotIntakeHold() && ($model->isDirty('status')
+            || filled($model->checks_report) && $model->isDirty('checks_report')
+            || filled($model->customer_action) && $model->isDirty('customer_action'))) {
+            $model->bot_hold_at = null;
+        }
+
         // لو الحالة اتغيرت فقط
         if ($model->isDirty('status')) {
             $model->status_updated_at = now();
@@ -317,6 +327,17 @@ public const PARKING_ACCOUNTS = [
     'rejected' => ['reject@motogate.com', 0],
     'approved' => ['accept@motogate.com', 48],
 ];
+
+/**
+ * Owner 2026-11-26: a new bot request starts «متوقف» (bot_hold_at) until an employee checks it.
+ * Any employee may make it «طلب جديد»; the parking job leaves it and the customer hears
+ * «وصل وفي انتظار المراجعة».
+ */
+public function isBotIntakeHold(): bool
+{
+    return $this->getOriginal('status', $this->status) === 'paused'
+        && $this->getOriginal('bot_hold_at', $this->bot_hold_at) !== null;
+}
 
 public static function parkingStaffId(string $status): ?int
 {

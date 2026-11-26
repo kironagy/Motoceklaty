@@ -141,7 +141,10 @@ class SubmissionService
                     'months' => $application->installmentPlan->months,
                     'machine_installment_price' => $application->machine->installment_price,
                     'deposit' => $application->down_payment,
-                    'status' => 'new_request',
+                    // Owner 2026-11-26: a bot request lands «متوقف» until an employee checks it and
+                    // makes it «طلب جديد» (InstallmentRequest::isBotIntakeHold).
+                    'status' => 'paused',
+                    'bot_hold_at' => now(),
                 ],
             ));
 

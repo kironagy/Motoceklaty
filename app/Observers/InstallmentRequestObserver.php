@@ -19,7 +19,11 @@ class InstallmentRequestObserver
 
     public function updated(InstallmentRequest $model): void
     {
-        $statusChanged = $model->wasChanged('status');
+        // Owner 2026-11-26: a bot request lands «متوقف» quietly; the first reason staff write on it
+        // is the pause the customer hears about, and his answer brings it back to «طلب جديد».
+        $intakePause = ! $model->wasChanged('status') && $model->status === 'paused'
+            && $model->wasChanged('bot_hold_at') && $model->getOriginal('bot_hold_at') !== null;
+        $statusChanged = $model->wasChanged('status') || $intakePause;
         $status = (string) $model->status;
 
         // Staff can also change what they need from the customer on a
@@ -43,7 +47,7 @@ class InstallmentRequestObserver
 
         if ($status === 'paused') {
             try {
-                $decisions->requestFromCustomer($model, $reason, $statusChanged ? (string) $model->getOriginal('status') : null);
+                $decisions->requestFromCustomer($model, $reason, $intakePause ? 'new_request' : ($statusChanged ? (string) $model->getOriginal('status') : null));
             } catch (\Throwable $e) {
                 // Saving the request must never fail because of the bot side.
                 Log::warning('Staff request to customer failed', ['installment_request_id' => $model->id, 'error' => $e->getMessage()]);

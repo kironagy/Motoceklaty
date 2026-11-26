@@ -1940,11 +1940,13 @@ Forms\Components\Section::make('الملاحظات')
                 ->schema(function () {
                     $user = Auth::user();
                     $isAdmin = $user instanceof Staff && $user->is_admin;
+                    // Owner 2026-11-26: a new bot request waits «متوقف»; any employee makes it «طلب جديد» when done.
+                    $release = fn ($record) => ! $isAdmin && (bool) $record?->isBotIntakeHold();
 
                     return [
                         Forms\Components\Select::make('status')
                             ->label('حالة الطلب')
-                            ->options([
+                            ->options(fn ($record) => $release($record) ? ['paused' => 'متوقف', 'new_request' => 'طلب جديد'] : [
                                 'new' => 'انتظار',
                                 'new_request' => 'طلب جديد',
                                 'pending' => 'تحت الاستعلام',
@@ -1960,8 +1962,9 @@ Forms\Components\Section::make('الملاحظات')
                             ])
                             ->default('new_request')
                             ->live()
-                            ->disabled(!$isAdmin)
-                            ->dehydrated($isAdmin),
+                            ->helperText(fn ($record) => $record?->isBotIntakeHold() ? 'طلب بوت جديد: راجعه، ولما يبقى تمام خلّيه «طلب جديد».' : null)
+                            ->disabled(fn ($record) => ! $isAdmin && ! $release($record))
+                            ->dehydrated(fn ($record) => $isAdmin || $release($record)),
 
                         // Paused bot requests: what the customer must do. The
                         // bot messages him and waits for exactly this.

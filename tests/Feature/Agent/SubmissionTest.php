@@ -196,8 +196,23 @@ class SubmissionTest extends TestCase
         $this->assertSame('Mohamed Ali', $ir->applicant_name);
         $this->assertSame('01012345678', $ir->applicant_phone);
         $this->assertSame(12, $ir->months);
-        $this->assertSame('new_request', $ir->status);
+        // Owner 2026-11-26: a bot request waits «متوقف» until an employee checks it.
+        $this->assertSame('paused', $ir->status);
+        $this->assertTrue($ir->isBotIntakeHold());
         $this->assertSame($application->id, $ir->application_id);
+
+        // the customer is not told something is missing, and the parking job leaves it alone
+        $status = app(\App\Domain\Applications\CustomerRequestStatus::class)->for($conversation->customer, $conversation);
+        $this->assertSame('وصل وفي انتظار المراجعة', $status[0]['status'] ?? null);
+        $this->assertArrayNotHasKey('missing', $status[0]);
+        $owner = $ir->staff_id;
+        $this->travel(3)->days();
+        $this->artisan('requests:transfer-expired-paused')->assertSuccessful();
+        $this->assertSame($owner, $ir->refresh()->staff_id);
+
+        // once an employee makes it «طلب جديد» it is an ordinary request
+        $ir->refresh()->update(['status' => 'new_request']);
+        $this->assertFalse($ir->refresh()->isBotIntakeHold());
     }
 
     public function test_submitted_request_lands_in_the_bot_tab_with_all_customer_data(): void

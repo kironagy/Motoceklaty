@@ -28,6 +28,8 @@ class TransferExpiredPausedRequests extends Command
 
             $query = InstallmentRequest::query()
                 ->where('status', $status)
+                // Owner 2026-11-26: a new bot request waiting for its first check stays with its employee
+                ->whereNull('bot_hold_at')
                 ->where(fn ($q) => $q->whereNull('staff_id')->orWhere('staff_id', '!=', $targetId));
 
             if ($hours > 0) {

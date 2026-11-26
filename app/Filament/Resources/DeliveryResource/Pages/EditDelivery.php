@@ -160,6 +160,12 @@ class EditDelivery extends EditRecord
         $user = Auth::user();
         $record = $this->record;
 
+        // Status is the admins' - except a new bot request an employee makes «طلب جديد» (owner 2026-11-26).
+        if (array_key_exists('status', $data) && ! \App\Models\InstallmentRequest::currentActor()?->is_admin
+            && ! ($record->isBotIntakeHold() && $data['status'] === 'new_request')) {
+            $data['status'] = $record->status;
+        }
+
         $singleFileFields = [
             'price_offer_image',
             'applicant_id_image',
@@ -372,6 +378,11 @@ class EditDelivery extends EditRecord
 
         $newStatus = $new['status'] ?? $this->record->status;
         $newReason = $new['checks_report'] ?? $this->record->checks_report;
+
+        // Status is the admins' - except a new bot request an employee makes «طلب جديد» (owner 2026-11-26).
+        if (! \App\Models\InstallmentRequest::currentActor()?->is_admin && ! ($this->record->isBotIntakeHold() && $newStatus === 'new_request')) {
+            $newStatus = $old['status'] ?? $this->record->status;
+        }
 
         $statusChanged = $clean($old['status'] ?? null) !== $clean($newStatus);
         // compared as the text the form shows, so a reason saved as parts isn't "changed" by every save
