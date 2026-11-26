@@ -398,6 +398,11 @@ class AsfooraTest extends TestCase
         $this->assertSame(4, $r['total']);
         $this->assertCount(1, $fake->requests(), 'one call for three different reasons');
         $this->assertSame(['ميت' => 2, 'ينفع' => 1, 'محتاج مراجعة' => 1], array_column($r['files'], 'count', 'title'));
+
+        // her own review group is used, never a second one
+        $fake->queue(new AiResponse([json_encode(['items' => [['k' => 0, 'group' => 'ينفع', 'note' => 'x']]])], [], 'STOP', [], 'bormaa:test', null, 1));
+        $again = \App\Domain\Asfoora\AsfooraTools::call('sort_requests', ['statuses' => ['rejected'], 'groups' => [['title' => 'ينفع', 'rule' => 'ورق'], ['title' => 'مرفوض - محتاج مراجعة', 'rule' => 'مش واضح']]]);
+        $this->assertSame(['ينفع', 'مرفوض - محتاج مراجعة'], array_column($again['files'], 'title'));
         $this->assertStringContainsString('ورق ناقص', json_encode($r['_tables'], JSON_UNESCAPED_UNICODE));
     }
 

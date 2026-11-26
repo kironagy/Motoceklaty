@@ -95,7 +95,7 @@ class AsfooraTools
             ],
             [
                 'name' => 'sort_requests',
-                'description' => 'Sorts MANY requests (any number) into groups by reading each one\'s Aman reason and employee note - e.g. «الميتة» / «ينفع نقاوح فيها» / «محتاج مراجعة». Give the filters and each group with its rule; the requests are read in batches for you and every group becomes its own Excel file with a note on each request. Use it instead of reading the requests yourself when there are more than ~40.',
+                'description' => 'Every request lands in exactly one group, so besides the groups he asked for always add one for the rest (e.g. «باقي المرفوض - رفض عادي») - «محتاج مراجعة» is added for you, only for what is unclear. Sorts MANY requests (any number) into groups by reading each one\'s Aman reason and employee note - e.g. «الميتة» / «ينفع نقاوح فيها» / «محتاج مراجعة». Give the filters and each group with its rule; the requests are read in batches for you and every group becomes its own Excel file with a note on each request. Use it instead of reading the requests yourself when there are more than ~40.',
                 'parameters' => ['type' => 'object', 'properties' => $filters + [
                     'groups' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => [
                         'title' => ['type' => 'string', 'description' => 'The file\'s name, e.g. «المرفوض الميت - نوفمبر».'],
@@ -348,8 +348,9 @@ class AsfooraTools
         if ($groups === []) {
             return ['error' => 'Give at least one group with a title and a rule.'];
         }
-        $review = 'محتاج مراجعة';
+        // her own «… مراجعة» group is the one for the unclear (live: a second one was added next to it)
         $titles = array_column($groups, 'title');
+        $review = collect($titles)->first(fn ($t) => str_contains($t, 'مراجع')) ?? 'محتاج مراجعة';
         if (! in_array($review, $titles, true)) {
             $groups[] = ['title' => $review, 'rule' => 'مش واضح من الكلام المكتوب يروح فين.'];
             $titles[] = $review;
