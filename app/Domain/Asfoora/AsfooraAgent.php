@@ -246,12 +246,23 @@ class AsfooraAgent
             : (isset($result['requests']) ? count($result['requests']) : (isset($result['groups']) ? count($result['groups']) : null));
     }
 
+    /** Owner 2026-11-26: he calls staff by what he calls them («محمود»), the system by their login («hefny», mahmoud@...). */
+    public static function staffDirectory(): string
+    {
+        $parking = array_column(\App\Models\InstallmentRequest::PARKING_ACCOUNTS, 0);
+
+        return \App\Models\Staff::query()->orderBy('id')->get(['id', 'name', 'email'])
+            ->map(fn ($s) => "#{$s->id}: {$s->name} - {$s->email}".(in_array($s->email, $parking, true) ? ' (حساب ركن، مش موظف)' : ''))
+            ->implode("\n        ");
+    }
+
     private function system(): string
     {
         $now = now();
         $statuses = collect(DeliveryResource::STATUS_LABELS)->map(fn ($label, $code) => "{$code} = {$label}")->implode('، ');
         // the week starts on Saturday in Egypt
         $weekStart = $now->copy()->startOfWeek(\Carbon\CarbonInterface::SATURDAY)->toDateString();
+        $staffList = self::staffDirectory();
 
         return <<<TXT
         إنت «عصفورة»، مساعد صاحب معرض موتو جيت (معرض موتوسيكلات بالتقسيط في مصر) جوه السيستم بتاعه. بتجاوب على أسئلته عن اللي حصل في السيستم من بياناته الحقيقية بس.
@@ -307,6 +318,12 @@ class AsfooraAgent
         - activity_log = سجل كل التعديلات: subject_type 'App\\Models\\InstallmentRequest' و subject_id رقم الطلب، causer_id الموظف (staff)، description و properties التفاصيل.
         - whatsapp_conversations / whatsapp_messages = محادثات البوت على الواتساب (direction incoming من العميل / outgoing، sender_type customer/bot/staff). whatsapp_bots = أرقام البوت.
         - staff = الموظفين.
+
+        الموظفين (رقم: الاسم في السيستم - إيميل الدخول):
+        {$staffList}
+        - صاحب المعرض بيقول اسم الموظف زي ما بيناديه، مش زي ما هو متسجل. لو الاسم مش لاقيه، دوّر عليه في القايمة دي بالاسم والإيميل ونطق الاسم بالإنجليزي أو بالعربي (محمود = mahmoud، حفني = hefny). ولو برضه مش لاقيه، استبعد: الأسامي اللي ليها صاحب واضح في القايمة مش هو، واللي فاضل من غير اسم يتطابق معاه (اسم دلع أو اسم عيلة زي «حفني») غالباً هو. لاقيت واحد بس؟ اشتغل عليه على طول وقول في سطر إنك افترضت إنه هو (مثلاً «محمود = hefny، إيميله mahmoud@...»). لاقيت أكتر من واحد؟ اسأله يقصد مين. ما تقولش «مش لاقيه» من غير ما تدور في القايمة.
+        - فلتر staff في الأدوات بياخد رقم الموظف (الأضمن) أو جزء من اسمه أو إيميله.
+        - «حوّلتله طلبات» = سطور activity_log على InstallmentRequest فيها JSON_EXTRACT(properties, '$.attributes.staff_id') = رقمه و '$.old.staff_id' مختلف، و created_at وقت التحويل. «عدّل فيهم كام» = سطور activity_log على نفس الطلبات بعد وقت التحويل و causer_id = رقمه (properties فيها اللي اتغير). ما تطلبش منه أرقام الطلبات، هاتها إنت من السجل.
         - inventory_items = مكن الخزنة، كل سطر مكنة (chassis_number الشاسيه، engine_number الماتور، inventory_id → inventories.warehouse_id → warehouses.name الخزنة، inventories.product_id → machines). sold_at مش فاضي = اتباعت (sold_by الموظف اللي باع). returned_at مش فاضي = البيعة دي اتعمل عليها مرتجع: مش بيعة، ما تحسبهاش. المرتجع بيرجّع نفس المكنة للخزنة كسطر جديد sold_at فاضي (ممكن يفضل عليه اسم العميل القديم، ده مش بيعة). البيعات = sold_at مش فاضي و returned_at فاضي.
         - letters = جوابات البيع (sold_by البايع، inventory_item_id سطر الخزنة). المرتجع بيمسح الجواب.
 

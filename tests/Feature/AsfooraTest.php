@@ -519,6 +519,19 @@ class AsfooraTest extends TestCase
         $this->assertCount(3, $alerts());
     }
 
+    /** Owner 2026-11-26: he says «محمود», the system has «hefny» with mahmoud@gmail.com. */
+    public function test_an_employee_is_found_by_login_email_or_number_and_is_in_her_staff_list(): void
+    {
+        $hefny = $this->staff(['name' => 'hefny', 'email' => 'mahmoud@gmail.com']);
+        $this->requests(3, 'paused', $hefny->id);
+        $this->requests(2, 'paused');
+
+        $byEmail = \App\Domain\Asfoora\AsfooraTools::call('list_requests', ['staff' => 'mahmoud']);
+        $this->assertSame(3, $byEmail['total_matching'] ?? null, json_encode(array_diff_key($byEmail, ['rows' => 1, 'requests' => 1])));
+        $this->assertSame(3, \App\Domain\Asfoora\AsfooraTools::call('list_requests', ['staff' => '#'.$hefny->id])['total_matching'] ?? null);
+        $this->assertStringContainsString("#{$hefny->id}: hefny - mahmoud@gmail.com", \App\Domain\Asfoora\AsfooraAgent::staffDirectory());
+    }
+
     public function test_staff_without_is_hitler_is_refused(): void
     {
         $this->actingAs($this->staff(), 'filament');

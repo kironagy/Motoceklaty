@@ -44,7 +44,7 @@ class AsfooraTools
             'to' => ['type' => 'string', 'description' => 'Last day included, YYYY-MM-DD (Cairo).'],
             'date_field' => ['type' => 'string', 'enum' => ['created_at', 'status_updated_at'], 'description' => 'created_at = when the request was uploaded (default); status_updated_at = when its status last changed.'],
             'statuses' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => $statuses], 'description' => 'Only these status codes.'],
-            'staff' => ['type' => 'string', 'description' => 'Part of the employee\'s name (the request\'s owner).'],
+            'staff' => ['type' => 'string', 'description' => 'The request\'s owner: the employee\'s number (best, from the staff list), or part of their name or login email.'],
             'installment_type' => ['type' => 'string', 'description' => 'Part of the installment system name (أمان، حالا، مايلو ...).'],
             'search' => ['type' => 'string', 'description' => 'Part of the customer\'s name, phone or national id.'],
             'reason' => ['type' => 'string', 'description' => 'Words in the reason (Aman\'s words, the employee\'s note), e.g. «غير مقيم».'],
@@ -210,7 +210,7 @@ class AsfooraTools
             // an exact moment (a watch: what came since its last look)
             ->when(filled($args['since'] ?? null), fn ($q) => $q->where('r.created_at', '>', Carbon::parse($args['since'])))
             ->when(! empty($args['statuses']), fn ($q) => $q->whereIn('r.status', (array) $args['statuses']))
-            ->when(filled($args['staff'] ?? null), fn ($q) => $q->where('s.name', 'like', '%'.$args['staff'].'%'))
+            ->when(filled($args['staff'] ?? null), fn ($q) => self::staffFilter($q, (string) $args['staff']))
             ->when(filled($args['installment_type'] ?? null), fn ($q) => $q->where('r.installment_type', 'like', '%'.$args['installment_type'].'%'))
             ->when(filled($args['search'] ?? null), fn ($q) => $q->where(fn ($w) => $w
                 ->where('r.applicant_name', 'like', '%'.$args['search'].'%')
@@ -660,5 +660,17 @@ class AsfooraTools
             ])->all();
 
         return ['request' => $fields, 'log' => $log];
+    }
+
+    /** Owner 2026-11-26: «محمود» is hefny (mahmoud@...) - a number, a name or a login email all find him. */
+    private static function staffFilter($query, string $staff): void
+    {
+        $staff = trim(ltrim(trim($staff), '#'));
+        if (ctype_digit($staff)) {
+            $query->where('r.staff_id', (int) $staff);
+
+            return;
+        }
+        $query->where(fn ($w) => $w->where('s.name', 'like', '%'.$staff.'%')->orWhere('s.email', 'like', '%'.$staff.'%'));
     }
 }
