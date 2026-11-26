@@ -71,6 +71,10 @@ return [
             'level' => env('LOG_LEVEL', 'debug'),
             'days' => env('LOG_DAILY_DAYS', 14),
             'replace_placeholders' => true,
+            // 2026-11-26: the day's file is made by whichever process logs first - often a root worker
+            // (pm2) - and the site (elhawy) then failed to write to it: "could not be opened in append
+            // mode", which threw inside requests. Every process can write to it.
+            'permission' => 0666,
         ],
 
         'slack' => [

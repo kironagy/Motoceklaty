@@ -293,6 +293,8 @@ class AsfooraTest extends TestCase
         $a = $this->staff(['is_hitler' => true]);
         $b = $this->staff(['is_hitler' => true]);
         $this->staff();
+        // a parking account carries is_hitler but is nobody
+        $this->staff(['is_hitler' => true, 'email' => 'hold@motogate.com', 'name' => 'متوقف']);
         $fake = new FakeAiProvider();
         $this->say($fake, ["امبارح اترفع **12 طلب**.\n\nحاجتين تعرفهم: ..."]);
         $this->app->instance(AiProvider::class, $fake);

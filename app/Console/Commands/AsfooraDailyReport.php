@@ -21,7 +21,9 @@ class AsfooraDailyReport extends Command
 
     public function handle(AsfooraAgent $agent): int
     {
-        $owners = Staff::where('is_hitler', true)->orderBy('id')->get(['id', 'name']);
+        // the status parking accounts («متوقف»، «مرفوض» ...) carry is_hitler too - they are not people
+        $owners = Staff::where('is_hitler', true)->whereNotIn('email', array_column(\App\Models\InstallmentRequest::PARKING_ACCOUNTS, 0))
+            ->orderBy('id')->get(['id', 'name']);
         if ($owners->isEmpty()) {
             return self::SUCCESS;
         }
