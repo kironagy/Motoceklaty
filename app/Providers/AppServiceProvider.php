@@ -50,6 +50,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Owner 2026-11-26: every employee action reaches the owners («الحق! فلان نقل طلب لفلان»)
+        \Spatie\Activitylog\Models\Activity::created(function ($activity) {
+            try {
+                \App\Domain\Asfoora\ActionAlerts::handle($activity);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        });
+
         // Separate budgets: autosaves/polling must never exhaust image uploads.
         \Illuminate\Support\Facades\RateLimiter::for('form-activity', fn ($request) =>
             \Illuminate\Cache\RateLimiting\Limit::perMinute(240)->by('form-activity:'.hash('sha256', (string) $request->route('token')).':'.$request->ip()));

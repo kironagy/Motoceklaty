@@ -63,13 +63,13 @@ class AsfooraExcel
     }
 
     /** a row matching one of the AI's colour rules ("status = متوقف امان → yellow") gets that colour */
-    private static function paint(array $row, array $rules): ?Style
+    private static function paint(array $row, array $rules, Border $line): ?Style
     {
-        $colors = ['yellow' => 'FFF2CC', 'red' => 'FCE4E4', 'green' => 'E2EFDA', 'orange' => 'FCE4D6', 'blue' => 'DDEBF7'];
+        $colors = ['yellow' => 'FEF08A', 'red' => 'FECACA', 'green' => 'BBF7D0', 'orange' => 'FED7AA', 'blue' => 'BFDBFE'];
         foreach ($rules as $rule) {
             $value = $row[$rule['column'] ?? ''] ?? null;
             if ($value !== null && trim((string) $value) === trim((string) ($rule['value'] ?? '')) && isset($colors[$rule['color'] ?? ''])) {
-                return (new Style())->setFontName('Calibri')->setFontSize(11)->setBackgroundColor($colors[$rule['color']])
+                return (new Style())->setFontName('Cairo')->setFontSize(11)->setBorder($line)->setBackgroundColor($colors[$rule['color']])
                     ->setCellAlignment(CellAlignment::RIGHT)->setCellVerticalAlignment(CellVerticalAlignment::TOP)->setShouldWrapText();
             }
         }
@@ -110,13 +110,21 @@ class AsfooraExcel
         $writer->openToFile($path);
 
         // Owner 2026-11-26: laid out like his own report (paused_requests_nov2026): the header on the
-        // first row in navy, frozen; text to the right and the top, wrapped; fixed widths for the known
-        // columns; dates as 22/11/2026; a coloured row in soft yellow. No title band, no zebra, no grid.
-        $font = fn () => (new Style())->setFontName('Calibri')->setFontSize(11);
-        $head = $font()->setFontBold()->setFontColor('FFFFFF')->setBackgroundColor('1F4E78')
+        // first row, frozen; text to the right and the top, wrapped; fixed widths for the known columns;
+        // dates as 22/11/2026. Owner (later the same day): "الألوان زي ما كانت في الأول" - the teal
+        // header, the light teal banding, thin borders and the bright row colours are back.
+        $line = new Border(
+            new BorderPart(Border::TOP, 'CBD5E1', Border::WIDTH_THIN),
+            new BorderPart(Border::BOTTOM, 'CBD5E1', Border::WIDTH_THIN),
+            new BorderPart(Border::LEFT, 'CBD5E1', Border::WIDTH_THIN),
+            new BorderPart(Border::RIGHT, 'CBD5E1', Border::WIDTH_THIN),
+        );
+        $font = fn () => (new Style())->setFontName('Cairo')->setFontSize(11)->setBorder($line);
+        $head = $font()->setFontBold()->setFontColor('FFFFFF')->setBackgroundColor('0D9488')
             ->setCellAlignment(CellAlignment::CENTER)->setCellVerticalAlignment(CellVerticalAlignment::CENTER)->setShouldWrapText();
-        $body = $font()->setCellAlignment(CellAlignment::RIGHT)->setCellVerticalAlignment(CellVerticalAlignment::TOP)->setShouldWrapText();
-        $totalStyle = $font()->setFontBold()->setBackgroundColor('DDEBF7')->setCellAlignment(CellAlignment::RIGHT);
+        $even = $font()->setCellAlignment(CellAlignment::RIGHT)->setCellVerticalAlignment(CellVerticalAlignment::TOP)->setShouldWrapText();
+        $odd = $font()->setBackgroundColor('F0FDFA')->setCellAlignment(CellAlignment::RIGHT)->setCellVerticalAlignment(CellVerticalAlignment::TOP)->setShouldWrapText();
+        $totalStyle = $font()->setFontBold()->setBackgroundColor('99F6E4')->setCellAlignment(CellAlignment::RIGHT);
 
         if ($tables === []) {
             $tables = [['title' => 'الرد', 'columns' => ['الرد'], 'rows' => [['الرد' => $message->content]]]];
@@ -138,7 +146,7 @@ class AsfooraExcel
             $writer->addRow(Row::fromValues($headers, $head)->setHeight(45));
 
             $lengths = array_map(fn ($h) => mb_strlen($h), $headers);
-            foreach (array_values($table['rows'] ?? []) as $row) {
+            foreach (array_values($table['rows'] ?? []) as $n => $row) {
                 $values = [];
                 foreach ($columns as $c => $column) {
                     $value = $row[$column] ?? null;
@@ -155,7 +163,7 @@ class AsfooraExcel
                     $values[] = $value;
                     $lengths[$c] = max($lengths[$c], min(60, mb_strlen((string) $value)));
                 }
-                $writer->addRow(Row::fromValues($values, self::paint($row, (array) ($table['highlight'] ?? [])) ?? $body));
+                $writer->addRow(Row::fromValues($values, self::paint($row, (array) ($table['highlight'] ?? []), $line) ?? ($n % 2 ? $odd : $even)));
             }
 
             // a count column gets its total

@@ -206,7 +206,7 @@ class AsfooraTest extends TestCase
         $this->assertStringContainsString('ليه في المجموعة دي', $dead);
         $alive = $sheet(1);
         $this->assertSame(1 + 3, substr_count($alive, '<row '));
-        $this->assertStringContainsString('FFF2CC', $alive);
+        $this->assertStringContainsString('FEF08A', $alive);
         $this->assertStringContainsString('ينفع نقاوح فيه', AsfooraExcel::filename($answer, 1));
     }
 
@@ -420,8 +420,8 @@ class AsfooraTest extends TestCase
         unlink($path);
 
         $this->assertSame(2, substr_count($sheet, '<row '));            // the header, then the rows - no title band
-        $this->assertStringContainsString('1F4E78', $all);                // navy header
-        $this->assertStringContainsString('FFF2CC', $all);                // his soft yellow
+        $this->assertStringContainsString('0D9488', $all);                // the teal header
+        $this->assertStringContainsString('FEF08A', $all);                // the yellow row
         $this->assertStringContainsString('22/11/2026', $all);           // his date format
         $this->assertStringContainsString('01050725028', $all);          // the phone keeps its 0
         $this->assertMatchesRegularExpression('/<col min="2" max="2" width="32"/', $sheet);
@@ -461,6 +461,52 @@ class AsfooraTest extends TestCase
         $this->travel(61)->minutes();
         $this->artisan('asfoora:watches')->assertSuccessful();
         $this->assertSame(2, \App\Models\Notification::where('user_id', $owner->id)->count());
+    }
+
+    public function test_owners_hear_every_employee_action_but_uploads_and_the_systems_own(): void
+    {
+        // only the customer messages are held; the alert itself runs
+        \Illuminate\Support\Facades\Queue::fake([\App\Jobs\SendWhatsappStatusNotification::class]);
+        app(\Illuminate\Bus\Dispatcher::class)->withoutDispatchingAfterResponses();
+        $owner = $this->staff(['is_hitler' => true, 'name' => 'akera']);
+        $habiba = $this->staff(['name' => 'حبيبة']);
+        $yousef = $this->staff(['name' => 'يوسف']);
+        Staff::create(['name' => 'متوقف', 'email' => 'hold@motogate.com', 'password' => 'x', 'is_hitler' => true]);
+        $brand = DB::table('brands')->insertGetId(['name' => 'b', 'image' => 'x', 'created_at' => now(), 'updated_at' => now()]);
+        $machine = DB::table('machines')->insertGetId(['name' => 'm', 'brand_id' => $brand, 'created_at' => now(), 'updated_at' => now()]);
+        $alerts = fn () => \App\Models\Notification::where('user_id', $owner->id)->orderBy('id')->pluck('message')->all();
+
+        // inside the panel Filament makes its guard the default one - the log's causer comes from it
+        $this->actingAs($habiba, 'filament');
+        auth()->shouldUse('filament');
+        $request = \App\Models\InstallmentRequest::create(['applicant_name' => 'أحمد علي', 'applicant_phone' => '01000000001', 'installment_type' => 'امان',
+            'machine_id' => $machine, 'months' => 24, 'status' => 'new_request', 'staff_id' => $habiba->id]);
+        $this->assertSame([], $alerts(), 'uploading a request is not an alert');
+
+        $request->update(['staff_id' => $yousef->id]);
+        $request->update(['status' => 'paused', 'checks_report' => ['staff' => 'ناقص مفردات']]);
+        $request->update(['applicant_phone' => '01000000002']);
+        $request->update(['deposit' => 5000]); // the same burst of edits
+        $got = $alerts();
+        $this->assertSame("حبيبة نقل طلب #{$request->id} (أحمد علي) من حبيبة لـ يوسف", $got[0]);
+        $this->assertSame("حبيبة غيّر حالة طلب #{$request->id} (أحمد علي) من طلب جديد لـ متوقف — ناقص مفردات", $got[1]);
+        // the two edits right after each other are one alert
+        $this->assertCount(3, $got);
+        $this->assertStringContainsString("حبيبة عدّل في طلب #{$request->id} (أحمد علي): ", $got[2]);
+        $this->assertStringContainsString('التليفون', $got[2]);
+        // never to the parking accounts, never to the one who did it
+        $this->assertSame(3, \App\Models\Notification::count());
+
+        // the system's own move (no one logged in) says nothing
+        auth('filament')->logout();
+        $request->update(['staff_id' => $habiba->id]);
+        $this->assertCount(3, $alerts());
+
+        // the owner's own action is not sent to himself
+        $this->actingAs($owner, 'filament');
+        auth()->shouldUse('filament');
+        $request->update(['status' => 'approved']);
+        $this->assertCount(3, $alerts());
     }
 
     public function test_staff_without_is_hitler_is_refused(): void
