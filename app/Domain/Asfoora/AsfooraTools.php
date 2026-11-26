@@ -47,6 +47,7 @@ class AsfooraTools
             'staff' => ['type' => 'string', 'description' => 'Part of the employee\'s name (the request\'s owner).'],
             'installment_type' => ['type' => 'string', 'description' => 'Part of the installment system name (أمان، حالا، مايلو ...).'],
             'search' => ['type' => 'string', 'description' => 'Part of the customer\'s name, phone or national id.'],
+            'reason' => ['type' => 'string', 'description' => 'Words in the reason (Aman\'s words, the employee\'s note), e.g. «غير مقيم».'],
             'source' => ['type' => 'string', 'enum' => ['bot', 'staff'], 'description' => 'bot = made by the WhatsApp bot (request_type bot); staff = entered by an employee. Test requests (fake) are always left out.'],
             'offset' => ['type' => 'integer', 'description' => 'Skip this many (paging through more than 200).'],
         ];
@@ -203,6 +204,9 @@ class AsfooraTools
             ->when(($args['source'] ?? null) === 'staff', fn ($q) => $q->where(fn ($w) => $w->whereNull('r.request_type')->orWhere('r.request_type', '!=', 'bot')))
             ->when(filled($args['from'] ?? null), fn ($q) => $q->where($field, '>=', Carbon::parse($args['from'])->startOfDay()))
             ->when(filled($args['to'] ?? null), fn ($q) => $q->where($field, '<=', Carbon::parse($args['to'])->endOfDay()))
+            // live: she searched «غير مقيم» in the names - the words of the reason are searched here
+            ->when(filled($args['reason'] ?? null), fn ($q) => $q->where(fn ($w) => $w->where('r.checks_report', 'like', '%'.$args['reason'].'%')
+                ->orWhere('r.aman_check_text', 'like', '%'.$args['reason'].'%')->orWhere('r.notes', 'like', '%'.$args['reason'].'%')))
             // an exact moment (a watch: what came since its last look)
             ->when(filled($args['since'] ?? null), fn ($q) => $q->where('r.created_at', '>', Carbon::parse($args['since'])))
             ->when(! empty($args['statuses']), fn ($q) => $q->whereIn('r.status', (array) $args['statuses']))
@@ -536,7 +540,8 @@ class AsfooraTools
     {
         $all = self::history(['offset' => 0] + $args, self::EXPORT_ROWS)['requests'];
         $offset = max(0, (int) ($args['offset'] ?? 0));
-        $limit = max(1, min(self::LIST_LIMIT, (int) ($args['limit'] ?? self::LIST_DEFAULT)));
+        // one page is for examples - the counts and the file cover the rest
+        $limit = max(1, min(50, (int) ($args['limit'] ?? self::LIST_DEFAULT)));
         $cut = fn ($t) => $t !== null && mb_strlen((string) $t) > 220 ? mb_substr((string) $t, 0, 220).'…' : $t;
         $page = array_map(fn ($r) => ['aman_reason' => $cut($r['aman_reason']), 'staff_note' => $cut($r['staff_note'])] + $r, array_slice($all, $offset, $limit));
         $top = fn (string $key, int $n) => collect($all)->map(fn ($r) => $r[$key] ? mb_substr(preg_replace('/\s+/u', ' ', (string) $r[$key]), 0, 70) : '(فاضي)')
