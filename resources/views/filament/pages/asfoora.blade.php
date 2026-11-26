@@ -185,12 +185,17 @@
         .mg-asf-hint { text-align: center; font-size: 11px; color: var(--mute); margin-top: 6px; }
 
         @media (max-width: 1023px) {
-            .mg-asf { grid-template-columns: 1fr; }
+            /* the rail is as tall as its chips (the grid stretched it to fill the page) */
+            .mg-asf { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
             .mg-asf-rail { position: static; max-height: none; flex-direction: row; align-items: center; overflow-x: auto; padding: 8px; border-radius: 18px; }
             .mg-asf-rail h4 { display: none; }
             .mg-asf-new { flex: none; padding: 9px 14px; }
             .mg-asf-item { flex: none; max-width: 170px; padding: 7px 10px; border: 1px solid var(--line); }
             .mg-asf-item small, .mg-asf-del { display: none; }
+            /* live 2026-11-26: the memory cards were squeezed into narrow columns in the row of chats */
+            .mg-asf-mem { flex: none; width: 240px; align-self: center; max-height: 86px; }
+            .mg-asf-mem span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+            .mg-asf-mem .mg-asf-del { display: inline; opacity: 1; }
             .mg-asf-compose { bottom: 8px; }
             .mg-asf-hint { display: none; }
             .mg-asf-top h1 { font-size: 21px; }
