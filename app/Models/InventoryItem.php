@@ -10,6 +10,7 @@ class InventoryItem extends Model
    use LogsActivity;
     protected $fillable = [
         'inventory_id',
+        'returned_at',
         'chassis_image',
         'engine_image',
         'color',
@@ -28,6 +29,7 @@ class InventoryItem extends Model
     ];
 
     protected $casts = [
+        'returned_at' => 'datetime',
         'cash' => 'decimal:2',
         'limit' => 'decimal:2',
         'admin_fees' => 'decimal:2',

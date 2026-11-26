@@ -23,6 +23,14 @@ class LetterReturnController extends Controller
         }
 
         DB::transaction(function () use ($letter) {
+            // Owner 2026-11-26: the sold row is the sale that was returned - it no longer counts as one.
+            InventoryItem::query()
+                ->when($letter->inventory_item_id,
+                    fn ($q) => $q->whereKey($letter->inventory_item_id),
+                    fn ($q) => $q->where('chassis_number', $letter->chassis_number)->where('engine_number', $letter->engine_number)->latest('id')->limit(1))
+                ->whereNotNull('sold_at')->whereNull('returned_at')
+                ->update(['returned_at' => now()]);
+
             InventoryItem::create([
                 'inventory_id'      => $letter->inventory_id,
                 'chassis_image'     => $letter->chassis_image,

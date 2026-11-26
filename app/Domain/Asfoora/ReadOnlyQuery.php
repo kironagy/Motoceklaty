@@ -122,7 +122,7 @@ class ReadOnlyQuery
     {
         $connection = DB::connection();
 
-        return Cache::remember('asfoora_schema_v3_'.$connection->getName().'_'.$connection->getDatabaseName(), 3600, function () {
+        return Cache::remember('asfoora_schema_v4_'.$connection->getName().'_'.$connection->getDatabaseName(), 3600, function () {
             $lines = [];
             $database = DB::connection()->getDriverName() === 'mysql' ? DB::connection()->getDatabaseName() : null;
             foreach (Schema::getTables() as $table) {

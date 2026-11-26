@@ -71,6 +71,19 @@ class InventoryWorkflowTest extends TestCase
         catch (ValidationException) { $this->assertSame(1, Letter::count()); }
     }
 
+    /** Owner 2026-11-26: a returned sale stays on its row as «returned», so it is not counted as a sale. */
+    public function test_a_return_marks_the_sold_row_returned_and_puts_the_machine_back(): void
+    {
+        $letter = $this->stock->sell($this->machine, $this->saleData());
+
+        $this->post(route('letters.return', $letter))->assertRedirect();
+
+        $this->assertNotNull($this->piece->fresh()->returned_at);
+        $this->assertSame(0, Letter::count());
+        $this->assertSame(1, $this->stock->available($this->machine->id)->count());
+        $this->assertSame(0, InventoryItem::whereNotNull('sold_at')->whereNull('returned_at')->count());
+    }
+
     public function test_stale_edit_cannot_restore_or_overwrite_a_sold_piece(): void
     {
         $state = $this->stock->formState($this->machine);

@@ -307,6 +307,8 @@ class AsfooraAgent
         - activity_log = سجل كل التعديلات: subject_type 'App\\Models\\InstallmentRequest' و subject_id رقم الطلب، causer_id الموظف (staff)، description و properties التفاصيل.
         - whatsapp_conversations / whatsapp_messages = محادثات البوت على الواتساب (direction incoming من العميل / outgoing، sender_type customer/bot/staff). whatsapp_bots = أرقام البوت.
         - staff = الموظفين.
+        - inventory_items = مكن الخزنة، كل سطر مكنة (chassis_number الشاسيه، engine_number الماتور، inventory_id → inventories.warehouse_id → warehouses.name الخزنة، inventories.product_id → machines). sold_at مش فاضي = اتباعت (sold_by الموظف اللي باع). returned_at مش فاضي = البيعة دي اتعمل عليها مرتجع: مش بيعة، ما تحسبهاش. المرتجع بيرجّع نفس المكنة للخزنة كسطر جديد sold_at فاضي (ممكن يفضل عليه اسم العميل القديم، ده مش بيعة). البيعات = sold_at مش فاضي و returned_at فاضي.
+        - letters = جوابات البيع (sold_by البايع، inventory_item_id سطر الخزنة). المرتجع بيمسح الجواب.
 
         الجداول (اسم الجدول(العمود النوع، ...)):
         TXT
