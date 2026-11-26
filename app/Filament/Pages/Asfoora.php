@@ -40,6 +40,11 @@ class Asfoora extends Page
 
     public string $question = '';
 
+    /** a sheet he attached (Excel / CSV) - sent with his next question */
+    public $sheet = null;
+
+    public ?array $attached = null;
+
     /** an answer is being made - the page polls and the composer waits */
     public bool $thinking = false;
 
@@ -55,6 +60,47 @@ class Asfoora extends Page
         $this->chatId = ($wanted ? $this->myChats()->find($wanted)?->id : null) ?? $this->myChats()->first()?->id;
     }
 
+    /** Owner 2026-11-26: Aman's sheet (or any Excel / CSV) given to her in the chat */
+    public function updatedSheet(): void
+    {
+        $this->validate(['sheet' => 'required|file|max:20480|mimes:xlsx,csv,txt']);
+        $name = (string) $this->sheet->getClientOriginalName();
+        $path = $this->sheet->storeAs('asfoora-files', \Illuminate\Support\Str::uuid().'.'.(str_ends_with(strtolower($name), '.csv') ? 'csv' : 'xlsx'), \App\Domain\Asfoora\SheetFile::DISK);
+        $this->attached = ['name' => mb_substr($name, 0, 120), 'path' => $path];
+        $this->sheet = null;
+    }
+
+    public function removeAttachment(): void
+    {
+        $this->attached = null;
+    }
+
+    /** The owner pressed «نفّذ» under her prepared changes - each request is saved as his own edit. */
+    public function applyAction(int $id): void
+    {
+        $action = \App\Models\AsfooraAction::whereKey($id)->where('status', 'pending')
+            ->whereIn('asfoora_chat_id', AsfooraChat::where('staff_id', auth()->id())->select('id'))->first();
+        if (! $action) {
+            return;
+        }
+        @set_time_limit(300);
+        $r = \App\Domain\Asfoora\AmanSheetSync::apply($action, (int) auth()->id());
+        Notification::make()->title('اتنفّذ: '.$r['done'].' طلب اتغيرت حالته')
+            ->body(($r['skipped'] ? count($r['skipped']).' طلب اتساب لأن حالته اتغيرت من ساعة المعاينة. ' : '').($r['failed'] ? count($r['failed']).' طلب ما اتعدلش (خطأ).' : ''))
+            ->success()->send();
+    }
+
+    public function cancelAction(int $id): void
+    {
+        \App\Models\AsfooraAction::whereKey($id)->where('status', 'pending')
+            ->whereIn('asfoora_chat_id', AsfooraChat::where('staff_id', auth()->id())->select('id'))->update(['status' => 'cancelled']);
+    }
+
+    public function stopWatch(int $id): void
+    {
+        \App\Models\AsfooraWatch::whereKey($id)->where('staff_id', auth()->id())->update(['is_active' => false]);
+    }
+
     public function deleteMemory(int $id): void
     {
         \App\Models\AsfooraMemory::whereKey($id)->delete();
@@ -63,6 +109,9 @@ class Asfoora extends Page
     public function ask(?string $preset = null): void
     {
         $question = trim($preset ?? $this->question);
+        if ($question === '' && $this->attached) {
+            $question = 'شوفي الشيت ده';
+        }
         if ($question === '') {
             return;
         }
@@ -71,10 +120,12 @@ class Asfoora extends Page
         $chat ??= AsfooraChat::create(['staff_id' => auth()->id()]);
         $this->chatId = $chat->id;
         $this->question = '';
+        $meta = $this->attached ? ['file' => $this->attached] : [];
+        $this->attached = null;
 
         // the answer is made after this response is sent (FPM finishes the request first), so a
         // question needing many lookups never hits the web timeout; the page polls until it is in
-        $answer = app(AsfooraAgent::class)->start($chat, mb_substr($question, 0, 2000));
+        $answer = app(AsfooraAgent::class)->start($chat, mb_substr($question, 0, 2000), $meta);
         app()->terminating(fn () => app(AsfooraAgent::class)->run($answer->id));
     }
 
@@ -184,6 +235,8 @@ class Asfoora extends Page
             'thinking' => $this->thinking = (bool) $chat?->messages->contains(fn ($m) => $m->meta['pending'] ?? false),
             'chats' => $this->myChats()->limit(30)->get(['id', 'title', 'updated_at']),
             'memories' => \App\Models\AsfooraMemory::orderBy('id')->get(['id', 'content']),
+            'watches' => $chat ? \App\Models\AsfooraWatch::where('asfoora_chat_id', $chat->id)->where('is_active', true)->get() : collect(),
+            'actions' => $chat ? \App\Models\AsfooraAction::where('asfoora_chat_id', $chat->id)->get()->keyBy('id') : collect(),
             'suggestions' => [
                 'تقرير الطلبات اللي اترفعت النهارده لكل موظف',
                 'الطلبات المتوقفة برقم الطلب والسبب ورقم تليفون العميل',

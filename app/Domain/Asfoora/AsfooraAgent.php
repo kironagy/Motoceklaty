@@ -19,6 +19,8 @@ class AsfooraAgent
 
     private const HISTORY_MESSAGES = 12;
 
+    private const TOKEN_BUDGET = 120000;
+
     /** an answer still "thinking" after this long has failed (the process making it died) */
     public const PENDING_MINUTES = 6;
 
@@ -31,9 +33,9 @@ class AsfooraAgent
      * the page has its response: start() saves his question and an empty answer that the page shows
      * as "thinking" and polls; run() fills it in.
      */
-    public function start(AsfooraChat $chat, string $question): AsfooraMessage
+    public function start(AsfooraChat $chat, string $question, array $meta = []): AsfooraMessage
     {
-        $chat->messages()->create(['role' => 'user', 'content' => $question]);
+        $chat->messages()->create(['role' => 'user', 'content' => $question, 'meta' => $meta ?: null]);
 
         if (blank($chat->title)) {
             $chat->update(['title' => mb_substr($question, 0, 60)]);
@@ -61,10 +63,13 @@ class AsfooraAgent
         // the conversation so far, without answers still being made or that never came
         $contents = AsfooraMessage::where('asfoora_chat_id', $answer->asfoora_chat_id)->where('id', '<', $answer->id)
             ->where('content', '!=', '')->latest('id')->limit(self::HISTORY_MESSAGES)->get()->reverse()
-            ->map(fn ($m) => ['role' => $m->role === 'assistant' ? 'model' : 'user', 'parts' => [['type' => 'text', 'text' => $m->content]]])
+            ->map(fn ($m) => ['role' => $m->role === 'assistant' ? 'model' : 'user', 'parts' => [['type' => 'text', 'text' => $m->content
+                .(isset($m->meta['file']) ? "\n[رفع ملف: {$m->meta['file']['name']} - اقراه بـ read_sheet، ولو شيت أمان وعايز يغير الحالات: aman_sheet_changes]" : '')]]])
             ->values()->all();
+        AsfooraTools::$chatId = $answer->asfoora_chat_id;
 
         $calls = [];
+        $actionId = null;
         $tables = [];
         $groupTables = null;
         $groupArgs = ['groups' => [], 'highlight' => []];
@@ -74,7 +79,8 @@ class AsfooraAgent
 
         try {
             for ($round = 0; $round < self::MAX_ROUNDS; $round++) {
-                $last = $round === self::MAX_ROUNDS - 1;
+                // Live 2026-11-26: one question looped to 300k tokens - past the budget she answers with what she has
+                $last = $round === self::MAX_ROUNDS - 1 || $tokens > self::TOKEN_BUDGET;
                 $response = $this->ai->chat(new AiRequest(
                     purpose: 'asfoora',
                     label: 'asfoora',
@@ -114,8 +120,18 @@ class AsfooraAgent
                         $groupTables = $result['_tables'];
                         unset($result['_tables']);
                     }
+                    if (isset($result['_action'])) {
+                        $actionId = $result['_action'];
+                        unset($result['_action']);
+                    }
                     $calls[] = ['tool' => $call['name'], 'args' => $args, 'rows' => self::size($result), 'error' => $result['error'] ?? null];
-                    array_push($tables, ...self::tables($call['name'], $args, $result));
+                    foreach (self::tables($call['name'], $args, $result) as $table) {
+                        // the same list read again (another page) is one file
+                        $key = isset($table['source']) ? json_encode([$table['source']['tool'], array_diff_key($table['source']['args'], ['offset' => 1, 'limit' => 1])]) : null;
+                        $tables = array_values(array_filter($tables, fn ($t) => $key === null || ! isset($t['source'])
+                            || json_encode([$t['source']['tool'], array_diff_key($t['source']['args'], ['offset' => 1, 'limit' => 1])]) !== $key));
+                        $tables[] = $table;
+                    }
                     $results[] = ['type' => 'tool_result', 'id' => $call['id'], 'name' => $call['name'], 'result' => $result];
                 }
                 $contents[] = ['role' => 'tool', 'parts' => $results];
@@ -144,7 +160,7 @@ class AsfooraAgent
         $answer->update([
             'content' => $text,
             // the data behind the answer - its Excel export (the last 6 tables)
-            'meta' => ['tools' => $calls, 'tokens' => $tokens, 'error' => $error, 'tables' => $groupTables ?? array_slice($tables, -6), 'followups' => $followups],
+            'meta' => ['tools' => $calls, 'tokens' => $tokens, 'error' => $error, 'tables' => $groupTables ?? array_slice($tables, -6), 'followups' => $followups, 'action_id' => $actionId],
         ]);
 
         return $answer;
@@ -257,8 +273,9 @@ class AsfooraAgent
         - جمّع الطلبات اللي ليها نفس القصة في جملة واحدة بأرقامها، من غير ما تكرر نفس الجملة لكل طلب. مثال من كلامه:
           «حاجتين تعرفهم: طلبات 5207 و5415 و5178 و5141 أصلاً مريم رفعتها، وبعدين beso خدها وبعد كده اتسحبت منه. وطلب 5874 و5273 و6196 لسه على اسم سيلزهم ومتسحبوش (El Joo وEl Hawi وManga).»
         - بعد الكلام حط الجدول، وفي الآخر سطر واحد بالسبب اللي متكرر أكتر أو الحاجة اللي محتاجة تتعمل.
+        - requests_with_history بترجّع summary محسوب على كل الطلبات + صفحة صغيرة. للتقرير اعتمد على summary وأمثلة من الصفحة، وما تقلبش الصفحات - ملف الإكسيل فيه الكل.
         - تقارير الطلبات المتوقفة/المرفوضة/الموافقة و«مين رفع/مين خد/اتسحب من مين»: استخدم requests_with_history. أعمدة الجدول بالترتيب ده: رقم الطلب، العميل، التليفون، تاريخ الطلب، اتسحب من (taken_from)، السيلز الحالي، سبب أمان (aman_reason)، ملاحظة الموظف (staff_note). «مفيش رد مكتوب من أمان» لو aman_reason فاضي. القصة (owners) استخدمها في الكلام: مين رفع ومين خد ومين اتسحب منه.
-        - فرز الطلبات («افرز المرفوض: الميت لوحده واللي ينفع نقاوح فيه لوحده»، «شوف اللي ينفع واللي مينفعش»): هات الطلبات كلها بـ requests_with_history (لو أكتر من 200 كمّل بـ offset)، اقرا سبب أمان وملاحظة الموظف لكل طلب، وقرر هو ينفع ولا لأ، وبعدين نادي make_report_files بمجموعة لكل نوع وملاحظة قصيرة لكل طلب (notes) بتقول ليه. كل مجموعة بتطلع ملف إكسيل لوحدها بزرار لوحدها.
+        - فرز الطلبات («افرز المرفوض: الميت لوحده واللي ينفع نقاوح فيه لوحده»، «شوف اللي ينفع واللي مينفعش»): نادي sort_requests بالفلاتر وبالمجموعات وقاعدة كل مجموعة (هي بتقرا كل طلب وتفرزه على دفعات، مهما كان العدد). لو الطلبات قليلة (أقل من 40) ممكن تقراها بنفسك وتنادي make_report_files. كل مجموعة بتطلع ملف إكسيل لوحدها بزرار لوحدها.
           ميت عادةً: رفض نهائي من أمان، سكور/استعلام ائتماني وحش، متعثر أو عليه أقساط متأخرة، طلب تاني شغال عند جهة تانية ومش هيلغيه، السن مش مناسب، مش شغال ومفيش حد يقدّم بداله، أو العميل لغى ومش عايز.
           ينفع نقاوح: ورق ناقص (مفردات مرتب، اسكرينات دخل، كشف حساب، بيان معاش، برنت تأمينات)، صورة بطاقة مش واضحة أو تالفة، عنوان مش مطابق، بيانات غلط تتصلح، مقدم أو مدة ممكن تتغير.
           لو صاحب المعرض قال معايير بنفسه امشي بيها هي. قول في ردك المعيار اللي مشيت بيه وعدد كل مجموعة، وأمثلة قليلة بالأرقام. الطلب اللي مش واضح حطه في «محتاج مراجعة» بدل ما تخمن.
@@ -274,7 +291,9 @@ class AsfooraAgent
           ```
         - تلوين الصفوف في الإكسيل (زي «متوقف امان» أصفر): highlight في make_report_files. لو طلب ملف مش فرز، برضه ينفع تعمل مجموعة واحدة بيها.
         - request_type: bot = الطلب جه من البوت، normal = موظف دخله، fake = تجريبي (مستبعد دايماً). «طلبات البوت» = source: bot.
-        - انت بتقرا بس: ولا فرز ولا ملف بيغيّر حاجة في اللوحة، وقول كده لو سأل.
+        - شيت مرفوع (📎): read_sheet تشوفه. شيت أمان وطلب تغيير حالات طلبات المعرض: aman_sheet_changes (المعرض افتراضياً «موتوجيت»). انت مش بتغيّر حاجة بنفسك: الأداة بتجهز التغييرات، وتحت ردك بيظهر زرار «نفّذ» هو اللي يدوسه. قوله: كام طلب هيتغير ولكل حالة كام، وكام عميل هيوصله رسالة واتساب، واللي محتاج مراجعة وليه، واللي مش لاقيه، وكام نفس حالته. وقوله ينزّل ملف «التغييرات اللي هتتنفذ» يبص عليه قبل ما يدوس.
+        - متابعة في الخلفية: «ابعتلي/تابعيلي الطلبات الجديدة كل ساعة» = watch_start (kind new_requests، ولو قال من البوت source bot). أي سؤال يتكرر = kind question. «خلاص»، «وقفي»، «بطّلي تبعتي» = watch_stop. المتابعة بتبعت إشعار على الموبايل كل مرة، وبتقول «مفيش جديد» لو مفيش، لحد ما يوقفها من هنا.
+        - غير كده انت بتقرا بس: ولا فرز ولا ملف بيغيّر حاجة في اللوحة، وقول كده لو سأل.
         - الحسابات «متوقف» و«متوقف امان» و«مرفوض» و«موافقه» مش موظفين: دي حسابات ركن الطلبات بيتنقل لها الطلب بعد مدة، فالطلب «اتسحب» من آخر موظف حقيقي كان معاه.
         - لو الطلب ناقص (مش واضح الفترة مثلاً) خد أقرب معنى وقول افترضت إيه.
 

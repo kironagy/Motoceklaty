@@ -15,7 +15,7 @@ class InstallmentRequestObserver
 {
     // Owner 2026-10-04: every change the customer should know about reaches
     // him on WhatsApp. new / new_request / transferred are internal steps.
-    private const NOTIFIABLE_STATUSES = ['pending', 'work_check', 'approved', 'rejected', 'paused', 'delivered', 'canceled'];
+    public const NOTIFIABLE_STATUSES = ['pending', 'work_check', 'approved', 'rejected', 'paused', 'delivered', 'canceled'];
 
     public function updated(InstallmentRequest $model): void
     {

@@ -63,19 +63,27 @@ class AsfooraExcel
     }
 
     /** a row matching one of the AI's colour rules ("status = متوقف امان → yellow") gets that colour */
-    private static function paint(array $row, array $rules, Border $line): ?Style
+    private static function paint(array $row, array $rules): ?Style
     {
-        $colors = ['yellow' => 'FEF08A', 'red' => 'FECACA', 'green' => 'BBF7D0', 'orange' => 'FED7AA', 'blue' => 'BFDBFE'];
+        $colors = ['yellow' => 'FFF2CC', 'red' => 'FCE4E4', 'green' => 'E2EFDA', 'orange' => 'FCE4D6', 'blue' => 'DDEBF7'];
         foreach ($rules as $rule) {
             $value = $row[$rule['column'] ?? ''] ?? null;
             if ($value !== null && trim((string) $value) === trim((string) ($rule['value'] ?? '')) && isset($colors[$rule['color'] ?? ''])) {
-                return (new Style())->setBorder($line)->setBackgroundColor($colors[$rule['color']])
-                    ->setCellVerticalAlignment(CellVerticalAlignment::CENTER)->setShouldWrapText()->setFontName('Cairo');
+                return (new Style())->setFontName('Calibri')->setFontSize(11)->setBackgroundColor($colors[$rule['color']])
+                    ->setCellAlignment(CellAlignment::RIGHT)->setCellVerticalAlignment(CellVerticalAlignment::TOP)->setShouldWrapText();
             }
         }
 
         return null;
     }
+
+    /** his sheet's widths for the columns he knows */
+    private const WIDTHS = [
+        'id' => 11, 'customer' => 32, 'phone' => 15, 'phone_2' => 15, 'created_at' => 12, 'taken_from' => 22, 'current_staff' => 16,
+        'aman_reason' => 55, 'staff_note' => 45, 'verdict' => 30, 'uploaded_by' => 16, 'owners' => 30, 'status' => 14, 'staff' => 16,
+        'reason' => 50, 'notes' => 45, 'system' => 16, 'machine' => 18, 'group' => 24, 'count' => 10, 'previous' => 14, 'change' => 10,
+        'note' => 50, 'from' => 14, 'to' => 14, 'sheet_customer' => 30, 'why' => 40, 'what' => 30, 'details' => 50, 'by' => 16, 'at' => 17,
+    ];
 
     public static function filename(AsfooraMessage $message, ?int $only = null): string
     {
@@ -101,53 +109,45 @@ class AsfooraExcel
         $writer = new Writer($options);
         $writer->openToFile($path);
 
-        $teal = '0D9488';
-        $line = new Border(
-            new BorderPart(Border::TOP, 'CBD5E1', Border::WIDTH_THIN),
-            new BorderPart(Border::BOTTOM, 'CBD5E1', Border::WIDTH_THIN),
-            new BorderPart(Border::LEFT, 'CBD5E1', Border::WIDTH_THIN),
-            new BorderPart(Border::RIGHT, 'CBD5E1', Border::WIDTH_THIN),
-        );
-        $title = (new Style())->setFontBold()->setFontSize(16)->setFontColor('FFFFFF')->setBackgroundColor('0F766E')
-            ->setCellAlignment(CellAlignment::RIGHT)->setCellVerticalAlignment(CellVerticalAlignment::CENTER)->setFontName('Cairo');
-        $sub = (new Style())->setFontSize(10)->setFontColor('475569')->setBackgroundColor('CCFBF1')->setCellAlignment(CellAlignment::RIGHT)->setFontName('Cairo');
-        $head = (new Style())->setFontBold()->setFontColor('FFFFFF')->setBackgroundColor($teal)->setBorder($line)
-            ->setCellAlignment(CellAlignment::CENTER)->setCellVerticalAlignment(CellVerticalAlignment::CENTER)->setShouldWrapText()->setFontName('Cairo');
-        $even = (new Style())->setBorder($line)->setCellVerticalAlignment(CellVerticalAlignment::CENTER)->setShouldWrapText()->setFontName('Cairo');
-        $odd = (new Style())->setBorder($line)->setBackgroundColor('F0FDFA')->setCellVerticalAlignment(CellVerticalAlignment::CENTER)->setShouldWrapText()->setFontName('Cairo');
-        $totalStyle = (new Style())->setFontBold()->setBorder($line)->setBackgroundColor('99F6E4')->setFontName('Cairo');
+        // Owner 2026-11-26: laid out like his own report (paused_requests_nov2026): the header on the
+        // first row in navy, frozen; text to the right and the top, wrapped; fixed widths for the known
+        // columns; dates as 22/11/2026; a coloured row in soft yellow. No title band, no zebra, no grid.
+        $font = fn () => (new Style())->setFontName('Calibri')->setFontSize(11);
+        $head = $font()->setFontBold()->setFontColor('FFFFFF')->setBackgroundColor('1F4E78')
+            ->setCellAlignment(CellAlignment::CENTER)->setCellVerticalAlignment(CellVerticalAlignment::CENTER)->setShouldWrapText();
+        $body = $font()->setCellAlignment(CellAlignment::RIGHT)->setCellVerticalAlignment(CellVerticalAlignment::TOP)->setShouldWrapText();
+        $totalStyle = $font()->setFontBold()->setBackgroundColor('DDEBF7')->setCellAlignment(CellAlignment::RIGHT);
 
         if ($tables === []) {
             $tables = [['title' => 'الرد', 'columns' => ['الرد'], 'rows' => [['الرد' => $message->content]]]];
         }
 
+        $usedNames = [];
         foreach ($tables as $i => $table) {
             $table = self::complete($table);
             $sheet = $i === 0 ? $writer->getCurrentSheet() : $writer->addNewSheetAndMakeItCurrent();
-            $sheet->setName(mb_substr(preg_replace('/[\\\\\/\?\*\[\]:]/u', ' ', (string) ($table['title'] ?? 'جدول')), 0, 28).($i ? ' '.($i + 1) : ''));
-            $sheet->setSheetView((new SheetView())->setRightToLeft(true)->setShowGridLines(false)->setFreezeRow(4));
+            $name = mb_substr(trim(preg_replace('/[\\\\\/\?\*\[\]:]/u', ' ', (string) ($table['title'] ?? 'جدول'))) ?: 'جدول', 0, 28);
+            $usedNames[$name] = ($usedNames[$name] ?? 0) + 1;
+            $sheet->setName($usedNames[$name] > 1 ? $name.' '.$usedNames[$name] : $name);
+            $sheet->setSheetView((new SheetView())->setRightToLeft(true)->setFreezeRow(2));
 
-            // the "still with his employee" flag is said by «اتسحب من» already - the sheet stays readable
+            // the "still with his employee" flag is said by «اتسحب من» already
             $columns = array_values(array_diff($table['columns'] ?? array_keys($table['rows'][0] ?? []), ['still_with_employee']));
             $headers = array_map(fn ($c) => self::HEADERS[$c] ?? str_replace('_', ' ', (string) $c), $columns);
             $width = max(1, count($columns));
-
-            $writer->addRow(Row::fromValues([mb_substr('عصفورة — '.$question, 0, 250)], $title)->setHeight(34));
-            $writer->addRow(Row::fromValues([($table['title'] ?? '').' · '.count($table['rows'] ?? []).' صف'
-                .(($table['fresh'] ?? false) ? ' · كل البيانات وقت التنزيل '.now()->format('Y-m-d H:i') : ' · '.$message->created_at->format('Y-m-d H:i'))
-                .(($table['truncated'] ?? false) ? ' · أول '.AsfooraTools::EXPORT_ROWS.' صف بس' : '')], $sub)->setHeight(20));
-            $writer->addRow(Row::fromValues([]));
-            $writer->addRow(Row::fromValues($headers, $head)->setHeight(26));
-            $writer->getOptions()->mergeCells(0, 1, $width - 1, 1, $i);
-            $writer->getOptions()->mergeCells(0, 2, $width - 1, 2, $i);
+            $writer->addRow(Row::fromValues($headers, $head)->setHeight(45));
 
             $lengths = array_map(fn ($h) => mb_strlen($h), $headers);
-            foreach (array_values($table['rows'] ?? []) as $n => $row) {
+            foreach (array_values($table['rows'] ?? []) as $row) {
                 $values = [];
                 foreach ($columns as $c => $column) {
                     $value = $row[$column] ?? null;
                     $value = is_array($value) ? json_encode($value, JSON_UNESCAPED_UNICODE) : (is_bool($value) ? ($value ? 'أيوه' : 'لأ') : $value);
                     $value = $value === null || $value === '' ? '-' : $value;
+                    // 2026-11-22 → 22/11/2026, like his sheet
+                    if (is_string($value) && preg_match('/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/', $value, $d)) {
+                        $value = "{$d[3]}/{$d[2]}/{$d[1]}".(isset($d[4]) && in_array($column, ['status_updated_at', 'at'], true) ? ' '.$d[4] : '');
+                    }
                     // phones and national ids stay text (Excel would drop the leading 0)
                     if (is_string($value) && is_numeric($value) && ! preg_match('/^0\d/', $value) && strlen($value) < 12) {
                         $value = $value + 0;
@@ -155,7 +155,7 @@ class AsfooraExcel
                     $values[] = $value;
                     $lengths[$c] = max($lengths[$c], min(60, mb_strlen((string) $value)));
                 }
-                $writer->addRow(Row::fromValues($values, self::paint($row, (array) ($table['highlight'] ?? []), $line) ?? ($n % 2 ? $odd : $even)));
+                $writer->addRow(Row::fromValues($values, self::paint($row, (array) ($table['highlight'] ?? [])) ?? $body));
             }
 
             // a count column gets its total
@@ -167,8 +167,8 @@ class AsfooraExcel
                 $writer->addRow(Row::fromValues($cells, $totalStyle));
             }
 
-            foreach ($lengths as $c => $len) {
-                $sheet->setColumnWidth(max(10, min(55, $len * 1.25 + 4)), $c + 1);
+            foreach ($columns as $c => $column) {
+                $sheet->setColumnWidth(self::WIDTHS[$column] ?? max(10, min(45, $lengths[$c] * 1.15 + 3)), $c + 1);
             }
         }
 

@@ -95,6 +95,29 @@
         .mg-asf-btn.xl { background: linear-gradient(120deg, #15803d, #0d9488); color: #f0fdf4; border: 0; box-shadow: 0 8px 18px -10px #22c55e; }
         .mg-asf-btn.xl:hover { color: #fff; transform: translateY(-1px); }
 
+        /* attachments and the «نفّذ» card */
+        .mg-asf-file { display: block; margin-top: 6px; font-size: 12px; opacity: .85; }
+        .mg-asf-attached { display: flex; align-items: center; gap: 8px; width: fit-content; margin: 0 8px 6px; padding: 5px 12px; border-radius: 999px; font-size: 12.5px;
+            background: rgba(56, 189, 248, .12); border: 1px solid rgba(56, 189, 248, .35); }
+        .mg-asf-attached button { color: var(--mute); }
+        .mg-asf-act { margin-top: 12px; padding: 14px 16px; border-radius: 16px; border: 1px solid rgba(245, 158, 11, .45);
+            background: linear-gradient(160deg, rgba(245, 158, 11, .1), rgba(45, 212, 191, .05)); }
+        .mg-asf-act.applied { border-color: rgba(34, 197, 94, .5); background: rgba(34, 197, 94, .07); }
+        .mg-asf-act.cancelled { opacity: .6; }
+        .mg-asf-act-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .mg-asf-act-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+        .mg-asf-act-chips span { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: rgba(148, 163, 184, .12); }
+        .mg-asf-act p { font-size: 13px; color: var(--mute); margin: 6px 0; }
+        .mg-asf-act-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+        .mg-asf-btn.go { background: linear-gradient(120deg, #d97706, #f59e0b); color: #1c1003; border: 0; font-weight: 800; box-shadow: 0 8px 18px -10px #f59e0b; }
+
+        /* a running watch */
+        .mg-asf-watch { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; padding: 8px 14px; border-radius: 14px; font-size: 13px;
+            background: rgba(56, 189, 248, .1); border: 1px solid rgba(56, 189, 248, .35); }
+        .mg-asf-watch span:nth-child(2) { flex: 1; }
+        .mg-asf-watch .dot { width: 9px; height: 9px; border-radius: 50%; background: #38bdf8; box-shadow: 0 0 0 0 rgba(56, 189, 248, .7); animation: mg-asf-ping 1.6s infinite; }
+        @keyframes mg-asf-ping { 70% { box-shadow: 0 0 0 9px rgba(56, 189, 248, 0); } 100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); } }
+
         /* memory */
         .mg-asf-mem { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; line-height: 1.6; padding: 8px 10px; border-radius: 12px;
             background: rgba(167, 139, 250, .08); border: 1px dashed rgba(167, 139, 250, .3); }
@@ -184,7 +207,7 @@
             .'<circle cx="42" cy="25" r="2.6" fill="#0b1324"/><circle cx="42.8" cy="24.2" r=".9" fill="#fff"/></svg>';
     @endphp
 
-    <div class="mg-asf" x-data="asfoora()" @if ($thinking) wire:poll.2s="refreshAnswers" @endif>
+    <div class="mg-asf" x-data="asfoora()" @if ($thinking) wire:poll.2s="refreshAnswers" @elseif ($watches->isNotEmpty()) wire:poll.60s="refreshAnswers" @endif>
         {{-- ---------- chats ---------- --}}
         <aside class="mg-asf-rail">
             <button type="button" class="mg-asf-new" wire:click="newChat">
@@ -224,6 +247,14 @@
                 </div>
             </header>
 
+            @foreach ($watches as $w)
+                <div class="mg-asf-watch" wire:key="watch-{{ $w->id }}">
+                    <span class="dot"></span>
+                    <span>🔔 بتابعلك {{ $w->describe() }} - الجاية {{ $w->next_run_at?->format('h:i A') }}</span>
+                    <button type="button" class="mg-asf-btn" wire:click="stopWatch({{ $w->id }})">وقّف</button>
+                </div>
+            @endforeach
+
             <div class="mg-asf-feed" x-ref="feed">
                 @if ($messages->isEmpty())
                     <div class="mg-asf-hello" x-show="! pending">
@@ -243,7 +274,7 @@
                 @foreach ($messages as $m)
                     @if ($m->role === 'user')
                         <div class="mg-asf-msg me" wire:key="m-{{ $m->id }}">
-                            <div class="mg-asf-bubble">{{ $m->content }}</div>
+                            <div class="mg-asf-bubble">{{ $m->content }}@if (isset($m->meta['file']))<span class="mg-asf-file">📎 {{ $m->meta['file']['name'] }}</span>@endif</div>
                         </div>
                     @elseif ($m->meta['pending'] ?? false)
                         <div class="mg-asf-msg ai" wire:key="m-{{ $m->id }}-pending">
@@ -279,6 +310,36 @@
                                         <span>🔎 {{ count($m->meta['tools']) }} {{ count($m->meta['tools']) === 1 ? 'بحث' : 'عمليات بحث' }} في السيستم</span>
                                     @endif
                                 </div>
+                                @if (($m->meta['action_id'] ?? null) && ($act = $actions[$m->meta['action_id']] ?? null))
+                                    @php
+                                        $changes = collect($act->payload['changes'] ?? []);
+                                        $notified = $changes->filter(fn ($c) => in_array($c['to_code'], \App\Observers\InstallmentRequestObserver::NOTIFIABLE_STATUSES, true))->count();
+                                    @endphp
+                                    <div class="mg-asf-act {{ $act->status }}">
+                                        <div class="mg-asf-act-head">
+                                            <strong>⚡ تغيير حالات من شيت أمان</strong>
+                                            <span>{{ $changes->count() }} طلب</span>
+                                        </div>
+                                        <div class="mg-asf-act-chips">
+                                            @foreach ($changes->countBy('to') as $to => $n)
+                                                <span>{{ $to }}: <b>{{ $n }}</b></span>
+                                            @endforeach
+                                        </div>
+                                        @if ($act->status === 'pending' && $changes->isNotEmpty())
+                                            <p>مفيش حاجة اتغيرت لسه. نزّل ملف «التغييرات اللي هتتنفذ» وبص عليه، وبعدين دوس نفّذ - كل طلب هيتعدل باسمك زي ما تكون غيرته بإيدك{{ $notified ? '، و'.$notified.' عميل هيوصله رسالة واتساب بحالته' : '' }}.</p>
+                                            <div class="mg-asf-act-btns">
+                                                <button type="button" class="mg-asf-btn go" wire:click="applyAction({{ $act->id }})" wire:loading.attr="disabled" wire:target="applyAction"
+                                                    wire:confirm="هيتغير {{ $changes->count() }} طلب{{ $notified ? ' وهيتبعت '.$notified.' رسالة واتساب للعملاء' : '' }}. متأكد؟">✓ نفّذ {{ $changes->count() }} تغيير</button>
+                                                <button type="button" class="mg-asf-btn" wire:click="cancelAction({{ $act->id }})">مش دلوقتي</button>
+                                                <span wire:loading wire:target="applyAction">بنفّذ…</span>
+                                            </div>
+                                        @elseif ($act->status === 'applied')
+                                            <p>✓ اتنفّذ {{ $act->applied_at?->locale('ar')->diffForHumans() }}: {{ $act->result['done'] ?? 0 }} طلب اتغير{{ ! empty($act->result['skipped']) ? '، و'.count($act->result['skipped']).' اتسابوا لأن حالتهم اتغيرت قبل التنفيذ' : '' }}{{ ! empty($act->result['failed']) ? '، و'.count($act->result['failed']).' فشلوا' : '' }}.</p>
+                                        @elseif ($act->status === 'cancelled')
+                                            <p>اتلغى - مفيش حاجة اتغيرت.</p>
+                                        @endif
+                                    </div>
+                                @endif
                                 @if (! empty($m->meta['followups']) && $loop->last)
                                     <div class="mg-asf-follow">
                                         @foreach ($m->meta['followups'] as $f)
@@ -305,7 +366,15 @@
 
             {{-- ---------- composer ---------- --}}
             <div class="mg-asf-compose">
+                @if ($attached)
+                    <div class="mg-asf-attached">📎 {{ $attached['name'] }} <button type="button" wire:click="removeAttachment" title="شيل الملف">✕</button></div>
+                @endif
+                <div class="mg-asf-attached" wire:loading.flex wire:target="sheet">⏳ بيرفع الشيت…</div>
                 <form class="mg-asf-box" x-on:submit.prevent="send()">
+                    <input type="file" x-ref="file" class="hidden" accept=".xlsx,.csv" wire:model="sheet">
+                    <button type="button" class="mg-asf-ico mg-asf-mic" x-show="! recording" x-on:click="$refs.file.click()" :disabled="busy" title="ارفع شيت إكسيل">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21 11-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l9.2-9.2a3.7 3.7 0 0 1 5.2 5.2l-9.2 9.2a1.8 1.8 0 0 1-2.6-2.6l8.5-8.5"/></svg>
+                    </button>
                     <template x-if="! recording">
                         <textarea x-ref="input" rows="1" x-model="text" placeholder="اسأل عصفورة…"
                             x-on:input="grow()" x-on:keydown.enter="if (! $event.shiftKey) { $event.preventDefault(); send(); }" :disabled="busy"></textarea>
@@ -321,7 +390,7 @@
                         <svg x-show="! recording" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
                         <svg x-show="recording" viewBox="0 0 24 24" fill="currentColor"><path d="M3 20.5 21 12 3 3.5v6.6L15 12 3 13.9z" transform="scale(-1,1) translate(-24,0)"/></svg>
                     </button>
-                    <button type="submit" class="mg-asf-ico mg-asf-send" x-show="! recording" :disabled="busy || ! text.trim()" title="ابعت">
+                    <button type="submit" class="mg-asf-ico mg-asf-send" x-show="! recording" :disabled="busy || (! text.trim() && ! $wire.attached)" title="ابعت">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 20.5 21 12 3 3.5v6.6L15 12 3 13.9z" transform="scale(-1,1) translate(-24,0)"/></svg>
                     </button>
                 </form>
@@ -349,7 +418,7 @@
                 bottom() { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); },
                 grow() { const t = this.$refs.input; if (! t) return; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 160) + 'px'; },
                 send(preset = null) {
-                    const q = (preset ?? this.text).trim();
+                    const q = (preset ?? this.text).trim() || (this.$wire.attached ? 'شوفي الشيت ده' : '');
                     if (! q || this.busy) return;
                     this.pending = q; this.text = '';
                     this.$nextTick(() => { this.grow(); this.bottom(); });

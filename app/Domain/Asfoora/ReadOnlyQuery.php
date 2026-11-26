@@ -41,13 +41,16 @@ class ReadOnlyQuery
         $sql = self::check($sql);
         $connection = DB::connection();
         $sqlite = $connection->getDriverName() === 'sqlite';
+        // the server runs MariaDB: its time limit is max_statement_time, in seconds
+        $maria = ! $sqlite && str_contains((string) $connection->getPdo()->getAttribute(\PDO::ATTR_SERVER_VERSION), 'MariaDB');
+        $limitVar = $maria ? 'max_statement_time' : 'max_execution_time';
         $rows = [];
         $truncated = false;
 
         if ($sqlite) {
             $connection->statement('PRAGMA query_only = ON');
         } else {
-            $connection->statement('SET SESSION max_execution_time = '.max(1000, $timeoutMs));
+            $connection->statement("SET SESSION {$limitVar} = ".($maria ? max(1, intdiv($timeoutMs, 1000)) : max(1000, $timeoutMs)));
             $connection->statement('START TRANSACTION READ ONLY');
         }
 
@@ -64,7 +67,7 @@ class ReadOnlyQuery
                 $connection->statement('PRAGMA query_only = OFF');
             } else {
                 $connection->statement('ROLLBACK');
-                $connection->statement('SET SESSION max_execution_time = 0');
+                $connection->statement("SET SESSION {$limitVar} = 0");
             }
         }
 

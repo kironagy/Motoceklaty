@@ -103,10 +103,10 @@ class AsfooraTest extends TestCase
 
         $this->assertStringContainsString('70 طلب', $answer->content);
         $this->assertArrayNotHasKey('pending', $answer->meta);
-        // the AI got 50 of them and the real total
+        // the AI got one page of them and the real total
         $result = json_decode((string) json_encode($fake->requests()[1]->contents[2]['parts'][0]['result']), true);
         $this->assertSame(70, $result['total_matching']);
-        $this->assertCount(50, $result['requests']);
+        $this->assertCount(30, $result['requests']);
         // the AI never sees the database's own clock - it gets today's date
         $this->assertStringContainsString(now()->toDateString(), $fake->requests()[0]->system);
 
@@ -117,8 +117,8 @@ class AsfooraTest extends TestCase
         $sheet = $zip->getFromName('xl/worksheets/sheet1.xml');
         $zip->close();
         unlink($path);
-        // title, subtitle and header (the blank spacer row is not written) + all 70 requests
-        $this->assertSame(3 + 70, substr_count($sheet, '<row '));
+        // the header + all 70 requests
+        $this->assertSame(1 + 70, substr_count($sheet, '<row '));
         $this->assertStringContainsString('rightToLeft="true"', $sheet);
 
         $this->assertStringContainsString('/admin/deliveries/75/edit', Asfoora::render_answer($answer->content));
@@ -201,12 +201,12 @@ class AsfooraTest extends TestCase
             return $xml;
         };
         $dead = $sheet(0);
-        $this->assertSame(3 + 2, substr_count($dead, '<row '));
+        $this->assertSame(1 + 2, substr_count($dead, '<row '));
         $this->assertStringContainsString('سكور وحش', $dead);
         $this->assertStringContainsString('ليه في المجموعة دي', $dead);
         $alive = $sheet(1);
-        $this->assertSame(3 + 3, substr_count($alive, '<row '));
-        $this->assertStringContainsString('FEF08A', $alive);
+        $this->assertSame(1 + 3, substr_count($alive, '<row '));
+        $this->assertStringContainsString('FFF2CC', $alive);
         $this->assertStringContainsString('ينفع نقاوح فيه', AsfooraExcel::filename($answer, 1));
     }
 
@@ -309,6 +309,158 @@ class AsfooraTest extends TestCase
             $this->assertSame(1, \App\Models\Notification::where('user_id', $owner->id)->count());
         }
         $this->assertSame(2, \App\Models\Notification::count());
+    }
+
+    private function amanSheet(array $rows): string
+    {
+        $path = 'asfoora-files/test-'.uniqid().'.xlsx';
+        \Illuminate\Support\Facades\Storage::disk('local')->makeDirectory('asfoora-files');
+        $writer = new \OpenSpout\Writer\XLSX\Writer();
+        $writer->openToFile(\Illuminate\Support\Facades\Storage::disk('local')->path($path));
+        $writer->getCurrentSheet()->setName('11-2026');
+        $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['اسم العميل ', 'اسم المعرض ', 'رقم الطلب ', 'حاله الطلب ', 'المبلغ ', 'المتبقي ', 'تاريخ الطلب ', 'كومنت ']));
+        foreach ($rows as $r) {
+            $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues($r));
+        }
+        $writer->close();
+
+        return $path;
+    }
+
+    public function test_aman_sheet_changes_are_prepared_then_applied_only_on_the_owners_press(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+        $owner = $this->staff(['is_hitler' => true]);
+        $this->requests(5, 'pending', $owner->id);
+        $ids = DB::table('installment_requests')->orderBy('id')->pluck('id')->all();
+        $names = ['أحمد عبد الموجود محمد', 'محمد سعد علي حسن', 'كريم عادل سيد', 'سامي فؤاد', 'وليد جبر'];
+        foreach ($ids as $i => $id) {
+            DB::table('installment_requests')->where('id', $id)->update(['applicant_name' => $names[$i], 'created_at' => '2026-11-05 10:00:00']);
+        }
+        DB::table('aman_uploads')->insert(['installment_request_id' => $ids[1], 'staff_id' => $owner->id, 'type' => 'upload', 'status' => 'uploaded', 'aman_ref' => '26116830050', 'created_at' => now(), 'updated_at' => now()]);
+
+        $path = $this->amanSheet([
+            ['احمد عبدالموجود محمد', 'موتوجيت', '26116830011', 'active', '57000', '55000', '11/05/2026', ''],          // by name (spelt differently) → approved with limit
+            ['اسم تاني خالص', 'موتو جيت', '26116830050', 'Rejected ', '', '', '11/04/2026', 'حاله ائتمانيه مرفوضه'],    // by Aman's number → rejected
+            ['كريم عادل سيد', 'موتوجيت', '26116830099', 'توقيع ', '40000', '40000', '11/06/2026', ''],                   // → delivered
+            ['سامي فؤاد', 'العدوي', '26116830100', 'Rejected', '', '', '11/06/2026', 'سكور'],                           // another showroom → ignored
+            ['وليد جبر', 'موتوجيت', '26116830101', 'Whatever', '', '', '11/06/2026', ''],                               // unknown status → review
+            ['حد مش عندنا', 'موتوجيت', '26116839999', 'Rejected', '', '', '11/06/2026', 'x'],                          // not found
+        ]);
+        $chat = AsfooraChat::create(['staff_id' => $owner->id]);
+        $chat->messages()->create(['role' => 'user', 'content' => 'غيري حالات موتو جيت', 'meta' => ['file' => ['name' => 'aman.xlsx', 'path' => $path]]]);
+        \App\Domain\Asfoora\AsfooraTools::$chatId = $chat->id;
+
+        $r = \App\Domain\Asfoora\AsfooraTools::call('aman_sheet_changes', []);
+        $this->assertSame(3, $r['to_change']);
+        $this->assertSame(1, $r['other_showrooms']);
+        $this->assertSame(1, $r['need_review']);
+        $this->assertSame(1, $r['not_found']);
+        // nothing changed yet
+        $this->assertSame(5, DB::table('installment_requests')->where('status', 'pending')->count());
+
+        $action = \App\Models\AsfooraAction::sole();
+        DB::table('installment_requests')->where('id', $ids[2])->update(['status' => 'paused']); // changed meanwhile
+        $this->actingAs($owner, 'filament');
+        $result = \App\Domain\Asfoora\AmanSheetSync::apply($action, $owner->id);
+
+        $this->assertSame(2, $result['done']);
+        $this->assertSame([$ids[2]], $result['skipped']);
+        $approved = \App\Models\InstallmentRequest::find($ids[0]);
+        $this->assertSame('approved', $approved->status);
+        $this->assertStringContainsString('بحد 57,000', $approved->checks_report['aman']);
+        $this->assertSame($owner->id, $approved->status_updated_by);
+        $rejected = \App\Models\InstallmentRequest::find($ids[1]);
+        $this->assertSame('rejected', $rejected->status);
+        $this->assertStringContainsString('حاله ائتمانيه مرفوضه', $rejected->checks_report['aman']);
+        $this->assertSame('paused', \App\Models\InstallmentRequest::find($ids[2])->status);
+        $this->assertSame('pending', \App\Models\InstallmentRequest::find($ids[4])->status);
+        $this->assertSame('applied', $action->fresh()->status);
+        // the customers hear it like from staff
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SendWhatsappStatusNotification::class, 2);
+    }
+
+    public function test_many_requests_are_sorted_in_batches_by_a_separate_call(): void
+    {
+        $owner = $this->staff(['is_hitler' => true]);
+        $this->requests(3, 'rejected', $owner->id);
+        $ids = DB::table('installment_requests')->orderBy('id')->pluck('id')->all();
+        $fake = new FakeAiProvider();
+        // the batch call labels two of the three; the third is never dropped
+        $fake->queue(new AiResponse([json_encode(['items' => [['id' => $ids[0], 'group' => 'ميت', 'note' => 'سكور'], ['id' => $ids[1], 'group' => 'ينفع', 'note' => 'ورق ناقص']]])], [], 'STOP', [], 'bormaa:test', null, 1));
+        $this->app->instance(AiProvider::class, $fake);
+
+        $r = \App\Domain\Asfoora\AsfooraTools::call('sort_requests', ['statuses' => ['rejected'], 'groups' => [['title' => 'ميت', 'rule' => 'سكور'], ['title' => 'ينفع', 'rule' => 'ورق']]]);
+        $this->assertSame(3, $r['total']);
+        $this->assertSame(['ميت' => 1, 'ينفع' => 1, 'محتاج مراجعة' => 1], array_column($r['files'], 'count', 'title'));
+        $this->assertStringContainsString('ورق ناقص', json_encode($r['_tables'], JSON_UNESCAPED_UNICODE));
+    }
+
+    public function test_reasons_and_notes_come_once_without_the_systems_own_lines(): void
+    {
+        $this->assertSame('وظيفة مرفوضه', \App\Domain\Asfoora\AsfooraTools::tidy("وظيفة مرفوضه\nرد أمان: وظيفة مرفوضه"));
+        $this->assertSame("رقم طلب أمان: 26116833533\nكلمت العميل", \App\Domain\Asfoora\AsfooraTools::tidy(
+            "رقم طلب أمان: 26116833533 — الموظف كتب رقم طلب أمان: 26116833533\nاتقدم من رابط الفورم (طلب تقسيط موتوسيكل)\nالعميل عدّل من تعديل العميل من رابط التقديم (2): صورة البطاقة\nكلمت العميل", true));
+    }
+
+    public function test_the_excel_looks_like_his_own_report(): void
+    {
+        $owner = $this->staff(['is_hitler' => true]);
+        $chat = AsfooraChat::create(['staff_id' => $owner->id]);
+        $rows = [['id' => 6196, 'customer' => 'عميل', 'phone' => '01050725028', 'created_at' => '2026-11-22', 'status' => 'متوقف امان']];
+        $m = $chat->messages()->create(['role' => 'assistant', 'content' => 'x', 'meta' => ['tables' => [
+            ['title' => 'الطلبات المتوقفة', 'columns' => array_keys($rows[0]), 'rows' => $rows, 'highlight' => [['column' => 'status', 'value' => 'متوقف امان', 'color' => 'yellow']]],
+        ]]]);
+        $path = AsfooraExcel::write($m, 'x');
+        $zip = new \ZipArchive();
+        $zip->open($path);
+        $sheet = $zip->getFromName('xl/worksheets/sheet1.xml');
+        $all = $sheet.$zip->getFromName('xl/sharedStrings.xml').$zip->getFromName('xl/styles.xml');
+        $zip->close();
+        unlink($path);
+
+        $this->assertSame(2, substr_count($sheet, '<row '));            // the header, then the rows - no title band
+        $this->assertStringContainsString('1F4E78', $all);                // navy header
+        $this->assertStringContainsString('FFF2CC', $all);                // his soft yellow
+        $this->assertStringContainsString('22/11/2026', $all);           // his date format
+        $this->assertStringContainsString('01050725028', $all);          // the phone keeps its 0
+        $this->assertMatchesRegularExpression('/<col min="2" max="2" width="32"/', $sheet);
+    }
+
+    public function test_a_watch_posts_new_requests_every_hour_until_he_stops_it(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+        $owner = $this->staff(['is_hitler' => true]);
+        $chat = AsfooraChat::create(['staff_id' => $owner->id]);
+        \App\Domain\Asfoora\AsfooraTools::$chatId = $chat->id;
+
+        $started = \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'new_requests']);
+        $watch = \App\Models\AsfooraWatch::findOrFail($started['started']);
+        $this->assertSame(60, $watch->every_minutes);
+
+        // nothing due yet
+        $this->assertSame(0, app(\App\Domain\Asfoora\AsfooraWatcher::class)->runDue());
+
+        // an hour later, nothing new: it still says so
+        $this->travel(61)->minutes();
+        $this->artisan('asfoora:watches')->assertSuccessful();
+        $this->assertStringContainsString('مفيش طلبات جديدة', $chat->messages()->reorder('id', 'desc')->value('content'));
+        $this->assertSame(1, \App\Models\Notification::where('user_id', $owner->id)->count());
+
+        // two requests come; the next hour tells them
+        $this->travel(5)->minutes();
+        $this->requests(2, 'new_request', $owner->id);
+        $this->travel(60)->minutes();
+        $this->artisan('asfoora:watches')->assertSuccessful();
+        $last = $chat->messages()->reorder('id', 'desc')->first();
+        $this->assertStringContainsString('2 طلب جديد', $last->content);
+        $this->assertCount(2, $last->meta['tables'][0]['rows']);
+
+        // "خلاص وقف"
+        \App\Domain\Asfoora\AsfooraTools::call('watch_stop', []);
+        $this->travel(61)->minutes();
+        $this->artisan('asfoora:watches')->assertSuccessful();
+        $this->assertSame(2, \App\Models\Notification::where('user_id', $owner->id)->count());
     }
 
     public function test_staff_without_is_hitler_is_refused(): void

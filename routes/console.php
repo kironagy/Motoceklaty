@@ -53,6 +53,8 @@ Schedule::command('attendance:mark-absences')->dailyAt('23:50')->timezone('Afric
 // Owner 2026-11-26: «عصفورة» writes yesterday's report every morning (ASFOORA_DAILY_REPORT=false turns it off)
 Schedule::command('asfoora:daily-report')->dailyAt('09:00')->timezone('Africa/Cairo')->withoutOverlapping()
     ->when(fn () => (bool) env('ASFOORA_DAILY_REPORT', true));
+// Owner 2026-11-26: the watches he starts from «عصفورة» ("ابعتلي الطلبات الجديدة كل ساعة")
+Schedule::command('asfoora:watches')->everyMinute()->withoutOverlapping(10);
 
 // Owner 2026-11-09: logged-out bot numbers went unnoticed for days - live status + owner alert.
 // Owner 2026-11-15: real phones of @lid customers from the worker's lid mappings

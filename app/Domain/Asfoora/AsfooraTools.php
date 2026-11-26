@@ -16,9 +16,24 @@ class AsfooraTools
     /** what the AI gets of a list (the Excel export runs it again in full, up to EXPORT_ROWS) */
     private const LIST_LIMIT = 200;
 
-    private const LIST_DEFAULT = 50;
+    private const LIST_DEFAULT = 30;
 
     public const EXPORT_ROWS = 20000;
+
+    /** the chat being answered - its uploaded sheet is the one the sheet tools read */
+    public static ?int $chatId = null;
+
+    public static function uploadedFile(): ?array
+    {
+        if (! self::$chatId) {
+            return null;
+        }
+        $meta = \App\Models\AsfooraMessage::where('asfoora_chat_id', self::$chatId)->where('role', 'user')
+            ->where('meta', 'like', '%"file"%')->latest('id')->value('meta');
+        $meta = is_string($meta) ? json_decode($meta, true) : $meta;
+
+        return $meta['file'] ?? null;
+    }
 
     /** @return list<array{name: string, description: string, parameters: array}> */
     public static function declarations(): array
@@ -79,6 +94,53 @@ class AsfooraTools
                 ], 'required' => ['groups']],
             ],
             [
+                'name' => 'sort_requests',
+                'description' => 'Sorts MANY requests (any number) into groups by reading each one\'s Aman reason and employee note - e.g. «الميتة» / «ينفع نقاوح فيها» / «محتاج مراجعة». Give the filters and each group with its rule; the requests are read in batches for you and every group becomes its own Excel file with a note on each request. Use it instead of reading the requests yourself when there are more than ~40.',
+                'parameters' => ['type' => 'object', 'properties' => $filters + [
+                    'groups' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => [
+                        'title' => ['type' => 'string', 'description' => 'The file\'s name, e.g. «المرفوض الميت - نوفمبر».'],
+                        'rule' => ['type' => 'string', 'description' => 'Which requests belong here, in plain words.'],
+                    ], 'required' => ['title', 'rule']]],
+                    'highlight' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => [
+                        'column' => ['type' => 'string', 'enum' => ['status', 'current_staff', 'taken_from', 'uploaded_by']],
+                        'value' => ['type' => 'string'],
+                        'color' => ['type' => 'string', 'enum' => ['yellow', 'red', 'green', 'orange', 'blue']],
+                    ], 'required' => ['column', 'value', 'color']]],
+                ], 'required' => ['groups']],
+            ],
+            [
+                'name' => 'read_sheet',
+                'description' => 'Reads the Excel/CSV sheet the owner uploaded in this chat: its sheets, their headers and row counts, and rows (up to 100 from offset).',
+                'parameters' => ['type' => 'object', 'properties' => [
+                    'sheet' => ['type' => 'string', 'description' => 'Which sheet (default the first).'],
+                    'offset' => ['type' => 'integer'], 'limit' => ['type' => 'integer'],
+                ]],
+            ],
+            [
+                'name' => 'aman_sheet_changes',
+                'description' => 'For Aman\'s sheet the owner uploaded (customer, showroom, Aman request number, status, amount, comment): finds the showroom\'s requests and PREPARES their status changes - active = موافقة with the limit in the reason, Rejected = رفض, Canceled = ملغي, توقيع = استلم المكنة, pending/on hold = متوقف امان, with Aman\'s comment as the reason. Nothing is changed: the owner presses «نفّذ» under your answer. Returns counts and a few examples.',
+                'parameters' => ['type' => 'object', 'properties' => [
+                    'showroom' => ['type' => 'string', 'description' => 'Only rows of this showroom (default «موتوجيت»).'],
+                    'sheets' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Only these sheets (e.g. one month). Default all.'],
+                ]],
+            ],
+            [
+                'name' => 'watch_start',
+                'description' => 'Starts a background watch in this chat that keeps sending him news with a push to his phone until he stops it: new requests every hour ("ابعتلي الطلبات الجديدة كل ساعة") - it also says when there is nothing new - or any question repeated on a schedule.',
+                'parameters' => ['type' => 'object', 'properties' => [
+                    'kind' => ['type' => 'string', 'enum' => ['new_requests', 'question'], 'description' => 'new_requests = the requests that came since the last look; question = your answer to his question each time.'],
+                    'question' => ['type' => 'string', 'description' => 'For kind=question: what to answer each time.'],
+                    'every_minutes' => ['type' => 'integer', 'description' => 'Default 60, at least 15.'],
+                    'source' => ['type' => 'string', 'enum' => ['bot', 'staff'], 'description' => 'new_requests: only the bot\'s / only the employees\'.'],
+                    'statuses' => ['type' => 'array', 'items' => ['type' => 'string']],
+                ], 'required' => ['kind']],
+            ],
+            [
+                'name' => 'watch_stop',
+                'description' => 'Stops a watch ("خلاص وقف"، "بطّلي تبعتي"): by id, or every watch of this chat when no id.',
+                'parameters' => ['type' => 'object', 'properties' => ['id' => ['type' => 'integer']]],
+            ],
+            [
                 'name' => 'remember',
                 'description' => 'Saves something the owner told you to keep in mind from now on ("افتكري إن ..."، "من هنا ورايح ..."): a rule, a preference, how he sorts requests. It is in your instructions in every later question. Only when he asks you to remember.',
                 'parameters' => ['type' => 'object', 'properties' => ['content' => ['type' => 'string', 'description' => 'The rule in his words, short and complete.']], 'required' => ['content']],
@@ -107,8 +169,13 @@ class AsfooraTools
             return match ($name) {
                 'requests_report' => self::report($args),
                 'list_requests' => self::list($args),
-                'requests_with_history' => self::history($args),
+                'requests_with_history' => self::historySummary($args),
                 'make_report_files' => self::groups($args),
+                'read_sheet' => self::readSheet($args),
+                'watch_start' => self::watchStart($args),
+                'watch_stop' => self::watchStop($args),
+                'sort_requests' => self::sortRequests($args),
+                'aman_sheet_changes' => self::amanChanges($args),
                 // her own notebook - the only thing she writes, and never the system's data
                 'remember' => ['saved' => \App\Models\AsfooraMemory::create(['content' => mb_substr(trim((string) ($args['content'] ?? '')), 0, 1000), 'created_by' => auth()->id()])->id],
                 'forget' => ['deleted' => (bool) \App\Models\AsfooraMemory::whereKey((int) ($args['id'] ?? 0))->delete()],
@@ -136,6 +203,8 @@ class AsfooraTools
             ->when(($args['source'] ?? null) === 'staff', fn ($q) => $q->where(fn ($w) => $w->whereNull('r.request_type')->orWhere('r.request_type', '!=', 'bot')))
             ->when(filled($args['from'] ?? null), fn ($q) => $q->where($field, '>=', Carbon::parse($args['from'])->startOfDay()))
             ->when(filled($args['to'] ?? null), fn ($q) => $q->where($field, '<=', Carbon::parse($args['to'])->endOfDay()))
+            // an exact moment (a watch: what came since its last look)
+            ->when(filled($args['since'] ?? null), fn ($q) => $q->where('r.created_at', '>', Carbon::parse($args['since'])))
             ->when(! empty($args['statuses']), fn ($q) => $q->whereIn('r.status', (array) $args['statuses']))
             ->when(filled($args['staff'] ?? null), fn ($q) => $q->where('s.name', 'like', '%'.$args['staff'].'%'))
             ->when(filled($args['installment_type'] ?? null), fn ($q) => $q->where('r.installment_type', 'like', '%'.$args['installment_type'].'%'))
@@ -255,8 +324,8 @@ class AsfooraTools
                 'created_at' => substr((string) $r->created_at, 0, 10),
                 'taken_from' => $parked ? ($names[end($real) ?: 0] ?? null) : null,
                 'current_staff' => $r->staff,
-                'aman_reason' => $cut($aman ?: ($r->aman_check_text ?: null)),
-                'staff_note' => $cut(trim(implode("\n", array_filter([$staffNote, $r->notes ? strip_tags((string) $r->notes) : null]))) ?: null),
+                'aman_reason' => $cut(self::tidy($aman ?: ($r->aman_check_text ?: null))),
+                'staff_note' => $cut(self::tidy(implode("\n", array_filter([$staffNote, $r->notes ? strip_tags((string) $r->notes) : null])), true)),
                 'uploaded_by' => $names[$real[0] ?? $collapsed[0] ?? $current] ?? null,
                 // oldest first; read right to left: «مريم ← beso ← متوقف»
                 'owners' => implode(' ← ', array_map(fn ($id) => $names[$id] ?? "#{$id}", $collapsed)),
@@ -266,6 +335,152 @@ class AsfooraTools
         })->all();
 
         return ['total_matching' => $total, 'shown' => count($rows), 'requests' => $rows];
+    }
+
+    /**
+     * Live 2026-11-26: sorting 485 rejected requests had the AI read them all in its own
+     * conversation and the call broke. Here they are read 60 at a time, each batch a short separate
+     * call that only labels (id → group + a few words why), and the groups become the files.
+     */
+    private static function sortRequests(array $args): array
+    {
+        $groups = array_values(array_filter(array_map(fn ($g) => ['title' => mb_substr(trim((string) ($g['title'] ?? '')), 0, 60), 'rule' => trim((string) ($g['rule'] ?? ''))], (array) ($args['groups'] ?? [])), fn ($g) => $g['title'] !== ''));
+        if ($groups === []) {
+            return ['error' => 'Give at least one group with a title and a rule.'];
+        }
+        $review = 'محتاج مراجعة';
+        $titles = array_column($groups, 'title');
+        if (! in_array($review, $titles, true)) {
+            $groups[] = ['title' => $review, 'rule' => 'مش واضح من الكلام المكتوب يروح فين.'];
+            $titles[] = $review;
+        }
+
+        $rows = self::history(['offset' => 0] + array_diff_key($args, ['groups' => 1, 'highlight' => 1]), self::EXPORT_ROWS)['requests'];
+        $memories = \App\Models\AsfooraMemory::orderBy('id')->pluck('content')->implode("\n- ");
+        $system = "إنت بتفرز طلبات تقسيط موتوسيكلات (جهة التمويل أمان) لصاحب المعرض. لكل طلب اختار مجموعة واحدة بالظبط من دول حسب قاعدتها:\n"
+            .collect($groups)->map(fn ($g) => "- {$g['title']}: {$g['rule']}")->implode("\n")
+            .($memories !== '' ? "\nقواعد صاحب المعرض الثابتة:\n- ".$memories : '')
+            ."\nلكل طلب: id، والمجموعة باسمها بالظبط، وملاحظة قصيرة (أقل من 12 كلمة) بالعامية بتقول ليه. ما تسيبش ولا طلب.";
+        $ai = app(\App\Agent\Providers\AiProvider::class);
+        $labels = [];
+
+        foreach (array_chunk($rows, 60) as $batch) {
+            $lines = implode("\n", array_map(fn ($r) => $r['id'].' | '.$r['status'].' | أمان: '.mb_substr((string) ($r['aman_reason'] ?? 'مفيش رد مكتوب'), 0, 200)
+                .' | الموظف: '.mb_substr((string) ($r['staff_note'] ?? '-'), 0, 160), $batch));
+            try {
+                $response = $ai->chat(new \App\Agent\Providers\AiRequest(
+                    purpose: 'asfoora', label: 'asfoora-sort', system: $system,
+                    contents: [['role' => 'user', 'parts' => [['type' => 'text', 'text' => $lines]]]],
+                    toolMode: 'none', temperature: 0.0, maxOutputTokens: 6000, thinkingLevel: 'low', timeoutSeconds: 90,
+                    responseSchema: ['type' => 'object', 'properties' => ['items' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => [
+                        'id' => ['type' => 'integer'], 'group' => ['type' => 'string', 'enum' => $titles], 'note' => ['type' => 'string'],
+                    ], 'required' => ['id', 'group', 'note']]]], 'required' => ['items']],
+                ));
+                foreach ((array) (json_decode(trim(implode('', $response->textParts)), true)['items'] ?? []) as $item) {
+                    if (in_array($item['group'] ?? null, $titles, true)) {
+                        $labels[(int) $item['id']] = ['group' => $item['group'], 'note' => (string) ($item['note'] ?? '')];
+                    }
+                }
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
+        // a request no batch labelled is never silently dropped
+        $sorted = ['groups' => array_map(fn ($t) => ['title' => $t, 'ids' => [], 'notes' => []], $titles), 'highlight' => (array) ($args['highlight'] ?? [])];
+        foreach ($rows as $r) {
+            $label = $labels[(int) $r['id']] ?? ['group' => $review, 'note' => 'ما اتفرزش - راجعه بنفسك'];
+            $at = array_search($label['group'], $titles, true);
+            $sorted['groups'][$at]['ids'][] = (int) $r['id'];
+            $sorted['groups'][$at]['notes'][] = ['id' => (int) $r['id'], 'note' => $label['note']];
+        }
+        $sorted['groups'] = array_values(array_filter($sorted['groups'], fn ($g) => $g['ids'] !== []));
+        $result = self::groups($sorted);
+
+        return [
+            'total' => count($rows),
+            'files' => $result['files'],
+            'examples' => collect($sorted['groups'])->mapWithKeys(fn ($g) => [$g['title'] => array_slice($g['notes'], 0, 4)])->all(),
+            '_tables' => $result['_tables'],
+        ];
+    }
+
+    private static function watchStart(array $args): array
+    {
+        $chat = self::$chatId ? \App\Models\AsfooraChat::find(self::$chatId) : null;
+        if (! $chat) {
+            return ['error' => 'No chat.'];
+        }
+        $kind = ($args['kind'] ?? '') === 'question' ? 'question' : 'new_requests';
+        if ($kind === 'question' && blank($args['question'] ?? null)) {
+            return ['error' => 'A question watch needs the question.'];
+        }
+        $every = max(15, min(1440, (int) ($args['every_minutes'] ?? 60)));
+        $watch = \App\Models\AsfooraWatch::create([
+            'asfoora_chat_id' => $chat->id, 'staff_id' => $chat->staff_id, 'kind' => $kind,
+            'question' => $kind === 'question' ? mb_substr((string) $args['question'], 0, 500) : null,
+            'filters' => array_filter(['source' => $args['source'] ?? null, 'statuses' => $args['statuses'] ?? null]) ?: null,
+            'every_minutes' => $every, 'last_checked_at' => now(), 'next_run_at' => now()->addMinutes($every),
+        ]);
+
+        return ['started' => $watch->id, 'what' => $watch->describe(), 'first_at' => $watch->next_run_at->format('h:i A'),
+            'note' => 'Tell him it runs in the background with a push each time - nothing new is said too - until he says stop here.'];
+    }
+
+    private static function watchStop(array $args): array
+    {
+        $q = \App\Models\AsfooraWatch::where('asfoora_chat_id', self::$chatId)->where('is_active', true)
+            ->when(! empty($args['id']), fn ($q) => $q->whereKey((int) $args['id']));
+        $stopped = $q->get()->map(fn ($w) => $w->describe())->all();
+        $q->update(['is_active' => false]);
+
+        return ['stopped' => $stopped];
+    }
+
+    private static function readSheet(array $args): array
+    {
+        $file = self::uploadedFile();
+        if (! $file) {
+            return ['error' => 'No sheet was uploaded in this chat - ask him to attach it (📎).'];
+        }
+        $sheets = SheetFile::read($file['path']);
+        $name = (string) ($args['sheet'] ?? '') ?: array_key_first($sheets);
+        $sheet = $sheets[$name] ?? null;
+        if (! $sheet) {
+            return ['error' => 'No sheet named '.$name, 'sheets' => array_keys($sheets)];
+        }
+        $offset = max(0, (int) ($args['offset'] ?? 0));
+
+        return [
+            'file' => $file['name'],
+            'sheets' => array_map(fn ($s) => count($s['rows']).' rows', $sheets),
+            'sheet' => $name,
+            'headers' => $sheet['headers'],
+            'rows' => array_slice($sheet['rows'], $offset, max(1, min(100, (int) ($args['limit'] ?? 50)))),
+        ];
+    }
+
+    private static function amanChanges(array $args): array
+    {
+        $file = self::uploadedFile();
+        if (! $file || ! self::$chatId) {
+            return ['error' => 'No sheet was uploaded in this chat - ask him to attach Aman\'s sheet (📎).'];
+        }
+        $p = AmanSheetSync::prepare(self::$chatId, $file['path'], (string) ($args['showroom'] ?? '') ?: 'موتوجيت', (array) ($args['sheets'] ?? []));
+        $tables = [
+            ['title' => 'التغييرات اللي هتتنفذ', 'rows' => array_map(fn ($c) => array_diff_key($c, ['from_code' => 1, 'to_code' => 1]), $p['changes']), 'group' => true],
+            ['title' => 'محتاج مراجعة', 'rows' => $p['review'], 'group' => true],
+            ['title' => 'مش لاقيه عندنا', 'rows' => $p['not_found'], 'group' => true],
+        ];
+
+        // the AI gets the counts and a few examples; the files and the «نفّذ» button carry the rest
+        return $p['summary'] + [
+            'examples_changes' => array_slice(array_map(fn ($c) => array_diff_key($c, ['from_code' => 1, 'to_code' => 1]), $p['changes']), 0, 12),
+            'examples_review' => array_slice($p['review'], 0, 8),
+            'examples_not_found' => array_slice($p['not_found'], 0, 5),
+            '_tables' => array_values(array_filter($tables, fn ($t) => $t['rows'] !== [])),
+            '_action' => $p['summary']['action_id'],
+        ];
     }
 
     /** The groups the AI sorted the requests into: counts back to it, the tables to the Excel export. */
@@ -298,9 +513,69 @@ class AsfooraTools
         return array_map(fn ($r) => ['id' => $r['id'], 'verdict' => $notes[(string) $r['id']] ?? null] + $r, $rows);
     }
 
+    /**
+     * Live 2026-11-26: a report of 479 stuck requests had the AI page through all of them (200 at a
+     * time) - 40k tokens a round, and the provider dropped the call. It now gets the numbers over
+     * every matching request (per status, holder, who it was taken from, Aman's commonest reasons)
+     * and one page of rows; the Excel export has them all.
+     */
+    private static function historySummary(array $args): array
+    {
+        $all = self::history(['offset' => 0] + $args, self::EXPORT_ROWS)['requests'];
+        $offset = max(0, (int) ($args['offset'] ?? 0));
+        $limit = max(1, min(self::LIST_LIMIT, (int) ($args['limit'] ?? self::LIST_DEFAULT)));
+        $cut = fn ($t) => $t !== null && mb_strlen((string) $t) > 220 ? mb_substr((string) $t, 0, 220).'…' : $t;
+        $page = array_map(fn ($r) => ['aman_reason' => $cut($r['aman_reason']), 'staff_note' => $cut($r['staff_note'])] + $r, array_slice($all, $offset, $limit));
+        $top = fn (string $key, int $n) => collect($all)->map(fn ($r) => $r[$key] ? mb_substr(preg_replace('/\s+/u', ' ', (string) $r[$key]), 0, 70) : '(فاضي)')
+            ->countBy()->sortDesc()->take($n)->all();
+
+        return [
+            'total_matching' => count($all),
+            'summary' => [
+                'by_status' => collect($all)->countBy('status')->sortDesc()->all(),
+                'by_current_staff' => collect($all)->countBy('current_staff')->sortDesc()->all(),
+                'by_taken_from' => collect($all)->whereNotNull('taken_from')->countBy('taken_from')->sortDesc()->all(),
+                'still_with_their_employee' => collect($all)->where('still_with_employee', true)->count(),
+                'by_uploaded_by' => collect($all)->countBy('uploaded_by')->sortDesc()->take(15)->all(),
+                'top_aman_reasons' => $top('aman_reason', 8),
+                'top_staff_notes' => $top('staff_note', 5),
+            ],
+            'shown' => count($page),
+            'offset' => $offset,
+            'requests' => $page,
+            'note' => 'Counts above are over ALL matching requests. The Excel file has every one of them - do not page through them for a report.',
+        ];
+    }
+
     public static function exportHistory(array $args): array
     {
         return self::history($args, self::EXPORT_ROWS)['requests'];
+    }
+
+    /**
+     * Owner 2026-11-26: "الشيت ملعبك ومش مفهوم". Aman's words came twice («وظيفة مرفوضه» and
+     * «رد أمان: وظيفة مرفوضه»), and the employee's note was buried under the system's own lines
+     * («اتقدم من رابط الفورم…»، «العميل عدّل من…»). Each line once, without those.
+     */
+    public static function tidy(?string $text, bool $staffNote = false): ?string
+    {
+        $seen = [];
+        $lines = [];
+        foreach (preg_split('/\R/u', (string) $text) as $line) {
+            $line = trim(preg_replace('/\s+/u', ' ', $line));
+            if ($staffNote && preg_match('/^(اتقدم من رابط الفورم|العميل عد[ّ]?ل|العميل رج[ّ]?ع)/u', $line)) {
+                continue;
+            }
+            $line = trim(preg_replace(['/^(رد أمان|رد امان|أمان قال|امان قال)\s*:\s*/u', '/\s*—\s*الموظف كتب رقم طلب أمان:\s*\d+/u'], '', $line));
+            $key = preg_replace('/[^\p{L}\p{N}]+/u', '', $line);
+            if ($line === '' || $line === '-' || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $lines[] = $line;
+        }
+
+        return $lines === [] ? null : implode("\n", $lines);
     }
 
     /** The whole list for the Excel export. */
