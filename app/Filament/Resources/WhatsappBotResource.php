@@ -89,6 +89,8 @@ class WhatsappBotResource extends Resource
                         ->searchable()
                         ->preload()
                         ->required()
+                        // one live bot per employee (archived ones don't count, owner 2026-11-27)
+                        ->unique(ignoreRecord: true, modifyRuleUsing: fn ($rule) => $rule->whereNull('archived_at'))
                         ->helperText('هيظهر هنا الموظفين اللي متعلمين كبوت فقط، واللي مش مربوطين ببوت تاني'),
 
                     Forms\Components\TextInput::make('whatsapp_phone_number')

@@ -178,7 +178,8 @@ public function role()
 
 public function whatsappBot()
 {
-    return $this->hasOne(\App\Models\WhatsappBot::class);
+    // Owner 2026-11-27: an archived (removed) bot is not his bot any more
+    return $this->hasOne(\App\Models\WhatsappBot::class)->whereNull('archived_at');
 }
 
 }
