@@ -24,7 +24,9 @@ class AmanSheetSync
 
         return match (true) {
             $s === '' => null,
-            (bool) preg_match('/^(active|approved?)$|موافق/u', $s) => 'approved',
+            // Owner 2026-11-27: Aman's Active = financed = «استلم المكنة» here
+            (bool) preg_match('/^active$/u', $s) => 'delivered',
+            (bool) preg_match('/^approved?$|موافق/u', $s) => 'approved',
             (bool) preg_match('/reject|رفض|مرفوض/u', $s) => 'rejected',
             (bool) preg_match('/cancel|ملغ|الغاء|إلغاء/u', $s) => 'canceled',
             (bool) preg_match('/توقيع|sign/u', $s) => 'delivered',
@@ -187,7 +189,7 @@ class AmanSheetSync
 
         return match ($to) {
             'approved' => 'موافقة أمان'.($amount ? ' بحد '.$amount.' جنيه' : '').($line['comment'] !== '' ? ' — '.$line['comment'] : ''),
-            'delivered' => 'توقيع عند أمان'.($amount ? ' بمبلغ '.$amount.' جنيه' : ''),
+            'delivered' => (mb_strtolower(trim($line['aman_status'])) === 'active' ? 'اتنفّذ عند أمان (Active)' : 'توقيع عند أمان').($amount ? ' بمبلغ '.$amount.' جنيه' : ''),
             // a long Aman status is itself what he must send («Income proof / بيان دخل ...»)
             default => implode(' — ', array_filter([
                 mb_strlen($line['aman_status']) > 20 || str_contains($line['aman_status'], '/') ? $line['aman_status'] : null,

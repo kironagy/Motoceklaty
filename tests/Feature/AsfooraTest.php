@@ -353,7 +353,7 @@ class AsfooraTest extends TestCase
         DB::table('aman_uploads')->insert(['installment_request_id' => $ids[1], 'staff_id' => $owner->id, 'type' => 'upload', 'status' => 'uploaded', 'aman_ref' => '26116830050', 'created_at' => now(), 'updated_at' => now()]);
 
         $path = $this->amanSheet([
-            ['احمد عبدالموجود محمد', 'موتوجيت', '26116830011', 'active', '57000', '55000', '11/05/2026', ''],          // by name (spelt differently) → approved with limit
+            ['احمد عبدالموجود محمد', 'موتوجيت', '26116830011', 'active', '57000', '55000', '11/05/2026', ''],          // by name (spelt differently) → Active = استلم المكنة (owner 2026-11-27)
             ['اسم تاني خالص', 'موتو جيت', '26116830050', 'Rejected ', '', '', '11/04/2026', 'حاله ائتمانيه مرفوضه'],    // by Aman's number → rejected
             ['كريم عادل سيد', 'موتوجيت', '26116830099', 'توقيع ', '40000', '40000', '11/06/2026', ''],                   // → delivered
             ['سامي فؤاد', 'العدوي', '26116830100', 'Rejected', '', '', '11/06/2026', 'سكور'],                           // another showroom → ignored
@@ -380,8 +380,8 @@ class AsfooraTest extends TestCase
         $this->assertSame(2, $result['done']);
         $this->assertSame([$ids[2]], $result['skipped']);
         $approved = \App\Models\InstallmentRequest::find($ids[0]);
-        $this->assertSame('approved', $approved->status);
-        $this->assertStringContainsString('بحد 57,000', $approved->checks_report['aman']);
+        $this->assertSame('delivered', $approved->status);
+        $this->assertStringContainsString('اتنفّذ عند أمان (Active) بمبلغ 57,000', $approved->checks_report['aman']);
         $this->assertSame($owner->id, $approved->status_updated_by);
         $rejected = \App\Models\InstallmentRequest::find($ids[1]);
         $this->assertSame('rejected', $rejected->status);
@@ -627,6 +627,10 @@ class AsfooraTest extends TestCase
         $this->assertSame(3, $r['applied']['changed'] ?? null, json_encode($r, JSON_UNESCAPED_UNICODE));
         $this->assertSame(['work_check', 'paused_aman', 'pending', 'new_request'], DB::table('installment_requests')->orderBy('id')->pluck('status')->all());
         $this->assertStringContainsString('بيان دخل', json_encode(\App\Models\InstallmentRequest::find($ids[1])->checks_report, JSON_UNESCAPED_UNICODE));
+        // owner 2026-11-27: «متوقف امان» tells the customer what Aman wants
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SendWhatsappStatusNotification::class, fn ($j) => $j->installmentRequestId === $ids[1] && $j->status === 'paused_aman');
+        $text = app(\App\Domain\Applications\StaffDecisionService::class)->message(\App\Models\InstallmentRequest::find($ids[1]), 'paused_aman', 'بيان دخل حديث و مختوم');
+        $this->assertStringContainsString('واقف عند جهة التمويل على: بيان دخل حديث و مختوم', $text);
     }
 
     public function test_staff_without_is_hitler_is_refused(): void

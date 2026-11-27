@@ -250,6 +250,11 @@ class StaffDecisionService
                     .'ابعتلي المطلوب هنا وأنا أكمّل الطلب على طول، ولو مش فاهم المطلوب قولي وأنا أوضحلك.',
                 default => "{$to}، طلبك رقم #{$request->id} متوقف مؤقتًا.\nلو عندك أي سؤال ابعتلي هنا.",
             },
+            // Owner 2026-11-27: Aman stopped it on something - he hears what, and sends it here
+            'paused_aman' => $reason !== ''
+                ? "{$to}، طلبك رقم #{$request->id} واقف عند جهة التمويل على: {$reason}.\n"
+                    .'ابعتلي المطلوب هنا وأنا أكمّل الطلب على طول، ولو مش فاهم المطلوب قولي وأنا أوضحلك.'
+                : "{$to}، طلبك رقم #{$request->id} واقف مؤقتًا عند جهة التمويل.\nأول ما يتحرك هبلغك هنا، ولو عندك أي سؤال ابعتلي.",
             // Owner 2026-10-04: a credit (I-Score) refusal is final - no
             // next steps, no "let's find another way".
             'rejected' => self::isCreditRejection($reason)
