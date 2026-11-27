@@ -163,7 +163,10 @@ class FormSubmissionService
             'work_status' => $customerType->legacy_work_status,
             'applicant_phone' => $columns['applicant_phone'] ?? $this->localPhone((string) $link->whatsapp_phone),
             'notes' => trim('اتقدم من رابط الفورم ('.$link->version->form->name.')'."\n".($columns['notes'] ?? '')),
-            'status' => 'new_request',
+            // Owner 2026-11-26/27: every new bot request lands «متوقف» until an employee checks it
+            // (InstallmentRequest::isBotIntakeHold) - the form link is where most of them come from
+            'status' => 'paused',
+            'bot_hold_at' => now(),
         ]));
 
         $application->update(['installment_request_id' => $request->id]);

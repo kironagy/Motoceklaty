@@ -218,7 +218,9 @@ class DynamicLinksTest extends TestCase
         $this->postJson('/f/'.$link->token.'/submit')->assertOk()->assertJsonPath('ok', true);
 
         $request = InstallmentRequest::where('form_link_id', $link->id)->firstOrFail();
-        $this->assertSame('new_request', $request->status);
+        // owner 2026-11-27: it waits «متوقف» until an employee checks it
+        $this->assertSame('paused', $request->status);
+        $this->assertTrue($request->isBotIntakeHold());
         $this->assertSame('bot', $request->request_type);
         $this->assertSame($this->staff->id, $request->staff_id);
         $this->assertSame('محمد علي حسن', $request->applicant_name);
