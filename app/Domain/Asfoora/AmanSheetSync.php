@@ -32,7 +32,8 @@ class AmanSheetSync
             (bool) preg_match('/^approved?$|موافق/u', $s) => 'approved',
             (bool) preg_match('/reject|رفض|مرفوض/u', $s) => 'rejected',
             (bool) preg_match('/cancel|ملغ|الغاء|إلغاء/u', $s) => 'canceled',
-            (bool) preg_match('/توقيع|sign/u', $s) => 'delivered',
+            // Owner 2026-11-27: توقيع = approved, he has not taken the machine yet
+            (bool) preg_match('/توقيع|sign/u', $s) => 'approved',
             // live 2026-11-27 (his monthly sheet): what Aman wants from him = متوقف امان; Aman still checking = تحت الاستعلام
             (bool) preg_match('/pend|hold|incomplete|missing|متوقف|معلق|استيفاء|مطلوب|income proof|customer id|commercial register|اوراق|أوراق/u', $s) => 'paused_aman',
             (bool) preg_match('/استعلام\s*عمل/u', $s) => 'work_check',
@@ -197,8 +198,8 @@ class AmanSheetSync
         $amount = is_numeric(str_replace(',', '', (string) $line['amount'])) ? number_format((float) str_replace(',', '', (string) $line['amount'])) : null;
 
         return match ($to) {
-            'approved' => 'موافقة أمان'.($amount ? ' بحد '.$amount.' جنيه' : '').($line['comment'] !== '' ? ' — '.$line['comment'] : ''),
-            'delivered' => (mb_strtolower(trim($line['aman_status'])) === 'active' ? 'اتنفّذ عند أمان (Active)' : 'توقيع عند أمان').($amount ? ' بمبلغ '.$amount.' جنيه' : ''),
+            'approved' => (preg_match('/توقيع|sign/u', mb_strtolower($line['aman_status'])) ? 'توقيع عند أمان (موافقة، لسه ما استلمش)' : 'موافقة أمان').($amount ? ' بحد '.$amount.' جنيه' : '').($line['comment'] !== '' ? ' — '.$line['comment'] : ''),
+            'delivered' => 'اتنفّذ عند أمان (Active)'.($amount ? ' بمبلغ '.$amount.' جنيه' : ''),
             // a long Aman status is itself what he must send («Income proof / بيان دخل ...»)
             'pending' => $line['aman_status'] === '' ? 'الطلب دخل أمان ولسه مفيش رد'.($line['comment'] !== '' ? ' — '.$line['comment'] : '') : ($line['comment'] !== '' ? $line['comment'] : 'أمان: '.$line['aman_status']),
             default => implode(' — ', array_filter([

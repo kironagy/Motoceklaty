@@ -120,7 +120,7 @@ class AsfooraTools
             ],
             [
                 'name' => 'aman_sheet_changes',
-                'description' => 'For Aman\'s sheet the owner uploaded (customer, showroom, Aman request number, status, amount, comment): finds the showroom\'s requests and their status changes - Active = استلم المكنة, Rejected = رفض, Canceled = ملغي, توقيع = استلم المكنة, what Aman wants = متوقف امان, a row with only Aman\'s request number (empty status) = تحت الاستعلام (only for a request not yet past it), with Aman\'s comment as the reason. apply=true CHANGES them now (when he asks to update/change the statuses); without it only a preview with a «نفّذ» button (when he only asks to compare/check). Returns counts and a few examples.',
+                'description' => 'For Aman\'s sheet the owner uploaded (customer, showroom, Aman request number, status, amount, comment): finds the showroom\'s requests and their status changes - Active = استلم المكنة, Rejected = رفض, Canceled = ملغي, توقيع = موافقة (not taken the machine yet), what Aman wants = متوقف امان, a row with only Aman\'s request number (empty status) = تحت الاستعلام (only for a request not yet past it), with Aman\'s comment as the reason. apply=true CHANGES them now (when he asks to update/change the statuses); without it only a preview with a «نفّذ» button (when he only asks to compare/check). Returns counts and a few examples.',
                 'parameters' => ['type' => 'object', 'properties' => [
                     'apply' => ['type' => 'boolean', 'description' => 'true = change the statuses now. He asked to change/update them.'],
                     'showroom' => ['type' => 'string', 'description' => 'Only rows of this showroom (default «موتوجيت»).'],
