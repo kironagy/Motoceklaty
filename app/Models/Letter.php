@@ -18,6 +18,7 @@ class Letter extends Model
     }
     protected $fillable = [
         'status',
+        'letter_image',
         'inventory_id',
         'inventory_item_id',
         'is_returned',
@@ -85,5 +86,15 @@ public function markAsReturned(): void
         'returned_at' => now(),
     ]);
 }
-}
 
+    /** Owner 2026-11-27: «تم التنفيذ» with «صورة الجواب» sends it to the customer on WhatsApp, once. */
+    protected static function booted(): void
+    {
+        static::saved(function (self $letter) {
+            if ($letter->status === \App\Jobs\SendLetterReadyWhatsapp::READY_STATUS && filled($letter->letter_image) && ! $letter->ready_sent_at
+                && ($letter->wasChanged('status') || $letter->wasChanged('letter_image') || $letter->wasRecentlyCreated)) {
+                \App\Jobs\SendLetterReadyWhatsapp::dispatch($letter->id)->afterCommit();
+            }
+        });
+    }
+}

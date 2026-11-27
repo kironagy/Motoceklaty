@@ -226,6 +226,14 @@ protected static function isSuperAdmin(): bool
                 Forms\Components\Section::make('حالة الجواب')
                     ->icon('heroicon-o-check-badge')
                     ->schema([
+                        // Owner 2026-11-27: «تم التنفيذ» with this photo sends it to the customer on WhatsApp
+                        Forms\Components\FileUpload::make('letter_image')
+                            ->label('صورة الجواب')
+                            ->image()
+                            ->directory('letters')
+                            ->helperText('لما الحالة تبقى «تم التنفيذ» والصورة مرفوعة، الصورة بتتبعت للعميل على الواتساب: جوابك جاهز، ولو عليه باقي بيتقاله يجهّز المبلغ.')
+                            ->columnSpanFull(),
+
                         Select::make('status')
                             ->label('الحالة')
                             ->options([

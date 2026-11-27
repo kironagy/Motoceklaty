@@ -29,4 +29,21 @@ class EditLetter extends EditRecord
             ->openUrlInNewTab(),
     ];
 }
+
+    /** Owner 2026-11-27: say what happened with the customer's «جوابك جاهز» message. */
+    protected function afterSave(): void
+    {
+        $letter = $this->record;
+        if ($letter->status !== \App\Jobs\SendLetterReadyWhatsapp::READY_STATUS || $letter->ready_sent_at) {
+            return;
+        }
+        if (blank($letter->letter_image)) {
+            \Filament\Notifications\Notification::make()->title('ما اتبعتش حاجة للعميل')->body('ارفع «صورة الجواب» عشان تتبعتله على الواتساب إن جوابه جاهز.')->warning()->send();
+
+            return;
+        }
+        if ($letter->wasChanged('status') || $letter->wasChanged('letter_image')) {
+            \Filament\Notifications\Notification::make()->title('صورة الجواب هتتبعت للعميل على الواتساب')->success()->send();
+        }
+    }
 }
