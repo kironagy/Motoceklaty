@@ -21,7 +21,7 @@ self.addEventListener('push', (event) => {
         self.registration.showNotification(data.title, {
             body: data.body,
             // the old /images/pwa/ icons were missing (404)
-            icon: '/images/motogate-logo.png',
+            icon: '/images/app/icon-192.png',
             tag: data.tag || 'moto-gate-notification',
             renotify: true,
             data: {

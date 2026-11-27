@@ -46,6 +46,7 @@ class Staff extends Authenticatable implements FilamentUser
         'can_clock_in_any_branch',
         'is_showroom_employee',
         'monthly_salary',
+        'notify_whatsapp',
         'attendance_time',
         'departure_time',
         'lat',

@@ -87,6 +87,12 @@ class AdminPanelProvider extends PanelProvider
             'panels::head.end',
             fn () => collect(['stats-cards', 'staff-ranking', 'sidebar', 'deliveries-table', 'deliveries-form'])->map(fn ($f) => '<link rel="stylesheet" href="'.asset("css/filament/admin/{$f}.css").'?v='.@filemtime(public_path("css/filament/admin/{$f}.css")).'">')->implode('')
         )
+        // Owner 2026-11-27: installable as an app (Android/iPhone) so its notifications behave like an app's
+        ->renderHook(
+            'panels::head.end',
+            fn () => '<link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#0b1220">'
+                .'<link rel="apple-touch-icon" href="/images/app/icon-192.png"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">'
+        )
         // A showroom's own logo keeps its colours (the main logo is whitened in the sidebar)
         ->renderHook(
             'panels::head.end',

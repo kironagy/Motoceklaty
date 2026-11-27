@@ -106,5 +106,9 @@ class AsfooraWatcher
         } catch (\Throwable $e) {
             report($e);
         }
+        // Owner 2026-11-27: and on his WhatsApp, which shows on a locked phone
+        if ($staff = \App\Models\Staff::find($watch->staff_id)) {
+            \App\Jobs\SendOwnerWhatsapp::to($staff, "🐦 {$title}\n\n".\App\Jobs\SendOwnerWhatsapp::plain($message->content), 'watch:'.$message->id);
+        }
     }
 }

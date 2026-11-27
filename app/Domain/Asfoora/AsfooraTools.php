@@ -173,6 +173,11 @@ class AsfooraTools
                 'parameters' => ['type' => 'object', 'properties' => ['id' => ['type' => 'integer']]],
             ],
             [
+                'name' => 'whatsapp_alerts',
+                'description' => 'Sets the owner\'s WhatsApp number that gets your watch reports and the daily report as WhatsApp messages too ("ابعتلي التقارير على الواتساب 010...") - they show on a locked phone. An empty phone stops them.',
+                'parameters' => ['type' => 'object', 'properties' => ['phone' => ['type' => 'string', 'description' => 'Egyptian mobile, e.g. 01012345678. Empty = stop.']], 'required' => ['phone']],
+            ],
+            [
                 'name' => 'remember',
                 'description' => 'Saves something the owner told you to keep in mind from now on ("افتكري إن ..."، "من هنا ورايح ..."): a rule, a preference, how he sorts requests. It is in your instructions in every later question. Only when he asks you to remember.',
                 'parameters' => ['type' => 'object', 'properties' => ['content' => ['type' => 'string', 'description' => 'The rule in his words, short and complete.']], 'required' => ['content']],
@@ -212,6 +217,7 @@ class AsfooraTools
                 'transfer_requests' => self::transfer($args),
                 'add_deduction' => self::deduction($args),
                 // her own notebook - the only thing she writes, and never the system's data
+                'whatsapp_alerts' => self::whatsappAlerts($args),
                 'remember' => ['saved' => \App\Models\AsfooraMemory::create(['content' => mb_substr(trim((string) ($args['content'] ?? '')), 0, 1000), 'created_by' => auth()->id()])->id],
                 'forget' => ['deleted' => (bool) \App\Models\AsfooraMemory::whereKey((int) ($args['id'] ?? 0))->delete()],
                 'request_details' => self::details((int) ($args['id'] ?? 0)),
@@ -537,6 +543,22 @@ class AsfooraTools
             '_tables' => array_values(array_filter($tables, fn ($t) => $t['rows'] !== [])),
             '_action' => $p['summary']['action_id'],
         ];
+    }
+
+    private static function whatsappAlerts(array $args): array
+    {
+        $actor = self::actor();
+        $raw = trim((string) ($args['phone'] ?? ''));
+        $phone = $raw === '' ? null : \App\Domain\Conversations\DirectWhatsapp::phone($raw);
+        if ($raw !== '' && ! $phone) {
+            throw new \InvalidArgumentException('Not an Egyptian mobile number - ask him for it again (01xxxxxxxxx).');
+        }
+        $actor->forceFill(['notify_whatsapp' => $phone ? '0'.substr($phone, 2) : null])->save();
+        if ($phone) {
+            \App\Jobs\SendOwnerWhatsapp::to($actor, '🐦 عصفورة: من هنا ورايح تقارير المتابعة والتقرير اليومي هيوصلوك هنا كمان. ما تردش على الرقم ده، البوت مش هيرد هنا.', 'hello:'.$actor->id.':'.now()->timestamp);
+        }
+
+        return ['whatsapp' => $phone ? '0'.substr($phone, 2) : null, 'note' => $phone ? 'A first message was sent to that number now.' : 'Stopped.'];
     }
 
     /** Owner 2026-11-27: actions run as him, from his chat only - never from a background watch. */

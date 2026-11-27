@@ -2,12 +2,8 @@
 
 namespace App\Jobs;
 
-use App\Domain\Conversations\BotSessions;
 use App\Domain\Conversations\DeliveryService;
-use App\Models\Customer;
 use App\Models\Letter;
-use App\Models\WhatsappBot;
-use App\Models\WhatsappConversation;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -54,7 +50,7 @@ class SendLetterReadyWhatsapp implements ShouldQueue
         return $text;
     }
 
-    public function handle(DeliveryService $delivery, BotSessions $sessions): void
+    public function handle(DeliveryService $delivery): void
     {
         $letter = Letter::find($this->letterId);
 
@@ -62,16 +58,15 @@ class SendLetterReadyWhatsapp implements ShouldQueue
             return;
         }
 
-        $digits = preg_replace('/\D/', '', (string) $letter->phone);
-        $phone = str_starts_with($digits, '0') ? '2'.$digits : $digits;
+        $phone = \App\Domain\Conversations\DirectWhatsapp::phone($letter->phone);
 
-        if (! preg_match('/^201\d{9}$/', $phone)) {
+        if (! $phone) {
             Log::warning('SendLetterReadyWhatsapp: no valid phone', ['letter_id' => $letter->id]);
 
             return;
         }
 
-        $conversation = $this->conversation($phone, $sessions);
+        $conversation = \App\Domain\Conversations\DirectWhatsapp::conversation($phone);
 
         if (! $conversation) {
             Log::warning('SendLetterReadyWhatsapp: no WhatsApp number connected', ['letter_id' => $letter->id]);
@@ -98,30 +93,5 @@ class SendLetterReadyWhatsapp implements ShouldQueue
 
         $letter->forceFill(['ready_sent_at' => now()])->saveQuietly();
         Log::info('LETTER READY SENT', ['letter_id' => $letter->id, 'bot_id' => $conversation->whatsapp_bot_id]);
-    }
-
-    /** His chat on a connected number when he has one; otherwise a new chat on a connected number. */
-    private function conversation(string $phone, BotSessions $sessions): ?WhatsappConversation
-    {
-        $live = WhatsappBot::query()->where('is_active', true)->whereNull('archived_at')->pluck('id')->map(fn ($id) => (int) $id)->all();
-        $connected = $sessions->connected();
-        $bots = $connected === null ? $live : array_values(array_intersect($connected, $live));
-
-        if ($bots === []) {
-            return null;
-        }
-
-        $existing = WhatsappConversation::where('phone', $phone)->whereIn('whatsapp_bot_id', $bots)->latest('id')->first();
-
-        if ($existing) {
-            return $existing;
-        }
-
-        $customer = Customer::firstOrCreate(['whatsapp_bot_id' => $bots[0], 'jid' => $phone.'@s.whatsapp.net'], ['phone' => $phone]);
-
-        return WhatsappConversation::firstOrCreate(
-            ['whatsapp_bot_id' => $bots[0], 'phone' => $phone],
-            ['status' => 'open', 'customer_id' => $customer->id],
-        );
     }
 }

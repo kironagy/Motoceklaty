@@ -174,6 +174,8 @@ class AgentRunner
 
         $conversation = WhatsappConversation::with('customer')->findOrFail($turn->whatsapp_conversation_id);
         if ($conversation->status === 'awaiting_agent' && ! \App\Domain\Handoff\HandoffService::botKeepsAnswering($conversation)) return ['messages'=>[], 'no_reply'=>true];
+        // Owner 2026-11-27: the chat «عصفورة» sends his own alerts on - the bot never answers there
+        if ($conversation->status === \App\Jobs\SendOwnerWhatsapp::STATUS) return ['messages'=>[], 'no_reply'=>true];
 
         // A re-answer turn (whatsapp:answer-waiting) for messages an earlier turn already handled - it
         // ran, chose silence, nothing failed - is not answered again hours later.
