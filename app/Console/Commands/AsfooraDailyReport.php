@@ -57,7 +57,7 @@ class AsfooraDailyReport extends Command
             } catch (\Throwable $e) {
                 report($e);
             }
-            \App\Jobs\SendOwnerWhatsapp::to($owner, "🐦 {$title}\n\n".\App\Jobs\SendOwnerWhatsapp::plain($answer->content), 'daily:'.$date.':'.$owner->id);
+            \App\Jobs\SendOwnerWhatsapp::to($owner, "🐦 {$title}\n\n".\App\Jobs\SendOwnerWhatsapp::plain($answer->content, true), 'daily:'.$date.':'.$owner->id, $answer);
         }
 
         return self::SUCCESS;

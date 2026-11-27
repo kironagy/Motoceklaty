@@ -48,7 +48,7 @@ class AsfooraWatcher
         if ($watch->kind === 'question') {
             $chat = AsfooraChat::find($watch->asfoora_chat_id);
             if ($chat) {
-                $answer = app(AsfooraAgent::class)->answer($chat, '🔔 '.$watch->question.' (من '.$since->format('H:i').' لحد دلوقتي)');
+                $answer = app(AsfooraAgent::class)->answer($chat, '🔔 '.$watch->question.' (من '.\App\Jobs\SendOwnerWhatsapp::twelveHour($since->format('H:i')).' لحد دلوقتي)');
                 $this->notify($watch, $answer);
             }
         } else {
@@ -108,7 +108,7 @@ class AsfooraWatcher
         }
         // Owner 2026-11-27: and on his WhatsApp, which shows on a locked phone
         if ($staff = \App\Models\Staff::find($watch->staff_id)) {
-            \App\Jobs\SendOwnerWhatsapp::to($staff, "🐦 {$title}\n\n".\App\Jobs\SendOwnerWhatsapp::plain($message->content), 'watch:'.$message->id);
+            \App\Jobs\SendOwnerWhatsapp::to($staff, "🐦 {$title}\n\n".\App\Jobs\SendOwnerWhatsapp::plain($message->content, true), 'watch:'.$message->id, $message);
         }
     }
 }

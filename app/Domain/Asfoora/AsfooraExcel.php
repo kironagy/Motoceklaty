@@ -126,6 +126,14 @@ class AsfooraExcel
         $odd = $font()->setBackgroundColor('F0FDFA')->setCellAlignment(CellAlignment::RIGHT)->setCellVerticalAlignment(CellVerticalAlignment::TOP)->setShouldWrapText();
         $totalStyle = $font()->setFontBold()->setBackgroundColor('99F6E4')->setCellAlignment(CellAlignment::RIGHT);
 
+        // a table written only in the text (a watch report) still gets its own sheet
+        if ($tables === [] && $only === null) {
+            foreach (\App\Jobs\SendOwnerWhatsapp::tables($message->content) as $n => [$labels, $rows]) {
+                $labels = array_map(fn ($h, $i) => trim(str_replace('**', '', $h)) ?: 'عمود '.($i + 1), $labels, array_keys($labels));
+                $tables[] = ['title' => 'التقرير'.($n ? ' '.($n + 1) : ''), 'columns' => $labels,
+                    'rows' => array_map(fn ($r) => array_combine($labels, array_pad(array_map(fn ($v) => trim(str_replace('**', '', $v)), array_slice($r, 0, count($labels))), count($labels), '')), $rows)];
+            }
+        }
         if ($tables === []) {
             $tables = [['title' => 'الرد', 'columns' => ['الرد'], 'rows' => [['الرد' => $message->content]]]];
         }
@@ -155,6 +163,9 @@ class AsfooraExcel
                     // 2026-11-22 → 22/11/2026, like his sheet
                     if (is_string($value) && preg_match('/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/', $value, $d)) {
                         $value = "{$d[3]}/{$d[2]}/{$d[1]}".(isset($d[4]) && in_array($column, ['status_updated_at', 'at'], true) ? ' '.$d[4] : '');
+                    }
+                    if (is_string($value)) {
+                        $value = \App\Jobs\SendOwnerWhatsapp::twelveHour($value);
                     }
                     // phones and national ids stay text (Excel would drop the leading 0)
                     if (is_string($value) && is_numeric($value) && ! preg_match('/^0\d/', $value) && strlen($value) < 12) {
