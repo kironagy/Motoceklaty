@@ -28,7 +28,10 @@ class AmanSheetSync
             (bool) preg_match('/reject|رفض|مرفوض/u', $s) => 'rejected',
             (bool) preg_match('/cancel|ملغ|الغاء|إلغاء/u', $s) => 'canceled',
             (bool) preg_match('/توقيع|sign/u', $s) => 'delivered',
-            (bool) preg_match('/pend|hold|incomplete|missing|متوقف|معلق|استعلام|inquir|review/u', $s) => 'paused_aman',
+            // live 2026-11-27 (his monthly sheet): what Aman wants from him = متوقف امان; Aman still checking = تحت الاستعلام
+            (bool) preg_match('/pend|hold|incomplete|missing|متوقف|معلق|استيفاء|مطلوب|income proof|customer id|commercial register|اوراق|أوراق/u', $s) => 'paused_aman',
+            (bool) preg_match('/استعلام\s*عمل/u', $s) => 'work_check',
+            (bool) preg_match('/استعلام|inquir|investigat|review|مراجع|processing|متابع|hits|مكالم|call/u', $s) => 'pending',
             default => null,
         };
     }
@@ -49,6 +52,10 @@ class AmanSheetSync
                 continue;
             }
             $col = self::columns($sheet['headers']);
+            // a dashboard / lists sheet: no request rows on it
+            if (! $col['status'] || (! $col['name'] && ! $col['ref'])) {
+                continue;
+            }
             foreach ($sheet['rows'] as $row) {
                 $rowsRead++;
                 $room = str_replace(' ', '', SheetFile::normalizeName((string) ($row[$col['showroom']] ?? '')));
@@ -181,7 +188,11 @@ class AmanSheetSync
         return match ($to) {
             'approved' => 'موافقة أمان'.($amount ? ' بحد '.$amount.' جنيه' : '').($line['comment'] !== '' ? ' — '.$line['comment'] : ''),
             'delivered' => 'توقيع عند أمان'.($amount ? ' بمبلغ '.$amount.' جنيه' : ''),
-            default => $line['comment'] !== '' ? $line['comment'] : 'أمان: '.$line['aman_status'],
+            // a long Aman status is itself what he must send («Income proof / بيان دخل ...»)
+            default => implode(' — ', array_filter([
+                mb_strlen($line['aman_status']) > 20 || str_contains($line['aman_status'], '/') ? $line['aman_status'] : null,
+                $line['comment'] !== '' ? $line['comment'] : null,
+            ])) ?: 'أمان: '.$line['aman_status'],
         } .($line['aman_ref'] !== '' ? ' (رقم طلب أمان: '.$line['aman_ref'].')' : '');
     }
 

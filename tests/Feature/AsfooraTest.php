@@ -311,13 +311,26 @@ class AsfooraTest extends TestCase
         $this->assertSame(2, \App\Models\Notification::count());
     }
 
-    private function amanSheet(array $rows): string
+    private function amanSheet(array $rows, bool $monthly = false): string
     {
         $path = 'asfoora-files/test-'.uniqid().'.xlsx';
         \Illuminate\Support\Facades\Storage::disk('local')->makeDirectory('asfoora-files');
         $writer = new \OpenSpout\Writer\XLSX\Writer();
         $writer->openToFile(\Illuminate\Support\Facades\Storage::disk('local')->path($path));
+        if ($monthly) {
+            // live 2026-11-27: his sheet starts with a dashboard, and each month has a title and totals above the header
+            $writer->getCurrentSheet()->setName('Dashboard');
+            $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['لوحة المتابعة']));
+            $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['الشهر', 'الاسم في الشيت', 'إجمالي الطلبات']));
+            $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['11-2026', 'x', 5]));
+            $writer->addNewSheetAndMakeItCurrent();
+        }
         $writer->getCurrentSheet()->setName('11-2026');
+        if ($monthly) {
+            $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['متابعة طلبات التمويل - نوفمبر']));
+            $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['إجمالي الطلبات', '', 'طلبات Active', '', 'إجمالي مبالغ Active']));
+            $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['=COUNTA(A5:A1004)', '', '=COUNTIF(D5:D1004,"Active")']));
+        }
         $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues(['اسم العميل ', 'اسم المعرض ', 'رقم الطلب ', 'حاله الطلب ', 'المبلغ ', 'المتبقي ', 'تاريخ الطلب ', 'كومنت ']));
         foreach ($rows as $r) {
             $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues($r));
@@ -586,6 +599,34 @@ class AsfooraTest extends TestCase
         $r = \App\Domain\Asfoora\AsfooraTools::call('aman_sheet_changes', ['apply' => true]);
         $this->assertSame(1, $r['applied']['changed'] ?? null, json_encode($r, JSON_UNESCAPED_UNICODE));
         $this->assertSame('rejected', DB::table('installment_requests')->where('id', $id)->value('status'));
+    }
+
+    public function test_his_monthly_sheet_with_titles_above_the_header_and_his_aman_statuses_is_read(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+        $owner = $this->staff(['is_hitler' => true]);
+        $this->actingAs($owner, 'filament');
+        $this->requests(4, 'new_request', $owner->id);
+        $ids = DB::table('installment_requests')->orderBy('id')->pluck('id')->all();
+        $names = ['كريم عادل سيد', 'سامي فؤاد علي', 'وليد جبر حسن', 'هاني صبري محمود'];
+        foreach ($ids as $i => $id) {
+            DB::table('installment_requests')->where('id', $id)->update(['applicant_name' => $names[$i], 'created_at' => '2026-11-05 10:00:00']);
+        }
+        $path = $this->amanSheet([
+            ['كريم عادل سيد', 'موتوجيت', '26116830001', 'استعلام عمل', '', '', '11/06/2026', ''],
+            ['سامي فؤاد علي', 'موتوجيت', '26116830002', 'Income proof / بيان دخل حديث و مختوم', '', '', '11/06/2026', ''],
+            ['وليد جبر حسن', 'موتوجيت', '26116830003', 'استعلام منزل', '', '', '11/06/2026', ''],
+            ['هاني صبري محمود', 'موتوجيت', '26116830004', 'مرحل للشهر التالي', '', '', '11/06/2026', ''],
+        ], monthly: true);
+        $chat = AsfooraChat::create(['staff_id' => $owner->id]);
+        $chat->messages()->create(['role' => 'user', 'content' => 'حدّث الحالات', 'meta' => ['file' => ['name' => 'v12.xlsx', 'path' => $path]]]);
+        \App\Domain\Asfoora\AsfooraTools::$chatId = $chat->id;
+
+        $r = \App\Domain\Asfoora\AsfooraTools::call('aman_sheet_changes', ['apply' => true]);
+        $this->assertSame(4, $r['rows_read'] ?? null, json_encode($r, JSON_UNESCAPED_UNICODE)); // the dashboard is not read as requests
+        $this->assertSame(3, $r['applied']['changed'] ?? null, json_encode($r, JSON_UNESCAPED_UNICODE));
+        $this->assertSame(['work_check', 'paused_aman', 'pending', 'new_request'], DB::table('installment_requests')->orderBy('id')->pluck('status')->all());
+        $this->assertStringContainsString('بيان دخل', json_encode(\App\Models\InstallmentRequest::find($ids[1])->checks_report, JSON_UNESCAPED_UNICODE));
     }
 
     public function test_staff_without_is_hitler_is_refused(): void
