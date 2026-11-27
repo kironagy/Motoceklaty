@@ -606,9 +606,10 @@ class AsfooraTest extends TestCase
         \Illuminate\Support\Facades\Queue::fake();
         $owner = $this->staff(['is_hitler' => true]);
         $this->actingAs($owner, 'filament');
-        $this->requests(4, 'new_request', $owner->id);
+        $this->requests(6, 'new_request', $owner->id);
         $ids = DB::table('installment_requests')->orderBy('id')->pluck('id')->all();
-        $names = ['كريم عادل سيد', 'سامي فؤاد علي', 'وليد جبر حسن', 'هاني صبري محمود'];
+        $names = ['كريم عادل سيد', 'سامي فؤاد علي', 'وليد جبر حسن', 'هاني صبري محمود', 'رامي عادل فهمي', 'ماجد سمير نبيل'];
+        DB::table('installment_requests')->where('id', $ids[5])->update(['status' => 'rejected']);
         foreach ($ids as $i => $id) {
             DB::table('installment_requests')->where('id', $id)->update(['applicant_name' => $names[$i], 'created_at' => '2026-11-05 10:00:00']);
         }
@@ -617,15 +618,18 @@ class AsfooraTest extends TestCase
             ['سامي فؤاد علي', 'موتوجيت', '26116830002', 'Income proof / بيان دخل حديث و مختوم', '', '', '11/06/2026', ''],
             ['وليد جبر حسن', 'موتوجيت', '26116830003', 'استعلام منزل', '', '', '11/06/2026', ''],
             ['هاني صبري محمود', 'موتوجيت', '26116830004', 'مرحل للشهر التالي', '', '', '11/06/2026', ''],
+            ['رامي عادل فهمي', 'موتوجيت', '26116830005', '', '', '', '11/06/2026', ''],   // only Aman's number = went in to Aman (owner 2026-11-27)
+            ['ماجد سمير نبيل', 'موتوجيت', '26116830006', '', '', '', '11/06/2026', ''],   // ... but a decision already taken stays
         ], monthly: true);
         $chat = AsfooraChat::create(['staff_id' => $owner->id]);
         $chat->messages()->create(['role' => 'user', 'content' => 'حدّث الحالات', 'meta' => ['file' => ['name' => 'v12.xlsx', 'path' => $path]]]);
         \App\Domain\Asfoora\AsfooraTools::$chatId = $chat->id;
 
         $r = \App\Domain\Asfoora\AsfooraTools::call('aman_sheet_changes', ['apply' => true]);
-        $this->assertSame(4, $r['rows_read'] ?? null, json_encode($r, JSON_UNESCAPED_UNICODE)); // the dashboard is not read as requests
-        $this->assertSame(3, $r['applied']['changed'] ?? null, json_encode($r, JSON_UNESCAPED_UNICODE));
-        $this->assertSame(['work_check', 'paused_aman', 'pending', 'new_request'], DB::table('installment_requests')->orderBy('id')->pluck('status')->all());
+        $this->assertSame(6, $r['rows_read'] ?? null, json_encode($r, JSON_UNESCAPED_UNICODE)); // the dashboard is not read as requests
+        $this->assertSame(4, $r['applied']['changed'] ?? null, json_encode($r, JSON_UNESCAPED_UNICODE));
+        $this->assertSame(['work_check', 'paused_aman', 'pending', 'new_request', 'pending', 'rejected'], DB::table('installment_requests')->orderBy('id')->pluck('status')->all());
+        $this->assertStringContainsString('الطلب دخل أمان', json_encode(\App\Models\InstallmentRequest::find($ids[4])->checks_report, JSON_UNESCAPED_UNICODE));
         $this->assertStringContainsString('بيان دخل', json_encode(\App\Models\InstallmentRequest::find($ids[1])->checks_report, JSON_UNESCAPED_UNICODE));
         // owner 2026-11-27: «متوقف امان» tells the customer what Aman wants
         \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SendWhatsappStatusNotification::class, fn ($j) => $j->installmentRequestId === $ids[1] && $j->status === 'paused_aman');

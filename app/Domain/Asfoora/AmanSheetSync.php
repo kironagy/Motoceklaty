@@ -18,6 +18,9 @@ use Illuminate\Support\Facades\DB;
 class AmanSheetSync
 {
     /** sheet status → ours */
+    /** statuses a request has before Aman looks at it */
+    private const BEFORE_AMAN = ['new', 'new_request', 'transferred', 'edited'];
+
     public static function mapStatus(?string $status): ?string
     {
         $s = mb_strtolower(trim((string) $status));
@@ -76,6 +79,10 @@ class AmanSheetSync
                     'date' => self::date($row[$col['date']] ?? null),
                 ];
                 $to = self::mapStatus($line['aman_status']);
+                // Owner 2026-11-27: a row with only Aman's request number = his request went in to Aman = تحت الاستعلام
+                if ($to === null && $line['aman_status'] === '' && $line['aman_ref'] !== '') {
+                    $to = 'pending';
+                }
                 if ($to === null) {
                     $review[] = $line + ['why' => 'حالة أمان مش معروفة: «'.$line['aman_status'].'»'];
 
@@ -98,7 +105,9 @@ class AmanSheetSync
         $same = 0;
         foreach ($picked as $id => $line) {
             $r = $requests[$id];
-            if ($r->status === $line['to']) {
+            if ($r->status === $line['to']
+                // went in to Aman: only a request not yet past that moves (a decision already taken stays)
+                || ($line['aman_status'] === '' && ! in_array($r->status, self::BEFORE_AMAN, true))) {
                 $same++;
 
                 continue;
@@ -191,6 +200,7 @@ class AmanSheetSync
             'approved' => 'موافقة أمان'.($amount ? ' بحد '.$amount.' جنيه' : '').($line['comment'] !== '' ? ' — '.$line['comment'] : ''),
             'delivered' => (mb_strtolower(trim($line['aman_status'])) === 'active' ? 'اتنفّذ عند أمان (Active)' : 'توقيع عند أمان').($amount ? ' بمبلغ '.$amount.' جنيه' : ''),
             // a long Aman status is itself what he must send («Income proof / بيان دخل ...»)
+            'pending' => $line['aman_status'] === '' ? 'الطلب دخل أمان ولسه مفيش رد'.($line['comment'] !== '' ? ' — '.$line['comment'] : '') : ($line['comment'] !== '' ? $line['comment'] : 'أمان: '.$line['aman_status']),
             default => implode(' — ', array_filter([
                 mb_strlen($line['aman_status']) > 20 || str_contains($line['aman_status'], '/') ? $line['aman_status'] : null,
                 $line['comment'] !== '' ? $line['comment'] : null,
