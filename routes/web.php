@@ -21,6 +21,11 @@ Route::post('/push-subscriptions', [PushSubscriptionController::class, 'store'])
 
 Route::delete('/push-subscriptions', [PushSubscriptionController::class, 'destroy'])
     ->name('push-subscriptions.destroy');
+
+// Owner 2026-11-27: «جرّب الإشعار» - one test push to this device only
+Route::post('/push-subscriptions/test', [PushSubscriptionController::class, 'test'])
+    ->middleware('throttle:10,1')
+    ->name('push-subscriptions.test');
 // web.php
 Route::get('/', [HomeController::class, 'index'])->name('home');
 

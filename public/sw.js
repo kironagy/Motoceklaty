@@ -1,3 +1,7 @@
+// Owner 2026-11-27: a new version takes over at once (the old one kept running on open tabs)
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+
 self.addEventListener('push', (event) => {
     let data = {
         title: 'Moto Gate',
@@ -13,18 +17,22 @@ self.addEventListener('push', (event) => {
         console.error('Push payload error:', error);
     }
 
-    event.waitUntil(
+    event.waitUntil(Promise.all([
         self.registration.showNotification(data.title, {
             body: data.body,
-            icon: '/images/pwa/icon-192.png',
-            badge: '/images/pwa/badge-72.png',
+            // the old /images/pwa/ icons were missing (404)
+            icon: '/images/motogate-logo.png',
             tag: data.tag || 'moto-gate-notification',
             renotify: true,
             data: {
                 url: data.url || '/admin',
             },
-        })
-    );
+        }),
+        // Owner 2026-11-27: an open tab shows it too, inside the site - even when the computer
+        // or the phone hides the browser's notifications
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+            .then((list) => list.forEach((client) => client.postMessage({ type: 'mg-push', ...data }))),
+    ]));
 });
 
 self.addEventListener('notificationclick', (event) => {

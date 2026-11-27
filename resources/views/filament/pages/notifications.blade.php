@@ -15,6 +15,24 @@
         
 
 </div>
+    {{-- Owner 2026-11-27: his computer had notifications on and still saw nothing - this checks each step on this device --}}
+    <div class="mg-push-test" dir="rtl">
+        <div>
+            <strong>الإشعارات مش بتظهرلك؟</strong>
+            <span>جرّب على الجهاز ده: هنبعت إشعار تجربة ونقولك وقف فين.</span>
+        </div>
+        <button type="button" id="mg-push-test-btn">🔔 جرّب الإشعار على الجهاز ده</button>
+        <ul id="mg-push-test-out" hidden></ul>
+    </div>
+    <style>
+        .mg-push-test { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(45, 212, 191, .35); background: rgba(45, 212, 191, .07); }
+        .mg-push-test > div { flex: 1 1 260px; display: flex; flex-direction: column; gap: 2px; }
+        .mg-push-test span { opacity: .75; font-size: .9em; }
+        .mg-push-test button { padding: 9px 16px; border-radius: 10px; background: #0d9488; color: #fff; font-weight: 700; }
+        .mg-push-test button:disabled { opacity: .6; }
+        .mg-push-test ul { flex-basis: 100%; margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: .95em; }
+    </style>
+
      <div id="push-notification-banner" class="push-banner" dir="rtl" style="display: none;">
     <div class="push-banner__glow"></div>
 
@@ -280,6 +298,58 @@
             }),
         });
     }
+
+    async function testPushOnThisDevice() {
+        const btn = document.getElementById('mg-push-test-btn');
+        const out = document.getElementById('mg-push-test-out');
+        const say = (text) => { const li = document.createElement('li'); li.textContent = text; out.appendChild(li); };
+        out.hidden = false; out.innerHTML = ''; btn.disabled = true;
+        try {
+            if (!('serviceWorker' in navigator) || !('Notification' in window) || !('PushManager' in window)) {
+                say('✗ المتصفح ده ما بيدعمش الإشعارات. على الآيفون لازم تضيف الموقع للشاشة الرئيسية الأول.');
+                return;
+            }
+            if (Notification.permission === 'denied') {
+                say('✗ الإشعارات محجوبة للموقع ده من المتصفح: دوس على القفل جنب الرابط ← الإشعارات ← سماح، وبعدين جرّب تاني.');
+                return;
+            }
+            if (Notification.permission !== 'granted' && await Notification.requestPermission() !== 'granted') {
+                say('✗ ما اتسمحش بالإشعارات.');
+                return;
+            }
+            say('✓ الموقع مسموحله يبعت إشعارات.');
+            await registerPushSubscription();
+            const registration = await navigator.serviceWorker.ready;
+            const subscription = await registration.pushManager.getSubscription();
+            say('✓ الجهاز ده متسجل.');
+            const arrived = new Promise((resolve) => {
+                const done = (e) => { if (String(e.detail?.tag || '').startsWith('push-test-')) { window.removeEventListener('mg-push', done); resolve(true); } };
+                window.addEventListener('mg-push', done);
+                setTimeout(() => resolve(false), 15000);
+            });
+            const res = await fetch('{{ route('push-subscriptions.test') }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                body: JSON.stringify({ endpoint: subscription.endpoint }),
+            }).then((r) => r.json());
+            if (!res.ok) {
+                say('✗ السيرفر ما قدرش يبعت للجهاز ده (' + (res.status || '') + ' ' + (res.reason || '') + ').');
+                return;
+            }
+            say('✓ السيرفر بعت الإشعار، وخدمة الإشعارات قبلته.');
+            if (await arrived) {
+                say('✓ المتصفح استلمه، وظهرلك هنا جوه الموقع.');
+                say('لو ما ظهرش برّه كمان (في ركن الشاشة أو شريط الموبايل)، يبقى الجهاز نفسه مخبي إشعارات المتصفح: على الويندوز من الإعدادات ← النظام ← الإشعارات ← شغّل Chrome، واقفل «عدم الإزعاج». على الموبايل من إعدادات التطبيقات ← المتصفح ← الإشعارات.');
+            } else {
+                say('✗ المتصفح ما استلمش الإشعار خلال 15 ثانية. اقفل المتصفح وافتحه تاني وجرّب، ولو فضل كده ابعتلنا صورة من الرسالة دي.');
+            }
+        } catch (e) {
+            say('✗ حصل خطأ: ' + (e && e.message ? e.message : e));
+        } finally {
+            btn.disabled = false;
+        }
+    }
+    document.getElementById('mg-push-test-btn')?.addEventListener('click', testPushOnThisDevice);
 
     function urlBase64ToUint8Array(base64String) {
         const padding = '='.repeat((4 - base64String.length % 4) % 4);

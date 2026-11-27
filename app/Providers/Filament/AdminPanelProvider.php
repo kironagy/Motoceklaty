@@ -110,6 +110,10 @@ class AdminPanelProvider extends PanelProvider
             'panels::body.end',
             fn () => view('filament.components.form-submit-guard')
         )
+        ->renderHook(
+            'panels::body.end',
+            fn () => view('filament.components.push-listener')
+        )
         // Owner 2026-11-22: only one request is lit (mg-tk-on): the last one tapped, or under the mouse.
         // A tap (click, so scrolling does not count) or a mouse pointing at another moves the light;
         // the touch listener also lets iPhone Safari show :active
