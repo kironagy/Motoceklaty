@@ -532,6 +532,62 @@ class AsfooraTest extends TestCase
         $this->assertStringContainsString("#{$hefny->id}: hefny - mahmoud@gmail.com", \App\Domain\Asfoora\AsfooraAgent::staffDirectory());
     }
 
+    /** Owner 2026-11-27: «غيّر / حوّل / نزّل خصم» - she does it at once, as him, and never from a watch. */
+    public function test_her_actions_change_statuses_move_requests_and_add_deductions_as_the_owner(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+        $owner = $this->staff(['is_hitler' => true, 'name' => 'المالك']);
+        $from = $this->staff(['name' => 'beso', 'is_admin' => false, 'is_super_admin' => false]);
+        $to = $this->staff(['name' => 'Mahmoud', 'is_admin' => false, 'is_super_admin' => false, 'monthly_salary' => 6000]);
+        $this->requests(3, 'pending', $from->id);
+        $ids = DB::table('installment_requests')->orderBy('id')->pluck('id')->all();
+        $tools = \App\Domain\Asfoora\AsfooraTools::class;
+
+        // no owner signed in (a background watch): refused, nothing changes
+        $this->assertArrayHasKey('error', $tools::call('change_status', ['ids' => $ids, 'status' => 'approved']));
+        $this->assertSame(3, DB::table('installment_requests')->where('status', 'pending')->count());
+
+        $this->actingAs($owner, 'filament');
+
+        $r = $tools::call('change_status', ['ids' => [$ids[0], $ids[1], 999999], 'status' => 'approved', 'reason' => 'ليمت 40000', 'reason_from' => 'aman']);
+        $this->assertSame(2, $r['changed'] ?? null, json_encode($r, JSON_UNESCAPED_UNICODE));
+        $this->assertSame(2, $r['customers_messaged']);
+        $this->assertSame([999999], $r['not_found']);
+        $first = \App\Models\InstallmentRequest::find($ids[0]);
+        $this->assertSame('approved', $first->status);
+        $this->assertSame('ليمت 40000', $first->checks_report['aman'] ?? null);
+        $this->assertSame($owner->id, (int) $first->status_updated_by);
+
+        $m = $tools::call('transfer_requests', ['ids' => $ids, 'to_staff' => $to->id]);
+        $this->assertSame(3, $m['moved']);
+        $this->assertSame(['beso' => 3], $m['moved_from']);
+        $this->assertSame(3, DB::table('installment_requests')->where('staff_id', $to->id)->count());
+
+        $d = $tools::call('add_deduction', ['staff' => $to->id, 'amount' => 300, 'reason' => 'تأخير']);
+        $this->assertSame(300.0, $d['amount']);
+        $this->assertSame(1.5, $d['days']);
+        $this->assertDatabaseHas('employee_deductions', ['staff_id' => $to->id, 'reason' => 'تأخير', 'created_by' => $owner->id]);
+        $this->assertArrayHasKey('error', $tools::call('add_deduction', ['staff' => $from->id, 'amount' => 100, 'reason' => 'x'])); // no salary
+    }
+
+    public function test_aman_sheet_with_apply_changes_the_statuses_at_once(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+        $owner = $this->staff(['is_hitler' => true]);
+        $this->actingAs($owner, 'filament');
+        $this->requests(1, 'pending', $owner->id);
+        $id = DB::table('installment_requests')->value('id');
+        DB::table('installment_requests')->where('id', $id)->update(['applicant_name' => 'كريم عادل سيد', 'created_at' => '2026-11-05 10:00:00']);
+        $path = $this->amanSheet([['كريم عادل سيد', 'موتوجيت', '26116830099', 'Rejected', '', '', '11/06/2026', 'سكور']]);
+        $chat = AsfooraChat::create(['staff_id' => $owner->id]);
+        $chat->messages()->create(['role' => 'user', 'content' => 'حدّث الحالات', 'meta' => ['file' => ['name' => 'aman.xlsx', 'path' => $path]]]);
+        \App\Domain\Asfoora\AsfooraTools::$chatId = $chat->id;
+
+        $r = \App\Domain\Asfoora\AsfooraTools::call('aman_sheet_changes', ['apply' => true]);
+        $this->assertSame(1, $r['applied']['changed'] ?? null, json_encode($r, JSON_UNESCAPED_UNICODE));
+        $this->assertSame('rejected', DB::table('installment_requests')->where('id', $id)->value('status'));
+    }
+
     public function test_staff_without_is_hitler_is_refused(): void
     {
         $this->actingAs($this->staff(), 'filament');

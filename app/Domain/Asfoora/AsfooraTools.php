@@ -3,6 +3,7 @@
 namespace App\Domain\Asfoora;
 
 use App\Filament\Resources\DeliveryResource;
+use App\Models\InstallmentRequest;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -119,11 +120,41 @@ class AsfooraTools
             ],
             [
                 'name' => 'aman_sheet_changes',
-                'description' => 'For Aman\'s sheet the owner uploaded (customer, showroom, Aman request number, status, amount, comment): finds the showroom\'s requests and PREPARES their status changes - active = موافقة with the limit in the reason, Rejected = رفض, Canceled = ملغي, توقيع = استلم المكنة, pending/on hold = متوقف امان, with Aman\'s comment as the reason. Nothing is changed: the owner presses «نفّذ» under your answer. Returns counts and a few examples.',
+                'description' => 'For Aman\'s sheet the owner uploaded (customer, showroom, Aman request number, status, amount, comment): finds the showroom\'s requests and their status changes - active = موافقة with the limit in the reason, Rejected = رفض, Canceled = ملغي, توقيع = استلم المكنة, pending/on hold = متوقف امان, with Aman\'s comment as the reason. apply=true CHANGES them now (when he asks to update/change the statuses); without it only a preview with a «نفّذ» button (when he only asks to compare/check). Returns counts and a few examples.',
                 'parameters' => ['type' => 'object', 'properties' => [
+                    'apply' => ['type' => 'boolean', 'description' => 'true = change the statuses now. He asked to change/update them.'],
                     'showroom' => ['type' => 'string', 'description' => 'Only rows of this showroom (default «موتوجيت»).'],
                     'sheets' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Only these sheets (e.g. one month). Default all.'],
                 ]],
+            ],
+            [
+                'name' => 'change_status',
+                'description' => 'CHANGES the status of requests now, as if the owner did it from the request page: the customer gets the usual WhatsApp message of the new status, the log shows the owner. For "غيّر حالة الطلب ده لـ..." or a sheet of request numbers he wants set to a status (read it with read_sheet first). At most 500 per call.',
+                'parameters' => ['type' => 'object', 'properties' => [
+                    'ids' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'Request numbers.'],
+                    'status' => ['type' => 'string', 'enum' => $statuses],
+                    'reason' => ['type' => 'string', 'description' => 'The reason / note (the limit for موافقة, what is missing for متوقف, why for رفض).'],
+                    'reason_from' => ['type' => 'string', 'enum' => ['aman', 'staff'], 'description' => 'aman = the reason is Aman\'s reply (رد أمان); staff = the showroom\'s note (default).'],
+                ], 'required' => ['ids', 'status']],
+            ],
+            [
+                'name' => 'transfer_requests',
+                'description' => 'MOVES requests to another employee now ("حوّل الطلب ده لفلان"، "حوّل طلبات فلان المتوقفة لعلان"): get the numbers first (list_requests / run_sql), then call with them. The log shows the owner moved them. At most 500 per call.',
+                'parameters' => ['type' => 'object', 'properties' => [
+                    'ids' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'Request numbers.'],
+                    'to_staff' => ['type' => 'integer', 'description' => 'The employee\'s number from the staff list.'],
+                ], 'required' => ['ids', 'to_staff']],
+            ],
+            [
+                'name' => 'add_deduction',
+                'description' => 'ADDS a salary deduction (خصم) for an employee now ("نزّل خصم على فلان يوم / 200 جنيه"). Give days, or amount in pounds (turned into days of his salary).',
+                'parameters' => ['type' => 'object', 'properties' => [
+                    'staff' => ['type' => 'integer', 'description' => 'The employee\'s number from the staff list.'],
+                    'days' => ['type' => 'number'],
+                    'amount' => ['type' => 'number', 'description' => 'Pounds, when he says an amount instead of days.'],
+                    'reason' => ['type' => 'string'],
+                    'date' => ['type' => 'string', 'description' => 'YYYY-MM-DD, default today.'],
+                ], 'required' => ['staff', 'reason']],
             ],
             [
                 'name' => 'watch_start',
@@ -177,6 +208,9 @@ class AsfooraTools
                 'watch_stop' => self::watchStop($args),
                 'sort_requests' => self::sortRequests($args),
                 'aman_sheet_changes' => self::amanChanges($args),
+                'change_status' => self::changeStatus($args),
+                'transfer_requests' => self::transfer($args),
+                'add_deduction' => self::deduction($args),
                 // her own notebook - the only thing she writes, and never the system's data
                 'remember' => ['saved' => \App\Models\AsfooraMemory::create(['content' => mb_substr(trim((string) ($args['content'] ?? '')), 0, 1000), 'created_by' => auth()->id()])->id],
                 'forget' => ['deleted' => (bool) \App\Models\AsfooraMemory::whereKey((int) ($args['id'] ?? 0))->delete()],
@@ -484,6 +518,11 @@ class AsfooraTools
             return ['error' => 'No sheet was uploaded in this chat - ask him to attach Aman\'s sheet (📎).'];
         }
         $p = AmanSheetSync::prepare(self::$chatId, $file['path'], (string) ($args['showroom'] ?? '') ?: 'موتوجيت', (array) ($args['sheets'] ?? []));
+        // Owner 2026-11-27: «غيّر الحالات» - she changes them herself
+        if (! empty($args['apply']) && $p['summary']['action_id']) {
+            $applied = AmanSheetSync::apply(\App\Models\AsfooraAction::findOrFail($p['summary']['action_id']), self::actor()->id);
+            $p['summary']['applied'] = ['changed' => $applied['done'], 'skipped_status_changed_meanwhile' => count($applied['skipped']), 'failed' => count($applied['failed'])];
+        }
         $tables = [
             ['title' => 'التغييرات اللي هتتنفذ', 'rows' => array_map(fn ($c) => array_diff_key($c, ['from_code' => 1, 'to_code' => 1]), $p['changes']), 'group' => true],
             ['title' => 'محتاج مراجعة', 'rows' => $p['review'], 'group' => true],
@@ -498,6 +537,127 @@ class AsfooraTools
             '_tables' => array_values(array_filter($tables, fn ($t) => $t['rows'] !== [])),
             '_action' => $p['summary']['action_id'],
         ];
+    }
+
+    /** Owner 2026-11-27: actions run as him, from his chat only - never from a background watch. */
+    private static function actor(): \App\Models\Staff
+    {
+        $actor = InstallmentRequest::currentActor();
+        if (! $actor?->is_hitler) {
+            throw new \InvalidArgumentException('Actions run only from the owner\'s chat, not from a watch or a report. Tell him to ask in the chat.');
+        }
+
+        return $actor;
+    }
+
+    /** @return list<int> */
+    private static function ids(array $args): array
+    {
+        $ids = array_values(array_unique(array_map('intval', (array) ($args['ids'] ?? []))));
+        if ($ids === [] || count($ids) > 500) {
+            throw new \InvalidArgumentException($ids === [] ? 'No request numbers.' : 'At most 500 requests per call - split them.');
+        }
+
+        return $ids;
+    }
+
+    private static function changeStatus(array $args): array
+    {
+        self::actor();
+        $status = (string) ($args['status'] ?? '');
+        if (! isset(DeliveryResource::STATUS_LABELS[$status])) {
+            throw new \InvalidArgumentException("Unknown status {$status}.");
+        }
+        $note = trim((string) ($args['reason'] ?? ''));
+        $done = $same = $missing = $failed = [];
+        foreach (self::ids($args) as $id) {
+            $r = InstallmentRequest::find($id);
+            if (! $r) {
+                $missing[] = $id;
+
+                continue;
+            }
+            if ($r->status === $status && $note === '') {
+                $same[] = $id;
+
+                continue;
+            }
+            try {
+                if ($note !== '') {
+                    $parts = $r->checks_report;
+                    $parts = is_array($parts) ? $parts : (filled($parts) ? ['staff' => (string) $parts] : []);
+                    $r->checks_report = array_merge($parts, [($args['reason_from'] ?? 'staff') === 'aman' ? 'aman' : 'staff' => $note]);
+                }
+                $r->status = $status;
+                $r->save();
+                $done[] = $id;
+            } catch (\Throwable $e) {
+                report($e);
+                $failed[] = $id;
+            }
+        }
+
+        return ['changed' => count($done), 'to' => DeliveryResource::STATUS_LABELS[$status], 'customers_messaged' => in_array($status, \App\Observers\InstallmentRequestObserver::NOTIFIABLE_STATUSES, true) ? count($done) : 0,
+            'already_that_status' => $same, 'not_found' => $missing, 'failed' => $failed, 'changed_ids' => array_slice($done, 0, 50)];
+    }
+
+    private static function transfer(array $args): array
+    {
+        $actor = self::actor();
+        $to = \App\Models\Staff::find((int) ($args['to_staff'] ?? 0));
+        if (! $to) {
+            throw new \InvalidArgumentException('No employee with that number - check the staff list.');
+        }
+        $done = $same = $missing = [];
+        $from = [];
+        foreach (self::ids($args) as $id) {
+            $r = InstallmentRequest::find($id);
+            if (! $r) {
+                $missing[] = $id;
+
+                continue;
+            }
+            if ((int) $r->staff_id === $to->id) {
+                $same[] = $id;
+
+                continue;
+            }
+            $from[$r->staff?->name ?? '—'] = ($from[$r->staff?->name ?? '—'] ?? 0) + 1;
+            $r->forceFill(['staff_id' => $to->id, 'pending_staff_id' => null, 'transfer_requested_by' => null, 'transfer_requested_at' => null])->save();
+            $done[] = $id;
+        }
+
+        return ['moved' => count($done), 'to' => $to->name, 'by' => $actor->name, 'moved_from' => $from, 'already_his' => $same, 'not_found' => $missing];
+    }
+
+    private static function deduction(array $args): array
+    {
+        self::actor();
+        $staff = \App\Models\Staff::find((int) ($args['staff'] ?? 0));
+        if (! $staff) {
+            throw new \InvalidArgumentException('No employee with that number - check the staff list.');
+        }
+        $rate = \App\Models\EmployeeDeduction::dayRate($staff);
+        $amount = isset($args['amount']) ? round((float) $args['amount'], 2) : null;
+        $days = isset($args['days']) ? (float) $args['days'] : null;
+        if ($days === null && $amount !== null) {
+            if ($rate <= 0) {
+                throw new \InvalidArgumentException("{$staff->name} has no monthly salary in the system, so an amount can't be turned into days - ask him to set the salary or give days.");
+            }
+            $days = round($amount / $rate, 2);
+        }
+        if (! $days || $days <= 0 || $days > 31) {
+            throw new \InvalidArgumentException('Give days (up to 31) or an amount.');
+        }
+        $d = \App\Models\EmployeeDeduction::create([
+            'staff_id' => $staff->id, 'days' => $days, 'reason' => mb_substr(trim((string) $args['reason']), 0, 500),
+            'deduction_date' => filled($args['date'] ?? null) ? Carbon::parse($args['date'])->toDateString() : now()->toDateString(),
+        ]);
+        if ($amount !== null && ! isset($args['days'])) {
+            $d->forceFill(['amount' => $amount])->save(); // exactly what he said
+        }
+
+        return ['deduction_id' => $d->id, 'employee' => $staff->name, 'days' => (float) $d->days, 'amount' => (float) $d->fresh()->amount, 'date' => $d->deduction_date->toDateString(), 'reason' => $d->reason];
     }
 
     /** The groups the AI sorted the requests into: counts back to it, the tables to the Excel export. */
