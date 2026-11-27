@@ -174,8 +174,8 @@ class AsfooraTools
             ],
             [
                 'name' => 'whatsapp_alerts',
-                'description' => 'Sets the owner\'s WhatsApp number that gets your watch reports and the daily report as WhatsApp messages too ("ابعتلي التقارير على الواتساب 010...") - they show on a locked phone. An empty phone stops them.',
-                'parameters' => ['type' => 'object', 'properties' => ['phone' => ['type' => 'string', 'description' => 'Egyptian mobile, e.g. 01012345678. Empty = stop.']], 'required' => ['phone']],
+                'description' => 'Sets the WhatsApp numbers (up to 3) that get your watch reports and the daily report as WhatsApp messages too ("ابعتلي التقارير على الواتساب 010... و 011...") - they show on a locked phone. Give the full list each time (it replaces the old one); an empty list stops them.',
+                'parameters' => ['type' => 'object', 'properties' => ['phones' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Egyptian mobiles, e.g. ["01012345678", "01198765432"]. Empty = stop.']], 'required' => ['phones']],
             ],
             [
                 'name' => 'remember',
@@ -548,17 +548,26 @@ class AsfooraTools
     private static function whatsappAlerts(array $args): array
     {
         $actor = self::actor();
-        $raw = trim((string) ($args['phone'] ?? ''));
-        $phone = $raw === '' ? null : \App\Domain\Conversations\DirectWhatsapp::phone($raw);
-        if ($raw !== '' && ! $phone) {
-            throw new \InvalidArgumentException('Not an Egyptian mobile number - ask him for it again (01xxxxxxxxx).');
+        $raw = array_values(array_filter(array_map('trim', array_map('strval', (array) ($args['phones'] ?? $args['phone'] ?? [])))));
+        $phones = [];
+        foreach ($raw as $p) {
+            $ok = \App\Domain\Conversations\DirectWhatsapp::phone($p);
+            if (! $ok) {
+                throw new \InvalidArgumentException("«{$p}» is not an Egyptian mobile number - ask him for it again (01xxxxxxxxx).");
+            }
+            $phones[$ok] = '0'.substr($ok, 2);
         }
-        $actor->forceFill(['notify_whatsapp' => $phone ? '0'.substr($phone, 2) : null])->save();
-        if ($phone) {
-            \App\Jobs\SendOwnerWhatsapp::to($actor, '🐦 عصفورة: من هنا ورايح تقارير المتابعة والتقرير اليومي هيوصلوك هنا كمان. ما تردش على الرقم ده، البوت مش هيرد هنا.', 'hello:'.$actor->id.':'.now()->timestamp);
+        if (count($phones) > \App\Jobs\SendOwnerWhatsapp::MAX_NUMBERS) {
+            throw new \InvalidArgumentException('At most '.\App\Jobs\SendOwnerWhatsapp::MAX_NUMBERS.' numbers.');
+        }
+        $before = \App\Jobs\SendOwnerWhatsapp::numbers($actor->notify_whatsapp);
+        $actor->forceFill(['notify_whatsapp' => $phones ? implode(',', $phones) : null])->save();
+        // a first message to each new number
+        foreach (array_diff(array_keys($phones), $before) as $new) {
+            \App\Jobs\SendOwnerWhatsapp::dispatch($actor->id, '🐦 عصفورة: من هنا ورايح تقارير المتابعة والتقرير اليومي هيوصلوا هنا كمان. ما تردش على الرقم ده، البوت مش هيرد هنا.', 'hello:'.$new.':'.now()->timestamp, $new)->afterCommit();
         }
 
-        return ['whatsapp' => $phone ? '0'.substr($phone, 2) : null, 'note' => $phone ? 'A first message was sent to that number now.' : 'Stopped.'];
+        return ['whatsapp' => array_values($phones), 'note' => $phones ? 'A first message was sent to each new number now.' : 'Stopped.'];
     }
 
     /** Owner 2026-11-27: actions run as him, from his chat only - never from a background watch. */

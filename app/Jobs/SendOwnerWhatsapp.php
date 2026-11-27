@@ -33,8 +33,18 @@ class SendOwnerWhatsapp implements ShouldQueue
         return now()->addHour();
     }
 
-    public function __construct(public int $staffId, public string $text, public ?string $key = null)
+    public const MAX_NUMBERS = 3;
+
+    public function __construct(public int $staffId, public string $text, public ?string $key = null, public ?string $phone = null)
     {
+    }
+
+    /** Owner 2026-11-27: «على رقمين» - his numbers, international form */
+    public static function numbers(?string $stored): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            fn ($p) => DirectWhatsapp::phone($p), preg_split('/[,،\s]+/u', (string) $stored, -1, PREG_SPLIT_NO_EMPTY)
+        ))));
     }
 
     /** a chat answer as WhatsApp text: no tables/headings marks, at most ~1500 characters */
@@ -50,15 +60,16 @@ class SendOwnerWhatsapp implements ShouldQueue
 
     public static function to(Staff $staff, string $text, ?string $key = null): void
     {
-        if (DirectWhatsapp::phone($staff->notify_whatsapp)) {
-            self::dispatch($staff->id, $text, $key)->afterCommit();
+        foreach (self::numbers($staff->notify_whatsapp) as $phone) {
+            self::dispatch($staff->id, $text, $key ? $key.':'.$phone : null, $phone)->afterCommit();
         }
     }
 
     public function handle(DeliveryService $delivery): void
     {
-        $phone = DirectWhatsapp::phone(Staff::whereKey($this->staffId)->value('notify_whatsapp'));
-        if (! $phone) {
+        // still one of his numbers (he may have removed it since)
+        $phone = $this->phone ?? (self::numbers(Staff::whereKey($this->staffId)->value('notify_whatsapp'))[0] ?? null);
+        if (! $phone || ! in_array($phone, self::numbers(Staff::whereKey($this->staffId)->value('notify_whatsapp')), true)) {
             return;
         }
         $conversation = DirectWhatsapp::conversation($phone, self::STATUS);

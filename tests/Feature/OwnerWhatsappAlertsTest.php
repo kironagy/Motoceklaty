@@ -22,11 +22,19 @@ class OwnerWhatsappAlertsTest extends TestCase
         $owner = Staff::create(['name' => 'O', 'email' => uniqid().'@x.test', 'password' => 'secret', 'is_hitler' => true]);
         $this->actingAs($owner, 'filament');
 
-        $this->assertArrayHasKey('error', \App\Domain\Asfoora\AsfooraTools::call('whatsapp_alerts', ['phone' => '123']));
-        $r = \App\Domain\Asfoora\AsfooraTools::call('whatsapp_alerts', ['phone' => '+20 101 234 5678']);
-        $this->assertSame('01012345678', $r['whatsapp']);
+        $this->assertArrayHasKey('error', \App\Domain\Asfoora\AsfooraTools::call('whatsapp_alerts', ['phones' => ['123']]));
+        $r = \App\Domain\Asfoora\AsfooraTools::call('whatsapp_alerts', ['phones' => ['+20 101 234 5678']]);
+        $this->assertSame(['01012345678'], $r['whatsapp']);
         $this->assertSame('01012345678', $owner->fresh()->notify_whatsapp);
         Queue::assertPushed(SendOwnerWhatsapp::class, 1);
+
+        // «على رقمين»: the second number gets its first message, the first is not greeted again
+        $r = \App\Domain\Asfoora\AsfooraTools::call('whatsapp_alerts', ['phones' => ['01012345678', '01198765432']]);
+        $this->assertSame(['01012345678', '01198765432'], $r['whatsapp']);
+        Queue::assertPushed(SendOwnerWhatsapp::class, 2);
+        Queue::assertPushed(SendOwnerWhatsapp::class, fn ($j) => $j->phone === '201198765432');
+        SendOwnerWhatsapp::to($owner->fresh(), 'تقرير', 'r1');
+        Queue::assertPushed(SendOwnerWhatsapp::class, 4); // one per number
 
         // the job: a connected (here: any live) number, the chat marked owner_alerts
         Http::fake(['*' => Http::response([], 500)]);
@@ -35,7 +43,7 @@ class OwnerWhatsappAlertsTest extends TestCase
         $this->mock(DeliveryService::class, function ($m) use (&$sent) {
             $m->shouldReceive('deliverForConversation')->once()->withArgs(function ($c, $result) use (&$sent) { $sent = [$c, $result]; return true; });
         });
-        app()->call([new SendOwnerWhatsapp($owner->id, '🐦 تقرير'), 'handle']);
+        app()->call([new SendOwnerWhatsapp($owner->id, '🐦 تقرير', null, '201012345678'), 'handle']);
         $this->assertSame('201012345678', $sent[0]->phone);
         $this->assertSame(SendOwnerWhatsapp::STATUS, $sent[0]->fresh()->status);
         $this->assertSame(['🐦 تقرير'], $sent[1]['messages']);
@@ -43,7 +51,7 @@ class OwnerWhatsappAlertsTest extends TestCase
         $this->assertSame("عنوان\n*كلمة* مهمة", SendOwnerWhatsapp::plain("## عنوان\n**كلمة** مهمة"));
 
         // empty = stop
-        \App\Domain\Asfoora\AsfooraTools::call('whatsapp_alerts', ['phone' => '']);
+        \App\Domain\Asfoora\AsfooraTools::call('whatsapp_alerts', ['phones' => []]);
         $this->assertNull($owner->fresh()->notify_whatsapp);
     }
 
