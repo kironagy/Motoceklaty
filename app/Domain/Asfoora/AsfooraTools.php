@@ -163,7 +163,9 @@ class AsfooraTools
                     'kind' => ['type' => 'string', 'enum' => ['new_requests', 'question'], 'description' => 'new_requests = the requests that came since the last look; question = your answer to his question each time.'],
                     'question' => ['type' => 'string', 'description' => 'For kind=question: what to answer each time.'],
                     'every_minutes' => ['type' => 'integer', 'description' => 'Default 60, at least 15.'],
-                    'replaces' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'Ids of running watches this one takes the place of (he changed the timing or what it reports: «خليه كل 20 دقيقة»، «ده غير ...»). They are stopped. Every new watch is one more message on his phone, so a change is never a second watch.'],
+                    'at' => ['type' => 'string', 'description' => 'A daily report at a set time, 24h "HH:MM" Cairo time («كل يوم الساعة 1 الصبح» = "01:00", «الساعة 11 بالليل» = "23:00"). every_minutes is then ignored; each run covers the day since the last one.'],
+                    'keep_others' => ['type' => 'boolean', 'description' => 'true only after he answered that the running reports stay as well.'],
+                    'replaces' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'Ids of running watches to stop first - after he chose that, or when he plainly changes one (he changed the timing or what it reports: «خليه كل 20 دقيقة»، «ده غير ...»). They are stopped. Every new watch is one more message on his phone, so a change is never a second watch.'],
                     'source' => ['type' => 'string', 'enum' => ['bot', 'staff'], 'description' => 'new_requests: only the bot\'s / only the employees\'.'],
                     'statuses' => ['type' => 'array', 'items' => ['type' => 'string']],
                 ], 'required' => ['kind']],
@@ -482,6 +484,21 @@ class AsfooraTools
         // owner 2026-11-28: a watch's own run started more watches; only he starts one, in the chat
         self::actor();
         $every = max(15, min(1440, (int) ($args['every_minutes'] ?? 60)));
+        $at = null;
+        if (filled($args['at'] ?? null)) {
+            if (! preg_match('/^([01]?\d|2[0-3]):([0-5]\d)$/', trim((string) $args['at']), $t)) {
+                return ['error' => 'at must be "HH:MM" (24h), e.g. "01:00".'];
+            }
+            $at = sprintf('%02d:%02d', $t[1], $t[2]);
+            $every = 1440;
+        }
+
+        // owner 2026-11-28: «يسألني أوقف الأول ولا أخلي الاتنين شغالين وأنا أحدد»
+        $running = \App\Models\AsfooraWatch::where('asfoora_chat_id', $chat->id)->where('is_active', true)->get();
+        if ($running->isNotEmpty() && empty($args['replaces']) && empty($args['keep_others'])) {
+            return ['started' => null, 'running' => $running->map(fn ($w) => ['id' => $w->id, 'what' => $w->describe()])->values()->all(),
+                'note' => 'Nothing started yet. Show him the reports already running and ask: stop them (or which of them) first, or keep them running too? Then call again with replaces = the ids to stop, or keep_others = true.'];
+        }
         $replaced = [];
         if (! empty($args['replaces'])) {
             $old = \App\Models\AsfooraWatch::where('asfoora_chat_id', $chat->id)->where('is_active', true)->whereIn('id', array_map('intval', (array) $args['replaces']))->get();
@@ -494,6 +511,14 @@ class AsfooraTools
             'filters' => array_filter(['source' => $args['source'] ?? null, 'statuses' => $args['statuses'] ?? null]) ?: null,
             'every_minutes' => $every, 'last_checked_at' => now(), 'next_run_at' => now()->addMinutes($every),
         ]);
+        if ($at) {
+            $first = now()->setTimeFromTimeString($at);
+            if ($first->lte(now())) {
+                $first->addDay();
+            }
+            // the first daily report covers the whole day before it
+            $watch->update(['filters' => ['at' => $at] + (array) ($watch->filters ?? []), 'next_run_at' => $first, 'last_checked_at' => $first->copy()->subDay()]);
+        }
 
         $others = \App\Models\AsfooraWatch::where('asfoora_chat_id', $chat->id)->where('is_active', true)->whereKeyNot($watch->id)->get()
             ->map(fn ($w) => ['id' => $w->id, 'what' => $w->describe(), 'question' => $w->question])->all();

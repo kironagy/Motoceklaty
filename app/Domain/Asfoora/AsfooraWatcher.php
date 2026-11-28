@@ -19,14 +19,20 @@ class AsfooraWatcher
     {
         $ran = 0;
         foreach (AsfooraWatch::where('is_active', true)->where('next_run_at', '<=', now())->get() as $watch) {
-            if ($watch->created_at->lt(now()->subDays(AsfooraWatch::MAX_DAYS))) {
+            $days = $watch->at() ? AsfooraWatch::MAX_DAYS_DAILY : AsfooraWatch::MAX_DAYS;
+            if ($watch->created_at->lt(now()->subDays($days))) {
                 $watch->update(['is_active' => false]);
-                $this->post($watch, 'وقفت متابعة '.$watch->describe().' لوحدها بعد '.AsfooraWatch::MAX_DAYS.' أيام. قولي «تابعي تاني» لو عايزها.', []);
+                $this->post($watch, 'وقفت متابعة '.$watch->describe().' لوحدها بعد '.$days.' يوم. قولي «تابعي تاني» لو عايزها.', []);
 
                 continue;
             }
             // taken first, so two runs never send it twice
-            if (! AsfooraWatch::whereKey($watch->id)->where('next_run_at', $watch->next_run_at)->update(['next_run_at' => now()->addMinutes($watch->every_minutes)])) {
+            // kept on its own clock (1:00 ص stays 1:00 ص), missed runs skipped
+            $next = $watch->next_run_at->copy();
+            while ($next->lte(now())) {
+                $next->addMinutes($watch->every_minutes);
+            }
+            if (! AsfooraWatch::whereKey($watch->id)->where('next_run_at', $watch->next_run_at)->update(['next_run_at' => $next])) {
                 continue;
             }
             try {

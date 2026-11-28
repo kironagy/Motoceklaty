@@ -497,13 +497,38 @@ class AsfooraTest extends TestCase
         \App\Domain\Asfoora\AsfooraTools::$chatId = $chat->id;
 
         $first = \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'question', 'question' => 'حركات محمود', 'every_minutes' => 15]);
-        $other = \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'question', 'question' => 'كل الحركات', 'every_minutes' => 30]);
+        // another one while one runs: nothing starts, she asks him first
+        $asked = \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'question', 'question' => 'كل الحركات', 'every_minutes' => 30]);
+        $this->assertNull($asked['started']);
+        $this->assertSame($first['started'], $asked['running'][0]['id']);
+        $this->assertSame(1, \App\Models\AsfooraWatch::where('is_active', true)->count());
+        // «خليهم الاتنين»
+        $other = \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'question', 'question' => 'كل الحركات', 'every_minutes' => 30, 'keep_others' => true]);
         $this->assertSame($first['started'], $other['still_running'][0]['id']);
 
         // «خليه كل 20 دقيقة»: the old one stops, one report instead of two
-        $changed = \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'question', 'question' => 'حركات محمود', 'every_minutes' => 20, 'replaces' => [$first['started']]]);
+        $changed = \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'question', 'question' => 'حركات محمود', 'every_minutes' => 20, 'replaces' => [$first['started']], 'keep_others' => true]);
         $this->assertCount(1, $changed['replaced']);
         $this->assertSame(2, \App\Models\AsfooraWatch::where('is_active', true)->count());
+
+        // «تقرير يومي كامل الساعة 1 الصبح»: on its own clock, the first one covers the day before
+        $before = \App\Models\AsfooraWatch::where('is_active', true)->pluck('id');
+        $this->travelTo(now()->setTime(21, 10));
+        $daily = \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'question', 'question' => 'تقرير يومي كامل', 'at' => '01:00', 'keep_others' => true]);
+        $watch = \App\Models\AsfooraWatch::findOrFail($daily['started']);
+        $this->assertSame('01:00', $watch->next_run_at->format('H:i'));
+        $this->assertTrue($watch->next_run_at->isTomorrow());
+        $this->assertSame(1440, $watch->every_minutes);
+        $this->assertStringContainsString('كل يوم الساعة 1:00 ص', $watch->describe());
+        $this->assertEquals($watch->next_run_at->copy()->subDay(), $watch->last_checked_at);
+        \App\Models\AsfooraWatch::whereKeyNot($watch->id)->update(['is_active' => false]);
+        $this->travelTo($watch->next_run_at->copy()->addMinute());
+        $this->mock(\App\Domain\Asfoora\AsfooraAgent::class, fn ($m) => $m->shouldReceive('answer')->once()->andReturnUsing(
+            fn ($chat, $q) => \App\Models\AsfooraMessage::create(['asfoora_chat_id' => $chat->id, 'role' => 'assistant', 'content' => 'تقرير', 'meta' => []])));
+        app(\App\Domain\Asfoora\AsfooraWatcher::class)->runDue();
+        $this->assertSame('01:00', $watch->fresh()->next_run_at->format('H:i'));
+        \App\Models\AsfooraWatch::whereIn('id', $before)->update(['is_active' => true]);
+        \App\Models\AsfooraWatch::whereKey($watch->id)->update(['is_active' => false]);
 
         // «ابعتهولي على الواتساب» now
         $sent = \App\Domain\Asfoora\AsfooraTools::call('whatsapp_send', ['text' => "**تقرير**\n| رقم | الحالة |\n|---|---|\n| #1 | مرفوض |"]);
