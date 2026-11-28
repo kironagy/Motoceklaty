@@ -454,6 +454,7 @@ class AsfooraTest extends TestCase
     {
         \Illuminate\Support\Facades\Queue::fake();
         $owner = $this->staff(['is_hitler' => true]);
+        $this->actingAs($owner, 'filament');
         $chat = AsfooraChat::create(['staff_id' => $owner->id]);
         \App\Domain\Asfoora\AsfooraTools::$chatId = $chat->id;
 
@@ -484,6 +485,37 @@ class AsfooraTest extends TestCase
         $this->travel(61)->minutes();
         $this->artisan('asfoora:watches')->assertSuccessful();
         $this->assertSame(2, \App\Models\Notification::where('user_id', $owner->id)->count());
+    }
+
+    /** Owner 2026-11-28: «المفروض كل 15 دقيقة لقيته بيبعت كل دقيقة» - 4 watches ran side by side */
+    public function test_changing_a_watch_replaces_it_and_a_watch_run_cannot_start_more(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+        $owner = $this->staff(['is_hitler' => true, 'notify_whatsapp' => '01012345678']);
+        $this->actingAs($owner, 'filament');
+        $chat = AsfooraChat::create(['staff_id' => $owner->id]);
+        \App\Domain\Asfoora\AsfooraTools::$chatId = $chat->id;
+
+        $first = \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'question', 'question' => 'حركات محمود', 'every_minutes' => 15]);
+        $other = \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'question', 'question' => 'كل الحركات', 'every_minutes' => 30]);
+        $this->assertSame($first['started'], $other['still_running'][0]['id']);
+
+        // «خليه كل 20 دقيقة»: the old one stops, one report instead of two
+        $changed = \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'question', 'question' => 'حركات محمود', 'every_minutes' => 20, 'replaces' => [$first['started']]]);
+        $this->assertCount(1, $changed['replaced']);
+        $this->assertSame(2, \App\Models\AsfooraWatch::where('is_active', true)->count());
+
+        // «ابعتهولي على الواتساب» now
+        $sent = \App\Domain\Asfoora\AsfooraTools::call('whatsapp_send', ['text' => "**تقرير**\n| رقم | الحالة |\n|---|---|\n| #1 | مرفوض |"]);
+        $this->assertSame(['01012345678'], $sent['sent_to']);
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SendOwnerWhatsapp::class, fn ($j) => str_contains($j->text, '*1) رقم: #1*'));
+
+        // a watch's own run (no owner signed in) starts nothing
+        auth('filament')->logout();
+        $this->assertArrayHasKey('error', \App\Domain\Asfoora\AsfooraTools::call('watch_start', ['kind' => 'new_requests']));
+        $this->assertArrayHasKey('error', \App\Domain\Asfoora\AsfooraTools::call('watch_stop', []));
+        $this->assertArrayHasKey('error', \App\Domain\Asfoora\AsfooraTools::call('whatsapp_send', ['text' => 'x']));
+        $this->assertSame(2, \App\Models\AsfooraWatch::where('is_active', true)->count());
     }
 
     public function test_owners_hear_every_employee_action_but_uploads_and_the_systems_own(): void

@@ -158,11 +158,12 @@ class AsfooraTools
             ],
             [
                 'name' => 'watch_start',
-                'description' => 'Starts a background watch in this chat that keeps sending him news with a push to his phone until he stops it: new requests every hour ("ابعتلي الطلبات الجديدة كل ساعة") - it also says when there is nothing new - or any question repeated on a schedule.',
+                'description' => 'Starts a background watch in this chat (each call = one more report on his phone; to change a running one pass its id in replaces) that keeps sending him news with a push to his phone until he stops it: new requests every hour ("ابعتلي الطلبات الجديدة كل ساعة") - it also says when there is nothing new - or any question repeated on a schedule.',
                 'parameters' => ['type' => 'object', 'properties' => [
                     'kind' => ['type' => 'string', 'enum' => ['new_requests', 'question'], 'description' => 'new_requests = the requests that came since the last look; question = your answer to his question each time.'],
                     'question' => ['type' => 'string', 'description' => 'For kind=question: what to answer each time.'],
                     'every_minutes' => ['type' => 'integer', 'description' => 'Default 60, at least 15.'],
+                    'replaces' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => 'Ids of running watches this one takes the place of (he changed the timing or what it reports: «خليه كل 20 دقيقة»، «ده غير ...»). They are stopped. Every new watch is one more message on his phone, so a change is never a second watch.'],
                     'source' => ['type' => 'string', 'enum' => ['bot', 'staff'], 'description' => 'new_requests: only the bot\'s / only the employees\'.'],
                     'statuses' => ['type' => 'array', 'items' => ['type' => 'string']],
                 ], 'required' => ['kind']],
@@ -176,6 +177,11 @@ class AsfooraTools
                 'name' => 'whatsapp_alerts',
                 'description' => 'Sets the WhatsApp numbers (up to 3) that get your watch reports and the daily report as WhatsApp messages too ("ابعتلي التقارير على الواتساب 010... و 011...") - they show on a locked phone. Give the full list each time (it replaces the old one); an empty list stops them.',
                 'parameters' => ['type' => 'object', 'properties' => ['phones' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Egyptian mobiles, e.g. ["01012345678", "01198765432"]. Empty = stop.']], 'required' => ['phones']],
+            ],
+            [
+                'name' => 'whatsapp_send',
+                'description' => 'Sends a message to his WhatsApp numbers (the ones set with whatsapp_alerts) right now: «ابعتهولي على الواتساب»، «ابعتلي تقرير عالواتساب». Write the full text to send (your report); tables become a short block per row. Only when he asks in his message.',
+                'parameters' => ['type' => 'object', 'properties' => ['text' => ['type' => 'string', 'description' => 'The message, as you would answer him (markdown).']], 'required' => ['text']],
             ],
             [
                 'name' => 'remember',
@@ -218,6 +224,7 @@ class AsfooraTools
                 'add_deduction' => self::deduction($args),
                 // her own notebook - the only thing she writes, and never the system's data
                 'whatsapp_alerts' => self::whatsappAlerts($args),
+                'whatsapp_send' => self::whatsappSend($args),
                 'remember' => ['saved' => \App\Models\AsfooraMemory::create(['content' => mb_substr(trim((string) ($args['content'] ?? '')), 0, 1000), 'created_by' => auth()->id()])->id],
                 'forget' => ['deleted' => (bool) \App\Models\AsfooraMemory::whereKey((int) ($args['id'] ?? 0))->delete()],
                 'request_details' => self::details((int) ($args['id'] ?? 0)),
@@ -472,7 +479,15 @@ class AsfooraTools
         if ($kind === 'question' && blank($args['question'] ?? null)) {
             return ['error' => 'A question watch needs the question.'];
         }
+        // owner 2026-11-28: a watch's own run started more watches; only he starts one, in the chat
+        self::actor();
         $every = max(15, min(1440, (int) ($args['every_minutes'] ?? 60)));
+        $replaced = [];
+        if (! empty($args['replaces'])) {
+            $old = \App\Models\AsfooraWatch::where('asfoora_chat_id', $chat->id)->where('is_active', true)->whereIn('id', array_map('intval', (array) $args['replaces']))->get();
+            $replaced = $old->map(fn ($w) => $w->id.': '.$w->describe())->all();
+            \App\Models\AsfooraWatch::whereIn('id', $old->pluck('id'))->update(['is_active' => false]);
+        }
         $watch = \App\Models\AsfooraWatch::create([
             'asfoora_chat_id' => $chat->id, 'staff_id' => $chat->staff_id, 'kind' => $kind,
             'question' => $kind === 'question' ? mb_substr((string) $args['question'], 0, 500) : null,
@@ -480,12 +495,18 @@ class AsfooraTools
             'every_minutes' => $every, 'last_checked_at' => now(), 'next_run_at' => now()->addMinutes($every),
         ]);
 
-        return ['started' => $watch->id, 'what' => $watch->describe(), 'first_at' => $watch->next_run_at->format('h:i A'),
-            'note' => 'Tell him it runs in the background with a push each time - nothing new is said too - until he says stop here.'];
+        $others = \App\Models\AsfooraWatch::where('asfoora_chat_id', $chat->id)->where('is_active', true)->whereKeyNot($watch->id)->get()
+            ->map(fn ($w) => ['id' => $w->id, 'what' => $w->describe(), 'question' => $w->question])->all();
+
+        return ['started' => $watch->id, 'what' => $watch->describe(), 'first_at' => $watch->next_run_at->format('h:i A'), 'replaced' => $replaced,
+            'still_running' => $others,
+            'note' => 'Tell him it runs in the background with a push each time - nothing new is said too - until he says stop here.'
+                .($others ? ' Tell him which other reports still run (each is its own message) - if one of them was meant to be replaced, stop it now with watch_stop.' : '')];
     }
 
     private static function watchStop(array $args): array
     {
+        self::actor();
         $q = \App\Models\AsfooraWatch::where('asfoora_chat_id', self::$chatId)->where('is_active', true)
             ->when(! empty($args['id']), fn ($q) => $q->whereKey((int) $args['id']));
         $stopped = $q->get()->map(fn ($w) => $w->describe())->all();
@@ -568,6 +589,23 @@ class AsfooraTools
         }
 
         return ['whatsapp' => array_values($phones), 'note' => $phones ? 'A first message was sent to each new number now.' : 'Stopped.'];
+    }
+
+    /** Owner 2026-11-27: «ابعتلي تقرير عالواتساب» - now, not only the scheduled reports */
+    private static function whatsappSend(array $args): array
+    {
+        $actor = self::actor();
+        $text = trim((string) ($args['text'] ?? ''));
+        if ($text === '') {
+            throw new \InvalidArgumentException('The text to send is empty.');
+        }
+        $phones = \App\Jobs\SendOwnerWhatsapp::numbers($actor->notify_whatsapp);
+        if ($phones === []) {
+            throw new \InvalidArgumentException('No WhatsApp number is set. Ask him for the number, then whatsapp_alerts.');
+        }
+        \App\Jobs\SendOwnerWhatsapp::to($actor, '🐦 '.\App\Jobs\SendOwnerWhatsapp::plain($text), 'send:'.md5($text).':'.now()->timestamp);
+
+        return ['sent_to' => array_map(fn ($p) => '0'.substr($p, 2), $phones), 'note' => 'Queued now; it arrives within a minute.'];
     }
 
     /** Owner 2026-11-27: actions run as him, from his chat only - never from a background watch. */
